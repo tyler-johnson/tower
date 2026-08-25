@@ -1,0 +1,33 @@
+name: ci
+
+# Deliberately one platform and one job while the repository is a scaffold.
+# fufu's matrix is sharded four ways across three operating systems because
+# its suite spawns a real `git` per assertion and Windows charges 6.6ms a
+# process; tower has no suite yet and no measured reason for any of that.
+# Widen this when there is something to widen it for.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace

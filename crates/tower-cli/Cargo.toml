@@ -1,0 +1,27 @@
+[package]
+name = "tower-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "tower: project management for people and agents, built on fufu"
+publish = false
+
+# One binary, installed under two names. `ff-tower` is what fufu's `ff-<name>`
+# dispatch finds when someone types `ff tower`; the installer links it to this
+# one rather than building a second copy.
+[[bin]]
+name = "tower"
+path = "src/main.rs"
+
+[dependencies]
+tower-core.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anstyle.workspace = true
+anstream.workspace = true
+
+[dev-dependencies]
+tower-testsupport.workspace = true
+tempfile.workspace = true

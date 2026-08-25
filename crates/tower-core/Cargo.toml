@@ -1,0 +1,15 @@
+[package]
+name = "tower-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "tower's engine: the flight log, the board fold, procedures"
+publish = false
+
+[dependencies]
+gix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
