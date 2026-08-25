@@ -50,14 +50,14 @@ Tower cannot enforce, only observe and complain. `ff tower next` prints the bay 
 
 ## Deconfliction — the earned existence
 
-Merge simulation is free and side-effect-less — the whole replay runs inside one object-memory clone and writes nothing — so tower can ask "would these two land on each other?" continuously, about work that has not been committed yet. `ff collide` is that question already spelled: one verdict per pair of branches with the paths where two of them touch the same thing, and the largest set that touches nothing. It reads each side's tree from the operation log rather than from a worktree, so a branch an agent is editing right now in another bay, with nothing committed, still answers. Tower does not need a probe of its own; it needs the verb's JSON and a reason to ask.
+Merge simulation is free and side-effect-less — the whole replay runs inside one object-memory clone and writes nothing — so tower can ask "would these two land on each other?" continuously, about work that has not been committed yet. `ff collide` is that question already spelled: two branches in, one verdict out, with the paths where they touch the same thing. It reads each side's tree from the operation log rather than from a worktree, so a branch an agent is editing right now in another bay, with nothing committed, still answers. Tower does not need a probe of its own; it needs the verb's JSON and a reason to ask.
 
 Two kinds of blocking, and they differ in kind:
 
 - **declared** — a human said this depends on that. Stored intent. Every tracker has it.
 - **discovered** — a merge probe found two branches inside the same hunk. Nobody typed it, it appeared the moment the second edit happened, and it disappears on its own when one lands.
 
-From discovered conflicts comes a **land order**: topologically sort in-flight work by pairwise conflict, and say which sequence costs nothing. The clear set `ff collide` closes with is the same answer pointed at assignment rather than at landing, which is what `ff tower next -n <k>` hands out. And once bays make "what is in the air right now" queryable, the check moves to assignment time — tower holds back a flight that would collide with one already flying instead of filing an incident after the fact. Sequencing on approach, not collision reporting.
+From discovered conflicts comes a **land order**: topologically sort in-flight work by pairwise conflict, and say which sequence costs nothing. The verdicts are fufu's and the fold over them is tower's, which is the right seam — a verdict is a fact about two trees, a set is a fact about a queue. Tower caches what it has asked, invalidates on the branch motion `ff watch --all` reports, and admits a candidate when it is clear against every flight already in: greedy rather than maximum, since the maximum conflict-free set is NP-hard and a scheduler that stalls on one has stopped scheduling. That fold pointed at assignment rather than at landing is what `ff tower next -n <k>` hands out. And once bays make "what is in the air right now" queryable, the check moves to assignment time — tower holds back a flight that would collide with one already flying instead of filing an incident after the fact. Sequencing on approach, not collision reporting.
 
 This is fufu's principle 7 raised one level: if an outcome can be known in memory for free, the board should already know it.
 
@@ -71,8 +71,8 @@ Field ownership is enforced hard, or sync becomes a merge problem it does not ne
 |---|---|---|
 | upstream tracker | exists, title, body, assignee, priority, cycle | upstream truth |
 | forge | PR, review state, CI, merge | upstream truth |
-| the repository | branch, snapshots, session, conflicts, order | derived by fufu |
-| tower | queue, bays, claims, local steps, briefs, notes | local truth |
+| the repository | branch, snapshots, session, conflicts | derived by fufu |
+| tower | queue, bays, claims, order, local steps, briefs, notes | local truth |
 
 Upstream changes arrive as `foreign` events in the local log — labeled, undoable, loud — and upstream wins every field it owns. tower holds a pointer and a local layer beside it; it never merges into someone else's model.
 
@@ -282,7 +282,7 @@ The shipped set is small: **plan** (decompose a goal into linked flights — sol
 
 Loop control is exit codes, fufu's own: **0** here is work, **1** nothing available, **3** work exists but it needs you. A loop runs until 1 or 3 and reports which. No timeout, no sentinel.
 
-Fan-out needs a set, not an item, because conflict-freedom is a property of the set: `ff tower next -n 3` returns three flights that collide with neither each other nor anything already flying, and the caller spawns one agent per bay. That is deconfliction as an API rather than a report, and it is the sharpest reason the design is worth building. The set itself is `ff collide`'s clear set, filtered to what is claimable; tower's contribution is the filter and the claim, not the verdict.
+Fan-out needs a set, not an item, because conflict-freedom is a property of the set: `ff tower next -n 3` returns three flights that collide with neither each other nor anything already flying, and the caller spawns one agent per bay. That is deconfliction as an API rather than a report, and it is the sharpest reason the design is worth building. The verdicts underneath are `ff collide`'s, one pair at a time; the set is tower's fold over them, filtered to what is claimable, and the fold, the filter and the claim are all tower's contribution.
 
 The shipped default stops short of the push boundary — committed on a branch, PR unopened — because principle 3 is easy to state and easy for an unattended loop to violate fourteen times before anyone looks. Editing that is the user's call, and visibly theirs.
 
@@ -316,7 +316,7 @@ Three layers of memory stay apart: a **skill** knows how to drive tower, the **a
 
 Four fufu surfaces carry most of this, and all four exist.
 
-- **`ff collide`** is the sideways axis. Base and remote were never the interesting pair for a tracker; every discovered conflict, land order, and assignment-time holdback is sibling against sibling, and that is the axis this verb points. It reports per pair and closes with the largest clear set, which is `ff tower next -n <k>` waiting for a caller.
+- **`ff collide`** is the sideways axis. Base and remote were never the interesting pair for a tracker; every discovered conflict, land order, and assignment-time holdback is sibling against sibling, and that is the axis this verb points. It answers one pair, which is the shape both questions tower asks actually take: whether a candidate hits anything already flying, and whether the next flight admitted to a set hits the ones already in it.
 - **`ff watch`** streams the operation log as newline-delimited JSON, and `--session <name>` narrows it to one tag — so a flight's own motion is a subscription rather than a poll. It reports what the log *did* rather than what was appended: an undo that steps the pointer back, a fork after one, a trim that rewrites every id a subscriber holds. Tower must handle those the way any subscriber does, because the board's ids are the log's ids wherever a flight points at capture. `--all` is the fleet form: every chain in the repository on one stream, with a `worktree` field on every line — the field the board keys on, present in both modes — so `bays: N` is one process rather than N. Bays that appear mid-stream join it, retired bays keep their place through their last capture, and a trim in one bay ends that bay's addresses rather than the stream.
 - **`ff publish`** is the outgoing half, and it is why `review` and `landed` are derivable at all: `ff sync` takes in, `ff publish` sends, and only the second one leaves the machine.
 - **Sessions** are a tag on an operation and nothing more. `--session <name>` rides every fufu command, lands as a `fufu-session` trailer, and serves as the equality test that groups adjacent captures into one `ff undo` step. There is nothing to open or close: every fufu call tower makes carries `--session <flight>`, per-flight capture chains fall out of the tagging, and the extension seam hands `FF_SESSION` down to a child process, so an adapter's own `ff` calls inherit the tag without re-passing the flag.
@@ -329,7 +329,7 @@ Load-bearing and absent:
 - **Forge reads.** The `review` procedure stands almost entirely on state the repository cannot see, so the adapter that supplies it is a dependency of a shipped default rather than a nicety. This one is tower's own to build.
 - **~~A handshake at the extension seam.~~** *Answered.* `ff <name>` hands a child `FF_REPO` — the worktree it was invoked against, absolute and resolved, unset outside one — alongside `FF_CONTRACT` and the session tag. A tower adapter reads which repository it is in rather than rediscovering it, and reads the envelope version before parsing an envelope. `ff -C <dir>` landed with it, so a bay is addressable without spawning from its directory: one process can ask every bay in the pool.
 
-What works today is most of it: the board through `active`, flight-to-branch linkage, the event log store, per-flight session tags, briefs, holds, land order, and the conflict-free set `next -n <k>` hands out. The deconfliction that is the reason to build tower is available now. What is missing is the concurrency to spend it on, and the forge state one of the two shipped procedures reads.
+What works today is most of it: the board through `active`, flight-to-branch linkage, the event log store, per-flight session tags, briefs, holds, and the pairwise verdicts underneath both the land order and the set `next -n <k>` hands out. The deconfliction that is the reason to build tower is available now. What is missing is the fold itself, the concurrency to spend it on, and the forge state one of the two shipped procedures reads.
 
 ## Open questions
 
