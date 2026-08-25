@@ -329,9 +329,11 @@ dependencies = [
 name = "ff-tower-core"
 version = "0.1.0"
 dependencies = [
+ "ff-tower-testsupport",
  "gix",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "toml",
 ]

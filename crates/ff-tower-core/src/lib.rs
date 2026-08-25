@@ -35,3 +35,5 @@
 //! CAS-appended, never touching the working tree and never touching
 //! `refs/fufu/*`. That is `gix` directly, and it is why the dependency is
 //! declared here rather than inherited from anything.
+
+pub mod ff;
