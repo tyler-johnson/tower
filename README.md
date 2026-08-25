@@ -48,11 +48,15 @@ Forge adapters are separate binaries discovered on PATH — `tower-github`, `tow
 ## Building
 
 ```console
-$ cargo build
-$ cargo test --workspace
+$ make              # fast dogfood build -- release semantics, no LTO link cost
+$ make install      # link ~/.cargo/bin/ff-tower at it; `ff tower` is live
+$ make test         # the suite
+$ make release      # the honest fat-LTO build
 ```
 
-fufu is a runtime dependency rather than a build one: tower spawns `ff`, so a `cargo build` needs nothing installed and running tower needs `ff` on PATH.
+`make install` is the whole install: fufu's `ff-<name>` dispatch searches PATH, so a symlink is all `ff tower` needs. It is idempotent, and the binary is live the moment a build links — no reinstall step between editing and running.
+
+fufu is a runtime dependency rather than a build one: tower spawns `ff`, so `make` needs nothing installed and running tower needs `ff` on PATH.
 
 ## License
 

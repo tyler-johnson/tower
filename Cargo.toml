@@ -40,3 +40,14 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Local dogfood builds: release semantics without the LTO link cost. A
+# separate target dir (target/dogfood), so it never thrashes the pristine
+# fat-LTO target/release. `make install` symlinks the binary here, and
+# strip stays off so a panic in daily use names its own line.
+[profile.dogfood]
+inherits = "release"
+lto = "off"
+codegen-units = 16
+incremental = true
+strip = false
