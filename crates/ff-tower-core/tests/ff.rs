@@ -55,28 +55,20 @@ fn collide_reads_the_sideways_axis() {
     repo.write("shared.txt", "right side\n");
     repo.ff(&["commit", "-m", "right: touch shared"]);
 
-    let collisions = Ff::at(repo.path()).collide(&[], None).expect("collide");
+    let collision = Ff::at(repo.path())
+        .collide("left", "right")
+        .expect("collide");
 
-    let pair = collisions
-        .pairs
-        .iter()
-        .find(|p| {
-            let names = [p.a.as_str(), p.b.as_str()];
-            names.contains(&"left") && names.contains(&"right")
-        })
-        .expect("left and right were both ranked in");
-
-    match &pair.pairing {
+    assert_eq!(collision.a.name, "left");
+    assert_eq!(collision.b.name, "right");
+    match &collision.pairing {
         Pairing::Collide { paths } => assert_eq!(paths, &["shared.txt"]),
         other => panic!("two edits to one file should collide, got {other:?}"),
     }
-    assert!(!pair.pairing.is_clear());
-    assert!(
-        !(collisions.clear.contains(&"left".to_string())
-            && collisions.clear.contains(&"right".to_string())),
-        "the clear set must not hold both sides of a collision: {:?}",
-        collisions.clear
-    );
+    assert!(!collision.pairing.is_clear());
+    // The ids a fold caches on: a verdict holds until one of the trees moves.
+    assert!(!collision.a.tip.is_empty());
+    assert!(!collision.a.tree.is_empty());
 }
 
 #[test]
@@ -91,16 +83,10 @@ fn collide_is_clear_when_branches_touch_different_files() {
     repo.write("right.txt", "right\n");
     repo.ff(&["commit", "-m", "right: its own file"]);
 
-    let collisions = Ff::at(repo.path()).collide(&[], None).expect("collide");
-    let pair = collisions
-        .pairs
-        .iter()
-        .find(|p| {
-            let names = [p.a.as_str(), p.b.as_str()];
-            names.contains(&"left") && names.contains(&"right")
-        })
-        .expect("both ranked in");
-    assert!(pair.pairing.is_clear(), "got {:?}", pair.pairing);
+    let collision = Ff::at(repo.path())
+        .collide("left", "right")
+        .expect("collide");
+    assert!(collision.pairing.is_clear(), "got {:?}", collision.pairing);
 }
 
 #[test]

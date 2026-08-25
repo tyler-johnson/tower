@@ -149,23 +149,23 @@ pub struct Editing {
 
 /// `ff collide --json` — the sideways axis, and tower's earned existence.
 ///
-/// Every discovered conflict, every land order, and the conflict-free set
-/// `ff tower next -n <k>` hands out is a read of this payload. The probe
-/// runs in an object-memory clone and writes nothing, and it judges each
-/// side on the open change's tree when that differs from the tip's — so a
-/// branch an agent is editing right now, with nothing committed, still
-/// answers.
+/// One pair, judged. Every discovered conflict, every land order, and the
+/// conflict-free set `ff tower next -n <k>` hands out is a fold over these
+/// verdicts — the fold is tower's, the verdict is fufu's, and tower does
+/// not reimplement the merge to get one. The probe runs in an object-memory
+/// clone and writes nothing, and it judges each side on the open change's
+/// tree when that differs from the tip's — so a branch an agent is editing
+/// right now, with nothing committed, still answers.
 #[derive(Debug, Clone, Deserialize)]
-pub struct Collisions {
-    pub sides: Vec<Side>,
-    pub pairs: Vec<Pair>,
-    /// The names clear against every name admitted before them, in side
-    /// order. Greedy rather than maximum — fufu says so, and tower must not
-    /// present it as the largest possible set.
-    pub clear: Vec<String>,
+pub struct Collision {
+    pub a: Side,
+    pub b: Side,
+    pub pairing: Pairing,
 }
 
-/// One branch, as the probe judged it.
+/// One branch, as the probe judged it. The ids are what make a verdict
+/// cacheable: it is a pure function of the two trees and the base between
+/// them, so a verdict stays good until one of these moves.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Side {
     pub name: String,
@@ -175,14 +175,6 @@ pub struct Side {
     pub tree: String,
     /// True when that tree is uncommitted work the operation log holds.
     pub open: bool,
-}
-
-/// One pair, judged once. `a` precedes `b` in side order.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Pair {
-    pub a: String,
-    pub b: String,
-    pub pairing: Pairing,
 }
 
 /// How two branches answer each other.

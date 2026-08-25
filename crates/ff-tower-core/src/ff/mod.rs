@@ -44,7 +44,7 @@ use std::process::Command;
 
 pub use error::{Error, Refusal, Result};
 pub use payload::{
-    At, ChangeKind, Collisions, Editing, FileStat, Head, Held, Open, Pair, Pairing, Side, Status,
+    At, ChangeKind, Collision, Editing, FileStat, Head, Held, Open, Pairing, Side, Status,
     UnknownReason,
 };
 
@@ -178,20 +178,15 @@ impl Ff {
         Ok(self.run::<Status>("status", &[] as &[&str])?.data)
     }
 
-    /// `ff collide --json` — which branches in flight would collide.
+    /// `ff collide --json` — would these two branches hit each other?
     ///
-    /// `names` empty means the ones the map would rank; `limit` is how many
-    /// branches to rank in, newest tip first, with `None` meaning fufu's own
-    /// default rather than all of them. A collision is a finding and not a
-    /// failure, so this exits 0 either way.
-    pub fn collide(&self, names: &[String], limit: Option<usize>) -> Result<Collisions> {
-        let mut args: Vec<OsString> = Vec::new();
-        if let Some(limit) = limit {
-            args.push("--max-count".into());
-            args.push(limit.to_string().into());
-        }
-        args.extend(names.iter().map(OsString::from));
-        Ok(self.run::<Collisions>("collide", &args)?.data)
+    /// One pair is the whole verb. Which sets can fly together is tower's
+    /// to fold out of these verdicts, because the fold needs a queue, a
+    /// notion of what is already in the air, and something to claim with —
+    /// none of which fufu has. A collision is a finding and not a failure,
+    /// so this exits 0 either way.
+    pub fn collide(&self, a: &str, b: &str) -> Result<Collision> {
+        Ok(self.run::<Collision>("collide", &[a, b])?.data)
     }
 
     /// Run one fufu verb and deserialize its `data` payload.
