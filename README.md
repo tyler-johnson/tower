@@ -33,15 +33,15 @@ That last line is fufu's extension rule unmodified: extensions read fufu state a
 
 ## Passive by construction
 
-**tower is a thing agents call. It never calls agents.** Every verb is a read plus a local write. No daemon, no cron, no dispatch, no iteration verb. If work should loop, the agent harness loops and calls `tower next` again — the harness is the scheduler, tower is only the queue.
+**tower is a thing agents call. It never calls agents.** Every verb is a read plus a local write. No daemon, no cron, no dispatch, no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue.
 
 ## Layout
 
 | crate | what it is |
 |---|---|
-| `tower-core` | the flight log, the fold that becomes a board, procedures, intake, land order |
-| `tower-cli` | the binary, installed as `tower` and as `ff-tower` for `ff tower` dispatch |
-| `tower-testsupport` | shared fixtures |
+| `ff-tower-core` | the flight log, the fold that becomes a board, procedures, intake, land order |
+| `ff-tower-cli` | the one binary, `ff-tower`, which fufu's dispatch finds for `ff tower` |
+| `ff-tower-testsupport` | shared fixtures |
 
 Forge adapters are separate binaries discovered on PATH — `tower-github`, `tower-linear` — on git's extension model, so a third party can write one without touching this repository.
 

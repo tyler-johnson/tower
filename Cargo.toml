@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["crates/tower-core", "crates/tower-cli", "crates/tower-testsupport"]
+members = [
+    "crates/ff-tower-core",
+    "crates/ff-tower-cli",
+    "crates/ff-tower-testsupport",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,8 +13,8 @@ license = "MIT"
 repository = "https://github.com/tyler-johnson/tower"
 
 [workspace.dependencies]
-tower-core = { path = "crates/tower-core" }
-tower-testsupport = { path = "crates/tower-testsupport" }
+ff-tower-core = { path = "crates/ff-tower-core" }
+ff-tower-testsupport = { path = "crates/ff-tower-testsupport" }
 
 # For tower's own store, and for nothing else. `refs/tower/log/<author>` is
 # an orphan commit chain tower writes itself; everything tower knows about

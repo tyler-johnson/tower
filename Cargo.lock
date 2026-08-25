@@ -312,6 +312,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
+name = "ff-tower-cli"
+version = "0.1.0"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "ff-tower-core",
+ "ff-tower-testsupport",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ff-tower-core"
+version = "0.1.0"
+dependencies = [
+ "gix",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "ff-tower-testsupport"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1635,38 +1667,6 @@ name = "toml_writer"
 version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
-
-[[package]]
-name = "tower-cli"
-version = "0.1.0"
-dependencies = [
- "anstream",
- "anstyle",
- "clap",
- "serde",
- "serde_json",
- "tempfile",
- "tower-core",
- "tower-testsupport",
-]
-
-[[package]]
-name = "tower-core"
-version = "0.1.0"
-dependencies = [
- "gix",
- "serde",
- "serde_json",
- "thiserror",
- "toml",
-]
-
-[[package]]
-name = "tower-testsupport"
-version = "0.1.0"
-dependencies = [
- "tempfile",
-]
 
 [[package]]
 name = "typenum"
