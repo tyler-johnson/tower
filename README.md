@@ -24,7 +24,7 @@ tower is a separate program with its own authority, its own store, and its own c
 ```
 reads     ff status --json · ff log --json · ff collide --json · ff watch --all
 calls     ff start · ff switch · ff worktree add|remove, tagged --session <flight>
-stores    refs/tower/log/<author>
+stores    refs/tower/log/<author>/<writer>
 derives   state · progress · conflicts · land order
 writes    nothing under refs/fufu/*, ever
 ```
