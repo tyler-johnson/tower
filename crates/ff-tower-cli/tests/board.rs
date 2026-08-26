@@ -181,3 +181,27 @@ fn colliding_flights_carry_the_warn_phrase_and_the_json_verdicts() {
         assert_eq!(view["unanswered"], serde_json::json!([]));
     }
 }
+
+#[test]
+fn a_decomposed_parent_carries_the_waiting_phrase_until_its_parts_land() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
+    stdout(&ff_tower(
+        repo.path(),
+        &["decompose", "1", "part one", "part two"],
+    ));
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("waiting on 2 flights"), "{out}");
+
+    // A done dependency has left the board, so the phrase narrows to the
+    // live part and then clears itself.
+    stdout(&ff_tower(repo.path(), &["done", "2"]));
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("waiting on #3"), "one live part, named: {out}");
+
+    stdout(&ff_tower(repo.path(), &["done", "3"]));
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(!out.contains("waiting on"), "the phrase clears: {out}");
+}

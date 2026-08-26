@@ -14,6 +14,7 @@ pub mod board;
 pub mod brief;
 pub mod claim;
 pub mod comment;
+pub mod decompose;
 pub mod done;
 pub mod file;
 pub mod hold;
@@ -50,11 +51,26 @@ pub fn store() -> Result<Store, CliError> {
 /// JSON payload is what the log holds — store-assigned time included —
 /// not a reconstruction.
 pub fn appended(store: &Store, id: &EventId) -> Result<Event, CliError> {
-    Ok(store
-        .read()?
+    Ok(appended_all(store, std::slice::from_ref(id))?
         .into_iter()
-        .find(|event| &event.id == id)
+        .next()
         .expect("the appended event is on the chain"))
+}
+
+/// The same, for a batch: one read of the chain, the events in the order
+/// asked for rather than the chain's.
+pub fn appended_all(store: &Store, ids: &[EventId]) -> Result<Vec<Event>, CliError> {
+    let chain = store.read()?;
+    Ok(ids
+        .iter()
+        .map(|id| {
+            chain
+                .iter()
+                .find(|event| &event.id == id)
+                .cloned()
+                .expect("the appended event is on the chain")
+        })
+        .collect())
 }
 
 /// A flight reference as typed: a bare number, a `writer#n` pair, or the
@@ -168,6 +184,7 @@ pub fn ensure_active<'a>(fold: &'a Fold, id: &EventId) -> Result<&'a Flight, Cli
 /// Small counts in words, matching the refusal grammar's register.
 fn count(n: usize) -> String {
     match n {
+        1 => "one".to_string(),
         2 => "two".to_string(),
         3 => "three".to_string(),
         4 => "four".to_string(),

@@ -192,3 +192,31 @@ fn an_empty_pick_under_json_is_a_data_envelope_not_an_error() {
         "data and error, never both"
     );
 }
+
+#[test]
+fn a_parent_waits_on_its_parts_and_stays_undone_when_they_land() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
+    stdout(&ff_tower(
+        repo.path(),
+        &["decompose", "1", "part one", "part two"],
+    ));
+
+    let text = stdout(&ff_tower(repo.path(), &["next", "--peek"]));
+    assert!(text.contains("ready #2: part one"), "{text}");
+    assert!(text.contains("passed #1 · waiting on #2, #3"), "{text}");
+
+    stdout(&ff_tower(repo.path(), &["done", "2"]));
+    stdout(&ff_tower(repo.path(), &["done", "3"]));
+
+    // Every part done makes the parent claimable, not finished — nothing
+    // derives a parent's done, only `ff tower done` ends it.
+    let text = stdout(&ff_tower(repo.path(), &["next", "--peek"]));
+    assert!(text.contains("ready #1: a broad task"), "{text}");
+    assert!(!text.contains("waiting"), "{text}");
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let open = board["data"]["open"].as_array().expect("open");
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0]["id"], serde_json::json!("pi.1"));
+}

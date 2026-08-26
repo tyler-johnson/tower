@@ -131,6 +131,22 @@ fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool
             colored,
         ));
     }
+    // A dependency absent from `refs` is done — done flights leave the
+    // board — so the phrase covers only the live ones and clears itself as
+    // they land.
+    let waiting: Vec<&String> = view
+        .depends_on
+        .iter()
+        .filter_map(|dep| refs.get(dep.as_str()))
+        .collect();
+    match waiting.as_slice() {
+        [] => {}
+        [one] => phrases.push(paint_dim(&format!("waiting on {one}"), colored)),
+        many => phrases.push(paint_dim(
+            &format!("waiting on {} flights", many.len()),
+            colored,
+        )),
+    }
     // A claim with no branch yet: the claim itself is the flight's motion.
     if view.claimed_by.is_some() && view.branch.is_none() {
         phrases.push(paint_dim("claimed", colored));

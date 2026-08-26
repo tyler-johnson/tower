@@ -47,6 +47,7 @@ fn verb(command: &Option<Command>) -> &'static str {
         Some(Command::File { .. }) => "file",
         Some(Command::Comment { .. }) => "comment",
         Some(Command::Link { .. }) => "link",
+        Some(Command::Decompose { .. }) => "decompose",
         Some(Command::Claim { .. }) => "claim",
         Some(Command::Hold { .. }) => "hold",
         Some(Command::Answer { .. }) => "answer",
@@ -78,6 +79,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             cmd::comment::run(cli.json, flight, message.clone())?
         }
         Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b)?,
+        Some(Command::Decompose { flight, parts }) => cmd::decompose::run(cli.json, flight, parts)?,
         Some(Command::Claim { flight }) => cmd::claim::run(cli.json, flight)?,
         Some(Command::Hold { flight, message }) => {
             cmd::hold::run(cli.json, flight, message.clone())?;

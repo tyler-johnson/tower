@@ -69,6 +69,16 @@ pub enum Command {
         #[arg(value_name = "b")]
         b: String,
     },
+    /// Split a flight into parts: each part files as a flight, and the
+    /// parent waits on all of them.
+    Decompose {
+        /// The flight to split — a number, `writer#n`, or the event id.
+        #[arg(value_name = "flight")]
+        flight: String,
+        /// The parts, one subject each.
+        #[arg(value_name = "part")]
+        parts: Vec<String>,
+    },
     /// Claim one specific flight, out of order.
     Claim {
         /// The flight to claim — a number, `writer#n`, or the event id.

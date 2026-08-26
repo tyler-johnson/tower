@@ -494,3 +494,107 @@ fn the_lifecycle_verbs_refuse_a_done_flight_but_a_comment_lands() {
         &["comment", "1", "-m", "postscript"],
     ));
 }
+
+#[test]
+fn decompose_files_the_parts_and_echoes_them() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
+    let out = stdout(&ff_tower(
+        repo.path(),
+        &[
+            "decompose",
+            "1",
+            "the fold: parent-child edges",
+            "the cli: decompose verb",
+        ],
+    ));
+    assert_eq!(
+        out,
+        "decomposed #1 into two parts\n\
+         · #2  the fold: parent-child edges\n\
+         · #3  the cli: decompose verb\n\
+         board: ff tower\n"
+    );
+}
+
+#[test]
+fn decompose_json_carries_the_parent_the_parts_and_the_edges() {
+    let repo = repo();
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "a broad task", "-p", "review"],
+    ));
+    let out = ff_tower(
+        repo.path(),
+        &["decompose", "1", "part one", "part two", "--json"],
+    );
+    let decomposed = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    assert_eq!(decomposed["cmd"], serde_json::json!("decompose"));
+    let data = &decomposed["data"];
+    assert_eq!(data["parent"], serde_json::json!("pi.1"));
+
+    let filed = data["filed"].as_array().expect("filed");
+    assert_eq!(filed.len(), 2);
+    for (event, subject) in filed.iter().zip(["part one", "part two"]) {
+        assert_eq!(event["kind"], serde_json::json!("filed"));
+        assert_eq!(event["body"]["subject"], serde_json::json!(subject));
+        assert_eq!(event["body"]["body"], serde_json::json!(""));
+        // The parts inherit the parent's procedure stamp.
+        assert_eq!(event["body"]["procedure"], serde_json::json!("review"));
+    }
+    assert_eq!(filed[0]["id"], serde_json::json!("pi.2"));
+    assert_eq!(filed[1]["id"], serde_json::json!("pi.3"));
+
+    let linked = data["linked"].as_array().expect("linked");
+    assert_eq!(linked.len(), 2);
+    for (event, part) in linked.iter().zip(["pi.2", "pi.3"]) {
+        assert_eq!(event["kind"], serde_json::json!("linked"));
+        assert_eq!(event["body"]["from"], serde_json::json!("pi.1"));
+        assert_eq!(event["body"]["to"], serde_json::json!(part));
+    }
+
+    // The parent depends on both parts; each part blocks the parent.
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let open = board["data"]["open"].as_array().expect("open");
+    let by_id = |id: &str| {
+        open.iter()
+            .find(|view| view["id"] == serde_json::json!(id))
+            .unwrap_or_else(|| panic!("no {id} in open"))
+    };
+    assert_eq!(
+        by_id("pi.1")["depends_on"],
+        serde_json::json!(["pi.2", "pi.3"])
+    );
+    assert_eq!(by_id("pi.2")["blocks"], serde_json::json!(["pi.1"]));
+    assert_eq!(by_id("pi.3")["blocks"], serde_json::json!(["pi.1"]));
+}
+
+#[test]
+fn decompose_with_no_parts_is_a_usage_refusal() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
+    let out = ff_tower(repo.path(), &["decompose", "1", "--json"]);
+    refusal(&out, 2, "usage/no-parts");
+}
+
+#[test]
+fn a_part_trimmed_to_nothing_is_a_usage_refusal() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
+    let out = ff_tower(repo.path(), &["decompose", "1", "part one", "  ", "--json"]);
+    refusal(&out, 2, "usage/empty-subject");
+
+    // Nothing was filed: the refusal lands before the append.
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["open"].as_array().expect("open").len(), 1);
+}
+
+#[test]
+fn decomposing_a_done_flight_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "finished"]));
+    stdout(&ff_tower(repo.path(), &["done", "1"]));
+    let out = ff_tower(repo.path(), &["decompose", "1", "too late", "--json"]);
+    refusal(&out, 1, "flight/done");
+}
