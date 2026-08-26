@@ -36,5 +36,6 @@
 //! touching `refs/fufu/*`. That is `gix` directly, and it is why the
 //! dependency is declared here rather than inherited from anything.
 
+pub mod board;
 pub mod ff;
 pub mod log;
