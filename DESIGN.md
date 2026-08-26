@@ -120,13 +120,13 @@ Not files in the working tree. `.tower/flights/*.md` is the obvious move and the
 
 The conflict problem dissolves because of what is stored. Derived fields are never stored at all, so they have zero merge surface and self-heal when someone works around tower. Stored intent is an append-only event log partitioned per author, so merging divergent logs is a **union, not a merge** — conflict-free by construction. The board is a fold over the union. The only genuine collision is two people editing one field in the same window; last-writer-wins with a stable tiebreak, and both events survive in the log regardless.
 
-**Sync is three tiers, and only one of them needs anything built.** *Machine-local* — bays, pool state, caches — never syncs and mostly rebuilds. *Mine across machines* — solo flights, notes, decompositions — is single-author and append-only, so backup or roaming is one plain `git push refs/tower/log/<me>/*` with no protocol at all — and no verb: tower builds nothing here. tower is a local tool that interfaces with remote data, and the designed way anything leaves the machine is `ff tower promote`; a convenience wrapper around that refspec is a much later question, if it is ever one. *Shared with others* is the only hard tier, and tower does not have it: in team mode upstream already holds it, and in solo mode it does not exist.
+**Sync is three tiers, and only one of them needs anything built.** *Machine-local* — bays, pool state, caches — never syncs and mostly rebuilds. *Mine across machines* — solo flights, notes, decompositions — is single-author and append-only, so backup or roaming is one plain `git push refs/tower/log/<me>/*` with no protocol at all — and no verb: tower builds nothing here. tower is a local tool that interfaces with remote data, and the designed way anything leaves the machine is `ff tower promote`. *Shared with others* is the only hard tier, and tower does not have it: in team mode upstream already holds it, and in solo mode it does not exist.
 
 Multi-writer works anyway — fetch `refs/tower/log/*`, fold the union — and it stays documented and unsupported. Every git-native tracker that tried to be the shared board was technically fine and socially dead: shared work needs a place people look, and a ref in a repository is not one. Making it one means notifications, identity, and permissions, which is a different product wearing this one as a hat. **tower never becomes the shared board; sharing is `ff tower promote`.**
 
 The deeper reason is that tower has no mechanism for agreement. Facts need no consensus — the branch exists, these hunks collide, CI failed — which is why tower can assert them unilaterally and be believed. Upstream state is negotiated: priority, ownership, what ships this cycle. A shared tower board would manufacture consensus data with nothing underneath it, and two people would confidently read different boards.
 
-One honest consequence: this is the first fufu-adjacent state that is not a cache. fufu's principle 3 says state is rebuildable and the repository wins; authored text is derivable from nothing. It holds anyway — the store *is* ordinary git objects in the repository, so the repository still wins literally — but authored flights are losable in a way no fufu state is. That is accepted rather than papered over: a doctor row can count what exists only on this machine, and the remedy is a plain git push of the refspec or a promotion — not a tower verb.
+One honest consequence: this is the first fufu-adjacent state that is not a cache. fufu's principle 3 says state is rebuildable and the repository wins; authored text is derivable from nothing. It holds anyway — the store *is* ordinary git objects in the repository, so the repository still wins literally — but authored flights are losable in a way no fufu state is. That is accepted rather than papered over: the store is ordinary git refs, and whether they leave the machine is git's business, not tower's — tower carries no backup surface at all, no verb, no warning, no doctor row.
 
 ## Surfaces
 
@@ -205,7 +205,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower explain <flight>` | why this is here, why this procedure, and what it beat | you |
 | `ff tower procedures [<name>]` | what is installed, what each matches, and where to fork it | you |
 | `ff tower config` | settings, on fufu's typed-registry model | you |
-| `ff tower doctor` | flights only this machine holds, stale adapters, bays that no longer resolve | you |
+| `ff tower doctor` | stale adapters, bays that no longer resolve | you |
 | `ff tower <adapter> <args>` | passthrough to `tower-<adapter>` on PATH: `ff tower linear`, `ff tower github` | either |
 
 Every one of them is a read plus a local write. Nothing in the column on the right is a dispatch target.
