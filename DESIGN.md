@@ -146,6 +146,12 @@ The whole design is aimed at one reflex: bare `ff tower`, often, because it is t
 
 The review loop deserves modeling directly, because it is mostly waiting and mostly agent-shaped: an incoming review is work arriving, and sorting its comments into what a machine can carry out and what needs a decision is where the ergonomic win lives. Answer the one design question, let the other three land.
 
+### Flight ids
+
+A flight is named by the id of the `filed` event that minted it: `<writer>.<seq>`, unique across machines because the writer component is. That full form is the wire form — JSON envelopes and `--session` tags carry it raw, always.
+
+Humans work in sequence numbers. Human output prints ids `#`-prefixed, and a board folded from a single writer — the normal case, since tower is local-first and log sync is the exception — prints the seq alone: `#3`. The full `#pi-8c2e.3` appears only when a second writer's flights are on the board, so every render stays unambiguous. On input, any verb taking a flight id accepts a bare seq, resolved against the board's filed flights: a unique match wins, an ambiguous one refuses and lists the full ids. A leading `#` is accepted and stripped for paste tolerance; the documented spelling is unprefixed, because an unquoted `#` starts a shell comment. The `#` is display convention, never wire format.
+
 ### The verbs
 
 fufu's rule that every verb must earn its existence carries over, and the one it kills first is `run`. Tower cannot run anything — a verb that implies dispatch would be the first crack in principle 2, and that line is too load-bearing to contradict casually. Starting work under a procedure is `ff tower file`, because filing is what actually happens; the decomposition and the first brief fall out of it.
