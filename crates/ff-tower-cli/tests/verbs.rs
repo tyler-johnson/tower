@@ -523,18 +523,3 @@ fn the_lifecycle_verbs_refuse_a_done_flight_but_a_comment_lands() {
         &["comment", "1", "-m", "postscript"],
     ));
 }
-
-#[test]
-fn a_bare_done_is_refused_until_bays_arrive() {
-    let repo = repo();
-    let out = ff_tower(repo.path(), &["done", "--json"]);
-    let envelope = refusal(&out, 2, "usage/needs-flight");
-    assert_eq!(
-        envelope["error"]["message"],
-        serde_json::json!("no flight given — naming the current one arrives with bays")
-    );
-    assert_eq!(
-        envelope["error"]["exits"],
-        serde_json::json!(["ff tower done <flight>"])
-    );
-}

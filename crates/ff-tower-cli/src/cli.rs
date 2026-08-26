@@ -95,8 +95,41 @@ pub enum Command {
     },
     /// Finish a flight — off the board, on the record.
     Done {
-        /// The flight to finish; naming the current one arrives with bays.
+        /// The flight to finish; the invoking worktree's flight when
+        /// unsaid, derived from its newest session-tagged work.
         #[arg(value_name = "flight")]
         flight: Option<String>,
+    },
+    /// The pool: what is bootstrapped, what is occupied, what is free.
+    Bay {
+        #[command(subcommand)]
+        action: Option<BayAction>,
+    },
+}
+
+/// The pool's three verbs; bare `ff tower bay` is the list, the same
+/// optional-subcommand mechanism as bare `ff tower` being the board.
+#[derive(Subcommand)]
+pub enum BayAction {
+    /// Every bay: id, branch, and the live flight sitting in it.
+    List,
+    /// Warm a bay — `ff worktree add`, so the chain floor is laid before
+    /// the first command runs in it.
+    Warm {
+        /// Where to put it; a relative path resolves against the
+        /// repository, not the shell's directory.
+        #[arg(value_name = "path")]
+        path: String,
+        /// The branch it stands on — a new one named after the directory
+        /// when unsaid.
+        #[arg(value_name = "branch")]
+        branch: Option<String>,
+    },
+    /// Release a bay — refused while a live flight sits in it; fufu
+    /// captures the tree before teardown either way.
+    Release {
+        /// The bay, by id or by path.
+        #[arg(value_name = "bay")]
+        bay: String,
     },
 }

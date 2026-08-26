@@ -9,6 +9,7 @@
 //! catch; the fold stays tolerant of what got into the log anyway.
 
 pub mod answer;
+pub mod bay;
 pub mod board;
 pub mod brief;
 pub mod claim;
