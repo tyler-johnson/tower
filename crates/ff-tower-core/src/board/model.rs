@@ -31,6 +31,9 @@ pub struct Board {
 #[derive(Debug, Serialize)]
 pub struct FlightView {
     pub id: String,
+    /// The dense per-writer flight number — the human name's numeric
+    /// half, beside the wire id.
+    pub number: u64,
     pub procedure: String,
     pub subject: String,
     pub filed_by: String,
@@ -212,6 +215,7 @@ fn view(
     };
     FlightView {
         id: flight.id.to_string(),
+        number: flight.number,
         procedure: flight.procedure,
         subject: flight.subject,
         filed_by: flight.filed_by,
@@ -352,6 +356,7 @@ mod tests {
         assert_eq!(board.in_the_air.len(), 1);
         let view = &board.in_the_air[0];
         assert_eq!(view.id, "pi.1");
+        assert_eq!(view.number, 1);
         assert_eq!(view.branch.as_deref(), Some("work"));
         assert_eq!(view.tip.as_deref().map(|t| &t[..8]), Some("3c8f9168"));
         assert_eq!(view.last_motion, Some(50));

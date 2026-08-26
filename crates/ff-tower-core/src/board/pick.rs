@@ -33,6 +33,9 @@ pub struct Picks {
 #[derive(Debug, Serialize)]
 pub struct Pick {
     pub flight: String,
+    /// The dense per-writer flight number — the human name's numeric
+    /// half, beside the wire id.
+    pub number: u64,
     pub subject: String,
     pub branch: Option<String>,
 }
@@ -149,6 +152,7 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
             Some(reason) => passed.push(Passed { flight: id, reason }),
             None => picked.push(Pick {
                 flight: id,
+                number: flight.number,
                 subject: flight.subject.clone(),
                 branch,
             }),
@@ -305,6 +309,7 @@ mod tests {
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.2");
+        assert_eq!(picks.picked[0].number, 2);
         match reasons(&picks).as_slice() {
             [("pi.1", Skip::Waiting { on })] => assert_eq!(on, &["pi.2"]),
             other => panic!("expected one waiting row, got {other:?}"),

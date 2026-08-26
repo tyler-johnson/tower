@@ -1,4 +1,5 @@
-//! The fold: the log's events, partitioned into flights.
+//! The fold: the log's events, partitioned into flights, each carrying
+//! its dense per-writer number — the human name's numeric half.
 //!
 //! Pure by construction — this file imports the log's types and nothing
 //! else. No `crate::ff`, no `std::process`: the compiler is what keeps
@@ -17,6 +18,12 @@ pub struct Flight {
     /// The filed event's id — the flight's identity, and the string that
     /// rides every fufu call as `--session`.
     pub id: EventId,
+    /// The flight's human name: its 1-based rank among this writer's
+    /// filed events. Dense where event seqs are sparse — every event
+    /// kind consumes a seq, only filings consume a number. Derived here,
+    /// never stored; the log is append-only and per-writer seqs are
+    /// monotonic, so a new filing can never renumber an earlier one.
+    pub number: u64,
     pub procedure: String,
     pub subject: String,
     pub body: String,
@@ -82,7 +89,10 @@ pub struct Fold {
 /// union orders by `(time, writer, seq)` and wall clocks disagree across
 /// machines, so a comment from a fast clock can sort *before* the filing
 /// it names. Pass 1 mints every flight; pass 2 attaches to flights that
-/// exist anywhere in the log, not merely earlier in it.
+/// exist anywhere in the log, not merely earlier in it. A numbering
+/// post-pass then ranks each writer's filings by seq — by seq and not
+/// union order, so a clock step can reorder the union without ever
+/// renumbering a flight.
 pub fn fold(events: &[Event]) -> Fold {
     let mut flights: Vec<Flight> = Vec::new();
     let mut by_id: HashMap<&EventId, usize> = HashMap::new();
@@ -105,6 +115,7 @@ pub fn fold(events: &[Event]) -> Fold {
             by_id.insert(&event.id, flights.len());
             flights.push(Flight {
                 id: event.id.clone(),
+                number: 0,
                 procedure: procedure.clone(),
                 subject: subject.clone(),
                 body: body.clone(),
@@ -118,6 +129,20 @@ pub fn fold(events: &[Event]) -> Fold {
                 done: None,
                 answered_at: None,
             });
+        }
+    }
+
+    let mut per_writer: HashMap<String, Vec<usize>> = HashMap::new();
+    for (at, flight) in flights.iter().enumerate() {
+        per_writer
+            .entry(flight.id.writer.clone())
+            .or_default()
+            .push(at);
+    }
+    for mut group in per_writer.into_values() {
+        group.sort_by_key(|&at| flights[at].id.seq);
+        for (rank, &at) in group.iter().enumerate() {
+            flights[at].number = rank as u64 + 1;
         }
     }
 
@@ -441,6 +466,58 @@ mod tests {
         ]);
         assert!(fold.flights.is_empty());
         assert_eq!(fold.unrouted.len(), 4);
+    }
+
+    #[test]
+    fn numbers_count_filings_alone_and_stay_dense() {
+        let fold = fold(&[
+            filed("pi.1", 10, "first"),
+            claimed("pi.2", 20, "pi.1"),
+            commented("pi.3", 30, "pi.1"),
+            filed("pi.4", 40, "second"),
+        ]);
+        let pairs: Vec<(u64, u64)> = fold
+            .flights
+            .iter()
+            .map(|flight| (flight.id.seq, flight.number))
+            .collect();
+        assert_eq!(pairs, [(1, 1), (4, 2)]);
+    }
+
+    #[test]
+    fn two_interleaved_writers_each_number_from_one() {
+        let fold = fold(&[
+            filed("pi.1", 10, "a"),
+            filed("qi.1", 20, "b"),
+            filed("pi.2", 30, "c"),
+            filed("qi.2", 40, "d"),
+        ]);
+        let numbers: Vec<(String, u64)> = fold
+            .flights
+            .iter()
+            .map(|flight| (flight.id.to_string(), flight.number))
+            .collect();
+        assert_eq!(
+            numbers,
+            [
+                ("pi.1".to_string(), 1),
+                ("qi.1".to_string(), 1),
+                ("pi.2".to_string(), 2),
+                ("qi.2".to_string(), 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_done_flight_keeps_its_number_and_the_next_filing_counts_on() {
+        let fold = fold(&[
+            filed("pi.1", 10, "finished"),
+            done("pi.2", 20, "pi.1"),
+            filed("pi.3", 30, "next"),
+        ]);
+        assert_eq!(fold.flights[0].number, 1);
+        assert!(fold.flights[0].done.is_some());
+        assert_eq!(fold.flights[1].number, 2);
     }
 
     #[test]

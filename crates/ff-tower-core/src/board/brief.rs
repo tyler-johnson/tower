@@ -20,6 +20,9 @@ use super::reads::Reads;
 #[derive(Debug, Serialize)]
 pub struct Brief {
     pub id: String,
+    /// The dense per-writer flight number — the human name's numeric
+    /// half, beside the wire id.
+    pub number: u64,
     pub procedure: String,
     pub subject: String,
     pub body: String,
@@ -101,6 +104,7 @@ pub fn brief(fold: &Fold, reads: &Reads, id: &EventId) -> Option<Brief> {
 
     Some(Brief {
         id: flight.id.to_string(),
+        number: flight.number,
         procedure: flight.procedure.clone(),
         subject: flight.subject.clone(),
         body: flight.body.clone(),
@@ -298,6 +302,7 @@ mod tests {
         )
         .expect("filed");
         assert_eq!(brief.id, "pi.1");
+        assert_eq!(brief.number, 1);
         assert_eq!(brief.procedure, "open");
         assert_eq!(brief.subject, "the subject");
         assert_eq!(brief.body, "the body\ntwo lines");
