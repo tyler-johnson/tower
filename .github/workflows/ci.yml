@@ -1,10 +1,10 @@
 name: ci
 
-# Deliberately one platform and one job while the repository is a scaffold.
-# fufu's matrix is sharded four ways across three operating systems because
-# its suite spawns a real `git` per assertion and Windows charges 6.6ms a
-# process; tower has no suite yet and no measured reason for any of that.
-# Widen this when there is something to widen it for.
+# Deliberately one platform and one test job. fufu's matrix is sharded four
+# ways across three operating systems because its suite spawns a real `git`
+# per assertion and Windows charges 6.6ms a process; tower's suite is small
+# and has no measured reason for any of that. Widen this when there is
+# something to widen it for.
 
 on:
   push:
@@ -28,6 +28,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: install fufu
+        # The suite runs against a real `ff` — mocking it away would pass
+        # against a contract that had moved. Pinned to the release the seam
+        # was built on; bump it when the contract does.
+        run: |
+          curl -fsSL https://github.com/tyler-johnson/fufu/releases/download/v0.8.0/ff_0.8.0_linux_amd64.tar.gz | sudo tar -xz -C /usr/local/bin ff
+          ff --version
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
