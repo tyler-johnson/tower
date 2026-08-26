@@ -231,6 +231,62 @@ pub struct OpLog {
     pub ops: Vec<OpEntry>,
 }
 
+/// `ff worktree list --json` — one worktree row: a bay, or the main
+/// worktree itself.
+///
+/// `path` is null for a bare repository's main row — tower never usefully
+/// runs bare, but the payload parses what fufu emits. A null `branch` is a
+/// detached HEAD. `chain`, `tip`, and the payload's `orphans` stay
+/// unmirrored: branch tips come from the `branch list` join, and nothing
+/// in tower reads a chain ref by name.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorktreeInfo {
+    /// fufu's worktree id — `main` for the main worktree.
+    pub id: String,
+    pub path: Option<String>,
+    pub branch: Option<String>,
+    /// True on the row the invoking worktree answered for.
+    pub current: bool,
+}
+
+/// `ff worktree list --json` — the survey: every worktree, main first.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorktreeList {
+    pub worktrees: Vec<WorktreeInfo>,
+}
+
+/// `ff worktree add --json` — the envelope wrapper around what was made.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorktreeAdd {
+    pub added: WorktreeAdded,
+}
+
+/// The worktree `ff worktree add` made.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorktreeAdded {
+    pub id: String,
+    pub path: String,
+    pub branch: String,
+}
+
+/// `ff worktree remove --json` — the envelope wrapper around what was
+/// torn down.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorktreeRemove {
+    pub removed: WorktreeRemoved,
+}
+
+/// The worktree `ff worktree remove` tore down. The capture came first —
+/// that is why the verb needs no `--force` — and `capture` is its op id,
+/// null when the tree held nothing to keep.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorktreeRemoved {
+    pub id: String,
+    pub path: String,
+    pub branch: Option<String>,
+    pub capture: Option<String>,
+}
+
 /// `ff branch list --json` — one branch, with fufu's holds on it.
 ///
 /// fufu's `session` field is deliberately unmirrored: it is an *editing*

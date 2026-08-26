@@ -2,21 +2,25 @@
 //!
 //! DESIGN.md's inbox, as a fold. The pipeline is four steps with the I/O
 //! quarantined in the middle two: [`fold`] partitions the log's events
-//! into flights and touches nothing else, [`gather`] makes three fufu
-//! spawns constant in flight count, [`probe`] asks `collide` once per
-//! distinct pair of in-flight branches — zero spawns in the solo norm —
-//! and [`enrich`] classifies each flight into a section over what the
-//! middle already fetched. [`assemble`] is the wiring, and the one call a
-//! render needs. [`pick`] is `next`'s fold, riding the same probe output
-//! as the board. [`brief`] is one flight's full record over the same
-//! reads, no probes.
+//! into flights and touches nothing else, [`gather`] makes four fufu
+//! spawns constant in flight count plus one `op log` per bay, [`probe`]
+//! asks `collide` once per distinct pair of in-flight branches — zero
+//! spawns in the solo norm — and [`enrich`] classifies each flight into a
+//! section over what the middle already fetched. [`assemble`] is the
+//! wiring, and the one call a render needs. [`pick`] is `next`'s fold,
+//! riding the same probe output as the board. [`brief`] is one flight's
+//! full record over the same reads, no probes. [`bays`] is the pool over
+//! the same reads too: occupancy joined from the survey and the fold,
+//! never registered.
 
+mod bay;
 mod brief;
 mod flight;
 mod model;
 mod pick;
 mod reads;
 
+pub use bay::{BayView, bays};
 pub use brief::{Brief, CommentView, LinkView, brief};
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use model::{Board, CollideView, FlightView, enrich};

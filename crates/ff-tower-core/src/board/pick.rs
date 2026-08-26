@@ -259,6 +259,7 @@ mod tests {
                 anonymous: Vec::new(),
             },
             current_branch: None,
+            worktrees: Vec::new(),
         }
     }
 

@@ -45,7 +45,8 @@ use std::process::Command;
 pub use error::{Error, Refusal, Result};
 pub use payload::{
     At, BranchInfo, BranchList, ChangeKind, Collision, Editing, FileStat, Head, Held, OpEntry,
-    OpLog, Open, Pairing, Side, Status, UnknownReason,
+    OpLog, Open, Pairing, Side, Status, UnknownReason, WorktreeAdd, WorktreeAdded, WorktreeInfo,
+    WorktreeList, WorktreeRemove, WorktreeRemoved,
 };
 
 use serde::Deserialize;
@@ -144,6 +145,18 @@ impl Ff {
         }
     }
 
+    /// The same handle aimed at another worktree — the pool fan-out. The
+    /// program override rides along; the session tag does not: a poll of
+    /// someone else's bay must not tag that bay's chain.
+    #[must_use]
+    pub fn at_path(&self, dir: impl Into<PathBuf>) -> Ff {
+        Ff {
+            program: self.program.clone(),
+            repo: dir.into(),
+            session: None,
+        }
+    }
+
     /// Tag every call from this handle with a session name.
     ///
     /// The design's rule verbatim: every fufu call tower makes carries
@@ -194,10 +207,11 @@ impl Ff {
     ///
     /// The only verb whose rows carry both `session` and `branch`, which
     /// makes it the flight-to-branch derivation: one call with
-    /// `session(glob:*)` answers for every tagged operation at once, so a
-    /// board render costs the same three spawns however many flights are
-    /// in the air. `-n 0` lifts the default cap of 25 rows — a fold over a
-    /// truncated log would quietly park old flights.
+    /// `session(glob:*)` answers for every tagged operation at once — on
+    /// *this* worktree's chain, which is all `session(...)` scans, so the
+    /// pool fan-out asks each bay through [`Ff::at_path`]. `-n 0` lifts
+    /// the default cap of 25 rows — a fold over a truncated log would
+    /// quietly park old flights.
     pub fn op_log(&self, revset: &str) -> Result<Vec<OpEntry>> {
         Ok(self.run::<OpLog>("op log", &[revset, "-n", "0"])?.data.ops)
     }
@@ -209,6 +223,38 @@ impl Ff {
     /// current branch, which turns up with `tip: None`.
     pub fn branch_list(&self) -> Result<BranchList> {
         Ok(self.run::<BranchList>("branch list", &[] as &[&str])?.data)
+    }
+
+    /// `ff worktree list --json` — the survey: every worktree, main
+    /// first, with the pool derived from it rather than registered
+    /// anywhere.
+    pub fn worktree_list(&self) -> Result<WorktreeList> {
+        Ok(self
+            .run::<WorktreeList>("worktree list", &[] as &[&str])?
+            .data)
+    }
+
+    /// `ff worktree add --json <path> [<branch>]` — warm a bay. fufu lays
+    /// the chain floor as the worktree is made, mints a branch named
+    /// after the directory when none is given, and refuses a branch
+    /// checked out elsewhere.
+    pub fn worktree_add(&self, path: &str, branch: Option<&str>) -> Result<WorktreeAdded> {
+        let mut args = vec![path];
+        if let Some(branch) = branch {
+            args.push(branch);
+        }
+        Ok(self.run::<WorktreeAdd>("worktree add", &args)?.data.added)
+    }
+
+    /// `ff worktree remove --json <worktree>` — tear a bay down, by path
+    /// or by id. The capture comes first, which is why the verb has no
+    /// `--force`: uncommitted work survives on the bay's chain and the
+    /// answer says where it went.
+    pub fn worktree_remove(&self, target: &str) -> Result<WorktreeRemoved> {
+        Ok(self
+            .run::<WorktreeRemove>("worktree remove", &[target])?
+            .data
+            .removed)
     }
 
     /// Run one fufu verb and deserialize its `data` payload.

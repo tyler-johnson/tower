@@ -20,8 +20,14 @@ use std::process::Command;
 /// Requires `ff` on PATH. That is deliberate rather than unfortunate: fufu
 /// is tower's runtime dependency, so a suite that mocked it away would pass
 /// against a contract that had moved.
+///
+/// The tempdir is a root holding `repo/`, and [`Repo::path`] answers the
+/// subdirectory: a bay warmed *inside* the working tree would ride into
+/// every capture as untracked noise, so [`Repo::bay_path`] hands out
+/// sibling slots beside `repo/` instead, inside the fixture's lifetime.
 pub struct Repo {
     dir: tempfile::TempDir,
+    repo: PathBuf,
 }
 
 impl Repo {
@@ -29,7 +35,9 @@ impl Repo {
     /// fufu's own floor is armed the way it would be in daily use.
     pub fn new() -> Repo {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repo { dir };
+        let path = dir.path().join("repo");
+        std::fs::create_dir(&path).expect("mkdir repo");
+        let repo = Repo { dir, repo: path };
 
         repo.ff(&["init"]);
         // Identity and a quiet default branch: a test repository must not
@@ -45,12 +53,18 @@ impl Repo {
     }
 
     pub fn path(&self) -> &Path {
-        self.dir.path()
+        &self.repo
+    }
+
+    /// A sibling slot beside the repository for a bay, never created here
+    /// — `ff worktree add` insists on making the directory itself.
+    pub fn bay_path(&self, name: &str) -> PathBuf {
+        self.dir.path().join(name)
     }
 
     /// Write a file, creating parent directories.
     pub fn write(&self, path: impl AsRef<Path>, contents: &str) {
-        let path = self.dir.path().join(path);
+        let path = self.path().join(path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("mkdir");
         }
@@ -78,7 +92,7 @@ impl Repo {
     fn run(&self, program: &str, args: &[&str]) -> String {
         let output = Command::new(program)
             .args(args)
-            .current_dir(self.dir.path())
+            .current_dir(self.path())
             .env("FF_NONINTERACTIVE", "1")
             .env_remove("FF_SESSION")
             .output()

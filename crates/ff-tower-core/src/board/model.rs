@@ -334,6 +334,7 @@ mod tests {
                 anonymous: Vec::new(),
             },
             current_branch: current.map(str::to_string),
+            worktrees: Vec::new(),
         }
     }
 

@@ -188,3 +188,67 @@ fn colliding_branches_carry_their_verdicts_through_the_board() {
     assert_eq!(untouched.id, "pi.3");
     assert!(untouched.collides.is_empty() && untouched.unanswered.is_empty());
 }
+
+#[test]
+fn a_bay_tagged_capture_reaches_the_board_from_main() {
+    // The widened reads end to end: a session-tagged capture made inside
+    // a bay lives on that bay's chain, and the board rendered from main
+    // still sees the flight in the air on the bay's branch.
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let store = Store::open(repo.path()).expect("open");
+    store.append(vec![filed("bay work")]).expect("append");
+
+    let bay = repo.bay_path("bay1");
+    Ff::at(repo.path())
+        .worktree_add(bay.to_str().expect("utf8"), Some("feather"))
+        .expect("add");
+    std::fs::write(bay.join("work.txt"), "an agent in a bay\n").expect("write");
+    Ff::at(&bay).session("pi.1").status().expect("status");
+
+    let events = store.read_all().expect("read_all");
+    let board = board::assemble(&Ff::at(repo.path()), &events).expect("assemble");
+
+    assert_eq!(board.in_the_air.len(), 1, "{board:?}");
+    let view = &board.in_the_air[0];
+    assert_eq!(view.id, "pi.1");
+    assert_eq!(view.branch.as_deref(), Some("feather"));
+    assert!(!view.current, "the render's own worktree sits on main");
+    assert!(board.open.is_empty());
+}
+
+#[test]
+fn gather_merges_bay_chains_and_skips_a_refusing_bay() {
+    // A bay can vanish between the survey and its poll; the fan-out skips
+    // it the way `probe` tolerates a vanished branch, and the healthy
+    // bay's rows still merge in.
+    let fake = ff_tower_testsupport::FakeFf::script(
+        r#"case "$3 $4" in
+  "op log")
+    case "$2" in
+      "/warm/bay") printf '%s\n' '{"ff":1,"cmd":"op log","data":{"ops":[{"branch":"feather","session":"pi.2","time":60}]}}' ;;
+      "/gone/bay") printf '%s\n' '{"ff":1,"cmd":"op log","error":{"id":"repo/not-found","message":"gone","exits":[]}}'; exit 1 ;;
+      *) printf '%s\n' '{"ff":1,"cmd":"op log","data":{"ops":[{"branch":"main","session":"pi.1","time":50}]}}' ;;
+    esac ;;
+  "branch list") printf '%s\n' '{"ff":1,"cmd":"branch list","data":{"named":[],"anonymous":[]}}' ;;
+  "status --json") printf '%s\n' '{"ff":1,"cmd":"status","data":{"head":{"state":"branch","name":"main","ref":"refs/heads/main","commit":"abc"},"open":{"id":null,"id_letters":null,"pending":null,"subject":null,"clean":true,"base":null,"time":null},"changes":[],"insertions":0,"deletions":0,"conflicts":[],"held":null,"session":null}}' ;;
+  "worktree list") printf '%s\n' '{"ff":1,"cmd":"worktree list","data":{"worktrees":[{"id":"main","path":"/main","branch":"main","current":true},{"id":"warm","path":"/warm/bay","branch":"feather","current":false},{"id":"gone","path":"/gone/bay","branch":"lost","current":false}]}}' ;;
+esac
+"#,
+    );
+    let ff = Ff::at("/main").program(fake.path());
+    let reads = board::gather(&ff).expect("gather");
+
+    assert_eq!(reads.worktrees.len(), 3, "the survey is carried whole");
+    let sessions: Vec<&str> = reads
+        .ops
+        .iter()
+        .filter_map(|op| op.session.as_deref())
+        .collect();
+    assert_eq!(
+        sessions,
+        ["pi.1", "pi.2"],
+        "the warm bay's chain merged; the gone bay skipped, not fatal"
+    );
+    assert_eq!(reads.current_branch.as_deref(), Some("main"));
+}

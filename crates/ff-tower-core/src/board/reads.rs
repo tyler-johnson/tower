@@ -1,31 +1,41 @@
-//! The module's I/O: three fufu spawns and the collide probes, two
-//! structs of answers.
+//! The module's I/O: four fufu spawns plus one per bay, the collide
+//! probes, and two structs of answers.
 //!
-//! Three spawns constant in flight count, plus one `collide` per distinct
-//! pair of in-flight branches — zero extra in the solo norm, where fewer
-//! than two distinct branches are flying. Every fufu read takes a capture
-//! first, so spawn count is log noise as well as latency: `op log` over
-//! `session(glob:*)` answers for every tagged operation at once, `branch
-//! list` carries fufu's holds per branch, and `status` says which branch
-//! this render is sitting on. Everything downstream of here is pure over
-//! what these returned.
+//! Four spawns constant in flight count, one `op log` per non-current
+//! worktree, plus one `collide` per distinct pair of in-flight branches —
+//! `bays: 1` (zero linked worktrees) is four spawns flat, and zero probes
+//! in the solo norm, where fewer than two distinct branches are flying.
+//! The per-bay fan-out exists because fufu's `session(...)` revset scans
+//! only the invoking worktree's chain: a capture made inside a bay is on
+//! that bay's chain and nowhere else, so a board read from main would
+//! never see it. Every fufu read takes a capture first, so spawn count is
+//! log noise as well as latency — a read-lane call in an unchanged tree
+//! is a `NoOp` capture that appends nothing, which is what keeps the
+//! per-bay polling clean. `op log` over `session(glob:*)` answers for
+//! every tagged operation on one chain at once, `branch list` carries
+//! fufu's holds per branch, `status` says which branch this render is
+//! sitting on, and `worktree list` is the survey the fan-out and the bay
+//! fold both run over. Everything downstream of here is pure over what
+//! these returned.
 
 use std::collections::HashMap;
 
-use crate::ff::{self, BranchInfo, BranchList, Ff, OpEntry, Pairing, UnknownReason};
+use crate::ff::{self, BranchInfo, BranchList, Ff, OpEntry, Pairing, UnknownReason, WorktreeInfo};
 
 use super::flight::Fold;
 
 /// Everything `enrich` needs from the repository, already fetched.
 #[derive(Debug)]
 pub struct Reads {
-    /// Every operation row carrying a session tag — the flight-to-branch
-    /// derivation.
+    /// Every operation row carrying a session tag, merged across every
+    /// worktree's chain — the flight-to-branch derivation.
     pub ops: Vec<OpEntry>,
     pub branches: BranchList,
     /// The branch this render's worktree sits on; `None` when HEAD is
     /// detached or unborn.
     pub current_branch: Option<String>,
+    /// The survey: every worktree, in `worktree list` order, main first.
+    pub worktrees: Vec<WorktreeInfo>,
 }
 
 impl Reads {
@@ -58,17 +68,41 @@ impl Reads {
     }
 }
 
-/// The three spawns. The revset positional is one argv token handed to the
-/// process with no shell, so `(`, `)`, `*` need no quoting; `glob:` goes
-/// through git's own wildmatch.
+/// The four spawns, then one `op log` per bay. The revset positional is
+/// one argv token handed to the process with no shell, so `(`, `)`, `*`
+/// need no quoting; `glob:` goes through git's own wildmatch.
+///
+/// The fan-out skips the `current` row rather than the one named `main`:
+/// the first `op_log` already covered the invoking chain, whichever
+/// worktree that is, so a gather run from inside a bay stays coherent. A
+/// bay that refuses mid-poll — the directory can vanish between the
+/// survey and the spawn — is skipped, `probe`'s tolerance; the other
+/// error kinds are the whole seam broken and propagate. `freshest()` is
+/// merge-safe over the extended rows with no dedup: chains are disjoint,
+/// and the max-time rule spans them.
 pub fn gather(ff: &Ff) -> ff::Result<Reads> {
-    let ops = ff.op_log("session(glob:*)")?;
+    let mut ops = ff.op_log("session(glob:*)")?;
     let branches = ff.branch_list()?;
     let status = ff.status()?;
+    let worktrees = ff.worktree_list()?.worktrees;
+    for row in &worktrees {
+        if row.current {
+            continue;
+        }
+        let Some(path) = row.path.as_deref() else {
+            continue;
+        };
+        match ff.at_path(path).op_log("session(glob:*)") {
+            Ok(rows) => ops.extend(rows),
+            Err(ff::Error::Ff(_)) => {}
+            Err(err) => return Err(err),
+        }
+    }
     Ok(Reads {
         ops,
         branches,
         current_branch: status.head.branch().map(str::to_string),
+        worktrees,
     })
 }
 
@@ -218,6 +252,7 @@ mod tests {
                 anonymous: Vec::new(),
             },
             current_branch: None,
+            worktrees: Vec::new(),
         }
     }
 
