@@ -8,14 +8,18 @@
 //! lives at write time because a verb is the moment a typo is cheap to
 //! catch; the fold stays tolerant of what got into the log anyway.
 
+pub mod answer;
 pub mod board;
+pub mod claim;
 pub mod comment;
+pub mod done;
 pub mod file;
+pub mod hold;
 pub mod link;
 
 use crate::error::CliError;
 use crate::render;
-use ff_tower_core::board::Fold;
+use ff_tower_core::board::{Flight, Fold};
 use ff_tower_core::ff::Ff;
 use ff_tower_core::log::{Event, EventId, Store};
 
@@ -104,6 +108,30 @@ pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, CliError> {
             }
         }
     }
+}
+
+/// The fold's flight for a resolved id. Infallible after `resolve` — the
+/// id came out of this fold's filed flights.
+pub fn flight<'a>(fold: &'a Fold, id: &EventId) -> &'a Flight {
+    fold.flights
+        .iter()
+        .find(|flight| &flight.id == id)
+        .expect("resolved to a filed flight")
+}
+
+/// The flight, refused when it is already done. The lifecycle verbs stop
+/// here; `comment` and `link` stay permissive on purpose — a note on the
+/// record is fine.
+pub fn ensure_active<'a>(fold: &'a Fold, id: &EventId) -> Result<&'a Flight, CliError> {
+    let flight = flight(fold, id);
+    if flight.done.is_some() {
+        return Err(CliError::coded(
+            "flight/done",
+            format!("`{}` is done — the log keeps its record", display(fold, id)),
+            vec!["ff tower".to_string()],
+        ));
+    }
+    Ok(flight)
 }
 
 /// Small counts in words, matching the refusal grammar's register.

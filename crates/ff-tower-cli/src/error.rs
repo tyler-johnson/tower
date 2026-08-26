@@ -2,9 +2,11 @@
 //!
 //! fufu's convention, tower's registry: ids are `category/kebab-case`, and
 //! the exit code derives from the namespace the way fufu's
-//! `Error::exit_code()` derives it — `usage/*` is 2, `held/*` is 3
-//! (reserved for the hold verb's slice), anything else 1. No `explain`
-//! verb and no registry file at this size; the mapping is the match below.
+//! `Error::exit_code()` derives it — `usage/*` is 2, `held/*` is 3,
+//! anything else 1. The `held/*` namespace stays unused in practice:
+//! hold's 3 is an outcome, and it rides the success path in `main.rs`.
+//! No `explain` verb and no registry file at this size; the mapping is
+//! the match below.
 //!
 //! One forwarding rule: a refusal fufu shaped itself passes through
 //! verbatim — its id, message, and exits are fufu's words, and wrapping

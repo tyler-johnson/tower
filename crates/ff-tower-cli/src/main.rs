@@ -8,10 +8,12 @@
 //! which one is canonical.
 //!
 //! Exit codes follow the error id's namespace, fufu's derivation:
-//! `usage/*` exits 2, `held/*` exits 3 (reserved for the hold verb),
-//! anything else 1. Success is 0, an empty board included — a board
-//! render is never a yes/no question. Clap keeps its default 2 for a
-//! command line it refused itself.
+//! `usage/*` exits 2, anything else 1. `hold`'s 3 is not one of them — it
+//! is an outcome, not an error, so it rides the success path below with a
+//! full data envelope, and the `held/*` error namespace stays unused.
+//! Success is otherwise 0, an empty board included — a board render is
+//! never a yes/no question. Clap keeps its default 2 for a command line
+//! it refused itself.
 
 mod cli;
 mod cmd;
@@ -26,8 +28,12 @@ use error::CliError;
 
 fn main() {
     let cli = Cli::parse();
-    if let Err(err) = run(&cli) {
-        report(cli.json, verb(&cli.command), &err);
+    match run(&cli) {
+        // Safe to exit: stdout is line-buffered and every verb ends its
+        // output with a newline, so nothing is left unflushed.
+        Ok(code) if code != 0 => std::process::exit(code),
+        Ok(_) => {}
+        Err(err) => report(cli.json, verb(&cli.command), &err),
     }
 }
 
@@ -39,22 +45,38 @@ fn verb(command: &Option<Command>) -> &'static str {
         Some(Command::File { .. }) => "file",
         Some(Command::Comment { .. }) => "comment",
         Some(Command::Link { .. }) => "link",
+        Some(Command::Claim { .. }) => "claim",
+        Some(Command::Hold { .. }) => "hold",
+        Some(Command::Answer { .. }) => "answer",
+        Some(Command::Done { .. }) => "done",
     }
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
+/// Run the verb and pick the success exit code — 0 everywhere except
+/// `hold`, whose 3 says the flight stopped with a question.
+fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
-        None | Some(Command::Board) => cmd::board::run(cli.json),
+        None | Some(Command::Board) => cmd::board::run(cli.json)?,
         Some(Command::File {
             subject,
             message,
             procedure,
-        }) => cmd::file::run(cli.json, subject, message.clone(), procedure.clone()),
+        }) => cmd::file::run(cli.json, subject, message.clone(), procedure.clone())?,
         Some(Command::Comment { flight, message }) => {
-            cmd::comment::run(cli.json, flight, message.clone())
+            cmd::comment::run(cli.json, flight, message.clone())?
         }
-        Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b),
+        Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b)?,
+        Some(Command::Claim { flight }) => cmd::claim::run(cli.json, flight)?,
+        Some(Command::Hold { flight, message }) => {
+            cmd::hold::run(cli.json, flight, message.clone())?;
+            return Ok(3);
+        }
+        Some(Command::Answer { flight, message }) => {
+            cmd::answer::run(cli.json, flight, message.clone())?
+        }
+        Some(Command::Done { flight }) => cmd::done::run(cli.json, flight.as_deref())?,
     }
+    Ok(0)
 }
 
 /// Render one failure and exit — the single failure path, fufu's

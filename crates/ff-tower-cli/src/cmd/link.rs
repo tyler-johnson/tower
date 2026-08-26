@@ -26,13 +26,7 @@ pub fn run(json: bool, a: &str, b: &str) -> Result<(), CliError> {
             Vec::new(),
         ));
     }
-    let declared = fold
-        .flights
-        .iter()
-        .find(|flight| flight.id == from)
-        .expect("resolved to a filed flight")
-        .depends_on
-        .contains(&to);
+    let declared = super::flight(&fold, &from).depends_on.contains(&to);
     if declared {
         return Err(CliError::coded(
             "link/exists",

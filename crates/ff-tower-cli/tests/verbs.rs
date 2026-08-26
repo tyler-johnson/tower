@@ -316,3 +316,225 @@ fn a_multi_writer_board_renders_full_ids_and_refuses_a_bare_seq() {
     assert!(message.contains("pi.1"), "got {message:?}");
     assert!(message.contains("sf.1"), "got {message:?}");
 }
+
+#[test]
+fn claim_puts_the_flight_in_the_air_on_the_claim_alone() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "take a claim"]));
+    let out = stdout(&ff_tower(repo.path(), &["claim", "1"]));
+    assert_eq!(out, "claimed #1: take a claim\nboard: ff tower\n");
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let flown = &board["data"]["in_the_air"][0];
+    assert_eq!(flown["id"], serde_json::json!("pi.1"));
+    assert_eq!(
+        flown["claimed_by"],
+        serde_json::json!("tests@tower.invalid")
+    );
+    assert!(flown["branch"].is_null());
+
+    // No branch yet, so the note line carries the dim `claimed` phrase.
+    let rendered = stdout(&ff_tower(repo.path(), &[]));
+    assert!(rendered.contains("in the air"), "got {rendered}");
+    assert!(rendered.contains("claimed"), "got {rendered}");
+}
+
+#[test]
+fn a_second_claim_is_refused_naming_the_claimant() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "claimed once"]));
+    stdout(&ff_tower(repo.path(), &["claim", "1"]));
+    let out = ff_tower(repo.path(), &["claim", "1", "--json"]);
+    let envelope = refusal(&out, 1, "claim/taken");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is already claimed by tests@tower.invalid")
+    );
+    assert_eq!(envelope["error"]["exits"], serde_json::json!([]));
+}
+
+#[test]
+fn hold_exits_three_with_a_data_envelope() {
+    // Never through the stdout() helper — 3 is a success this helper
+    // would read as failure. The envelope is the data form, not an error.
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    let out = ff_tower(
+        repo.path(),
+        &["hold", "1", "-m", "which retry path?", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(3), "hold's success exits 3");
+    let envelope = envelope(&out);
+    assert_eq!(envelope["cmd"], serde_json::json!("hold"));
+    assert!(envelope["error"].is_null());
+    let held = &envelope["data"]["held"];
+    assert_eq!(held["body"]["flight"], serde_json::json!("pi.1"));
+    assert_eq!(
+        held["body"]["question"],
+        serde_json::json!("which retry path?")
+    );
+}
+
+#[test]
+fn hold_echoes_on_stdout_and_still_exits_three() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    let out = ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "held #1: which retry path?\nboard: ff tower\n"
+    );
+}
+
+#[test]
+fn a_hold_without_a_question_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    let out = ff_tower(repo.path(), &["hold", "1", "--json"]);
+    let envelope = refusal(&out, 2, "usage/needs-message");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("no question given")
+    );
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower hold <flight> -m <question>"])
+    );
+}
+
+#[test]
+fn a_second_hold_is_refused_quoting_the_open_question() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
+    let out = ff_tower(repo.path(), &["hold", "1", "-m", "another?", "--json"]);
+    let envelope = refusal(&out, 1, "hold/exists");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is already held: which retry path?")
+    );
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower answer <flight> -m <answer>"])
+    );
+}
+
+#[test]
+fn a_held_flight_renders_under_waiting_on_you() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("waiting on you"), "got {out}");
+    assert!(out.contains("? "), "the waiting glyph: {out}");
+    assert!(out.contains("which retry path?"), "got {out}");
+    assert!(out.contains("asked "), "got {out}");
+}
+
+#[test]
+fn answer_releases_the_hold_with_the_answer_as_motion() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    stdout(&ff_tower(repo.path(), &["claim", "1"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
+    let out = stdout(&ff_tower(
+        repo.path(),
+        &["answer", "1", "-m", "the outer one"],
+    ));
+    assert_eq!(out, "answered #1: the outer one\nboard: ff tower\n");
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["waiting_on_you"], serde_json::json!([]));
+    let flown = &board["data"]["in_the_air"][0];
+    assert_eq!(flown["id"], serde_json::json!("pi.1"));
+    assert!(flown["question"].is_null());
+    assert!(flown["last_motion"].is_number());
+}
+
+#[test]
+fn an_answer_with_no_open_question_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "never held"]));
+    let out = ff_tower(repo.path(), &["answer", "1", "-m", "to what?", "--json"]);
+    let envelope = refusal(&out, 1, "answer/not-held");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` has no open question")
+    );
+    assert_eq!(envelope["error"]["exits"], serde_json::json!(["ff tower"]));
+}
+
+#[test]
+fn done_takes_the_flight_off_the_board_and_out_of_the_count() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "finished"]));
+    stdout(&ff_tower(repo.path(), &["file", "still open"]));
+    let out = stdout(&ff_tower(repo.path(), &["done", "1"]));
+    assert_eq!(out, "done #1: finished\nboard: ff tower\n");
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    for section in ["waiting_on_you", "in_the_air", "holding", "open"] {
+        let views = board["data"][section].as_array().expect(section);
+        assert!(
+            views
+                .iter()
+                .all(|view| view["id"] != serde_json::json!("pi.1")),
+            "pi.1 must leave {section}"
+        );
+    }
+    let rendered = stdout(&ff_tower(repo.path(), &[]));
+    assert!(
+        rendered.contains("1 flight ·"),
+        "the footer drops: {rendered}"
+    );
+}
+
+#[test]
+fn done_twice_is_refused_as_already_done() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "finished"]));
+    stdout(&ff_tower(repo.path(), &["done", "1"]));
+    let out = ff_tower(repo.path(), &["done", "1", "--json"]);
+    let envelope = refusal(&out, 1, "flight/done");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is already done")
+    );
+    assert_eq!(envelope["error"]["exits"], serde_json::json!(["ff tower"]));
+}
+
+#[test]
+fn the_lifecycle_verbs_refuse_a_done_flight_but_a_comment_lands() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "finished"]));
+    stdout(&ff_tower(repo.path(), &["done", "1"]));
+
+    let out = ff_tower(repo.path(), &["claim", "1", "--json"]);
+    refusal(&out, 1, "flight/done");
+    let out = ff_tower(repo.path(), &["hold", "1", "-m", "q?", "--json"]);
+    refusal(&out, 1, "flight/done");
+    let out = ff_tower(repo.path(), &["answer", "1", "-m", "a", "--json"]);
+    refusal(&out, 1, "flight/done");
+
+    // A note on the record is fine — only the lifecycle verbs refuse.
+    stdout(&ff_tower(
+        repo.path(),
+        &["comment", "1", "-m", "postscript"],
+    ));
+}
+
+#[test]
+fn a_bare_done_is_refused_until_bays_arrive() {
+    let repo = repo();
+    let out = ff_tower(repo.path(), &["done", "--json"]);
+    let envelope = refusal(&out, 2, "usage/needs-flight");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("no flight given — naming the current one arrives with bays")
+    );
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower done <flight>"])
+    );
+}

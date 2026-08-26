@@ -1,11 +1,11 @@
 //! The human render, in fufu's list grammar: a head line per flight, then
 //! an indented dim note joining phrases with ` · ` in urgency order —
-//! held/resolving first, then `on <branch>`, then the comment count,
-//! then age.
+//! the open question first, then held/resolving, then `claimed`/`on
+//! <branch>`, then the comment count, then age.
 //!
-//! Glyphs carry the meaning independent of color: `▸` in the air, `‖`
-//! holding, `·` open. A local vocabulary, not fufu's — `@ ● ✓ ✕` name git
-//! objects, not flight states.
+//! Glyphs carry the meaning independent of color: `?` waiting on you, `▸`
+//! in the air, `‖` holding, `·` open. A local vocabulary, not fufu's —
+//! `@ ● ✓ ✕` name git objects, not flight states.
 //!
 //! Ids render in DESIGN's display form: `#`-prefixed, the seq alone when
 //! the board's filed flights span one writer, `#<writer>.<seq>` otherwise.
@@ -94,11 +94,18 @@ fn tip_column(view: &FlightView) -> String {
 
 fn note(view: &FlightView, now: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
+    if let Some(question) = view.question.as_deref() {
+        phrases.push(paint_warn(question, colored));
+    }
     if view.held {
         phrases.push(paint_warn("held", colored));
     }
     if view.resolving {
         phrases.push(paint_warn("resolving", colored));
+    }
+    // A claim with no branch yet: the claim itself is the flight's motion.
+    if view.claimed_by.is_some() && view.branch.is_none() {
+        phrases.push(paint_dim("claimed", colored));
     }
     if let Some(branch) = view.branch.as_deref()
         && branch != "@detached"
@@ -113,9 +120,12 @@ fn note(view: &FlightView, now: i64, colored: bool) -> String {
         };
         phrases.push(paint_dim(&format!("{} {noun}", view.comments), colored));
     }
-    match view.last_motion {
-        Some(motion) => phrases.push(paint_dim(&format!("moved {}", age(now, motion)), colored)),
-        None => phrases.push(paint_dim(
+    match (view.asked_at, view.last_motion) {
+        (Some(asked), _) => phrases.push(paint_dim(&format!("asked {}", age(now, asked)), colored)),
+        (None, Some(motion)) => {
+            phrases.push(paint_dim(&format!("moved {}", age(now, motion)), colored))
+        }
+        (None, None) => phrases.push(paint_dim(
             &format!("filed {}", age(now, view.filed_at)),
             colored,
         )),
@@ -125,16 +135,16 @@ fn note(view: &FlightView, now: i64, colored: bool) -> String {
 
 /// The whole board, as one string ending in a newline.
 pub fn board(board: &Board, now: i64, colored: bool) -> String {
-    let sections: [(&str, char, &[FlightView]); 3] = [
+    let sections: [(&str, char, &[FlightView]); 4] = [
+        ("waiting on you", '?', &board.waiting_on_you),
         ("in the air", '▸', &board.in_the_air),
         ("holding", '‖', &board.holding),
         ("open", '·', &board.open),
     ];
-    let flights = board.waiting_on_you.len()
-        + sections
-            .iter()
-            .map(|(_, _, views)| views.len())
-            .sum::<usize>();
+    let flights = sections
+        .iter()
+        .map(|(_, _, views)| views.len())
+        .sum::<usize>();
     let short = short_ids(
         sections
             .iter()

@@ -53,4 +53,34 @@ pub enum Command {
         #[arg(value_name = "b")]
         b: String,
     },
+    /// Claim one specific flight, out of order.
+    Claim {
+        /// The flight to claim, `<writer>.<seq>`.
+        #[arg(value_name = "flight")]
+        flight: String,
+    },
+    /// Stop a flight with a question attached — bay warm, exit 3.
+    Hold {
+        /// The flight to hold.
+        #[arg(value_name = "flight")]
+        flight: String,
+        /// The question.
+        #[arg(short = 'm', value_name = "msg")]
+        message: Option<String>,
+    },
+    /// Answer the open question and release the hold.
+    Answer {
+        /// The held flight.
+        #[arg(value_name = "flight")]
+        flight: String,
+        /// The answer.
+        #[arg(short = 'm', value_name = "msg")]
+        message: Option<String>,
+    },
+    /// Finish a flight — off the board, on the record.
+    Done {
+        /// The flight to finish; naming the current one arrives with bays.
+        #[arg(value_name = "flight")]
+        flight: Option<String>,
+    },
 }
