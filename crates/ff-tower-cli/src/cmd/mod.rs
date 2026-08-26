@@ -20,6 +20,7 @@ pub mod file;
 pub mod hold;
 pub mod link;
 pub mod next;
+pub mod procedures;
 
 use crate::error::CliError;
 use crate::render;

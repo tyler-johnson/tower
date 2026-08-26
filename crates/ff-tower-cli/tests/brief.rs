@@ -11,8 +11,19 @@ fn ff_tower(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ff-tower"))
         .args(args)
         .env("FF_REPO", repo)
+        .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn ff-tower")
+}
+
+/// The fixture's own config root, beside the repository inside the
+/// tempdir and never created — an empty user layer. A suite that read the
+/// developer's real `~/.config/tower/procedures` would pass or fail by
+/// whose machine it is running on.
+fn xdg(repo: &Path) -> std::path::PathBuf {
+    repo.parent()
+        .expect("the fixture nests the repository")
+        .join("xdg")
 }
 
 fn stdout(output: &Output) -> String {
@@ -88,6 +99,39 @@ fn brief_renders_the_full_record_both_link_directions() {
     assert!(text.contains("#2  the dependency"), "{text}");
     assert!(text.contains("blocks\n· #1  the dependent"), "{text}");
     assert!(!text.contains("depends on"), "{text}");
+}
+
+#[test]
+fn a_part_stamp_gets_its_own_line_under_the_head() {
+    let repo = repo();
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "the retry test", "-p", "review"],
+    ));
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "2"]));
+    assert!(text.contains("#2  the retry test · pass\n"), "{text}");
+    assert!(
+        text.contains("    part pass · agent · skill review · done asserted\n"),
+        "{text}"
+    );
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "3"]));
+    assert!(
+        text.contains("    part smoke · you · bay warm · done asserted\n"),
+        "{text}"
+    );
+
+    // The parent is no part, so it gets no line.
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    assert!(!text.contains("part "), "{text}");
+
+    let envelope = envelope(&ff_tower(repo.path(), &["brief", "2", "--json"]));
+    assert_eq!(envelope["data"]["part"]["crew"], serde_json::json!("agent"));
+    assert!(
+        envelope["data"]["part"]["bay"].is_null(),
+        "absent facts are null: {envelope}"
+    );
 }
 
 #[test]

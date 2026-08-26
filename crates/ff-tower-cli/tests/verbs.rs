@@ -1,7 +1,9 @@
 //! The write verbs, spawned the way fufu's dispatch spawns them: `FF_REPO`
 //! in the environment, argv carrying the verb. file/comment/link never
 //! spawn fufu, so no `TOWER_FF` appears here — a wrong `ff` on PATH could
-//! not break these even if it tried.
+//! not break these even if it tried. `file` does read the procedure
+//! registry, so every spawn points `XDG_CONFIG_HOME` at the fixture's own
+//! tempdir.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -12,8 +14,19 @@ fn ff_tower(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ff-tower"))
         .args(args)
         .env("FF_REPO", repo)
+        .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn ff-tower")
+}
+
+/// The fixture's own config root, beside the repository inside the
+/// tempdir and never created — an empty user layer. A suite that read the
+/// developer's real `~/.config/tower/procedures` would pass or fail by
+/// whose machine it is running on.
+fn xdg(repo: &Path) -> std::path::PathBuf {
+    repo.parent()
+        .expect("the fixture nests the repository")
+        .join("xdg")
 }
 
 fn stdout(output: &Output) -> String {
@@ -51,6 +64,15 @@ fn repo() -> Repo {
     repo
 }
 
+/// A single-part procedure in the repository layer, so a test can file one
+/// flight under a name that is not the default.
+fn install_chore(repo: &Repo) {
+    repo.write(
+        ".tower/procedures/chore.toml",
+        "name = \"chore\"\n\n[[part]]\nid   = \"do\"\ncrew = \"you\"\n",
+    );
+}
+
 #[test]
 fn file_echoes_the_filing_and_the_tail() {
     let repo = repo();
@@ -67,6 +89,7 @@ fn file_echoes_the_filing_and_the_tail() {
 #[test]
 fn file_json_round_trips_body_and_procedure() {
     let repo = repo();
+    install_chore(&repo);
     let out = ff_tower(
         repo.path(),
         &[
@@ -75,7 +98,7 @@ fn file_json_round_trips_body_and_procedure() {
             "-m",
             "body text",
             "-p",
-            "review",
+            "chore",
             "--json",
         ],
     );
@@ -88,7 +111,175 @@ fn file_json_round_trips_body_and_procedure() {
     assert_eq!(filed["kind"], serde_json::json!("filed"));
     assert_eq!(filed["body"]["subject"], serde_json::json!("try the verbs"));
     assert_eq!(filed["body"]["body"], serde_json::json!("body text"));
+    assert_eq!(filed["body"]["procedure"], serde_json::json!("chore"));
+    // One part collapses onto the flight, so there is nothing beside it.
+    assert_eq!(envelope["data"]["parts"], serde_json::json!([]));
+    assert_eq!(envelope["data"]["linked"], serde_json::json!([]));
+}
+
+#[test]
+fn a_plain_file_is_still_one_flight_and_one_event() {
+    // `open` is a real procedure now, and its single part collapses onto
+    // the flight: the echo, the count, and the chain are what they were.
+    let repo = repo();
+    let out = ff_tower(repo.path(), &["file", "a plain one", "--json"]);
+    let filing = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    assert_eq!(filing["data"]["filed"]["id"], serde_json::json!("pi.1"));
+    assert_eq!(
+        filing["data"]["filed"]["body"]["procedure"],
+        serde_json::json!("open")
+    );
+    assert_eq!(
+        filing["data"]["filed"]["body"]["part"],
+        serde_json::json!({"id": "work", "crew": "you", "done": "asserted"})
+    );
+    assert_eq!(filing["data"]["parts"], serde_json::json!([]));
+    assert_eq!(filing["data"]["linked"], serde_json::json!([]));
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["open"].as_array().expect("open").len(), 1);
+}
+
+#[test]
+fn file_under_review_echoes_the_parent_and_its_parts() {
+    let repo = repo();
+    let out = stdout(&ff_tower(
+        repo.path(),
+        &["file", "the retry test", "-p", "review"],
+    ));
+    assert_eq!(
+        out,
+        "filed #1 under review: the retry test\n\
+         · #2  the retry test · pass     agent\n\
+         · #3  the retry test · smoke    you\n\
+         · #4  the retry test · verdict  you\n\
+         board: ff tower\n"
+    );
+}
+
+#[test]
+fn file_under_review_json_carries_the_parent_three_parts_and_five_edges() {
+    let repo = repo();
+    let out = ff_tower(
+        repo.path(),
+        &[
+            "file",
+            "the retry test",
+            "-m",
+            "body text",
+            "-p",
+            "review",
+            "--json",
+        ],
+    );
+    let filing = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    assert_eq!(filing["cmd"], serde_json::json!("file"));
+    let data = &filing["data"];
+
+    // The parent keeps the procedure stamp and the body, and is no part.
+    let filed = &data["filed"];
+    assert_eq!(filed["id"], serde_json::json!("pi.1"));
     assert_eq!(filed["body"]["procedure"], serde_json::json!("review"));
+    assert_eq!(
+        filed["body"]["subject"],
+        serde_json::json!("the retry test")
+    );
+    assert_eq!(filed["body"]["body"], serde_json::json!("body text"));
+    assert!(filed["body"]["part"].is_null());
+
+    let parts = data["parts"].as_array().expect("parts");
+    assert_eq!(parts.len(), 3);
+    let ids: Vec<&str> = parts
+        .iter()
+        .map(|event| event["id"].as_str().expect("an id"))
+        .collect();
+    assert_eq!(ids, ["pi.2", "pi.3", "pi.4"]);
+    // Every row stands alone: `next` hands one to an agent with no parent
+    // context attached.
+    assert_eq!(
+        parts[0]["body"]["subject"],
+        serde_json::json!("the retry test · pass")
+    );
+    assert_eq!(parts[0]["body"]["body"], serde_json::json!(""));
+    assert_eq!(
+        parts[0]["body"]["part"],
+        serde_json::json!({
+            "id": "pass",
+            "crew": "agent",
+            "skill": "review",
+            "done": "asserted",
+        })
+    );
+    assert_eq!(
+        parts[1]["body"]["part"],
+        serde_json::json!({"id": "smoke", "crew": "you", "done": "asserted", "bay": "warm"})
+    );
+    assert_eq!(
+        parts[2]["body"]["part"],
+        serde_json::json!({"id": "verdict", "crew": "you", "done": "asserted"})
+    );
+
+    // Three edges from the parent, then the `after` DAG: `verdict` waits
+    // on both, `pass` and `smoke` on neither.
+    let linked = data["linked"].as_array().expect("linked");
+    let edges: Vec<(&str, &str)> = linked
+        .iter()
+        .map(|event| {
+            (
+                event["body"]["from"].as_str().expect("from"),
+                event["body"]["to"].as_str().expect("to"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        edges,
+        [
+            ("pi.1", "pi.2"),
+            ("pi.1", "pi.3"),
+            ("pi.1", "pi.4"),
+            ("pi.4", "pi.2"),
+            ("pi.4", "pi.3"),
+        ]
+    );
+
+    // And the board reads the same DAG back off the log.
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let open = board["data"]["open"].as_array().expect("open");
+    let by_id = |id: &str| {
+        open.iter()
+            .find(|view| view["id"] == serde_json::json!(id))
+            .unwrap_or_else(|| panic!("no {id} in open"))
+    };
+    assert_eq!(
+        by_id("pi.1")["depends_on"],
+        serde_json::json!(["pi.2", "pi.3", "pi.4"])
+    );
+    assert_eq!(
+        by_id("pi.4")["depends_on"],
+        serde_json::json!(["pi.2", "pi.3"])
+    );
+    assert_eq!(by_id("pi.2")["part"]["crew"], serde_json::json!("agent"));
+}
+
+#[test]
+fn a_procedure_that_is_not_installed_is_refused() {
+    let repo = repo();
+    let out = ff_tower(repo.path(), &["file", "a subject", "-p", "ghost", "--json"]);
+    let refused = refusal(&out, 1, "procedure/not-found");
+    assert_eq!(
+        refused["error"]["message"],
+        serde_json::json!("no procedure `ghost` — installed: open, review")
+    );
+    assert_eq!(
+        refused["error"]["exits"],
+        serde_json::json!(["ff tower procedures"])
+    );
+
+    // Nothing was filed: the refusal lands before the append.
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["open"], serde_json::json!([]));
 }
 
 #[test]
@@ -520,9 +711,10 @@ fn decompose_files_the_parts_and_echoes_them() {
 #[test]
 fn decompose_json_carries_the_parent_the_parts_and_the_edges() {
     let repo = repo();
+    install_chore(&repo);
     stdout(&ff_tower(
         repo.path(),
-        &["file", "a broad task", "-p", "review"],
+        &["file", "a broad task", "-p", "chore"],
     ));
     let out = ff_tower(
         repo.path(),
@@ -540,8 +732,11 @@ fn decompose_json_carries_the_parent_the_parts_and_the_edges() {
         assert_eq!(event["kind"], serde_json::json!("filed"));
         assert_eq!(event["body"]["subject"], serde_json::json!(subject));
         assert_eq!(event["body"]["body"], serde_json::json!(""));
-        // The parts inherit the parent's procedure stamp.
-        assert_eq!(event["body"]["procedure"], serde_json::json!("review"));
+        // The parts inherit the parent's procedure stamp, and carry no
+        // part stamp of their own — a part named on the command line is
+        // not a part of a definition.
+        assert_eq!(event["body"]["procedure"], serde_json::json!("chore"));
+        assert!(event["body"]["part"].is_null());
     }
     assert_eq!(filed[0]["id"], serde_json::json!("pi.2"));
     assert_eq!(filed[1]["id"], serde_json::json!("pi.3"));

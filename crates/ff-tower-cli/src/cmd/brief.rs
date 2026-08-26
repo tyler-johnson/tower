@@ -11,6 +11,7 @@
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, Brief, Fold};
+use ff_tower_core::log::PartStamp;
 
 pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     super::parse_ref(flight)?;
@@ -45,6 +46,9 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         brief.subject
     ));
     out.push_str(&format!("    {}\n", note(brief, now, colored)));
+    if let Some(part) = brief.part.as_ref() {
+        out.push_str(&format!("    {}\n", part_line(part, colored)));
+    }
 
     if !brief.body.is_empty() {
         out.push('\n');
@@ -93,6 +97,22 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     out.push_str(&super::tail(colored));
     out.push('\n');
     out
+}
+
+/// What part of its procedure this flight is, as the filing stamped it.
+/// Its own line rather than a phrase in the note: the note is urgency
+/// ordered, and crew is not urgency — it is what a reader needs to know
+/// before picking the flight up, which is what a brief is for.
+fn part_line(part: &PartStamp, colored: bool) -> String {
+    let mut phrases = vec![format!("part {}", part.id), part.crew.clone()];
+    if let Some(skill) = part.skill.as_deref() {
+        phrases.push(format!("skill {skill}"));
+    }
+    if let Some(bay) = part.bay.as_deref() {
+        phrases.push(format!("bay {bay}"));
+    }
+    phrases.push(format!("done {}", part.done));
+    render::paint_dim(&phrases.join(" · "), colored)
 }
 
 /// The note line, in the board's phrase order with the done mark ahead of

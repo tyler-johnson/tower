@@ -79,6 +79,12 @@ pub enum Command {
         #[arg(value_name = "part")]
         parts: Vec<String>,
     },
+    /// What procedures are installed, and where to fork one.
+    Procedures {
+        /// One procedure, in full; the whole list when unsaid.
+        #[arg(value_name = "name")]
+        name: Option<String>,
+    },
     /// Claim one specific flight, out of order.
     Claim {
         /// The flight to claim — a number, `writer#n`, or the event id.

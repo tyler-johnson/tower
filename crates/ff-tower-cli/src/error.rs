@@ -12,7 +12,7 @@
 //! verbatim — its id, message, and exits are fufu's words, and wrapping
 //! them in a tower id would hide the one part worth matching on.
 
-use ff_tower_core::{ff, log};
+use ff_tower_core::{ff, log, procedure};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -20,6 +20,9 @@ pub enum CliError {
     Log(#[from] log::Error),
     #[error(transparent)]
     Ff(#[from] ff::Error),
+    /// A definition the loader declined — its own id, carried through.
+    #[error(transparent)]
+    Procedure(#[from] procedure::Error),
     /// A refusal tower shaped itself — a verb declining its input.
     #[error("{message}")]
     Coded {
@@ -54,6 +57,7 @@ impl CliError {
             CliError::Ff(ff::Error::Contract { .. }) => "ff/contract",
             CliError::Ff(ff::Error::Mismatched { .. }) => "ff/mismatched",
             CliError::Ff(ff::Error::Unparsable { .. }) => "ff/unparsable",
+            CliError::Procedure(err) => err.id(),
         }
     }
 
@@ -66,6 +70,7 @@ impl CliError {
                 vec!["git config user.email <email>".to_string()]
             }
             CliError::Ff(ff::Error::Ff(refusal)) => refusal.exits.clone(),
+            CliError::Procedure(_) => vec!["ff tower procedures".to_string()],
             _ => Vec::new(),
         }
     }

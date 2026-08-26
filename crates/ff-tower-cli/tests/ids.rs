@@ -10,8 +10,19 @@ fn ff_tower(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ff-tower"))
         .args(args)
         .env("FF_REPO", repo)
+        .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn ff-tower")
+}
+
+/// The fixture's own config root, beside the repository inside the
+/// tempdir and never created — an empty user layer. A suite that read the
+/// developer's real `~/.config/tower/procedures` would pass or fail by
+/// whose machine it is running on.
+fn xdg(repo: &Path) -> std::path::PathBuf {
+    repo.parent()
+        .expect("the fixture nests the repository")
+        .join("xdg")
 }
 
 fn stdout(output: &Output) -> String {
