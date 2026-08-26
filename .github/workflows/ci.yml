@@ -22,18 +22,30 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      # The fufu commit the seam is built against.
+      FUFU_REV: 2c861094
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: cache fufu
+        id: fufu
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/ff
+          key: fufu-${{ env.FUFU_REV }}
       - name: install fufu
         # The suite runs against a real `ff` — mocking it away would pass
-        # against a contract that had moved. Pinned to the release the seam
-        # was built on; bump it when the contract does.
+        # against a contract that had moved. Built from source at a pinned
+        # commit rather than pulled from a release: tower tracks fufu's main
+        # between releases (the one-pair `ff collide` landed after v0.8.0),
+        # so the pin is a rev, cached above, bumped when the seam moves.
+        if: steps.fufu.outputs.cache-hit != 'true'
         run: |
-          curl -fsSL https://github.com/tyler-johnson/fufu/releases/download/v0.8.0/ff_0.8.0_linux_amd64.tar.gz | sudo tar -xz -C /usr/local/bin ff
+          cargo install --git https://github.com/tyler-johnson/fufu --rev "$FUFU_REV" --locked ff-cli
           ff --version
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
