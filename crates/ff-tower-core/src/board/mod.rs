@@ -8,13 +8,16 @@
 //! and [`enrich`] classifies each flight into a section over what the
 //! middle already fetched. [`assemble`] is the wiring, and the one call a
 //! render needs. [`pick`] is `next`'s fold, riding the same probe output
-//! as the board.
+//! as the board. [`brief`] is one flight's full record over the same
+//! reads, no probes.
 
+mod brief;
 mod flight;
 mod model;
 mod pick;
 mod reads;
 
+pub use brief::{Brief, CommentView, LinkView, brief};
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};
