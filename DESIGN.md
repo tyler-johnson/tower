@@ -258,9 +258,11 @@ The shipped set is small, because the point is that people fork it:
 | `review` | someone else's work you have been asked to look at | agent pass and **smoke test**, concurrently · **verdict** |
 | `open` | anything unclassified | one part, **yours** |
 
+**A single-part procedure collapses onto the flight.** `open`'s one part is yours and is the flight itself: filing under it mints one flight carrying that part's stamp, never a parent and a lone child. Two parts or more mint the parent plus one flight per part, on the same `linked` edges `decompose` writes. Without the rule, `ff tower file "fix the typo"` would cost two flights to say one thing.
+
 Bold parts are crewed to you. Almost nothing here is a new primitive: a procedure is a decomposition template plus a crew assignment per part, riding on `file`, `link`, and `brief`. That the `ticket` procedure contains its own promotion is the entire research-first workflow — a flight exists before its upstream identity, research produces the body, `ff tower promote` mints the ticket. That is local-steps-are-anonymous-branches walked one step forward, with principle 3 putting your hand on the promotion because it is the moment the team sees anything.
 
-**Every procedure ends with you.** Not a default — principle 3 restated at the flight level. The boundary where the team sees the work is always a human gesture, so the last part is always yours. A procedure with no human part is not a procedure, it is a script.
+**Every procedure ends with you.** Not a default — principle 3 restated at the flight level. The boundary where the team sees the work is always a human gesture, so the last part is always yours. A procedure with no human part is not a procedure, it is a script. The rule lands at load time and refuses: a definition whose terminal parts — the ones nothing else names in `after` — are not all crewed to you fails to load, by name and by part. A warning would leave the board holding flights whose shape contradicts the principle, and the moment to say so is while the file is still being read.
 
 **Procedures declare structure; skills hold judgment.** A procedure is data — a name, match rules, parts, crew, a done condition — and it cannot express control flow. No conditions, no loops. Everything conditional lives in the skill an agent-crewed part points at, in markdown, which is where this document already puts judgment. The moment a procedure needs an `if`, it is a skill. That rule is the only thing between this feature and Jira's workflow editor, which is where configurable trackers go to die: the config language grows into a bad programming language and the shipped defaults become nothing.
 
@@ -268,7 +270,11 @@ The same test draws every part boundary: a part ends where the crew changes or a
 
 ### Shape
 
-Two files. The structure is data, the judgment beside it is markdown, and the split is principle 13 made physical. Definitions layer the usual way — yours roams with your config, the repository's is the team's, merged by name with the more specific winning. This is not the working-tree trap from *Storage and sync*: what must never live in the tree is derived, mutable board state, and a procedure definition is config that changes monthly.
+Two files. The structure is data, the judgment beside it is markdown, and the split is principle 13 made physical.
+
+Definitions layer in three, keyed by the name inside the file, the more specific replacing the less wholesale: **built-in**, shipped in the binary; **user**, `$XDG_CONFIG_HOME/tower/procedures/*.toml` — `~/.config/tower/procedures` when that variable is unset — which roams with your config; and **repository**, `<main worktree>/.tower/procedures/*.toml`, which is the team's. The main-worktree anchor is `tower.bays`'s, for `tower.bays`'s reason: every bay must see the same definitions, and a path resolved against the invoking worktree would hand each bay its own procedure set. A missing directory is an empty layer; a file in a directory being read that does not parse is a refusal naming the path, because a definition you cannot see is worse than one that refuses.
+
+The repository layer is in the tree, and that is not the working-tree trap from *Storage and sync*: what must never live there is derived, mutable board state, and a procedure definition is config that changes monthly. It also has to be in the tree to be the team's at all — a definition on an orphan ref is a definition nobody clones.
 
 ```toml
 name    = "review"
@@ -299,7 +305,9 @@ done  = "asserted"
 
 Order is a DAG through `after` — the same edges `ff tower link` writes — so concurrency is the absence of a declaration rather than a keyword: `pass` and `smoke` fly together because neither names the other.
 
-**`done` is a closed enum**: `asserted` (the crew says so), `committed`, `promoted`, `landed`. Four values cannot grow into an expression language, which is the whole point. *Done when CI is green and two people approved* is a human-crewed part you assert, and what convinces you belongs to the skill.
+**`done` is a closed enum**: `asserted` (the crew says so), `committed`, `promoted`, `landed`. Four values cannot grow into an expression language, which is the whole point. *Done when CI is green and two people approved* is a human-crewed part you assert, and what convinces you belongs to the skill. A part that does not say is `asserted`, and `asserted` is the only one anything derives today — the other three parse, validate, and store against the verbs that will be able to see them.
+
+The enum is closed in the loader and open in the log. A part's stamp copied into a `filed` event carries `crew` and `done` as free strings, because a known kind whose body does not parse is an error by design: one closed enum inside the wire body would mean a newer tower's `crew = "pair"` takes an older tower's whole board down rather than one flight. The refusal belongs where a person is editing a file, which is the same place the four-values-cannot-grow argument actually bites.
 
 **The definition is read once, at file time, and its parts are copied into the log.** Filing writes the flight: the procedure stamp and which rule matched, the subject and its resolution state, and one instance per part carrying crew, skill, edges, and claimant. Readiness, conflicts, order, and section stay derived as ever. Editing a procedure therefore never disturbs a flight already in the air — a board that re-read config at render time would flicker for exactly the reason principle 11 forbids re-running judgment, and forking a procedure mid-week has to be safe or nobody will.
 
@@ -311,7 +319,7 @@ Intake is a read, not a subscription — upstream is pulled lazily at invocation
 
 Classification is deterministic and stored, never recomputed; principle 11 governs routing exactly as it governs triage. Rules match on facts an adapter or a person supplied, run once when the signal lands, and leave an overridable event in the log. **The routing is explained** for the same reason the ranking is: *classified `review` because upstream sent `review_requested`* is correctable in a glance, and a silent stamp is a black box you stop trusting on the second bad call.
 
-Ambiguity goes to you and stays unclaimable. Asymmetric errors again, with teeth this time: an orchestrator looping on `ff tower next` will otherwise eventually claim a vague meeting request and start editing files. `next` returns only flights whose procedure declares an agent-crewed first part, unclassified work sits in your lane, and `ff tower triage` is the walk through that pile.
+Ambiguity goes to you and stays unclaimable. Asymmetric errors again, with teeth this time: an orchestrator looping on `ff tower next` will otherwise eventually claim a vague meeting request and start editing files. `next` returns only flights whose procedure declares an agent-crewed first part, unclassified work sits in your lane, and `ff tower triage` is the walk through that pile. The gate is triage's to close, not filing's: a `file` that stamps crew before there is any way to work the pile it creates would make every `open` flight unpickable and hand an orchestrator nothing at all, so the stamp lands first and the gate lands with the verb that makes the pile workable.
 
 **A flight's subject resolves late.** File a review against a bare branch with no PR, or a ticket that exists nowhere — tower holds a local subject, derives what the repository shows, and stays silent about fields it cannot see. When the PR opens or the ticket is minted, the adapter links it and upstream truth flows into the fields it owns. Both shipped procedures need this, and it is one mechanism rather than two special cases.
 
@@ -354,7 +362,7 @@ Three layers of memory stay apart: a **skill** knows how to drive tower, the **a
 9. **One model, every surface.** CLI, MCP, and anything later consume one contract.
 10. **Facts, not consensus.** tower is authoritative over what the repository shows and what you alone authored. It holds no negotiated state, because it has no way to negotiate.
 11. **Judgment is stored, never recomputed.** A model's verdict is written to the log as authored intent. The board stays a pure function of repository and log, or it flickers and is not believed.
-12. **Every procedure ends with you.** Principle 3 at the flight level: the last part of any shape of work is human-crewed, because the boundary where the team sees it always is.
+12. **Every procedure ends with you.** Principle 3 at the flight level: the last part of any shape of work is human-crewed, because the boundary where the team sees it always is. Checked when a definition loads, and refused there.
 13. **Procedures declare structure; skills hold judgment.** Procedures are data and carry no control flow. Every conditional lives in markdown a person can fork.
 
 ## What it stands on
