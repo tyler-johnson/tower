@@ -1,7 +1,10 @@
 //! The human render, in fufu's list grammar: a head line per flight, then
 //! an indented dim note joining phrases with ` · ` in urgency order —
-//! the open question first, then held/resolving, then `claimed`/`on
-//! <branch>`, then the comment count, then age.
+//! the open question first, then held/resolving, then a `collides` warn
+//! per conflicting neighbor and a `no verdict` dim per unanswered one,
+//! then `claimed`/`on <branch>`, then the comment count, then age. No
+//! affirmative "lands clean" phrase: absence of a warn is the verdict,
+//! and board noise is the enemy.
 //!
 //! Glyphs carry the meaning independent of color: `?` waiting on you, `▸`
 //! in the air, `‖` holding, `·` open. A local vocabulary, not fufu's —
@@ -92,7 +95,7 @@ fn tip_column(view: &FlightView) -> String {
     }
 }
 
-fn note(view: &FlightView, now: i64, colored: bool) -> String {
+fn note(view: &FlightView, now: i64, short: bool, colored: bool) -> String {
     let mut phrases = Vec::new();
     if let Some(question) = view.question.as_deref() {
         phrases.push(paint_warn(question, colored));
@@ -102,6 +105,20 @@ fn note(view: &FlightView, now: i64, colored: bool) -> String {
     }
     if view.resolving {
         phrases.push(paint_warn("resolving", colored));
+    }
+    for collide in &view.collides {
+        let with = flight_ref(&collide.with, short);
+        let on = match collide.paths.as_slice() {
+            [path] => path.clone(),
+            paths => format!("{} paths", paths.len()),
+        };
+        phrases.push(paint_warn(&format!("collides {with} on {on}"), colored));
+    }
+    for with in &view.unanswered {
+        phrases.push(paint_dim(
+            &format!("no verdict vs {}", flight_ref(with, short)),
+            colored,
+        ));
     }
     // A claim with no branch yet: the claim itself is the flight's motion.
     if view.claimed_by.is_some() && view.branch.is_none() {
@@ -180,7 +197,7 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
                 subject,
                 paint_dim(&tip_column(view), colored),
             ));
-            out.push_str(&format!("    {}\n", note(view, now, colored)));
+            out.push_str(&format!("    {}\n", note(view, now, short, colored)));
         }
         out.push('\n');
     }

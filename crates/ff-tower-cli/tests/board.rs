@@ -127,3 +127,57 @@ fn a_missing_ff_exits_one_and_names_fufu() {
     assert_eq!(envelope["error"]["exits"], serde_json::json!([]));
     assert!(envelope.get("data").is_none(), "data and error, never both");
 }
+
+#[test]
+fn colliding_flights_carry_the_warn_phrase_and_the_json_verdicts() {
+    // Built through the binary where a verb exists for it, and through the
+    // core `Ff` for the session-tagged captures an agent would take.
+    use ff_tower_core::ff::Ff;
+
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "left work"]));
+    stdout(&ff_tower(repo.path(), &["file", "right work"]));
+
+    repo.ff(&["start", "-b", "left"]);
+    repo.write("shared.txt", "left side\n");
+    Ff::at(repo.path())
+        .session("pi.1")
+        .status()
+        .expect("status");
+    repo.ff(&["commit", "-m", "left: touch shared"]);
+
+    repo.ff(&["switch", "main"]);
+    repo.ff(&["start", "-b", "right"]);
+    repo.write("shared.txt", "right side\n");
+    Ff::at(repo.path())
+        .session("pi.2")
+        .status()
+        .expect("status");
+    repo.ff(&["commit", "-m", "right: touch shared"]);
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("collides #2 on shared.txt"), "{out}");
+    assert!(out.contains("collides #1 on shared.txt"), "{out}");
+    assert!(!out.contains("no verdict"), "{out}");
+
+    let out = stdout(&ff_tower(repo.path(), &["--json"]));
+    let envelope: serde_json::Value = serde_json::from_str(&out).expect("an envelope");
+    let air = envelope["data"]["in_the_air"]
+        .as_array()
+        .expect("in_the_air");
+    assert_eq!(air.len(), 2);
+    for view in air {
+        let other = if view["id"] == serde_json::json!("pi.1") {
+            "pi.2"
+        } else {
+            "pi.1"
+        };
+        assert_eq!(view["collides"][0]["with"], serde_json::json!(other));
+        assert_eq!(
+            view["collides"][0]["paths"],
+            serde_json::json!(["shared.txt"])
+        );
+        assert_eq!(view["unanswered"], serde_json::json!([]));
+    }
+}
