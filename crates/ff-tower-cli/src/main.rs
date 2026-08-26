@@ -42,6 +42,7 @@ fn main() {
 fn verb(command: &Option<Command>) -> &'static str {
     match command {
         None | Some(Command::Board) => "board",
+        Some(Command::Next { .. }) => "next",
         Some(Command::File { .. }) => "file",
         Some(Command::Comment { .. }) => "comment",
         Some(Command::Link { .. }) => "link",
@@ -53,10 +54,14 @@ fn verb(command: &Option<Command>) -> &'static str {
 }
 
 /// Run the verb and pick the success exit code — 0 everywhere except
-/// `hold`, whose 3 says the flight stopped with a question.
+/// `hold`, whose 3 says the flight stopped with a question, and `next`,
+/// which picks its own: 1 is fufu's "no," an empty pick.
 fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
         None | Some(Command::Board) => cmd::board::run(cli.json)?,
+        Some(Command::Next { count, peek }) => {
+            return cmd::next::run(cli.json, count.unwrap_or(1), *peek);
+        }
         Some(Command::File {
             subject,
             message,

@@ -16,12 +16,27 @@ pub mod done;
 pub mod file;
 pub mod hold;
 pub mod link;
+pub mod next;
 
 use crate::error::CliError;
 use crate::render;
 use ff_tower_core::board::{Flight, Fold};
 use ff_tower_core::ff::Ff;
 use ff_tower_core::log::{Event, EventId, Store};
+
+/// The repository handle for the verbs that spawn fufu. The test seam:
+/// environment carries addressing, argv carries verbs — the seam's own
+/// discipline — and an env var cannot leak into an interactive shell the
+/// way a hidden flag one autocomplete away could.
+pub fn ff() -> Result<Ff, CliError> {
+    let mut ff = Ff::here()?;
+    if let Some(program) = std::env::var_os("TOWER_FF")
+        && !program.is_empty()
+    {
+        ff = ff.program(program);
+    }
+    Ok(ff)
+}
 
 /// The store, opened on the repository fufu's dispatch handed us.
 pub fn store() -> Result<Store, CliError> {

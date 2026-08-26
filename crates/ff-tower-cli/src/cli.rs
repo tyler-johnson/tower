@@ -23,6 +23,16 @@ pub struct Cli {
 pub enum Command {
     /// The board — what is filed, what is moving, what is stuck.
     Board,
+    /// Claim the next ready flight, or a set of `k` that collide with
+    /// neither each other nor anything already flying.
+    Next {
+        /// How many flights to hand out; one when unsaid.
+        #[arg(short = 'n', value_name = "k")]
+        count: Option<usize>,
+        /// The same computation with no claim written.
+        #[arg(long)]
+        peek: bool,
+    },
     /// File a flight onto the board.
     File {
         /// What the flight is about.
