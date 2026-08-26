@@ -150,9 +150,11 @@ The review loop deserves modeling directly, because it is mostly waiting and mos
 
 ### Flight ids
 
-A flight is named by the id of the `filed` event that minted it: `<writer>.<seq>`, unique across machines because the writer component is. That full form is the wire form — JSON envelopes and `--session` tags carry it raw, always.
+A flight has two names, and the split is human against wire. The wire name is the id of the `filed` event that minted it: `<writer>.<seq>`, unique across machines because the writer component is. JSON envelopes and `--session` tags carry it raw, always. The event sequence is shared by every kind of event on a writer's chain — comments, claims, links, dones all consume one — so wire ids are sparse by construction and count nothing a person cares about.
 
-Humans work in sequence numbers. Human output prints ids `#`-prefixed, and a board folded from a single writer — the normal case, since tower is local-first and log sync is the exception — prints the seq alone: `#3`. The full `#pi-8c2e.3` appears only when a second writer's flights are on the board, so every render stays unambiguous. On input, any verb taking a flight id accepts a bare seq, resolved against the board's filed flights: a unique match wins, an ambiguous one refuses and lists the full ids. A leading `#` is accepted and stripped for paste tolerance; the documented spelling is unprefixed, because an unquoted `#` starts a shell comment. The `#` is display convention, never wire format.
+Humans get a dense number instead. A flight's number is its position among its writer's `filed` events — derived from the fold, never stored, so there is no second counter to mint, CAS, or sync, and the append-only log makes the numbering stable forever: a done flight keeps its number, and no filing can renumber an earlier one. Human output prints `#3`, and a board folded from a single writer — the normal case, since tower is local-first and log sync is the exception — needs nothing more. When a second writer's flights are on the board, the writer rides along as `pi-8c2e#3`: `#` binds a writer to a flight number the way `.` binds one to an event seq, so the two forms can never be confused.
+
+On input, any verb taking a flight accepts either name. A bare number resolves as a flight number against the board's filed flights — a unique match wins, an ambiguous one refuses and lists the full forms — `writer#n` names another writer's flight exactly, and the dotted form is always the filing event's id, accepted everywhere a number is. A leading `#` on a bare number is accepted and stripped for paste tolerance; the documented spelling is unprefixed, because an unquoted `#` starts a shell comment.
 
 ### Lifecycle
 
