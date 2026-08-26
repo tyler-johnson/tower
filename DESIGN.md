@@ -182,6 +182,16 @@ The picked set is claimed in one atomic append; `--peek` is the same computation
 
 Today's brief is the fold's record — subject, body, comments, links carrying each linked flight's subject and done state, the open question — plus the reads' facts: branch, tip, holds, and whether the branch is the reader's own. The verb table's files, prior art, verify command, and handoff notes arrive as procedures and bays make them exist; the brief grows with the data, never ahead of it.
 
+### Decompose
+
+`ff tower decompose <flight> <part>…` files each part as its own flight and declares the parent's dependency on every one of them. The parts are `linked` edges and nothing else — no container kind, no parent type, no fold change — so a part is indistinguishable from a hand-declared dependency, and that is the point: the readiness gate, `depends_on`/`blocks`, and the brief's link sections all work on it unchanged. One level of flights and edges is the whole model, and the thing that could grow into a project type never gets minted. The filings and their edges land in one append, because two would leave a window where the parent is live, unlinked, and claimable — exactly the state the readiness gate exists to prevent.
+
+The family renders where it already rendered: the brief's `depends on` and `blocks` sections carry each linked flight with its done state. The board gains one phrase, a dim `waiting on` over the parent's undone dependencies, because a parent `next` perpetually skips while looking like any other open flight is the one place the edge was invisible. A dependency that is done has left the board, so the phrase covers only live parts and clears itself as they land.
+
+A parent's done stays asserted. Every part done makes the parent claimable, not finished — whether the broad task is over is a judgment, and `ff tower done` is where it gets made.
+
+Parts arrive as arguments, one subject each, inheriting the parent's procedure stamp; a part's body is a `comment`, because a per-part `-m` would have to pair with a subject positionally. That is the by-hand half of the verb. When procedures land, a definition's parts replace the arguments — the edges are the same edges.
+
 ### The verbs
 
 fufu's rule that every verb must earn its existence carries over, and the one it kills first is `run`. Tower cannot run anything — a verb that implies dispatch would be the first crack in principle 2, and that line is too load-bearing to contradict casually. Starting work under a procedure is `ff tower file`, because filing is what actually happens; the decomposition and the first brief fall out of it.
@@ -201,7 +211,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower done [<flight>]` | finish a part whose completion nothing can derive; a smoke test that went fine leaves no trace | you |
 | `ff tower link <a> <b>` | declare that one flight depends on another — discovered conflicts need no verb | either |
 | `ff tower comment <flight> -m <note>` | a note on the record, local; saying it to the team is a separate, deliberate gesture | either |
-| `ff tower decompose <flight>` | file a procedure's parts, or split further by hand | either |
+| `ff tower decompose <flight> <part>…` | file the parts as flights the parent waits on — a procedure's, or by hand | either |
 | `ff tower promote <flight>` | mint the upstream ticket, link it, keep local history — the publish boundary | you |
 | `ff tower bay <list\|warm\|release>` | the pool: what is bootstrapped, what is occupied, what to build ahead of you; bare `warm` mints the next slot under `tower.bays` | either |
 | `ff tower explain <flight>` | why this is here, why this procedure, and what it beat | you |
