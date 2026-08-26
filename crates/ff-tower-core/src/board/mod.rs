@@ -1,26 +1,29 @@
 //! The board: a pure function of (repository, log).
 //!
-//! DESIGN.md's inbox, as a fold. The pipeline is three steps with the I/O
-//! quarantined in the middle one: [`fold`] partitions the log's events
-//! into flights and touches nothing else, [`gather`] makes the module's
-//! only fufu spawns — exactly three, constant in flight count — and
-//! [`enrich`] classifies each flight into a section over what `gather`
-//! already fetched. [`assemble`] is the wiring, and the one call a render
-//! needs.
+//! DESIGN.md's inbox, as a fold. The pipeline is four steps with the I/O
+//! quarantined in the middle two: [`fold`] partitions the log's events
+//! into flights and touches nothing else, [`gather`] makes three fufu
+//! spawns constant in flight count, [`probe`] asks `collide` once per
+//! distinct pair of in-flight branches — zero spawns in the solo norm —
+//! and [`enrich`] classifies each flight into a section over what the
+//! middle already fetched. [`assemble`] is the wiring, and the one call a
+//! render needs.
 
 mod flight;
 mod model;
 mod reads;
 
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
-pub use model::{Board, FlightView, enrich};
-pub use reads::{Reads, gather};
+pub use model::{Board, CollideView, FlightView, enrich};
+pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};
 
 use crate::ff::{self, Ff};
 use crate::log::Event;
 
-/// One board: fold the log, gather the reads, enrich.
+/// One board: fold the log, gather the reads, probe the pairs, enrich.
 pub fn assemble(ff: &Ff, events: &[Event]) -> ff::Result<Board> {
+    let fold = fold(events);
     let reads = gather(ff)?;
-    Ok(enrich(fold(events), &reads))
+    let verdicts = probe(ff, &fold, &reads)?;
+    Ok(enrich(fold, &reads, &verdicts))
 }

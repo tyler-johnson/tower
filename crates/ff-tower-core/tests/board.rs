@@ -127,3 +127,64 @@ fn a_held_flight_assembles_into_waiting_on_you() {
     assert!(view.claimed_by.is_some());
     assert!(board.in_the_air.is_empty() && board.holding.is_empty() && board.open.is_empty());
 }
+
+#[test]
+fn colliding_branches_carry_their_verdicts_through_the_board() {
+    // The probe step end to end: two flights on branches that both edit
+    // `shared.txt` carry mirrored `collides` entries, and an untouched
+    // flight carries none.
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let store = Store::open(repo.path()).expect("open");
+    store
+        .append(vec![
+            filed("left work"),
+            filed("right work"),
+            filed("untouched"),
+        ])
+        .expect("append");
+
+    repo.ff(&["start", "-b", "left"]);
+    repo.write("shared.txt", "left side\n");
+    Ff::at(repo.path())
+        .session("pi.1")
+        .status()
+        .expect("status");
+    repo.ff(&["commit", "-m", "left: touch shared"]);
+
+    repo.ff(&["switch", "main"]);
+    repo.ff(&["start", "-b", "right"]);
+    repo.write("shared.txt", "right side\n");
+    Ff::at(repo.path())
+        .session("pi.2")
+        .status()
+        .expect("status");
+    repo.ff(&["commit", "-m", "right: touch shared"]);
+
+    let events = store.read_all().expect("read_all");
+    let board = board::assemble(&Ff::at(repo.path()), &events).expect("assemble");
+
+    assert_eq!(board.in_the_air.len(), 2);
+    let one = board
+        .in_the_air
+        .iter()
+        .find(|v| v.id == "pi.1")
+        .expect("pi.1");
+    let two = board
+        .in_the_air
+        .iter()
+        .find(|v| v.id == "pi.2")
+        .expect("pi.2");
+    assert_eq!(one.collides.len(), 1, "{one:?}");
+    assert_eq!(one.collides[0].with, "pi.2");
+    assert_eq!(one.collides[0].paths, ["shared.txt"]);
+    assert_eq!(two.collides.len(), 1, "{two:?}");
+    assert_eq!(two.collides[0].with, "pi.1");
+    assert_eq!(two.collides[0].paths, ["shared.txt"]);
+    assert!(one.unanswered.is_empty() && two.unanswered.is_empty());
+
+    assert_eq!(board.open.len(), 1);
+    let untouched = &board.open[0];
+    assert_eq!(untouched.id, "pi.3");
+    assert!(untouched.collides.is_empty() && untouched.unanswered.is_empty());
+}
