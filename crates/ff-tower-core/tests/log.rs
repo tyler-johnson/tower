@@ -336,3 +336,15 @@ fn a_first_append_mints_the_writer_and_keeps_it() {
     let reopened = Store::open(repo.path()).expect("open");
     assert_eq!(reopened.writer(), Some(writer.as_str()));
 }
+
+#[test]
+fn pool_root_reads_the_key_and_is_none_without_it() {
+    let repo = Repo::new();
+    let store = Store::open(repo.path()).expect("open");
+    assert_eq!(store.pool_root(), None);
+
+    // The snapshot is taken at open, so the key lands before a fresh one.
+    repo.git(&["config", "tower.bays", "../bays"]);
+    let store = Store::open(repo.path()).expect("open");
+    assert_eq!(store.pool_root().as_deref(), Some("../bays"));
+}

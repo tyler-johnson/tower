@@ -75,6 +75,18 @@ impl Store {
         self.writer.get().map(String::as_str)
     }
 
+    /// `tower.bays` from config, when set: the pool root bare `warm`
+    /// mints slots under. Same granularity story as `tower.writer`:
+    /// local config lives in the common dir and is shared across a
+    /// repository's linked worktrees, so every bay sees the same pool
+    /// root.
+    pub fn pool_root(&self) -> Option<String> {
+        self.repo
+            .config_snapshot()
+            .string("tower.bays")
+            .map(|value| value.to_string())
+    }
+
     /// Append events as one commit, assigning ids `<writer>.<seq>` in
     /// order. Returns the assigned ids; an empty batch writes nothing.
     pub fn append(&self, kinds: Vec<Kind>) -> Result<Vec<EventId>> {
