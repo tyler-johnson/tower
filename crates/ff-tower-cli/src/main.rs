@@ -43,6 +43,7 @@ fn verb(command: &Option<Command>) -> &'static str {
     match command {
         None | Some(Command::Board) => "board",
         Some(Command::Next { .. }) => "next",
+        Some(Command::Brief { .. }) => "brief",
         Some(Command::File { .. }) => "file",
         Some(Command::Comment { .. }) => "comment",
         Some(Command::Link { .. }) => "link",
@@ -62,6 +63,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Next { count, peek }) => {
             return cmd::next::run(cli.json, count.unwrap_or(1), *peek);
         }
+        Some(Command::Brief { flight }) => cmd::brief::run(cli.json, flight)?,
         Some(Command::File {
             subject,
             message,

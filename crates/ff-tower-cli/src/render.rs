@@ -41,7 +41,7 @@ pub fn paint_id(text: &str, colored: bool) -> String {
     paint(ID, text, colored)
 }
 
-fn paint_warn(text: &str, colored: bool) -> String {
+pub fn paint_warn(text: &str, colored: bool) -> String {
     paint(WARN, text, colored)
 }
 
@@ -71,7 +71,7 @@ pub fn flight_ref(id: &str, short: bool) -> String {
 
 /// `4m ago`, `2d ago` — s/m/h/d/w. `now` is an argument so a render is a
 /// pure function of its inputs.
-fn age(now: i64, then: i64) -> String {
+pub fn age(now: i64, then: i64) -> String {
     let delta = (now - then).max(0);
     match delta {
         0..60 => format!("{delta}s ago"),

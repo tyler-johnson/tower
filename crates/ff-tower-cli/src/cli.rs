@@ -33,6 +33,12 @@ pub enum Command {
         #[arg(long)]
         peek: bool,
     },
+    /// Everything known about one flight, for whoever picks it up.
+    Brief {
+        /// The flight to brief, `<writer>.<seq>`.
+        #[arg(value_name = "flight")]
+        flight: String,
+    },
     /// File a flight onto the board.
     File {
         /// What the flight is about.

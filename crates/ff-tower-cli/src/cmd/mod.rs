@@ -10,6 +10,7 @@
 
 pub mod answer;
 pub mod board;
+pub mod brief;
 pub mod claim;
 pub mod comment;
 pub mod done;
