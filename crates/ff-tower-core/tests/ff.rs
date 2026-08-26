@@ -177,6 +177,42 @@ fn a_session_handle_tags_every_call() {
 }
 
 #[test]
+fn a_two_word_verb_splits_into_two_argv_words() {
+    let args = argv(&Ff::at("/some/bay"), "op log");
+
+    let op = args.iter().position(|a| a == "op").expect("the first word");
+    assert_eq!(
+        args[op + 1],
+        "log",
+        "each word of the verb is its own token"
+    );
+    assert_eq!(
+        args[op + 2],
+        "--json",
+        "--json still follows the whole verb"
+    );
+}
+
+#[test]
+fn a_mismatched_two_word_verb_is_refused() {
+    // The fake answers for `op` alone. `run` compares the full string, so
+    // half a verb is a mismatch and not a match on the first word.
+    let fake = FakeFf::saying(r#"{"ff":1,"cmd":"op","data":null}"#, 0);
+    let err = Ff::at("/repo")
+        .program(fake.path())
+        .run::<Option<()>>("op log", &[] as &[&str])
+        .expect_err("half a verb");
+
+    match err {
+        Error::Mismatched { asked, answered } => {
+            assert_eq!(asked, "op log");
+            assert_eq!(answered, "op");
+        }
+        other => panic!("expected a mismatch, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_contract_tower_does_not_read_is_refused_before_the_payload() {
     // The payload here is nonsense for a status. The point is that the
     // version is checked first, so the error names the contract rather than

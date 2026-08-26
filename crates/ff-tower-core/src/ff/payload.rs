@@ -208,3 +208,46 @@ pub enum UnknownReason {
     #[serde(other)]
     Other,
 }
+
+/// `ff op log --json` — one operation row.
+///
+/// The row that ties a flight to a branch: `session` is the tag tower rode
+/// on the call that captured it, `branch` is where HEAD stood when it did.
+/// `id`, `verb`, `summary` and the rest go unmirrored until something in
+/// tower reads them.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpEntry {
+    /// `@detached` is a literal fufu emits for a detached HEAD, carried
+    /// as-is rather than decoded here.
+    pub branch: Option<String>,
+    pub session: Option<String>,
+    /// Unix seconds.
+    pub time: i64,
+}
+
+/// `ff op log --json` — the payload around the rows.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpLog {
+    pub ops: Vec<OpEntry>,
+}
+
+/// `ff branch list --json` — one branch, with fufu's holds on it.
+///
+/// fufu's `session` field is deliberately unmirrored: it is an *editing*
+/// session, the same naming trap `Status::editing` renames away, and
+/// nothing in tower reads it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BranchInfo {
+    pub name: String,
+    /// `None` for the unborn current branch, which the list still carries.
+    pub tip: Option<String>,
+    pub held: bool,
+    pub resolving: bool,
+}
+
+/// `ff branch list --json` — every branch fufu knows.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BranchList {
+    pub named: Vec<BranchInfo>,
+    pub anonymous: Vec<BranchInfo>,
+}

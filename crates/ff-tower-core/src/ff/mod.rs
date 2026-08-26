@@ -44,8 +44,8 @@ use std::process::Command;
 
 pub use error::{Error, Refusal, Result};
 pub use payload::{
-    At, ChangeKind, Collision, Editing, FileStat, Head, Held, Open, Pairing, Side, Status,
-    UnknownReason,
+    At, BranchInfo, BranchList, ChangeKind, Collision, Editing, FileStat, Head, Held, OpEntry,
+    OpLog, Open, Pairing, Side, Status, UnknownReason,
 };
 
 use serde::Deserialize;
@@ -189,6 +189,28 @@ impl Ff {
         Ok(self.run::<Collision>("collide", &[a, b])?.data)
     }
 
+    /// `ff op log --json <revset> -n 0` — operation rows, filtered by a
+    /// revset.
+    ///
+    /// The only verb whose rows carry both `session` and `branch`, which
+    /// makes it the flight-to-branch derivation: one call with
+    /// `session(glob:*)` answers for every tagged operation at once, so a
+    /// board render costs the same three spawns however many flights are
+    /// in the air. `-n 0` lifts the default cap of 25 rows — a fold over a
+    /// truncated log would quietly park old flights.
+    pub fn op_log(&self, revset: &str) -> Result<Vec<OpEntry>> {
+        Ok(self.run::<OpLog>("op log", &[revset, "-n", "0"])?.data.ops)
+    }
+
+    /// `ff branch list --json` — every branch fufu knows, with its holds.
+    ///
+    /// `held`/`resolving` here are fufu's own, per branch — the only
+    /// "holding" signal that exists — and the list covers the unborn
+    /// current branch, which turns up with `tip: None`.
+    pub fn branch_list(&self) -> Result<BranchList> {
+        Ok(self.run::<BranchList>("branch list", &[] as &[&str])?.data)
+    }
+
     /// Run one fufu verb and deserialize its `data` payload.
     ///
     /// Public because the seam is meant to be widened by callers rather than
@@ -263,7 +285,13 @@ impl Ff {
         if let Some(session) = &self.session {
             command.arg("--session").arg(session);
         }
-        command.arg(verb).arg("--json");
+        // A verb can be two words — `op log`, `branch list` — and each
+        // word is its own argv token. The envelope still answers with the
+        // full string, which is what `run` compares against.
+        for word in verb.split(' ') {
+            command.arg(word);
+        }
+        command.arg("--json");
         for arg in args {
             command.arg(arg);
         }
