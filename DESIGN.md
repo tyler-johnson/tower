@@ -27,7 +27,7 @@ The contract:
 ```
 reads     ff status --json · ff log --json · ff collide --json · ff watch
 calls     ff start · ff switch, every call tagged --session <flight>
-stores    refs/tower/log/<author>
+stores    refs/tower/log/<author>/<writer>
 derives   state · progress · conflicts · land order
 writes    nothing under refs/fufu/*, ever
 ```
@@ -114,11 +114,11 @@ Bays are not agent-only, though, and the `review` procedure is the case that pro
 
 Not files in the working tree. `.tower/flights/*.md` is the obvious move and the trap every git-native tracker falls into: the board becomes branch-dependent, ticket edits pollute code diffs, and closing something on an unmerged branch means the board lies until merge.
 
-**An orphan ref, shaped like fufu's journal.** `refs/tower/log/<author>` — a commit chain with its own tree, no relation to code history, never touching the working tree, CAS-appended, reachability as the gc pin. Sync is one explicit refspec.
+**An orphan ref, shaped like fufu's journal.** `refs/tower/log/<author>/<writer>` — a commit chain with its own tree, no relation to code history, never touching the working tree, CAS-appended, reachability as the gc pin. Sync is one explicit refspec. The writer component is the machine's, minted once into local config: one ref per author alone breaks the moment two machines append under one email — both chains diverge and a push is rejected with no merge available, because a commit chain has no union — while a ref per writer makes every push a fast-forward, and the fold unions `refs/tower/log/**` either way.
 
 The conflict problem dissolves because of what is stored. Derived fields are never stored at all, so they have zero merge surface and self-heal when someone works around tower. Stored intent is an append-only event log partitioned per author, so merging divergent logs is a **union, not a merge** — conflict-free by construction. The board is a fold over the union. The only genuine collision is two people editing one field in the same window; last-writer-wins with a stable tiebreak, and both events survive in the log regardless.
 
-**Sync is three tiers, and only one of them needs anything built.** *Machine-local* — bays, pool state, caches — never syncs and mostly rebuilds. *Mine across machines* — solo flights, notes, decompositions — is single-author and append-only, so roaming is `git push refs/tower/log/<me>` with no protocol at all; that is backup, not sync. *Shared with others* is the only hard tier, and tower does not have it: in team mode upstream already holds it, and in solo mode it does not exist.
+**Sync is three tiers, and only one of them needs anything built.** *Machine-local* — bays, pool state, caches — never syncs and mostly rebuilds. *Mine across machines* — solo flights, notes, decompositions — is single-author and append-only, so roaming is `git push refs/tower/log/<me>/*` with no protocol at all; that is backup, not sync. *Shared with others* is the only hard tier, and tower does not have it: in team mode upstream already holds it, and in solo mode it does not exist.
 
 Multi-writer works anyway — fetch `refs/tower/log/*`, fold the union — and it stays documented and unsupported. Every git-native tracker that tried to be the shared board was technically fine and socially dead: shared work needs a place people look, and a ref in a repository is not one. Making it one means notifications, identity, and permissions, which is a different product wearing this one as a hat. **tower never becomes the shared board; sharing is `ff tower promote`.**
 
