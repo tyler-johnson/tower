@@ -158,6 +158,14 @@ Four events move a flight through its states, and each one is a person or an age
 
 `hold` exits 3, and 3 is an outcome, not an error — fufu's precedent. The envelope is a full success envelope with the held event in `data`; only the exit code says the flight stopped with a question. A machine caller branches on the code, a human reads the echo, and neither has to parse an error to learn that holding is what happened.
 
+### Verdicts
+
+Conflict verdicts are derived facts, never stored: the board probes `ff collide` for every distinct pair of in-flight branches per render, which costs nothing in the solo norm — fewer than two distinct branches means zero probes — and O(pairs) beyond it. No cache until `ff watch` gives tower a subscription path to invalidate one; a cache without an invalidation signal would be the board lying about freshness.
+
+Unknown never rounds down to clear. fufu answering "no base" and fufu refusing to judge one pair — a branch deleted mid-render, say — both land on the row as "no verdict," and a refusal on one pair is one unanswered row, never a dead board. Only the seam breaking wholesale (no `ff`, a contract tower does not read) fails the render.
+
+The JSON carries the verdicts per flight — `collides`, each entry naming the other flight and the paths fufu reported, and `unanswered` for the pairs fufu could not judge — and no board-level pair list: the per-flight entries carry each pair once from each side, which is what a render and a machine caller both iterate anyway. The land order and the conflict-free set are `next`'s fold over these same pairs, deliberately not this surface's.
+
 ### The verbs
 
 fufu's rule that every verb must earn its existence carries over, and the one it kills first is `run`. Tower cannot run anything — a verb that implies dispatch would be the first crack in principle 2, and that line is too load-bearing to contradict casually. Starting work under a procedure is `ff tower file`, because filing is what actually happens; the decomposition and the first brief fall out of it.
