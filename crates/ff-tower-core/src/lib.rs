@@ -31,9 +31,10 @@
 //! of tower's own store and not of the repository underneath it.
 //!
 //! What tower does need a git library for is that own store.
-//! `refs/tower/log/<author>` is an orphan commit chain with its own tree,
-//! CAS-appended, never touching the working tree and never touching
-//! `refs/fufu/*`. That is `gix` directly, and it is why the dependency is
-//! declared here rather than inherited from anything.
+//! `refs/tower/log/<author>/<writer>` is an orphan commit chain with its
+//! own tree, CAS-appended, never touching the working tree and never
+//! touching `refs/fufu/*`. That is `gix` directly, and it is why the
+//! dependency is declared here rather than inherited from anything.
 
 pub mod ff;
+pub mod log;

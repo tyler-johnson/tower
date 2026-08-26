@@ -63,6 +63,13 @@ impl Repo {
         self.run("ff", args)
     }
 
+    /// Pin this repository's tower writer id, so log ids in assertions
+    /// read `pi.1` instead of whatever the machine would mint. Shell-based
+    /// on purpose: testsupport stays free of gix and serde.
+    pub fn pin_writer(&self, writer: &str) {
+        self.git(&["config", "tower.writer", writer]);
+    }
+
     /// Run git directly. Only for setup fufu has no verb for.
     pub fn git(&self, args: &[&str]) -> String {
         self.run("git", args)

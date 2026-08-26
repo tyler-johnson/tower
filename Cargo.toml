@@ -16,8 +16,8 @@ repository = "https://github.com/tyler-johnson/tower"
 ff-tower-core = { path = "crates/ff-tower-core" }
 ff-tower-testsupport = { path = "crates/ff-tower-testsupport" }
 
-# For tower's own store, and for nothing else. `refs/tower/log/<author>` is
-# an orphan commit chain tower writes itself; everything tower knows about
+# For tower's own store, and for nothing else. `refs/tower/log/<author>/<writer>`
+# is an orphan commit chain tower writes itself; everything tower knows about
 # the repository comes from `ff <verb> --json` instead. The feature set is
 # deliberately thin and will grow with the store rather than ahead of it.
 gix = { version = "0.73.0", default-features = false, features = [
