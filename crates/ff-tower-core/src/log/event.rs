@@ -73,10 +73,10 @@ impl<'de> Deserialize<'de> for EventId {
     }
 }
 
-/// One authored gesture. The vocabulary starts at three — minting,
-/// referencing, pairing, enough distinct shapes to prove the store — and
-/// grows with the verbs that write it: `claimed`, `held`, `answered`,
-/// `done`, `promote` land with theirs.
+/// One authored gesture. Minting, referencing, pairing, and the four
+/// lifecycle marks — enough vocabulary for a flight to be filed, claimed,
+/// held on a question, answered, and finished. `promote` lands with its
+/// verb.
 #[derive(Debug, Clone)]
 pub enum Kind {
     /// Mints a flight; the flight's id is this event's id.
@@ -89,6 +89,15 @@ pub enum Kind {
     Commented { flight: EventId, text: String },
     /// `from` depends on `to` — a declared dependency, stored intent.
     Linked { from: EventId, to: EventId },
+    /// Puts the flight in the air at assignment; the claimant is the
+    /// event's author.
+    Claimed { flight: EventId },
+    /// Stops the flight with a question — waiting on you until answered.
+    Held { flight: EventId, question: String },
+    /// Answers the open question and releases the hold.
+    Answered { flight: EventId, answer: String },
+    /// Takes the flight off the board; the log keeps its record.
+    Done { flight: EventId },
     /// A kind from a newer tower, preserved verbatim so the fold can carry
     /// it even though this binary cannot read it.
     Unknown { kind: String, body: Box<RawValue> },
@@ -101,6 +110,10 @@ impl Kind {
             Kind::Filed { .. } => "filed",
             Kind::Commented { .. } => "commented",
             Kind::Linked { .. } => "linked",
+            Kind::Claimed { .. } => "claimed",
+            Kind::Held { .. } => "held",
+            Kind::Answered { .. } => "answered",
+            Kind::Done { .. } => "done",
             Kind::Unknown { kind, .. } => kind,
         }
     }
@@ -148,6 +161,28 @@ struct LinkedBody {
     to: EventId,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ClaimedBody {
+    flight: EventId,
+}
+
+#[derive(Serialize, Deserialize)]
+struct HeldBody {
+    flight: EventId,
+    question: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AnsweredBody {
+    flight: EventId,
+    answer: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DoneBody {
+    flight: EventId,
+}
+
 impl Serialize for Event {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let body = match &self.kind {
@@ -167,6 +202,20 @@ impl Serialize for Event {
             Kind::Linked { from, to } => serde_json::value::to_raw_value(&LinkedBody {
                 from: from.clone(),
                 to: to.clone(),
+            }),
+            Kind::Claimed { flight } => serde_json::value::to_raw_value(&ClaimedBody {
+                flight: flight.clone(),
+            }),
+            Kind::Held { flight, question } => serde_json::value::to_raw_value(&HeldBody {
+                flight: flight.clone(),
+                question: question.clone(),
+            }),
+            Kind::Answered { flight, answer } => serde_json::value::to_raw_value(&AnsweredBody {
+                flight: flight.clone(),
+                answer: answer.clone(),
+            }),
+            Kind::Done { flight } => serde_json::value::to_raw_value(&DoneBody {
+                flight: flight.clone(),
             }),
             Kind::Unknown { body, .. } => Ok(body.clone()),
         }
@@ -215,6 +264,22 @@ impl<'de> Deserialize<'de> for Event {
             let LinkedBody { from, to } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Linked { from, to }
+        } else if kind == "claimed" {
+            let ClaimedBody { flight } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Claimed { flight }
+        } else if kind == "held" {
+            let HeldBody { flight, question } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Held { flight, question }
+        } else if kind == "answered" {
+            let AnsweredBody { flight, answer } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Answered { flight, answer }
+        } else if kind == "done" {
+            let DoneBody { flight } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Done { flight }
         } else {
             Kind::Unknown { kind, body }
         };
@@ -249,15 +314,15 @@ mod tests {
         let event: Event = serde_json::from_str(filed).expect("parse");
         assert!(matches!(event.kind, Kind::Filed { .. }));
 
-        let future = r#"{"id":"pi.2","author":"a@b.c","writer":"pi","time":8,"kind":"claimed","body":{"flight":"pi.1"}}"#;
+        let future = r#"{"id":"pi.2","author":"a@b.c","writer":"pi","time":8,"kind":"promoted","body":{"flight":"pi.1"}}"#;
         let event: Event = serde_json::from_str(future).expect("parse");
         let Kind::Unknown { kind, body } = &event.kind else {
             panic!("a future kind must be preserved, not dropped");
         };
-        assert_eq!(kind, "claimed");
+        assert_eq!(kind, "promoted");
         assert_eq!(body.get(), r#"{"flight":"pi.1"}"#);
         let json = serde_json::to_string(&event).expect("serialize");
-        assert!(json.contains(r#""kind":"claimed""#));
+        assert!(json.contains(r#""kind":"promoted""#));
         assert!(json.contains(r#""flight":"pi.1""#));
     }
 
@@ -265,5 +330,48 @@ mod tests {
     fn a_known_kind_with_a_broken_body_is_an_error() {
         let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"nope":true}}"#;
         assert!(serde_json::from_str::<Event>(broken).is_err());
+        // The lifecycle vocabulary is this binary's own: a `held` with no
+        // question is malformed, not a kind from the future.
+        let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"held","body":{"flight":"pi.1"}}"#;
+        assert!(serde_json::from_str::<Event>(broken).is_err());
+    }
+
+    #[test]
+    fn the_lifecycle_kinds_round_trip() {
+        let flight: EventId = "pi.1".parse().expect("id");
+        let kinds = [
+            Kind::Claimed {
+                flight: flight.clone(),
+            },
+            Kind::Held {
+                flight: flight.clone(),
+                question: "which retry path?".to_string(),
+            },
+            Kind::Answered {
+                flight: flight.clone(),
+                answer: "the outer one".to_string(),
+            },
+            Kind::Done { flight },
+        ];
+        for (seq, kind) in kinds.into_iter().enumerate() {
+            let event = Event {
+                id: EventId {
+                    writer: "pi".to_string(),
+                    seq: seq as u64 + 2,
+                },
+                author: "a@b.c".to_string(),
+                writer: "pi".to_string(),
+                time: 7,
+                kind,
+            };
+            let json = serde_json::to_string(&event).expect("serialize");
+            assert!(json.contains(&format!(r#""kind":"{}""#, event.kind.name())));
+            let back: Event = serde_json::from_str(&json).expect("parse");
+            assert_eq!(back.kind.name(), event.kind.name());
+            assert!(
+                !matches!(back.kind, Kind::Unknown { .. }),
+                "a lifecycle kind must parse as itself"
+            );
+        }
     }
 }

@@ -92,3 +92,38 @@ fn a_tagged_flight_assembles_into_the_air_and_an_untouched_one_stays_open() {
     assert!(board.waiting_on_you.is_empty());
     assert!(board.unrouted.is_empty());
 }
+
+#[test]
+fn a_held_flight_assembles_into_waiting_on_you() {
+    // Serde, fold, and enrich end to end: the lifecycle kinds go through a
+    // real store and come back out as the waiting section.
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let store = Store::open(repo.path()).expect("open");
+    let ids = store
+        .append(vec![filed("stuck on a question")])
+        .expect("append");
+    let flight = ids[0].clone();
+    store
+        .append(vec![
+            Kind::Claimed {
+                flight: flight.clone(),
+            },
+            Kind::Held {
+                flight,
+                question: "which retry path?".to_string(),
+            },
+        ])
+        .expect("append");
+
+    let events = store.read_all().expect("read_all");
+    let board = board::assemble(&Ff::at(repo.path()), &events).expect("assemble");
+
+    assert_eq!(board.waiting_on_you.len(), 1);
+    let view = &board.waiting_on_you[0];
+    assert_eq!(view.id, "pi.1");
+    assert_eq!(view.question.as_deref(), Some("which retry path?"));
+    assert!(view.asked_at.is_some());
+    assert!(view.claimed_by.is_some());
+    assert!(board.in_the_air.is_empty() && board.holding.is_empty() && board.open.is_empty());
+}

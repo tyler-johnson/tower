@@ -30,6 +30,30 @@ pub struct Flight {
     /// The reverse edge, folded in here so a render never has to scan
     /// every other flight to answer "what waits on this one".
     pub blocks: Vec<EventId>,
+    /// The last claim, when one stands — last wins, a reassignment.
+    pub claim: Option<Mark>,
+    /// The open question, when the flight is held. Cleared by `answered`.
+    pub question: Option<Question>,
+    /// Set once `done` lands; the partition drops the flight on it.
+    pub done: Option<Mark>,
+    /// The freshest answer's time — an answer counts as motion even
+    /// though its text lives only in the log.
+    pub answered_at: Option<i64>,
+}
+
+/// Who made a lifecycle mark, and when.
+#[derive(Debug, Clone)]
+pub struct Mark {
+    pub by: String,
+    pub at: i64,
+}
+
+/// The question a held flight is waiting on.
+#[derive(Debug, Clone)]
+pub struct Question {
+    pub by: String,
+    pub at: i64,
+    pub text: String,
 }
 
 /// A note on a flight's record.
@@ -89,6 +113,10 @@ pub fn fold(events: &[Event]) -> Fold {
                 comments: Vec::new(),
                 depends_on: Vec::new(),
                 blocks: Vec::new(),
+                claim: None,
+                question: None,
+                done: None,
+                answered_at: None,
             });
         }
     }
@@ -111,6 +139,50 @@ pub fn fold(events: &[Event]) -> Fold {
                     flights[dependency].blocks.push(from.clone());
                 }
                 _ => unrouted.push(event.clone()),
+            },
+            Kind::Claimed { flight } => match by_id.get(flight) {
+                Some(&at) => {
+                    flights[at].claim = Some(Mark {
+                        by: event.author.clone(),
+                        at: event.time,
+                    })
+                }
+                None => unrouted.push(event.clone()),
+            },
+            Kind::Held { flight, question } => match by_id.get(flight) {
+                Some(&at) => {
+                    flights[at].question = Some(Question {
+                        by: event.author.clone(),
+                        at: event.time,
+                        text: question.clone(),
+                    })
+                }
+                None => unrouted.push(event.clone()),
+            },
+            // Log order, not causal order: cross-writer clock skew can
+            // sort an `answered` before the `held` it answers, leaving
+            // that question open until re-answered. Accepted — it heals
+            // itself, and seq order makes it impossible single-writer.
+            Kind::Answered { flight, .. } => match by_id.get(flight) {
+                Some(&at) => {
+                    let flight = &mut flights[at];
+                    flight.question = None;
+                    flight.answered_at = Some(
+                        flight
+                            .answered_at
+                            .map_or(event.time, |at| at.max(event.time)),
+                    );
+                }
+                None => unrouted.push(event.clone()),
+            },
+            Kind::Done { flight } => match by_id.get(flight) {
+                Some(&at) => {
+                    flights[at].done = Some(Mark {
+                        by: event.author.clone(),
+                        at: event.time,
+                    })
+                }
+                None => unrouted.push(event.clone()),
             },
             Kind::Unknown { .. } => unrouted.push(event.clone()),
         }
@@ -168,6 +240,48 @@ mod tests {
         )
     }
 
+    fn claimed(id: &str, time: i64, flight: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Claimed {
+                flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
+    fn held(id: &str, time: i64, flight: &str, question: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Held {
+                flight: flight.parse().expect("id"),
+                question: question.to_string(),
+            },
+        )
+    }
+
+    fn answered(id: &str, time: i64, flight: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Answered {
+                flight: flight.parse().expect("id"),
+                answer: "an answer".to_string(),
+            },
+        )
+    }
+
+    fn done(id: &str, time: i64, flight: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Done {
+                flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
     #[test]
     fn a_comment_attaches_to_its_flight() {
         let fold = fold(&[filed("pi.1", 10, "s"), commented("pi.2", 20, "pi.1")]);
@@ -219,7 +333,7 @@ mod tests {
             "pi.2",
             20,
             Kind::Unknown {
-                kind: "claimed".to_string(),
+                kind: "promoted".to_string(),
                 body: serde_json::value::to_raw_value(&serde_json::json!({"flight": "pi.1"}))
                     .expect("raw"),
             },
@@ -227,7 +341,7 @@ mod tests {
         let fold = fold(&[filed("pi.1", 10, "s"), future]);
         assert_eq!(fold.flights.len(), 1);
         assert_eq!(fold.unrouted.len(), 1);
-        assert!(matches!(&fold.unrouted[0].kind, Kind::Unknown { kind, .. } if kind == "claimed"));
+        assert!(matches!(&fold.unrouted[0].kind, Kind::Unknown { kind, .. } if kind == "promoted"));
     }
 
     #[test]
@@ -257,5 +371,83 @@ mod tests {
         assert_eq!(fold.flights.len(), 1);
         assert_eq!(fold.flights[0].subject, "first");
         assert_eq!(fold.unrouted.len(), 1);
+    }
+
+    #[test]
+    fn a_claim_records_its_author_and_time_and_the_last_claim_wins() {
+        let once = fold(&[filed("pi.1", 10, "s"), claimed("pi.2", 20, "pi.1")]);
+        let claim = once.flights[0].claim.as_ref().expect("claimed");
+        assert_eq!(claim.by, "a@b.c");
+        assert_eq!(claim.at, 20);
+
+        let twice = fold(&[
+            filed("pi.1", 10, "s"),
+            claimed("pi.2", 20, "pi.1"),
+            claimed("qi.1", 30, "pi.1"),
+        ]);
+        assert_eq!(twice.flights[0].claim.as_ref().expect("claimed").at, 30);
+    }
+
+    #[test]
+    fn a_hold_sets_the_question() {
+        let fold = fold(&[filed("pi.1", 10, "s"), held("pi.2", 20, "pi.1", "which?")]);
+        let question = fold.flights[0].question.as_ref().expect("held");
+        assert_eq!(question.text, "which?");
+        assert_eq!(question.by, "a@b.c");
+        assert_eq!(question.at, 20);
+    }
+
+    #[test]
+    fn an_answer_clears_the_question_and_is_not_a_comment() {
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            held("pi.2", 20, "pi.1", "which?"),
+            answered("pi.3", 30, "pi.1"),
+        ]);
+        assert!(fold.flights[0].question.is_none());
+        assert_eq!(fold.flights[0].answered_at, Some(30));
+        assert!(fold.flights[0].comments.is_empty());
+    }
+
+    #[test]
+    fn an_answer_with_no_open_question_is_a_silent_no_op() {
+        let fold = fold(&[filed("pi.1", 10, "s"), answered("pi.2", 20, "pi.1")]);
+        assert!(fold.flights[0].question.is_none());
+        assert_eq!(fold.flights[0].answered_at, Some(20));
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn cross_writer_skew_can_leave_a_question_open() {
+        // The accepted wart, pinned: a fast clock sorts the `answered`
+        // before the `held` it answers, so the log-order fold sees the
+        // hold last and the question stands until re-answered. Impossible
+        // single-writer — seq order is causal there.
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            answered("fast.1", 15, "pi.1"),
+            held("pi.2", 20, "pi.1", "which?"),
+        ]);
+        assert!(fold.flights[0].question.is_some());
+    }
+
+    #[test]
+    fn a_lifecycle_event_for_a_flight_never_filed_is_unrouted() {
+        let fold = fold(&[
+            claimed("pi.1", 10, "zz.9"),
+            held("pi.2", 20, "zz.9", "q"),
+            answered("pi.3", 30, "zz.9"),
+            done("pi.4", 40, "zz.9"),
+        ]);
+        assert!(fold.flights.is_empty());
+        assert_eq!(fold.unrouted.len(), 4);
+    }
+
+    #[test]
+    fn done_records_its_author_and_time() {
+        let fold = fold(&[filed("pi.1", 10, "s"), done("pi.2", 20, "pi.1")]);
+        let mark = fold.flights[0].done.as_ref().expect("done");
+        assert_eq!(mark.by, "a@b.c");
+        assert_eq!(mark.at, 20);
     }
 }

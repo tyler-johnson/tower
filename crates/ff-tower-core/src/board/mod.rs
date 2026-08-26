@@ -12,7 +12,7 @@ mod flight;
 mod model;
 mod reads;
 
-pub use flight::{Comment, Flight, Fold, fold};
+pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use model::{Board, FlightView, enrich};
 pub use reads::{Reads, gather};
 

@@ -17,10 +17,9 @@ use super::reads::Reads;
 
 /// The inbox's four sections, plus what the fold could not route.
 ///
-/// *Waiting on you* is always empty this slice — it needs `held` and
-/// `answered` event kinds, which land with their verbs — but the key is
-/// present regardless, so growing it later breaks nothing that parses
-/// this.
+/// A done flight appears in none of them — sections and JSON both; the
+/// log keeps its record, and a `--json` consumer deliberately has no
+/// "done" list to read.
 #[derive(Debug, Serialize)]
 pub struct Board {
     pub waiting_on_you: Vec<FlightView>,
@@ -52,16 +51,25 @@ pub struct FlightView {
     pub resolving: bool,
     /// The branch is the one this render's own worktree sits on.
     pub current: bool,
+    /// The standing claim's author, when one stands.
+    pub claimed_by: Option<String>,
+    /// The open question tower's own `hold` attached — distinct from
+    /// `held`/`resolving`, which stay fufu's branch verdicts.
+    pub question: Option<String>,
+    pub asked_at: Option<i64>,
 }
 
 /// Partition the fold's flights using already-fetched reads.
 ///
-/// *In the air* is a flight whose session tag appears on any op row; its
-/// branch is the freshest row's, its last motion the greatest time.
-/// *Holding* is an in-air flight whose branch fufu holds (`held` or
-/// `resolving`). *Open* is the rest. A branch of `None`, `@detached`, or a
-/// name absent from the index (deleted, or landed) cannot be held by
-/// definition: the flight stays in the air.
+/// Per flight, in order: done drops it before any section; an unanswered
+/// question is *waiting on you*; a branch fufu holds (`held` or
+/// `resolving`) is *holding*; an op row or a standing claim is *in the
+/// air*; the rest is *open*. Enrichment runs before routing, so a waiting
+/// flight keeps its branch and tip — a warm bay is the point of holding.
+/// A branch of `None`, `@detached`, or a name absent from the index
+/// (deleted, or landed) cannot be held by definition: the flight stays in
+/// the air. `last_motion` is the max of the freshest op row's time, the
+/// claim, the question, and the freshest answer.
 pub fn enrich(fold: Fold, reads: &Reads) -> Board {
     // Freshest op row per session tag.
     let mut freshest: HashMap<&str, &OpEntry> = HashMap::new();
@@ -85,53 +93,63 @@ pub fn enrich(fold: Fold, reads: &Reads) -> Board {
         .map(|branch| (branch.name.as_str(), branch))
         .collect();
 
+    let mut waiting_on_you = Vec::new();
     let mut in_the_air = Vec::new();
     let mut holding = Vec::new();
     let mut open = Vec::new();
     for flight in fold.flights {
-        match freshest.get(flight.id.to_string().as_str()) {
-            Some(op) => {
-                let row = op
-                    .branch
-                    .as_deref()
-                    .filter(|name| *name != "@detached")
-                    .and_then(|name| branches.get(name).copied());
-                let view = view(
-                    flight,
-                    op.branch.clone(),
-                    row.and_then(|row| row.tip.clone()),
-                    Some(op.time),
-                    row.is_some_and(|row| row.held),
-                    row.is_some_and(|row| row.resolving),
-                    reads.current_branch.as_deref(),
-                );
-                if view.held || view.resolving {
-                    holding.push(view);
-                } else {
-                    in_the_air.push(view);
-                }
-            }
-            None => open.push(view(
-                flight,
-                None,
-                None,
-                None,
-                false,
-                false,
-                reads.current_branch.as_deref(),
-            )),
+        if flight.done.is_some() {
+            continue;
+        }
+        let op = freshest.get(flight.id.to_string().as_str()).copied();
+        let row = op.and_then(|op| {
+            op.branch
+                .as_deref()
+                .filter(|name| *name != "@detached")
+                .and_then(|name| branches.get(name).copied())
+        });
+        let last_motion = [
+            op.map(|op| op.time),
+            flight.claim.as_ref().map(|claim| claim.at),
+            flight.question.as_ref().map(|question| question.at),
+            flight.answered_at,
+        ]
+        .into_iter()
+        .flatten()
+        .max();
+        let claimed = flight.claim.is_some();
+        let view = view(
+            flight,
+            op.and_then(|op| op.branch.clone()),
+            row.and_then(|row| row.tip.clone()),
+            last_motion,
+            row.is_some_and(|row| row.held),
+            row.is_some_and(|row| row.resolving),
+            reads.current_branch.as_deref(),
+        );
+        if view.question.is_some() {
+            waiting_on_you.push(view);
+        } else if view.held || view.resolving {
+            holding.push(view);
+        } else if op.is_some() || claimed {
+            in_the_air.push(view);
+        } else {
+            open.push(view);
         }
     }
 
-    // Placeholder sorts for this slice: motion freshest-first in the air
-    // and holding, filed oldest-first in open. DESIGN's "priority then
-    // readiness then age" waits on data that does not exist yet.
+    // Waiting sorts oldest-asked first — the longest-blocked agent gets
+    // the top row. The rest are this slice's placeholders: motion
+    // freshest-first in the air and holding, filed oldest-first in open.
+    // DESIGN's "priority then readiness then age" waits on data that does
+    // not exist yet.
+    waiting_on_you.sort_by_key(|view| view.asked_at);
     in_the_air.sort_by_key(|view| std::cmp::Reverse(view.last_motion));
     holding.sort_by_key(|view| std::cmp::Reverse(view.last_motion));
     open.sort_by_key(|view| view.filed_at);
 
     Board {
-        waiting_on_you: Vec::new(),
+        waiting_on_you,
         in_the_air,
         holding,
         open,
@@ -152,6 +170,10 @@ fn view(
         (Some(a), Some(b)) => a == b,
         _ => false,
     };
+    let (question, asked_at) = match flight.question {
+        Some(question) => (Some(question.text), Some(question.at)),
+        None => (None, None),
+    };
     FlightView {
         id: flight.id.to_string(),
         procedure: flight.procedure,
@@ -167,6 +189,9 @@ fn view(
         held,
         resolving,
         current,
+        claimed_by: flight.claim.map(|claim| claim.by),
+        question,
+        asked_at,
     }
 }
 
@@ -190,6 +215,59 @@ mod tests {
                 body: String::new(),
             },
         }
+    }
+
+    fn lifecycle(id: &str, time: i64, kind: Kind) -> Event {
+        let id: EventId = id.parse().expect("id");
+        Event {
+            writer: id.writer.clone(),
+            author: "a@b.c".to_string(),
+            time,
+            id,
+            kind,
+        }
+    }
+
+    fn claimed(id: &str, time: i64, flight: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Claimed {
+                flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
+    fn held(id: &str, time: i64, flight: &str, question: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Held {
+                flight: flight.parse().expect("id"),
+                question: question.to_string(),
+            },
+        )
+    }
+
+    fn answered(id: &str, time: i64, flight: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Answered {
+                flight: flight.parse().expect("id"),
+                answer: "an answer".to_string(),
+            },
+        )
+    }
+
+    fn done(id: &str, time: i64, flight: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Done {
+                flight: flight.parse().expect("id"),
+            },
+        )
     }
 
     fn op(session: &str, branch: Option<&str>, time: i64) -> OpEntry {
@@ -345,5 +423,106 @@ mod tests {
         );
         let times: Vec<i64> = board.open.iter().map(|v| v.filed_at).collect();
         assert_eq!(times, [10, 20]);
+    }
+
+    #[test]
+    fn a_question_beats_a_held_branch_and_keeps_the_bay() {
+        // The routing order: waiting on you wins over holding even when
+        // fufu holds the branch, and the enrichment survives the move —
+        // a warm bay is the point of holding.
+        let board = enrich(
+            fold(&[filed("pi.1", 10), held("pi.2", 60, "pi.1", "which?")]),
+            &reads(
+                vec![op("pi.1", Some("work"), 50)],
+                vec![branch("work", true, false)],
+                None,
+            ),
+        );
+        assert!(board.holding.is_empty() && board.in_the_air.is_empty());
+        assert_eq!(board.waiting_on_you.len(), 1);
+        let view = &board.waiting_on_you[0];
+        assert_eq!(view.question.as_deref(), Some("which?"));
+        assert_eq!(view.asked_at, Some(60));
+        assert_eq!(view.branch.as_deref(), Some("work"));
+        assert!(view.tip.is_some());
+        assert!(view.held);
+    }
+
+    #[test]
+    fn a_done_flight_appears_nowhere() {
+        let board = enrich(
+            fold(&[filed("pi.1", 10), done("pi.2", 60, "pi.1")]),
+            &reads(
+                vec![op("pi.1", Some("work"), 50)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+        );
+        assert!(board.waiting_on_you.is_empty());
+        assert!(board.in_the_air.is_empty());
+        assert!(board.holding.is_empty());
+        assert!(board.open.is_empty());
+    }
+
+    #[test]
+    fn a_claim_with_no_op_row_is_in_the_air_on_the_claim_alone() {
+        let board = enrich(
+            fold(&[filed("pi.1", 10), claimed("pi.2", 40, "pi.1")]),
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(board.in_the_air.len(), 1);
+        let view = &board.in_the_air[0];
+        assert_eq!(view.claimed_by.as_deref(), Some("a@b.c"));
+        assert!(view.branch.is_none());
+        assert_eq!(view.last_motion, Some(40));
+    }
+
+    #[test]
+    fn a_claim_and_an_op_row_take_the_freshest_time_as_motion() {
+        let board = enrich(
+            fold(&[filed("pi.1", 10), claimed("pi.2", 40, "pi.1")]),
+            &reads(
+                vec![op("pi.1", Some("work"), 70)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+        );
+        assert_eq!(board.in_the_air[0].last_motion, Some(70));
+    }
+
+    #[test]
+    fn an_answer_releases_the_flight_with_the_answer_as_motion() {
+        let board = enrich(
+            fold(&[
+                filed("pi.1", 10),
+                held("pi.2", 60, "pi.1", "which?"),
+                answered("pi.3", 80, "pi.1"),
+            ]),
+            &reads(
+                vec![op("pi.1", Some("work"), 50)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+        );
+        assert!(board.waiting_on_you.is_empty());
+        assert_eq!(board.in_the_air.len(), 1);
+        let view = &board.in_the_air[0];
+        assert!(view.question.is_none());
+        assert_eq!(view.last_motion, Some(80));
+    }
+
+    #[test]
+    fn waiting_on_you_is_sorted_oldest_asked_first() {
+        let board = enrich(
+            fold(&[
+                filed("pi.1", 10),
+                filed("pi.2", 20),
+                held("pi.3", 70, "pi.2", "later"),
+                held("pi.4", 60, "pi.1", "sooner"),
+            ]),
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        let asked: Vec<Option<i64>> = board.waiting_on_you.iter().map(|v| v.asked_at).collect();
+        assert_eq!(asked, [Some(60), Some(70)]);
     }
 }
