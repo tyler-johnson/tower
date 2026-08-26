@@ -7,7 +7,8 @@
 
 use std::path::Path;
 
-use ff_tower_core::log::{Error, Kind, Store};
+use ff_tower_core::board;
+use ff_tower_core::log::{Error, EventId, Kind, Store};
 use ff_tower_testsupport::Repo;
 
 /// The fixture's author (set by `Repo::new`), and the chain the pinned
@@ -69,6 +70,58 @@ fn a_batch_is_one_commit_and_several_events() {
 
     assert_eq!(repo.git(&["rev-list", "--count", REF]).trim(), "1");
     assert_eq!(store.read().expect("read").len(), 3);
+}
+
+#[test]
+fn a_batch_can_name_its_own_ids() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let store = Store::open(repo.path()).expect("open");
+    store.append(vec![filed("the broad task")]).expect("append");
+
+    // The parts and the parent's dependency on them, in one append: the
+    // `linked` events name ids this same batch mints.
+    let parent: EventId = "pi.1".parse().expect("id");
+    let ids = store
+        .append_with(|mint| {
+            vec![
+                filed("part one"),
+                filed("part two"),
+                Kind::Linked {
+                    from: parent.clone(),
+                    to: mint(0),
+                },
+                Kind::Linked {
+                    from: parent.clone(),
+                    to: mint(1),
+                },
+            ]
+        })
+        .expect("append");
+    let named: Vec<String> = ids.iter().map(ToString::to_string).collect();
+    assert_eq!(named, ["pi.2", "pi.3", "pi.4", "pi.5"]);
+
+    // One commit for the four events, so there is no window where the
+    // parent is live, unlinked, and claimable.
+    assert_eq!(repo.git(&["rev-list", "--count", REF]).trim(), "2");
+
+    let fold = board::fold(&store.read_all().expect("read"));
+    let flight = |seq: &str| {
+        let id: EventId = seq.parse().expect("id");
+        fold.flights
+            .iter()
+            .find(|flight| flight.id == id)
+            .expect("a filed flight")
+    };
+    assert_eq!(
+        flight("pi.1").depends_on,
+        [
+            "pi.2".parse::<EventId>().expect("id"),
+            "pi.3".parse().expect("id")
+        ]
+    );
+    assert_eq!(flight("pi.2").blocks, std::slice::from_ref(&parent));
+    assert_eq!(flight("pi.3").blocks, std::slice::from_ref(&parent));
 }
 
 #[test]

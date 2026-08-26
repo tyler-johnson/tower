@@ -90,9 +90,27 @@ impl Store {
     /// Append events as one commit, assigning ids `<writer>.<seq>` in
     /// order. Returns the assigned ids; an empty batch writes nothing.
     pub fn append(&self, kinds: Vec<Kind>) -> Result<Vec<EventId>> {
+        // Ahead of the delegation, so an empty append still mints no
+        // writer.
         if kinds.is_empty() {
             return Ok(Vec::new());
         }
+        self.append_with(move |_| kinds.clone())
+    }
+
+    /// Append a batch whose events name each other's ids: `plan` receives a
+    /// minter — `mint(n)` is the id this batch's `n`th event will take — and
+    /// returns the kinds in that same order. Re-run per attempt, because a
+    /// lost CAS reparents the batch onto a new tip with fresh seqs.
+    ///
+    /// The plan cannot be built ahead of the append and handed to
+    /// [`Store::append`]: seqs are assigned inside the retry loop below.
+    /// Two appends would do instead — file, then link — but they leave a
+    /// window where the parent is live, unlinked, and claimable.
+    pub fn append_with(
+        &self,
+        plan: impl Fn(&dyn Fn(usize) -> EventId) -> Vec<Kind>,
+    ) -> Result<Vec<EventId>> {
         let writer = self.writer_or_mint()?;
         let name = chain::log_ref(&self.author, &writer);
 
@@ -119,9 +137,16 @@ impl Store {
             // the sort key no matter what the clock does.
             let now = wall_clock().max(tip_time);
 
+            let kinds = plan(&|offset| EventId {
+                writer: writer.clone(),
+                seq: next_seq + offset as u64,
+            });
+            if kinds.is_empty() {
+                return Ok(Vec::new());
+            }
+
             let events: Vec<Event> = kinds
-                .iter()
-                .cloned()
+                .into_iter()
                 .enumerate()
                 .map(|(offset, kind)| Event {
                     id: EventId {
