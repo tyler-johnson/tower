@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::log::{Event, EventId, Kind};
+use crate::log::{Event, EventId, Kind, PartStamp};
 
 /// One flight, assembled from its `filed` event and everything that named
 /// it since.
@@ -25,6 +25,10 @@ pub struct Flight {
     /// monotonic, so a new filing can never renumber an earlier one.
     pub number: u64,
     pub procedure: String,
+    /// The procedure part this flight is, as the filing stamped it.
+    /// Carried, never derived from: nothing in the fold keys on crew this
+    /// slice, and the definition it came from is not read again.
+    pub part: Option<PartStamp>,
     pub subject: String,
     pub body: String,
     pub filed_by: String,
@@ -103,6 +107,7 @@ pub fn fold(events: &[Event]) -> Fold {
             procedure,
             subject,
             body,
+            part,
         } = &event.kind
         {
             // A duplicate filed id is unreachable by construction — ids
@@ -117,6 +122,7 @@ pub fn fold(events: &[Event]) -> Fold {
                 id: event.id.clone(),
                 number: 0,
                 procedure: procedure.clone(),
+                part: part.clone(),
                 subject: subject.clone(),
                 body: body.clone(),
                 filed_by: event.author.clone(),
@@ -239,6 +245,7 @@ mod tests {
                 procedure: "open".to_string(),
                 subject: subject.to_string(),
                 body: String::new(),
+                part: None,
             },
         )
     }

@@ -8,7 +8,7 @@
 use serde::Serialize;
 
 use crate::ff::Pairing;
-use crate::log::Event;
+use crate::log::{Event, PartStamp};
 
 use super::flight::{Flight, Fold};
 use super::reads::{Reads, Verdicts};
@@ -35,6 +35,11 @@ pub struct FlightView {
     /// half, beside the wire id.
     pub number: u64,
     pub procedure: String,
+    /// The procedure part this flight is, as the filing stamped it —
+    /// `null` on a parent and on a plain filing. Carried for `--json`;
+    /// the board's note line is urgency-ordered phrases, and crew is not
+    /// urgency.
+    pub part: Option<PartStamp>,
     pub subject: String,
     pub filed_by: String,
     /// Raw epoch; relative age is the render's concern.
@@ -217,6 +222,7 @@ fn view(
         id: flight.id.to_string(),
         number: flight.number,
         procedure: flight.procedure,
+        part: flight.part,
         subject: flight.subject,
         filed_by: flight.filed_by,
         filed_at: flight.filed_at,
@@ -256,6 +262,7 @@ mod tests {
                 procedure: "open".to_string(),
                 subject: format!("subject of {time}"),
                 body: String::new(),
+                part: None,
             },
         }
     }

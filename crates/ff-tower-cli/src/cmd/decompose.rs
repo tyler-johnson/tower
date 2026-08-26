@@ -49,6 +49,10 @@ pub fn run(json: bool, flight: &str, parts: &[String]) -> Result<(), CliError> {
                 procedure: procedure.clone(),
                 subject: subject.clone(),
                 body: String::new(),
+                // The by-hand half: a part named on the command line is
+                // not a part of a definition, so it inherits the
+                // procedure stamp and carries no part stamp.
+                part: None,
             })
             .collect();
         kinds.extend((0..subjects.len()).map(|offset| Kind::Linked {

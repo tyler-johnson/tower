@@ -73,6 +73,30 @@ impl<'de> Deserialize<'de> for EventId {
     }
 }
 
+/// One part of a procedure, copied into the log at file time.
+///
+/// The definition is read once and never again, so this is the whole of
+/// what a flight knows about the shape it was filed under. Editing the
+/// definition afterwards cannot reach it.
+///
+/// `crew` and `done` are free strings here while the loader's are closed
+/// enums, and that asymmetry is deliberate. A known kind with a body that
+/// does not parse is an error by design, so a closed enum on the wire
+/// would mean a newer tower's `crew = "pair"` fails an older tower's parse
+/// — one future value taking the whole board down rather than one flight.
+/// The refusal belongs at load time, which is where "four values cannot
+/// grow into an expression language" actually bites.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartStamp {
+    pub id: String,
+    pub crew: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<String>,
+    pub done: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bay: Option<String>,
+}
+
 /// One authored gesture. Minting, referencing, pairing, and the four
 /// lifecycle marks — enough vocabulary for a flight to be filed, claimed,
 /// held on a question, answered, and finished. `promote` lands with its
@@ -84,6 +108,10 @@ pub enum Kind {
         procedure: String,
         subject: String,
         body: String,
+        /// The procedure part this flight is, when its procedure has
+        /// parts to give. `None` on a parent, and on any filing written
+        /// before procedures had definitions behind them.
+        part: Option<PartStamp>,
     },
     /// A note on the record, local.
     Commented { flight: EventId, text: String },
@@ -142,11 +170,15 @@ struct Wire {
     body: Box<RawValue>,
 }
 
+/// `part` is `default` and skipped when absent, so a plain filing's wire
+/// bytes are exactly what they were before parts existed.
 #[derive(Serialize, Deserialize)]
 struct FiledBody {
     procedure: String,
     subject: String,
     body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part: Option<PartStamp>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -190,10 +222,12 @@ impl Serialize for Event {
                 procedure,
                 subject,
                 body,
+                part,
             } => serde_json::value::to_raw_value(&FiledBody {
                 procedure: procedure.clone(),
                 subject: subject.clone(),
                 body: body.clone(),
+                part: part.clone(),
             }),
             Kind::Commented { flight, text } => serde_json::value::to_raw_value(&CommentedBody {
                 flight: flight.clone(),
@@ -250,11 +284,13 @@ impl<'de> Deserialize<'de> for Event {
                 procedure,
                 subject,
                 body,
+                part,
             } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Filed {
                 procedure,
                 subject,
                 body,
+                part,
             }
         } else if kind == "commented" {
             let CommentedBody { flight, text } =
@@ -324,6 +360,81 @@ mod tests {
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(json.contains(r#""kind":"promoted""#));
         assert!(json.contains(r#""flight":"pi.1""#));
+    }
+
+    #[test]
+    fn a_plain_filing_serializes_exactly_as_it_did_before_parts() {
+        let event = Event {
+            id: "pi.1".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::Filed {
+                procedure: "open".to_string(),
+                subject: "s".to_string(),
+                body: "b".to_string(),
+                part: None,
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&event).expect("serialize"),
+            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"procedure":"open","subject":"s","body":"b"}}"#
+        );
+    }
+
+    #[test]
+    fn a_part_stamp_round_trips_and_omits_what_it_does_not_carry() {
+        let event = Event {
+            id: "pi.2".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::Filed {
+                procedure: "review".to_string(),
+                subject: "the retry test · pass".to_string(),
+                body: String::new(),
+                part: Some(PartStamp {
+                    id: "pass".to_string(),
+                    crew: "agent".to_string(),
+                    skill: Some("review".to_string()),
+                    done: "asserted".to_string(),
+                    bay: None,
+                }),
+            },
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains(
+                r#""part":{"id":"pass","crew":"agent","skill":"review","done":"asserted"}"#
+            ),
+            "got {json}"
+        );
+
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        let Kind::Filed { part, .. } = back.kind else {
+            panic!("a filing parses as a filing");
+        };
+        let part = part.expect("the stamp survives");
+        assert_eq!(part.id, "pass");
+        assert_eq!(part.crew, "agent");
+        assert_eq!(part.skill.as_deref(), Some("review"));
+        assert_eq!(part.done, "asserted");
+        assert!(part.bay.is_none());
+    }
+
+    #[test]
+    fn a_crew_this_binary_has_never_heard_of_still_parses() {
+        // The tolerance rule: the enum is closed in the loader and open
+        // here, so a newer tower's value costs one flight's fidelity
+        // rather than the whole board.
+        let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"procedure":"pairing","subject":"s","body":"","part":{"id":"drive","crew":"pair","done":"reviewed"}}}"#;
+        let event: Event = serde_json::from_str(filed).expect("parse");
+        let Kind::Filed { part, .. } = event.kind else {
+            panic!("a filing parses as a filing");
+        };
+        let part = part.expect("the stamp survives");
+        assert_eq!(part.crew, "pair");
+        assert_eq!(part.done, "reviewed");
     }
 
     #[test]

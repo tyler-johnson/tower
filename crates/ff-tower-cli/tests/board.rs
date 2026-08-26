@@ -36,6 +36,7 @@ fn repo_with_a_filing() -> Repo {
             procedure: "open".to_string(),
             subject: "write the doctor verb".to_string(),
             body: String::new(),
+            part: None,
         }])
         .expect("append");
     repo

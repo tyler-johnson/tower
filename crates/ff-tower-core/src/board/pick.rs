@@ -181,6 +181,7 @@ mod tests {
                 procedure: "open".to_string(),
                 subject: format!("subject of {time}"),
                 body: String::new(),
+                part: None,
             },
         }
     }

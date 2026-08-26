@@ -43,6 +43,7 @@ pub fn run(
         procedure: procedure.clone(),
         subject: subject.to_string(),
         body: message.unwrap_or_default(),
+        part: None,
     }])?;
     let id = ids.into_iter().next().expect("one filed event");
 

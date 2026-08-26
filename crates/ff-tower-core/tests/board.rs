@@ -17,6 +17,7 @@ fn filed(subject: &str) -> Kind {
         procedure: "open".to_string(),
         subject: subject.to_string(),
         body: String::new(),
+        part: None,
     }
 }
 

@@ -9,7 +9,7 @@
 
 use serde::Serialize;
 
-use crate::log::EventId;
+use crate::log::{EventId, PartStamp};
 
 use super::flight::Fold;
 use super::reads::Reads;
@@ -24,6 +24,10 @@ pub struct Brief {
     /// half, beside the wire id.
     pub number: u64,
     pub procedure: String,
+    /// The procedure part this flight is, as the filing stamped it. The
+    /// brief is the read surface for one flight, so this is where crew
+    /// and skill are meant to be read.
+    pub part: Option<PartStamp>,
     pub subject: String,
     pub body: String,
     pub filed_by: String,
@@ -106,6 +110,7 @@ pub fn brief(fold: &Fold, reads: &Reads, id: &EventId) -> Option<Brief> {
         id: flight.id.to_string(),
         number: flight.number,
         procedure: flight.procedure.clone(),
+        part: flight.part.clone(),
         subject: flight.subject.clone(),
         body: flight.body.clone(),
         filed_by: flight.filed_by.clone(),
@@ -162,7 +167,7 @@ mod tests {
     use super::super::flight::fold;
     use super::*;
     use crate::ff::{BranchInfo, BranchList, OpEntry};
-    use crate::log::{Event, EventId, Kind};
+    use crate::log::{Event, EventId, Kind, PartStamp};
 
     fn filed(id: &str, time: i64, subject: &str, body: &str) -> Event {
         let id: EventId = id.parse().expect("id");
@@ -175,6 +180,7 @@ mod tests {
                 procedure: "open".to_string(),
                 subject: subject.to_string(),
                 body: body.to_string(),
+                part: None,
             },
         }
     }
@@ -308,6 +314,37 @@ mod tests {
         assert_eq!(brief.body, "the body\ntwo lines");
         assert_eq!(brief.filed_by, "filer@b.c");
         assert_eq!(brief.filed_at, 10);
+        assert!(brief.part.is_none(), "a plain filing is no part");
+    }
+
+    #[test]
+    fn a_part_stamp_reaches_the_brief() {
+        // The brief is the read surface for one flight, so this is where
+        // crew and skill are meant to be read — the board's note line is
+        // urgency-ordered, and crew is not urgency.
+        let mut event = filed("pi.1", 10, "the retry test · pass", "");
+        let Kind::Filed { part, .. } = &mut event.kind else {
+            unreachable!("filed");
+        };
+        *part = Some(PartStamp {
+            id: "pass".to_string(),
+            crew: "agent".to_string(),
+            skill: Some("review".to_string()),
+            done: "asserted".to_string(),
+            bay: None,
+        });
+
+        let brief = brief(
+            &fold(&[event]),
+            &reads(Vec::new(), Vec::new(), None),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        let part = brief.part.expect("the stamp reaches the brief");
+        assert_eq!(part.id, "pass");
+        assert_eq!(part.crew, "agent");
+        assert_eq!(part.skill.as_deref(), Some("review"));
+        assert_eq!(part.done, "asserted");
     }
 
     #[test]

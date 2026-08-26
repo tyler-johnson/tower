@@ -33,7 +33,7 @@ use gix::refs::transaction::PreviousValue;
 
 pub use chain::{CHAIN_VERSION, TOWER_EMAIL, TOWER_NAME};
 pub use error::{Error, Result};
-pub use event::{Event, EventId, Kind};
+pub use event::{Event, EventId, Kind, PartStamp};
 
 /// The store, open on one repository.
 ///
