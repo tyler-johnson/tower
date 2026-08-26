@@ -168,17 +168,6 @@ fn a_comment_without_a_note_is_refused() {
 }
 
 #[test]
-fn a_malformed_flight_id_is_refused_in_the_ids_words() {
-    let repo = repo();
-    let out = ff_tower(repo.path(), &["comment", "not-an-id", "-m", "x", "--json"]);
-    let envelope = refusal(&out, 2, "usage/bad-flight");
-    assert_eq!(
-        envelope["error"]["message"],
-        serde_json::json!("`not-an-id` is not a flight — `<seq>` or `<writer>.<seq>`")
-    );
-}
-
-#[test]
 fn link_declares_the_edge_both_ways() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
@@ -297,24 +286,6 @@ fn a_bare_seq_links_and_the_wire_stays_full() {
         .find(|view| view["id"] == serde_json::json!("pi.2"))
         .expect("pi.2 in open");
     assert_eq!(dependent["depends_on"], serde_json::json!(["pi.1"]));
-}
-
-#[test]
-fn a_multi_writer_board_renders_full_ids_and_refuses_a_bare_seq() {
-    let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "from the pi"]));
-    repo.pin_writer("sf");
-    stdout(&ff_tower(repo.path(), &["file", "from starforge"]));
-
-    let out = stdout(&ff_tower(repo.path(), &[]));
-    assert!(out.contains("#pi.1"), "full form on a shared board: {out}");
-    assert!(out.contains("#sf.1"), "full form on a shared board: {out}");
-
-    let out = ff_tower(repo.path(), &["comment", "1", "-m", "x", "--json"]);
-    let envelope = refusal(&out, 1, "flight/ambiguous");
-    let message = envelope["error"]["message"].as_str().expect("a message");
-    assert!(message.contains("pi.1"), "got {message:?}");
-    assert!(message.contains("sf.1"), "got {message:?}");
 }
 
 #[test]

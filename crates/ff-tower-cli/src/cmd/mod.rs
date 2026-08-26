@@ -57,33 +57,42 @@ pub fn appended(store: &Store, id: &EventId) -> Result<Event, CliError> {
         .expect("the appended event is on the chain"))
 }
 
-/// A flight reference as typed: a bare seq, or the full wire form.
+/// A flight reference as typed: a bare number, a `writer#n` pair, or the
+/// full wire form `<writer>.<seq>`.
 pub enum FlightRef {
-    Seq(u64),
+    Number(u64),
+    WriterNumber(String, u64),
     Full(EventId),
 }
 
 /// The syntactic half of naming a flight, before any store is opened. One
-/// leading `#` is stripped for paste tolerance — output prints ids
-/// `#`-prefixed, and what tower prints, tower accepts.
+/// leading `#` is stripped for paste tolerance — output prints numbers
+/// `#`-prefixed, and what tower prints, tower accepts (`#pi#3` pasted
+/// still parses: the split is at the last `#`).
 pub fn parse_ref(text: &str) -> Result<FlightRef, CliError> {
     let bare = text.strip_prefix('#').unwrap_or(text);
-    if let Ok(seq) = bare.parse::<u64>() {
-        return Ok(FlightRef::Seq(seq));
+    if let Ok(number) = bare.parse::<u64>() {
+        return Ok(FlightRef::Number(number));
+    }
+    if let Some((writer, digits)) = bare.rsplit_once('#')
+        && let Ok(number) = digits.parse::<u64>()
+    {
+        return Ok(FlightRef::WriterNumber(writer.to_string(), number));
     }
     if let Ok(id) = bare.parse::<EventId>() {
         return Ok(FlightRef::Full(id));
     }
     Err(CliError::coded(
         "usage/bad-flight",
-        format!("`{text}` is not a flight — `<seq>` or `<writer>.<seq>`"),
+        format!("`{text}` is not a flight — `<n>`, `<writer>#<n>`, or `<writer>.<seq>`"),
         Vec::new(),
     ))
 }
 
-/// Resolve a reference against the fold's filed flights. A bare seq must
-/// match exactly one flight; the refusals quote the reference as the user
-/// typed it, and an ambiguity names every candidate in full form.
+/// Resolve a reference against the fold's filed flights. A bare number
+/// must match exactly one flight across writers; the refusals quote the
+/// reference as the user typed it, and an ambiguity names every candidate
+/// in `writer#n` form.
 pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, CliError> {
     let not_found = || {
         CliError::coded(
@@ -100,23 +109,28 @@ pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, CliError> {
                 Err(not_found())
             }
         }
-        FlightRef::Seq(seq) => {
-            let candidates: Vec<&EventId> = fold
+        FlightRef::WriterNumber(writer, number) => fold
+            .flights
+            .iter()
+            .find(|flight| flight.id.writer == writer && flight.number == number)
+            .map(|flight| flight.id.clone())
+            .ok_or_else(not_found),
+        FlightRef::Number(number) => {
+            let candidates: Vec<&Flight> = fold
                 .flights
                 .iter()
-                .filter(|flight| flight.id.seq == seq)
-                .map(|flight| &flight.id)
+                .filter(|flight| flight.number == number)
                 .collect();
             match candidates.as_slice() {
                 [] => Err(not_found()),
-                [id] => Ok((*id).clone()),
+                [flight] => Ok(flight.id.clone()),
                 many => Err(CliError::coded(
                     "flight/ambiguous",
                     format!(
                         "`{text}` names {} flights: {}",
                         count(many.len()),
                         many.iter()
-                            .map(|id| format!("`{id}`"))
+                            .map(|flight| format!("`{}#{}`", flight.id.writer, flight.number))
                             .collect::<Vec<_>>()
                             .join(", ")
                     ),
@@ -161,15 +175,16 @@ fn count(n: usize) -> String {
     }
 }
 
-/// A resolved id in the board's display form, for verb echo lines. The
-/// id itself joins the fold's flights in the writer count — `file` echoes
-/// a flight its pre-append fold does not hold.
+/// A resolved id in the board's display form — `#n`, or `writer#n` when
+/// the fold's filed flights span more than one writer. Infallible after
+/// `resolve`: the number lives on the fold's flight, so the flight must be
+/// present — `file` re-folds after its append for exactly this.
 pub fn display(fold: &Fold, id: &EventId) -> String {
     let short = fold
         .flights
         .iter()
         .all(|flight| flight.id.writer == id.writer);
-    render::flight_ref(&id.to_string(), short)
+    render::flight_ref(&id.writer, flight(fold, id).number, short)
 }
 
 /// The standard dim tail — one string, every write verb.

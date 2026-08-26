@@ -35,7 +35,7 @@ pub enum Command {
     },
     /// Everything known about one flight, for whoever picks it up.
     Brief {
-        /// The flight to brief, `<writer>.<seq>`.
+        /// The flight to brief — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
     },
@@ -53,7 +53,7 @@ pub enum Command {
     },
     /// A note on a flight's record.
     Comment {
-        /// The flight to comment on, `<writer>.<seq>`.
+        /// The flight to comment on — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
         /// The note.
@@ -71,7 +71,7 @@ pub enum Command {
     },
     /// Claim one specific flight, out of order.
     Claim {
-        /// The flight to claim, `<writer>.<seq>`.
+        /// The flight to claim — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
     },

@@ -39,8 +39,6 @@ pub fn run(
     };
 
     let store = super::store()?;
-    // Read only to decide the echo's display form — no validation here.
-    let fold = board::fold(&store.read_all()?);
     let ids = store.append(vec![Kind::Filed {
         procedure: procedure.clone(),
         subject: subject.to_string(),
@@ -55,6 +53,9 @@ pub fn run(
             machine::emit("file", &serde_json::json!({ "filed": event }))
         );
     } else {
+        // Re-fold after the append: the echo's number lives on the fold's
+        // flight, so the flight must be in it.
+        let fold = board::fold(&store.read_all()?);
         let colored = render::colored();
         println!(
             "filed {} under {procedure}: {subject}",

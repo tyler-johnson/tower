@@ -10,8 +10,11 @@
 //! in the air, `‖` holding, `·` open. A local vocabulary, not fufu's —
 //! `@ ● ✓ ✕` name git objects, not flight states.
 //!
-//! Ids render in DESIGN's display form: `#`-prefixed, the seq alone when
-//! the board's filed flights span one writer, `#<writer>.<seq>` otherwise.
+//! Ids render in DESIGN's display form: the flight's dense number,
+//! `#<n>` when the board's filed flights span one writer, `<writer>#<n>`
+//! otherwise — the wire's dotted form never renders here.
+
+use std::collections::HashMap;
 
 use anstyle::{AnsiColor, Color, Style};
 use ff_tower_core::board::{Board, FlightView};
@@ -49,23 +52,31 @@ pub fn paint_dim(text: &str, colored: bool) -> String {
     paint(DIM, text, colored)
 }
 
-/// Whether the given full ids span at most one writer, so `#<seq>` alone
-/// names a flight unambiguously. The writer is everything before the last
-/// `.` — safe to split on because a sanitized writer contains no dots.
+/// Whether the given full ids span at most one writer, so `#<n>` alone
+/// names a flight unambiguously.
 pub fn short_ids<'a>(ids: impl Iterator<Item = &'a str>) -> bool {
-    let mut writers = ids.map(|id| id.rsplit_once('.').map_or(id, |(writer, _)| writer));
+    let mut writers = ids.map(writer_of);
     match writers.next() {
         None => true,
         Some(first) => writers.all(|writer| writer == first),
     }
 }
 
-/// The display form of a full id: `#3` when short, `#pi-8c2e.3` otherwise.
-pub fn flight_ref(id: &str, short: bool) -> String {
+/// The writer half of a wire id — everything before the last `.`, safe to
+/// split on because a sanitized writer contains no dots.
+fn writer_of(id: &str) -> &str {
+    id.rsplit_once('.').map_or(id, |(writer, _)| writer)
+}
+
+/// The display form of a flight's number: `#3` when short, `pi-8c2e#3`
+/// otherwise. The long form takes no leading `#` — the interior `#` is
+/// the marker, and it binds a writer to a flight number the way `.` binds
+/// one to an event seq, so the two names cannot be confused.
+pub fn flight_ref(writer: &str, number: u64, short: bool) -> String {
     if short {
-        format!("#{}", id.rsplit_once('.').map_or(id, |(_, seq)| seq))
+        format!("#{number}")
     } else {
-        format!("#{id}")
+        format!("{writer}#{number}")
     }
 }
 
@@ -95,7 +106,7 @@ fn tip_column(view: &FlightView) -> String {
     }
 }
 
-fn note(view: &FlightView, now: i64, short: bool, colored: bool) -> String {
+fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
     if let Some(question) = view.question.as_deref() {
         phrases.push(paint_warn(question, colored));
@@ -107,7 +118,7 @@ fn note(view: &FlightView, now: i64, short: bool, colored: bool) -> String {
         phrases.push(paint_warn("resolving", colored));
     }
     for collide in &view.collides {
-        let with = flight_ref(&collide.with, short);
+        let with = &refs[collide.with.as_str()];
         let on = match collide.paths.as_slice() {
             [path] => path.clone(),
             paths => format!("{} paths", paths.len()),
@@ -116,7 +127,7 @@ fn note(view: &FlightView, now: i64, short: bool, colored: bool) -> String {
     }
     for with in &view.unanswered {
         phrases.push(paint_dim(
-            &format!("no verdict vs {}", flight_ref(with, short)),
+            &format!("no verdict vs {}", refs[with.as_str()]),
             colored,
         ));
     }
@@ -168,10 +179,22 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
             .flat_map(|(_, _, views)| views.iter())
             .map(|view| view.id.as_str()),
     );
-    let id_width = sections
+    // Wire id to display form, over every section at once: a verdict
+    // partner is always a live flight, so the map answers for `collides`
+    // and `unanswered` entries too.
+    let refs: HashMap<&str, String> = sections
         .iter()
         .flat_map(|(_, _, views)| views.iter())
-        .map(|view| flight_ref(&view.id, short).chars().count())
+        .map(|view| {
+            (
+                view.id.as_str(),
+                flight_ref(writer_of(&view.id), view.number, short),
+            )
+        })
+        .collect();
+    let id_width = refs
+        .values()
+        .map(|reference| reference.chars().count())
         .max()
         .unwrap_or(0);
     let subject_width = sections
@@ -189,7 +212,7 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
         out.push_str(title);
         out.push('\n');
         for view in views {
-            let id = format!("{:<id_width$}", flight_ref(&view.id, short));
+            let id = format!("{:<id_width$}", refs[view.id.as_str()]);
             let subject = format!("{:<subject_width$}", view.subject);
             out.push_str(&format!(
                 "{glyph} {}  {}  {}\n",
@@ -197,7 +220,7 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
                 subject,
                 paint_dim(&tip_column(view), colored),
             ));
-            out.push_str(&format!("    {}\n", note(view, now, short, colored)));
+            out.push_str(&format!("    {}\n", note(view, &refs, now, colored)));
         }
         out.push('\n');
     }
