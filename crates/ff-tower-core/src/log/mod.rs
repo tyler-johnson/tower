@@ -27,7 +27,7 @@ mod error;
 mod event;
 mod lock;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gix::refs::transaction::PreviousValue;
 
@@ -85,6 +85,25 @@ impl Store {
             .config_snapshot()
             .string("tower.bays")
             .map(|value| value.to_string())
+    }
+
+    /// The main worktree's path — the parent of the common dir — or
+    /// `None` for a bare repository, which has no tree to anchor to.
+    ///
+    /// Beside `pool_root` and for its reason: the CLI stays gix-free, and
+    /// this is the anchor `.tower/procedures` resolves against. The main
+    /// worktree rather than the invoking one, because a bay must read the
+    /// same definitions the repository does. No spawn — `file` keeps the
+    /// property that it never runs fufu.
+    pub fn main_worktree(&self) -> Option<PathBuf> {
+        if self.repo.is_bare() {
+            return None;
+        }
+        self.repo
+            .common_dir()
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(Path::to_path_buf)
     }
 
     /// Append events as one commit, assigning ids `<writer>.<seq>` in

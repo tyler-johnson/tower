@@ -1,0 +1,27 @@
+# Someone else's work you have been asked to look at. DESIGN.md's block,
+# shipped: `pass` and `smoke` fly together because neither names the other,
+# and `verdict` waits on both.
+name    = "review"
+subject = "branch"            # may resolve to a PR later
+
+[[match]]                     # only ever runs on adapter signals
+source = "github"
+event  = "review_requested"
+
+[[part]]
+id    = "pass"
+crew  = "agent"
+skill = "review"
+done  = "asserted"
+
+[[part]]
+id   = "smoke"
+crew = "you"
+bay  = "warm"                 # build the tree ahead of me
+done = "asserted"
+
+[[part]]
+id    = "verdict"
+crew  = "you"
+after = ["pass", "smoke"]
+done  = "asserted"

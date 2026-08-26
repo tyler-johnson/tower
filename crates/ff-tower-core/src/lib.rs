@@ -39,3 +39,4 @@
 pub mod board;
 pub mod ff;
 pub mod log;
+pub mod procedure;
