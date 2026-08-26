@@ -166,6 +166,12 @@ Unknown never rounds down to clear. fufu answering "no base" and fufu refusing t
 
 The JSON carries the verdicts per flight — `collides`, each entry naming the other flight and the paths fufu reported, and `unanswered` for the pairs fufu could not judge — and no board-level pair list: the per-flight entries carry each pair once from each side, which is what a render and a machine caller both iterate anyway. The land order and the conflict-free set are `next`'s fold over these same pairs, deliberately not this surface's.
 
+### Next
+
+`ff tower next` is that fold, pointed at assignment. The pool is any unclaimed live flight: a standing claim, an open question, or a fufu hold takes a flight out, and an op row alone does not — a session-tagged flight nobody claimed is claimable, and it is exactly the state `requeue` hands a flight back in. Readiness is declared dependencies done. Admission is greedy: a candidate joins the pick when its branch is clear against every flight already flying and every candidate already admitted, in filed order — a maximum set would cost more than the answer is worth. Unknown excludes: a pairing fufu could not judge is a reason to leave a flight out of a fan-out set, never rounded down to clear.
+
+The picked set is claimed in one atomic append; `--peek` is the same computation with no write, and the envelope says which happened. An empty pick is exit 1 over a full data envelope — fufu's "no," on the hold precedent: an outcome rides the success path and only the code says it, so `while ff tower next` terminates on the code alone. The passed rows are the explained ranking — each flight the walk examined and why it lost (`waiting`, `collides`, `no-verdict`), and nothing past where the walk stopped, so the output stays bounded by the ask rather than the board.
+
 ### The verbs
 
 fufu's rule that every verb must earn its existence carries over, and the one it kills first is `run`. Tower cannot run anything — a verb that implies dispatch would be the first crack in principle 2, and that line is too load-bearing to contradict casually. Starting work under a procedure is `ff tower file`, because filing is what actually happens; the decomposition and the first brief fall out of it.
