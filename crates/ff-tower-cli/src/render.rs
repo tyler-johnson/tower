@@ -1,6 +1,7 @@
 //! The human render, in fufu's list grammar: a head line per flight, then
 //! an indented dim note joining phrases with ` · ` in urgency order —
-//! held/resolving first, then `on <branch>`, then age.
+//! held/resolving first, then `on <branch>`, then the comment count,
+//! then age.
 //!
 //! Glyphs carry the meaning independent of color: `▸` in the air, `‖`
 //! holding, `·` open. A local vocabulary, not fufu's — `@ ● ✓ ✕` name git
@@ -30,7 +31,7 @@ fn paint(style: Style, text: &str, colored: bool) -> String {
     }
 }
 
-fn paint_id(text: &str, colored: bool) -> String {
+pub fn paint_id(text: &str, colored: bool) -> String {
     paint(ID, text, colored)
 }
 
@@ -38,7 +39,7 @@ fn paint_warn(text: &str, colored: bool) -> String {
     paint(WARN, text, colored)
 }
 
-fn paint_dim(text: &str, colored: bool) -> String {
+pub fn paint_dim(text: &str, colored: bool) -> String {
     paint(DIM, text, colored)
 }
 
@@ -80,6 +81,14 @@ fn note(view: &FlightView, now: i64, colored: bool) -> String {
         && branch != "@detached"
     {
         phrases.push(paint_dim(&format!("on {branch}"), colored));
+    }
+    if view.comments > 0 {
+        let noun = if view.comments == 1 {
+            "comment"
+        } else {
+            "comments"
+        };
+        phrases.push(paint_dim(&format!("{} {noun}", view.comments), colored));
     }
     match view.last_motion {
         Some(motion) => phrases.push(paint_dim(&format!("moved {}", age(now, motion)), colored)),

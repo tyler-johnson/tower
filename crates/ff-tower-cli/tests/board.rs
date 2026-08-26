@@ -105,4 +105,25 @@ fn a_missing_ff_exits_one_and_names_fufu() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.starts_with("ff-tower: "), "got {stderr:?}");
     assert!(stderr.contains("fufu"), "the dependency is named: {stderr}");
+
+    // The same failure under --json is an error envelope on stdout — slice
+    // 3's scoped omission, closed.
+    let output = Command::new(env!("CARGO_BIN_EXE_ff-tower"))
+        .args(["--json"])
+        .env("FF_REPO", repo.path())
+        .env("TOWER_FF", "/nonexistent/ff")
+        .output()
+        .expect("spawn ff-tower");
+
+    assert_eq!(output.status.code(), Some(1));
+    let envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("an envelope");
+    assert_eq!(envelope["tower"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("board"));
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!("ff/not-installed")
+    );
+    assert_eq!(envelope["error"]["exits"], serde_json::json!([]));
+    assert!(envelope.get("data").is_none(), "data and error, never both");
 }

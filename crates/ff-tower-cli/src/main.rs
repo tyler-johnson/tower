@@ -7,12 +7,14 @@
 //! machine with no fufu on it — and one spelling means no question about
 //! which one is canonical.
 //!
-//! Exit codes: a board render is never a yes/no question, so success is 0,
-//! an empty board included. Seam or store errors print `ff-tower: {err}`
-//! to stderr and exit 1. Clap keeps its default 2 for usage; 3 has no
-//! meaning for a render.
+//! Exit codes follow the error id's namespace, fufu's derivation:
+//! `usage/*` exits 2, `held/*` exits 3 (reserved for the hold verb),
+//! anything else 1. Success is 0, an empty board included — a board
+//! render is never a yes/no question. Clap keeps its default 2 for a
+//! command line it refused itself.
 
 mod cli;
+mod cmd;
 mod error;
 mod machine;
 mod render;
@@ -21,45 +23,57 @@ use clap::Parser;
 
 use cli::{Cli, Command};
 use error::CliError;
-use ff_tower_core::board;
-use ff_tower_core::ff::Ff;
-use ff_tower_core::log::Store;
 
 fn main() {
     let cli = Cli::parse();
     if let Err(err) = run(&cli) {
-        eprintln!("ff-tower: {err}");
-        std::process::exit(1);
+        report(cli.json, verb(&cli.command), &err);
+    }
+}
+
+/// The wire name of the verb being run — the envelope's `cmd`, success or
+/// failure alike.
+fn verb(command: &Option<Command>) -> &'static str {
+    match command {
+        None | Some(Command::Board) => "board",
+        Some(Command::File { .. }) => "file",
+        Some(Command::Comment { .. }) => "comment",
+        Some(Command::Link { .. }) => "link",
     }
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
-    match cli.command {
-        None | Some(Command::Board) => board_verb(cli.json),
+    match &cli.command {
+        None | Some(Command::Board) => cmd::board::run(cli.json),
+        Some(Command::File {
+            subject,
+            message,
+            procedure,
+        }) => cmd::file::run(cli.json, subject, message.clone(), procedure.clone()),
+        Some(Command::Comment { flight, message }) => {
+            cmd::comment::run(cli.json, flight, message.clone())
+        }
+        Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b),
     }
 }
 
-fn board_verb(json: bool) -> Result<(), CliError> {
-    let mut ff = Ff::here()?;
-    // The test seam: environment carries addressing, argv carries verbs —
-    // the seam's own discipline — and an env var cannot leak into an
-    // interactive shell the way a hidden flag one autocomplete away could.
-    if let Some(program) = std::env::var_os("TOWER_FF")
-        && !program.is_empty()
-    {
-        ff = ff.program(program);
-    }
-    let store = Store::open(ff.repo())?;
-    let events = store.read_all()?;
-    let board = board::assemble(&ff, &events)?;
+/// Render one failure and exit — the single failure path, fufu's
+/// `report()`. `--json` gets the error envelope on stdout, so a machine
+/// caller always has an envelope to parse; a human gets `ff-tower: {err}`
+/// on stderr with the exits as a `try:` block. Both exit by the id's
+/// namespace.
+fn report(json: bool, cmd: &str, err: &CliError) -> ! {
     if json {
-        println!("{}", machine::emit("board", &board));
+        println!("{}", machine::emit_error(cmd, err));
     } else {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_secs() as i64)
-            .unwrap_or(0);
-        print!("{}", render::board(&board, now, render::colored()));
+        eprintln!("ff-tower: {err}");
+        let exits = err.exits();
+        if !exits.is_empty() {
+            eprintln!("  try:");
+            for hint in exits {
+                eprintln!("    {hint}");
+            }
+        }
     }
-    Ok(())
+    std::process::exit(err.exit_code())
 }
