@@ -7,14 +7,17 @@
 //! distinct pair of in-flight branches — zero spawns in the solo norm —
 //! and [`enrich`] classifies each flight into a section over what the
 //! middle already fetched. [`assemble`] is the wiring, and the one call a
-//! render needs.
+//! render needs. [`pick`] is `next`'s fold, riding the same probe output
+//! as the board.
 
 mod flight;
 mod model;
+mod pick;
 mod reads;
 
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use model::{Board, CollideView, FlightView, enrich};
+pub use pick::{Passed, Pick, Picks, Skip, pick};
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};
 
 use crate::ff::{self, Ff};
