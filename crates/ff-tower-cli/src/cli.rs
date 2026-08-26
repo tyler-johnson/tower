@@ -117,9 +117,10 @@ pub enum BayAction {
     /// the first command runs in it.
     Warm {
         /// Where to put it; a relative path resolves against the
-        /// repository, not the shell's directory.
+        /// repository, not the shell's directory. Minted under
+        /// `tower.bays` when unsaid.
         #[arg(value_name = "path")]
-        path: String,
+        path: Option<String>,
         /// The branch it stands on — a new one named after the directory
         /// when unsaid.
         #[arg(value_name = "branch")]

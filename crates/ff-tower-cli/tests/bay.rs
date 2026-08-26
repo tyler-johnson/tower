@@ -234,3 +234,92 @@ fn a_bare_done_on_a_done_flight_is_already_done() {
     let out = ff_tower(repo.path(), &["done", "--json"]);
     refusal(&out, 1, "flight/done");
 }
+
+#[test]
+fn bare_warm_without_the_key_is_refused() {
+    let repo = repo();
+    let out = ff_tower(repo.path(), &["bay", "warm", "--json"]);
+    let envelope = refusal(&out, 2, "usage/needs-path");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("bare `warm` needs a pool root — set `tower.bays` or name a path")
+    );
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["git config tower.bays <dir>", "ff tower bay warm <path>"])
+    );
+}
+
+#[test]
+fn bare_warm_mints_slots_under_the_pool_root() {
+    let repo = repo();
+    // The root is deliberately uncreated: setting the key is the
+    // deliberate act, the directory bootstraps itself.
+    let root = repo.bay_path("bays");
+    repo.git(&["config", "tower.bays", root.to_str().expect("utf8")]);
+
+    let text = stdout(&ff_tower(repo.path(), &["bay", "warm"]));
+    let root = std::fs::canonicalize(&root).expect("warm created the root");
+    assert!(
+        text.contains(&format!(
+            "warmed bay-1: {} on bay-1",
+            root.join("bay-1").display()
+        )),
+        "{text}"
+    );
+
+    let second = stdout(&ff_tower(repo.path(), &["bay", "warm"]));
+    assert!(second.contains("warmed bay-2:"), "{second}");
+
+    let list = stdout(&ff_tower(repo.path(), &["bay"]));
+    assert!(list.contains("bay-1") && list.contains("bay-2"), "{list}");
+    assert_eq!(
+        list.matches("free").count(),
+        3,
+        "main and both bays: {list}"
+    );
+    assert!(list.contains("3 bays"), "{list}");
+}
+
+#[test]
+fn a_released_slot_number_is_reused() {
+    let repo = repo();
+    let root = repo.bay_path("bays");
+    repo.git(&["config", "tower.bays", root.to_str().expect("utf8")]);
+    stdout(&ff_tower(repo.path(), &["bay", "warm"]));
+    stdout(&ff_tower(repo.path(), &["bay", "warm"]));
+    stdout(&ff_tower(repo.path(), &["bay", "release", "bay-1"]));
+
+    let text = stdout(&ff_tower(repo.path(), &["bay", "warm"]));
+    assert!(text.contains("warmed bay-1:"), "{text}");
+}
+
+#[test]
+fn a_foreign_directory_in_the_pool_is_skipped_not_collided_with() {
+    let repo = repo();
+    let root = repo.bay_path("bays");
+    repo.git(&["config", "tower.bays", root.to_str().expect("utf8")]);
+    std::fs::create_dir_all(root.join("bay-1")).expect("mkdir");
+
+    let text = stdout(&ff_tower(repo.path(), &["bay", "warm"]));
+    assert!(text.contains("warmed bay-2:"), "{text}");
+}
+
+#[test]
+fn a_relative_key_resolves_against_the_main_worktree() {
+    let repo = repo();
+    repo.git(&["config", "tower.bays", "../pool"]);
+
+    let out = ff_tower(repo.path(), &["bay", "warm", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let warmed = envelope(&out);
+    let path = warmed["data"]["added"]["path"].as_str().expect("path");
+    // Beside the repo — where `Repo::bay_path` puts siblings — never
+    // under the shell's directory.
+    let expected =
+        std::fs::canonicalize(repo.bay_path("pool")).expect("the pool sits beside the repo");
+    assert_eq!(
+        std::fs::canonicalize(path).expect("canonical"),
+        expected.join("bay-1")
+    );
+}

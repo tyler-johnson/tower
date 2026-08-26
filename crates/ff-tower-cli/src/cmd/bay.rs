@@ -13,12 +13,13 @@ use crate::cli::BayAction;
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, BayView, Fold};
+use ff_tower_core::ff::Ff;
 use ff_tower_core::log::Store;
 
 pub fn run(json: bool, action: Option<&BayAction>) -> Result<(), CliError> {
     match action {
         None | Some(BayAction::List) => list(json),
-        Some(BayAction::Warm { path, branch }) => warm(json, path, branch.as_deref()),
+        Some(BayAction::Warm { path, branch }) => warm(json, path.as_deref(), branch.as_deref()),
         Some(BayAction::Release { bay }) => release(json, bay),
     }
 }
@@ -41,12 +42,18 @@ fn list(json: bool) -> Result<(), CliError> {
     Ok(())
 }
 
-fn warm(json: bool, path: &str, branch: Option<&str>) -> Result<(), CliError> {
+fn warm(json: bool, path: Option<&str>, branch: Option<&str>) -> Result<(), CliError> {
     // No fold and no gate: fufu's own refusals — `worktree/exists`,
     // `branch/checked-out-elsewhere`, `worktree/unborn` — forward
-    // verbatim, and the path passes through untouched so a relative one
-    // resolves against the repository via `-C`.
-    let added = super::ff()?.worktree_add(path, branch)?;
+    // verbatim, and a named path passes through untouched so a relative
+    // one resolves against the repository via `-C`. No path mints the
+    // next slot under `tower.bays` instead.
+    let ff = super::ff()?;
+    let path = match path {
+        Some(path) => path.to_string(),
+        None => mint_slot(&ff)?,
+    };
+    let added = ff.worktree_add(&path, branch)?;
 
     if json {
         println!(
@@ -67,6 +74,76 @@ fn warm(json: bool, path: &str, branch: Option<&str>) -> Result<(), CliError> {
         println!("{}", super::tail(colored));
     }
     Ok(())
+}
+
+/// The next slot under `tower.bays`: `root/bay-<n>`, smallest free n.
+///
+/// The root may be relative, resolved against the main worktree's path —
+/// never the shell's directory or the invoking bay, because the key is
+/// common-dir-shared and the anchor must be too. A configured-but-missing
+/// root is created: setting the key is the deliberate act, the directory
+/// bootstraps itself. A number is taken while a worktree sits under the
+/// root as `bay-<n>` or the directory exists on disk — the exists-guard
+/// keeps a leftover or foreign directory from colliding — and since
+/// `ff worktree remove` deletes the directory, released numbers come back
+/// on their own.
+fn mint_slot(ff: &Ff) -> Result<String, CliError> {
+    let Some(root) = Store::open(ff.repo())?.pool_root() else {
+        return Err(CliError::coded(
+            "usage/needs-path",
+            "bare `warm` needs a pool root — set `tower.bays` or name a path",
+            vec![
+                "git config tower.bays <dir>".to_string(),
+                "ff tower bay warm <path>".to_string(),
+            ],
+        ));
+    };
+
+    let list = ff.worktree_list()?;
+    let root = std::path::Path::new(&root);
+    let root = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        let main = list
+            .worktrees
+            .iter()
+            .find(|row| row.id == "main")
+            .and_then(|row| row.path.as_deref())
+            .expect("the survey lists main with a path");
+        std::path::Path::new(main).join(root)
+    };
+    let io = |err: std::io::Error| {
+        CliError::coded(
+            "bay/pool-root",
+            format!("pool root `{}`: {err}", root.display()),
+            vec!["git config tower.bays <dir>".to_string()],
+        )
+    };
+    std::fs::create_dir_all(&root).map_err(&io)?;
+    let root = std::fs::canonicalize(&root).map_err(&io)?;
+
+    let taken: std::collections::HashSet<u64> = list
+        .worktrees
+        .iter()
+        .filter_map(|row| std::fs::canonicalize(row.path.as_deref()?).ok())
+        .filter(|path| path.parent() == Some(root.as_path()))
+        .filter_map(|path| slot_number(path.file_name()?.to_str()?))
+        .collect();
+
+    let slot = (1..)
+        .find(|n| !taken.contains(n) && !root.join(format!("bay-{n}")).exists())
+        .expect("the naturals do not run out");
+    Ok(root
+        .join(format!("bay-{slot}"))
+        .to_string_lossy()
+        .into_owned())
+}
+
+/// `bay-<n>` with n ≥ 1, or nothing.
+fn slot_number(name: &str) -> Option<u64> {
+    name.strip_prefix("bay-")
+        .and_then(|digits| digits.parse().ok())
+        .filter(|n| *n >= 1)
 }
 
 fn release(json: bool, bay: &str) -> Result<(), CliError> {
@@ -173,10 +250,7 @@ fn page(fold: &Fold, views: &[BayView], colored: bool) -> String {
 
     let noun = if views.len() == 1 { "bay" } else { "bays" };
     out.push_str(&render::paint_dim(
-        &format!(
-            "{} {noun} · ff tower bay warm <path> to add one",
-            views.len()
-        ),
+        &format!("{} {noun} · ff tower bay warm to add one", views.len()),
         colored,
     ));
     out.push('\n');
