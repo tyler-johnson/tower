@@ -172,6 +172,12 @@ The JSON carries the verdicts per flight — `collides`, each entry naming the o
 
 The picked set is claimed in one atomic append; `--peek` is the same computation with no write, and the envelope says which happened. An empty pick is exit 1 over a full data envelope — fufu's "no," on the hold precedent: an outcome rides the success path and only the code says it, so `while ff tower next` terminates on the code alone. The passed rows are the explained ranking — each flight the walk examined and why it lost (`waiting`, `collides`, `no-verdict`), and nothing past where the walk stopped, so the output stays bounded by the ask rather than the board.
 
+### Brief
+
+`ff tower brief` is the read half of the handoff: `next` hands an agent a flight id and a subject, and the brief is what it reads next — everything the log and the repository know about one flight, in one read over the fold and the reads. No probes: verdicts stay the board's and `next`'s surfaces, and the brief stays instant. A done flight briefs like any other, because the log keeps the record and reading it is never a lifecycle move.
+
+Today's brief is the fold's record — subject, body, comments, links carrying each linked flight's subject and done state, the open question — plus the reads' facts: branch, tip, holds, and whether the branch is the reader's own. The verb table's files, prior art, verify command, and handoff notes arrive as procedures and bays make them exist; the brief grows with the data, never ahead of it.
+
 ### The verbs
 
 fufu's rule that every verb must earn its existence carries over, and the one it kills first is `run`. Tower cannot run anything — a verb that implies dispatch would be the first crack in principle 2, and that line is too load-bearing to contradict casually. Starting work under a procedure is `ff tower file`, because filing is what actually happens; the decomposition and the first brief fall out of it.
