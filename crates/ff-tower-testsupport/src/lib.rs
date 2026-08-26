@@ -125,13 +125,19 @@ impl FakeFf {
     pub fn script(body: &str) -> FakeFf {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("ff");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}")).expect("write fake");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                .expect("chmod fake");
-        }
+        // Written by a child process, not this one. Tests run in parallel
+        // in one process, and an executable written here would leave a
+        // briefly-open write fd that a concurrently forking test inherits —
+        // the exec of the fake then fails ETXTBSY, at random. A child's fd
+        // never enters this process's table, so the race cannot exist.
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(r#"printf '%s' "$1" > "$0" && chmod 755 "$0""#)
+            .arg(&path)
+            .arg(format!("#!/bin/sh\n{body}"))
+            .status()
+            .expect("write fake");
+        assert!(status.success(), "writing the fake failed");
         FakeFf { dir, path }
     }
 
