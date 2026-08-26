@@ -60,7 +60,7 @@ fn file_echoes_the_filing_and_the_tail() {
     ));
     assert_eq!(
         out,
-        "filed pi.1 under open: fix the flaky retry test\nboard: ff tower\n"
+        "filed #1 under open: fix the flaky retry test\nboard: ff tower\n"
     );
 }
 
@@ -122,7 +122,7 @@ fn a_comment_counts_on_the_board() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "carry a note"]));
     let out = stdout(&ff_tower(repo.path(), &["comment", "pi.1", "-m", "a note"]));
-    assert_eq!(out, "commented on pi.1\nboard: ff tower\n");
+    assert_eq!(out, "commented on #1\nboard: ff tower\n");
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(board["data"]["open"][0]["comments"], serde_json::json!(1));
 }
@@ -174,7 +174,7 @@ fn a_malformed_flight_id_is_refused_in_the_ids_words() {
     let envelope = refusal(&out, 2, "usage/bad-flight");
     assert_eq!(
         envelope["error"]["message"],
-        serde_json::json!("`not-an-id` is not `<writer>.<seq>`")
+        serde_json::json!("`not-an-id` is not a flight — `<seq>` or `<writer>.<seq>`")
     );
 }
 
@@ -184,7 +184,7 @@ fn link_declares_the_edge_both_ways() {
     stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
     stdout(&ff_tower(repo.path(), &["file", "the dependent"]));
     let out = stdout(&ff_tower(repo.path(), &["link", "pi.2", "pi.1"]));
-    assert_eq!(out, "linked pi.2: depends on pi.1\nboard: ff tower\n");
+    assert_eq!(out, "linked #2: depends on #1\nboard: ff tower\n");
 
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     let open = board["data"]["open"].as_array().expect("open");
@@ -200,7 +200,12 @@ fn link_declares_the_edge_both_ways() {
 #[test]
 fn a_self_link_is_a_usage_refusal() {
     let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "itself"]));
     let out = ff_tower(repo.path(), &["link", "pi.1", "pi.1", "--json"]);
+    refusal(&out, 2, "usage/self-link");
+    // A bare seq naming the same flight is a self-link only resolution
+    // can see — the check fires on resolved ids.
+    let out = ff_tower(repo.path(), &["link", "1", "1", "--json"]);
     refusal(&out, 2, "usage/self-link");
 }
 
@@ -251,4 +256,63 @@ fn a_missing_identity_is_a_coded_envelope() {
         envelope["error"]["exits"],
         serde_json::json!(["git config user.email <email>"])
     );
+}
+
+#[test]
+fn a_bare_seq_resolves_against_the_board() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "take a bare seq"]));
+    stdout(&ff_tower(repo.path(), &["comment", "1", "-m", "note"]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["open"][0]["comments"], serde_json::json!(1));
+}
+
+#[test]
+fn a_hash_prefixed_reference_is_accepted() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "take a pasted ref"]));
+    stdout(&ff_tower(repo.path(), &["comment", "#1", "-m", "note"]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["open"][0]["comments"], serde_json::json!(1));
+}
+
+#[test]
+fn a_bare_seq_with_no_match_is_not_found() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the only flight"]));
+    let out = ff_tower(repo.path(), &["comment", "9", "-m", "x", "--json"]);
+    refusal(&out, 1, "flight/not-found");
+}
+
+#[test]
+fn a_bare_seq_links_and_the_wire_stays_full() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
+    stdout(&ff_tower(repo.path(), &["file", "the dependent"]));
+    stdout(&ff_tower(repo.path(), &["link", "2", "1"]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let open = board["data"]["open"].as_array().expect("open");
+    let dependent = open
+        .iter()
+        .find(|view| view["id"] == serde_json::json!("pi.2"))
+        .expect("pi.2 in open");
+    assert_eq!(dependent["depends_on"], serde_json::json!(["pi.1"]));
+}
+
+#[test]
+fn a_multi_writer_board_renders_full_ids_and_refuses_a_bare_seq() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "from the pi"]));
+    repo.pin_writer("sf");
+    stdout(&ff_tower(repo.path(), &["file", "from starforge"]));
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("#pi.1"), "full form on a shared board: {out}");
+    assert!(out.contains("#sf.1"), "full form on a shared board: {out}");
+
+    let out = ff_tower(repo.path(), &["comment", "1", "-m", "x", "--json"]);
+    let envelope = refusal(&out, 1, "flight/ambiguous");
+    let message = envelope["error"]["message"].as_str().expect("a message");
+    assert!(message.contains("pi.1"), "got {message:?}");
+    assert!(message.contains("sf.1"), "got {message:?}");
 }

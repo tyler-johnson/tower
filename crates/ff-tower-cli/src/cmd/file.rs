@@ -6,6 +6,7 @@
 
 use crate::error::CliError;
 use crate::{machine, render};
+use ff_tower_core::board;
 use ff_tower_core::log::Kind;
 
 pub fn run(
@@ -38,6 +39,8 @@ pub fn run(
     };
 
     let store = super::store()?;
+    // Read only to decide the echo's display form — no validation here.
+    let fold = board::fold(&store.read_all()?);
     let ids = store.append(vec![Kind::Filed {
         procedure: procedure.clone(),
         subject: subject.to_string(),
@@ -55,7 +58,7 @@ pub fn run(
         let colored = render::colored();
         println!(
             "filed {} under {procedure}: {subject}",
-            render::paint_id(&id.to_string(), colored)
+            render::paint_id(&super::display(&fold, &id), colored)
         );
         println!("{}", super::tail(colored));
     }

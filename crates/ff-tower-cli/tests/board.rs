@@ -80,7 +80,7 @@ fn a_piped_render_is_plain_text_and_names_its_sections() {
         "piped output has escape bytes: {out:?}"
     );
     assert!(out.contains("open\n"), "the section header is named: {out}");
-    assert!(out.contains("pi.1"));
+    assert!(out.contains("#1"));
     assert!(out.contains("write the doctor verb"));
     assert!(out.contains("1 flight · ff tower file to add one"));
 }

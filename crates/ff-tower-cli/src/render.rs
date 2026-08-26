@@ -6,6 +6,9 @@
 //! Glyphs carry the meaning independent of color: `▸` in the air, `‖`
 //! holding, `·` open. A local vocabulary, not fufu's — `@ ● ✓ ✕` name git
 //! objects, not flight states.
+//!
+//! Ids render in DESIGN's display form: `#`-prefixed, the seq alone when
+//! the board's filed flights span one writer, `#<writer>.<seq>` otherwise.
 
 use anstyle::{AnsiColor, Color, Style};
 use ff_tower_core::board::{Board, FlightView};
@@ -41,6 +44,26 @@ fn paint_warn(text: &str, colored: bool) -> String {
 
 pub fn paint_dim(text: &str, colored: bool) -> String {
     paint(DIM, text, colored)
+}
+
+/// Whether the given full ids span at most one writer, so `#<seq>` alone
+/// names a flight unambiguously. The writer is everything before the last
+/// `.` — safe to split on because a sanitized writer contains no dots.
+pub fn short_ids<'a>(ids: impl Iterator<Item = &'a str>) -> bool {
+    let mut writers = ids.map(|id| id.rsplit_once('.').map_or(id, |(writer, _)| writer));
+    match writers.next() {
+        None => true,
+        Some(first) => writers.all(|writer| writer == first),
+    }
+}
+
+/// The display form of a full id: `#3` when short, `#pi-8c2e.3` otherwise.
+pub fn flight_ref(id: &str, short: bool) -> String {
+    if short {
+        format!("#{}", id.rsplit_once('.').map_or(id, |(_, seq)| seq))
+    } else {
+        format!("#{id}")
+    }
 }
 
 /// `4m ago`, `2d ago` — s/m/h/d/w. `now` is an argument so a render is a
@@ -112,10 +135,16 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
             .iter()
             .map(|(_, _, views)| views.len())
             .sum::<usize>();
+    let short = short_ids(
+        sections
+            .iter()
+            .flat_map(|(_, _, views)| views.iter())
+            .map(|view| view.id.as_str()),
+    );
     let id_width = sections
         .iter()
         .flat_map(|(_, _, views)| views.iter())
-        .map(|view| view.id.chars().count())
+        .map(|view| flight_ref(&view.id, short).chars().count())
         .max()
         .unwrap_or(0);
     let subject_width = sections
@@ -133,7 +162,7 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
         out.push_str(title);
         out.push('\n');
         for view in views {
-            let id = format!("{:<id_width$}", view.id);
+            let id = format!("{:<id_width$}", flight_ref(&view.id, short));
             let subject = format!("{:<subject_width$}", view.subject);
             out.push_str(&format!(
                 "{glyph} {}  {}  {}\n",

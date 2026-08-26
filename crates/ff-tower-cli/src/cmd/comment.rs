@@ -17,11 +17,11 @@ pub fn run(json: bool, flight: &str, message: Option<String>) -> Result<(), CliE
             vec!["ff tower comment <flight> -m <note>".to_string()],
         ));
     };
-    let flight = super::parse_flight(flight)?;
+    super::parse_ref(flight)?;
 
     let store = super::store()?;
     let fold = board::fold(&store.read_all()?);
-    super::ensure_filed(&fold, &flight)?;
+    let flight = super::resolve(&fold, flight)?;
 
     let ids = store.append(vec![Kind::Commented {
         flight: flight.clone(),
@@ -39,7 +39,7 @@ pub fn run(json: bool, flight: &str, message: Option<String>) -> Result<(), CliE
         let colored = render::colored();
         println!(
             "commented on {}",
-            render::paint_id(&flight.to_string(), colored)
+            render::paint_id(&super::display(&fold, &flight), colored)
         );
         println!("{}", super::tail(colored));
     }

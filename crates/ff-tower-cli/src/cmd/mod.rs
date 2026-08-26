@@ -36,22 +36,95 @@ pub fn appended(store: &Store, id: &EventId) -> Result<Event, CliError> {
         .expect("the appended event is on the chain"))
 }
 
-/// Parse a positional as a flight id, refusing in the id's own words.
-pub fn parse_flight(text: &str) -> Result<EventId, CliError> {
-    text.parse()
-        .map_err(|message: String| CliError::coded("usage/bad-flight", message, Vec::new()))
+/// A flight reference as typed: a bare seq, or the full wire form.
+pub enum FlightRef {
+    Seq(u64),
+    Full(EventId),
 }
 
-/// Refuse a target that is not a filed flight.
-pub fn ensure_filed(fold: &Fold, id: &EventId) -> Result<(), CliError> {
-    if fold.flights.iter().any(|flight| &flight.id == id) {
-        return Ok(());
+/// The syntactic half of naming a flight, before any store is opened. One
+/// leading `#` is stripped for paste tolerance — output prints ids
+/// `#`-prefixed, and what tower prints, tower accepts.
+pub fn parse_ref(text: &str) -> Result<FlightRef, CliError> {
+    let bare = text.strip_prefix('#').unwrap_or(text);
+    if let Ok(seq) = bare.parse::<u64>() {
+        return Ok(FlightRef::Seq(seq));
+    }
+    if let Ok(id) = bare.parse::<EventId>() {
+        return Ok(FlightRef::Full(id));
     }
     Err(CliError::coded(
-        "flight/not-found",
-        format!("no flight `{id}` on the board"),
-        vec!["ff tower".to_string()],
+        "usage/bad-flight",
+        format!("`{text}` is not a flight — `<seq>` or `<writer>.<seq>`"),
+        Vec::new(),
     ))
+}
+
+/// Resolve a reference against the fold's filed flights. A bare seq must
+/// match exactly one flight; the refusals quote the reference as the user
+/// typed it, and an ambiguity names every candidate in full form.
+pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, CliError> {
+    let not_found = || {
+        CliError::coded(
+            "flight/not-found",
+            format!("no flight `{text}` on the board"),
+            vec!["ff tower".to_string()],
+        )
+    };
+    match parse_ref(text)? {
+        FlightRef::Full(id) => {
+            if fold.flights.iter().any(|flight| flight.id == id) {
+                Ok(id)
+            } else {
+                Err(not_found())
+            }
+        }
+        FlightRef::Seq(seq) => {
+            let candidates: Vec<&EventId> = fold
+                .flights
+                .iter()
+                .filter(|flight| flight.id.seq == seq)
+                .map(|flight| &flight.id)
+                .collect();
+            match candidates.as_slice() {
+                [] => Err(not_found()),
+                [id] => Ok((*id).clone()),
+                many => Err(CliError::coded(
+                    "flight/ambiguous",
+                    format!(
+                        "`{text}` names {} flights: {}",
+                        count(many.len()),
+                        many.iter()
+                            .map(|id| format!("`{id}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    vec!["ff tower".to_string()],
+                )),
+            }
+        }
+    }
+}
+
+/// Small counts in words, matching the refusal grammar's register.
+fn count(n: usize) -> String {
+    match n {
+        2 => "two".to_string(),
+        3 => "three".to_string(),
+        4 => "four".to_string(),
+        _ => n.to_string(),
+    }
+}
+
+/// A resolved id in the board's display form, for verb echo lines. The
+/// id itself joins the fold's flights in the writer count — `file` echoes
+/// a flight its pre-append fold does not hold.
+pub fn display(fold: &Fold, id: &EventId) -> String {
+    let short = fold
+        .flights
+        .iter()
+        .all(|flight| flight.id.writer == id.writer);
+    render::flight_ref(&id.to_string(), short)
 }
 
 /// The standard dim tail — one string, every write verb.

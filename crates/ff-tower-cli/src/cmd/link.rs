@@ -10,31 +10,37 @@ use ff_tower_core::board;
 use ff_tower_core::log::Kind;
 
 pub fn run(json: bool, a: &str, b: &str) -> Result<(), CliError> {
-    let from = super::parse_flight(a)?;
-    let to = super::parse_flight(b)?;
-    if from == to {
-        return Err(CliError::coded(
-            "usage/self-link",
-            format!("`{from}` cannot depend on itself"),
-            Vec::new(),
-        ));
-    }
+    super::parse_ref(a)?;
+    super::parse_ref(b)?;
 
     let store = super::store()?;
     let fold = board::fold(&store.read_all()?);
-    super::ensure_filed(&fold, &from)?;
-    super::ensure_filed(&fold, &to)?;
+    let from = super::resolve(&fold, a)?;
+    let to = super::resolve(&fold, b)?;
+    // Self-link fires on the resolved ids — `link 3 pi.3` naming one
+    // flight twice is a self-link only resolution can see.
+    if from == to {
+        return Err(CliError::coded(
+            "usage/self-link",
+            format!("`{}` cannot depend on itself", super::display(&fold, &from)),
+            Vec::new(),
+        ));
+    }
     let declared = fold
         .flights
         .iter()
         .find(|flight| flight.id == from)
-        .expect("ensured filed")
+        .expect("resolved to a filed flight")
         .depends_on
         .contains(&to);
     if declared {
         return Err(CliError::coded(
             "link/exists",
-            format!("`{from}` already depends on `{to}`"),
+            format!(
+                "`{}` already depends on `{}`",
+                super::display(&fold, &from),
+                super::display(&fold, &to)
+            ),
             Vec::new(),
         ));
     }
@@ -55,8 +61,8 @@ pub fn run(json: bool, a: &str, b: &str) -> Result<(), CliError> {
         let colored = render::colored();
         println!(
             "linked {}: depends on {}",
-            render::paint_id(&from.to_string(), colored),
-            render::paint_id(&to.to_string(), colored)
+            render::paint_id(&super::display(&fold, &from), colored),
+            render::paint_id(&super::display(&fold, &to), colored)
         );
         println!("{}", super::tail(colored));
     }
