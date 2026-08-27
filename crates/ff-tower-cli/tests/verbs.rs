@@ -512,7 +512,11 @@ fn a_second_claim_is_refused_naming_the_claimant() {
         envelope["error"]["message"],
         serde_json::json!("`#1` is already claimed by tests@tower.invalid")
     );
-    assert_eq!(envelope["error"]["exits"], serde_json::json!([]));
+    // The raise site says nothing, so the exits are the registry's.
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower", "ff tower next"])
+    );
 }
 
 #[test]

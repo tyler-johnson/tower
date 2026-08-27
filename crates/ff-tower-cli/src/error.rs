@@ -5,8 +5,9 @@
 //! `Error::exit_code()` derives it — `usage/*` is 2, `held/*` is 3,
 //! anything else 1. The `held/*` namespace stays unused in practice:
 //! hold's 3 is an outcome, and it rides the success path in `main.rs`.
-//! No `explain` verb and no registry file at this size; the mapping is
-//! the match below.
+//! The prose behind each id lives in `explain.rs`'s registry — `ff tower
+//! explain <id>` — and the sync guards there hold the two surfaces
+//! together; the mapping for wrapped errors stays the match below.
 //!
 //! One forwarding rule: a refusal fufu shaped itself passes through
 //! verbatim — its id, message, and exits are fufu's words, and wrapping

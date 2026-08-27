@@ -18,6 +18,7 @@ pub mod config;
 pub mod decompose;
 pub mod doctor;
 pub mod done;
+pub mod explain;
 pub mod file;
 pub mod hold;
 pub mod link;

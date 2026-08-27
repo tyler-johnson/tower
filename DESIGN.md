@@ -217,6 +217,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower decompose <flight> <part>…` | file the parts as flights the parent waits on — a procedure's, or by hand | either |
 | `ff tower promote <flight>` | mint the upstream ticket, link it, keep local history — the publish boundary | you |
 | `ff tower bay <list\|warm\|release>` | the pool: what is bootstrapped, what is occupied, what to build ahead of you; bare `warm` mints the next slot under `tower.bays` | either |
+| `ff tower explain <error-id>` | look up an error id and see what it means — the prose behind every coded refusal; `--list` is the whole catalog | either |
 | `ff tower procedures [<name>]` | what is installed, what each matches, and where to fork it | you |
 | `ff tower config` | settings, on fufu's typed-registry model | you |
 | `ff tower version` | which tower this is: the release, the commit it was built from, and — read from the update lane's cache, without touching the network — whether it is still the current one. `--json` reports the three as fields | either |

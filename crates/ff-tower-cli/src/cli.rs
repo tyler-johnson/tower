@@ -173,6 +173,15 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: Option<String>,
     },
+    /// Look up an error id and see what it means.
+    Explain {
+        /// The error id to look up.
+        #[arg(value_name = "id")]
+        id: Option<String>,
+        /// List every error id tower knows.
+        #[arg(long)]
+        list: bool,
+    },
     /// Settings, on fufu's typed-registry model: bare lists them, a key
     /// gets, key + value sets, `--unset` returns to the default.
     Config {
@@ -250,6 +259,7 @@ impl Command {
             | Command::Hold { .. }
             | Command::Answer { .. }
             | Command::Done { .. }
+            | Command::Explain { .. }
             | Command::Config { .. }
             | Command::Bay { .. } => Lanes {
                 update: true,

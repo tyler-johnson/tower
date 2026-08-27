@@ -22,6 +22,7 @@
 mod cli;
 mod cmd;
 mod error;
+mod explain;
 mod machine;
 mod render;
 mod selfupdate;
@@ -128,6 +129,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Hold { .. }) => "hold",
         Some(Command::Answer { .. }) => "answer",
         Some(Command::Done { .. }) => "done",
+        Some(Command::Explain { .. }) => "explain",
         Some(Command::Config { .. }) => "config",
         Some(Command::Bay { action }) => match action {
             None | Some(BayAction::List) => "bay list",
@@ -183,6 +185,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             cmd::answer::run(cli.json, flight, message.clone())?
         }
         Some(Command::Done { flight }) => cmd::done::run(cli.json, flight.as_deref())?,
+        Some(Command::Explain { id, list }) => cmd::explain::run(cli.json, id.as_deref(), *list)?,
         Some(Command::Config {
             key,
             value,
@@ -200,14 +203,15 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
 /// Render one failure and exit — the single failure path, fufu's
 /// `report()`. `--json` gets the error envelope on stdout, so a machine
 /// caller always has an envelope to parse; a human gets `ff-tower: {err}`
-/// on stderr with the exits as a `try:` block. Both exit by the id's
-/// namespace.
+/// on stderr with the exits as a `try:` block. Both surfaces take their
+/// exits from `explain::exits_for` — the raise site's when it spoke, the
+/// registry's otherwise — and both exit by the id's namespace.
 fn report(json: bool, cmd: &str, err: &CliError) -> ! {
     if json {
         println!("{}", machine::emit_error(cmd, err));
     } else {
         eprintln!("ff-tower: {err}");
-        let exits = err.exits();
+        let exits = explain::exits_for(err);
         if !exits.is_empty() {
             eprintln!("  try:");
             for hint in exits {

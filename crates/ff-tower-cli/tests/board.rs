@@ -136,7 +136,12 @@ fn a_missing_ff_exits_one_and_names_fufu() {
         envelope["error"]["id"],
         serde_json::json!("ff/not-installed")
     );
-    assert_eq!(envelope["error"]["exits"], serde_json::json!([]));
+    // The raise site says nothing, so `exits_for` falls back to naming
+    // the registry lookup — a coded failure always has prose behind it.
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower explain ff/not-installed"])
+    );
     assert!(envelope.get("data").is_none(), "data and error, never both");
 }
 

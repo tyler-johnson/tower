@@ -52,7 +52,7 @@ pub fn emit_error(cmd: &str, err: &CliError) -> String {
         error: ErrorBody {
             id: err.id(),
             message: err.to_string(),
-            exits: err.exits(),
+            exits: crate::explain::exits_for(err),
         },
     })
     .expect("the error serializes")
