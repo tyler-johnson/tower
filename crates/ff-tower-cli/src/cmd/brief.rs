@@ -1,16 +1,19 @@
 //! `ff tower brief <flight>` — everything known about one flight, for
-//! whoever picks it up.
+//! whoever picks it up: the full record, its standing on `next`'s walk,
+//! and what it beat.
 //!
 //! The read half of the handoff: `next` hands out a flight id and a
 //! subject, and the brief is what an agent reads next. Fold plus gather,
-//! zero probes — verdicts stay the board's and `next`'s surfaces, so the
-//! brief is instant. Not `ensure_active`: a done flight briefs, the log
-//! keeps the record, and the render carries the done mark alongside
-//! everything else.
+//! and the collide probes only where `wants_verdicts` says they can
+//! change the answer — the laziness lives here because the fold stays
+//! spawn-free, and a done or branchless flight briefs with zero probes,
+//! byte-identical to the probed run. Not `ensure_active`: a done flight
+//! briefs, the log keeps the record, and the render carries the done
+//! mark alongside everything else.
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, Brief, Fold};
+use ff_tower_core::board::{self, Brief, Fold, Skip, Standing, Verdicts};
 use ff_tower_core::log::PartStamp;
 
 pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
@@ -22,7 +25,12 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 
     let ff = super::ff()?;
     let reads = board::gather(&ff)?;
-    let brief = board::brief(&fold, &reads, &id).expect("resolved to a filed flight");
+    let verdicts = if board::wants_verdicts(&fold, &reads, &id) {
+        board::probe(&ff, &fold, &reads)?
+    } else {
+        Verdicts::default()
+    };
+    let brief = board::brief(&fold, &reads, &verdicts, &id).expect("resolved to a filed flight");
 
     if json {
         println!("{}", machine::emit("brief", &brief));
@@ -37,7 +45,8 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 }
 
 /// The detail page: head and note in the board's grammar, then the body
-/// verbatim, the link sections, and the comments in reading order.
+/// verbatim, the link sections, and the comments in reading order. The
+/// beat rows land right after the routing line — one dim line per row.
 fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -45,7 +54,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         render::paint_id(&show(fold, &brief.id), colored),
         brief.subject
     ));
-    out.push_str(&format!("    {}\n", note(brief, now, colored)));
+    out.push_str(&format!("    {}\n", note(fold, brief, now, colored)));
     if let Some(part) = brief.part.as_ref() {
         out.push_str(&format!("    {}\n", part_line(part, colored)));
     }
@@ -61,6 +70,22 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
             phrase.push_str(&format!(" · {because}"));
         }
         out.push_str(&format!("    {}\n", render::paint_dim(&phrase, colored)));
+    }
+    for beaten in &brief.beat {
+        let reason = match &beaten.reason {
+            Skip::Waiting { .. } => unreachable!("waiting rows never enter beat"),
+            Skip::Collides { paths, .. } => {
+                format!("collides on {}", render::paths_phrase(paths))
+            }
+            Skip::NoVerdict { .. } => "no verdict".to_string(),
+        };
+        out.push_str(&format!(
+            "    {}\n",
+            render::paint_dim(
+                &format!("beat {} · {reason}", show(fold, &beaten.flight)),
+                colored
+            )
+        ));
     }
 
     if !brief.body.is_empty() {
@@ -129,8 +154,11 @@ fn part_line(part: &PartStamp, colored: bool) -> String {
 }
 
 /// The note line, in the board's phrase order with the done mark ahead of
-/// everything — a reader must know first that the flight is over.
-fn note(brief: &Brief, now: i64, colored: bool) -> String {
+/// everything — a reader must know first that the flight is over. The
+/// standing joins as one phrase before the branch: precedence makes it
+/// exclusive with the mark phrases — a walk standing only exists with no
+/// done, question, hold, or claim — so the line never says a thing twice.
+fn note(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
     if let (Some(by), Some(at)) = (brief.done_by.as_deref(), brief.done_at) {
         phrases.push(render::paint_dim(
@@ -149,6 +177,40 @@ fn note(brief: &Brief, now: i64, colored: bool) -> String {
     }
     if let Some(by) = brief.claimed_by.as_deref() {
         phrases.push(render::paint_dim(&format!("claimed by {by}"), colored));
+    }
+    match &brief.standing {
+        // Said above, from the brief's own flat facts.
+        Standing::Done | Standing::Question | Standing::Held | Standing::Claimed => {}
+        Standing::Yours => phrases.push(render::paint_dim(
+            &match brief.part.as_ref().map(|part| part.crew.as_str()) {
+                Some(crew) => format!("yours — crewed {crew}"),
+                None => "yours — no part stamp".to_string(),
+            },
+            colored,
+        )),
+        Standing::Ready => phrases.push(render::paint_dim("ready", colored)),
+        Standing::Waiting { on } => phrases.push(render::paint_dim(
+            &format!(
+                "waiting on {}",
+                on.iter()
+                    .map(|dep| show(fold, dep))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            colored,
+        )),
+        Standing::Collides { with, paths } => phrases.push(render::paint_warn(
+            &format!(
+                "collides with {} on {}",
+                show(fold, with),
+                render::paths_phrase(paths)
+            ),
+            colored,
+        )),
+        Standing::NoVerdict { with } => phrases.push(render::paint_warn(
+            &format!("no verdict vs {}", show(fold, with)),
+            colored,
+        )),
     }
     match brief.branch.as_deref() {
         Some("@detached") => phrases.push(render::paint_dim("(detached)", colored)),

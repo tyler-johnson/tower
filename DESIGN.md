@@ -208,7 +208,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower triage` | walk the unclassified pile and route each item to a procedure | you |
 | `ff tower take <flight>` | take the controls: crew this to you, agent off | you |
 | `ff tower requeue <flight>` | the reverse — hand it back to the pool | either |
-| `ff tower brief <flight>` | everything known about this flight: subject, files, prior art, verify command, handoff notes | an agent |
+| `ff tower brief <flight>` | everything known about this flight: subject, files, prior art, verify command, handoff notes — plus its standing on `next`'s walk, why it is where it is, and what it beat | an agent |
 | `ff tower hold <flight> -m <question>` | stop with a question attached — bay warm, session open, exit 3 | an agent |
 | `ff tower answer <flight> -m <answer>` | answer it and release the hold | you |
 | `ff tower done [<flight>]` | finish a part whose completion nothing can derive; a smoke test that went fine leaves no trace | you |
@@ -217,7 +217,6 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower decompose <flight> <part>…` | file the parts as flights the parent waits on — a procedure's, or by hand | either |
 | `ff tower promote <flight>` | mint the upstream ticket, link it, keep local history — the publish boundary | you |
 | `ff tower bay <list\|warm\|release>` | the pool: what is bootstrapped, what is occupied, what to build ahead of you; bare `warm` mints the next slot under `tower.bays` | either |
-| `ff tower explain <flight>` | why this is here, why this procedure, and what it beat | you |
 | `ff tower procedures [<name>]` | what is installed, what each matches, and where to fork it | you |
 | `ff tower config` | settings, on fufu's typed-registry model | you |
 | `ff tower version` | which tower this is: the release, the commit it was built from, and — read from the update lane's cache, without touching the network — whether it is still the current one. `--json` reports the three as fields | either |

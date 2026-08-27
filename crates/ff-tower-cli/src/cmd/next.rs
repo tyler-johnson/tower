@@ -107,13 +107,11 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
-                Skip::Collides { with, paths } => {
-                    let on = match paths.as_slice() {
-                        [path] => path.clone(),
-                        paths => format!("{} paths", paths.len()),
-                    };
-                    format!("collides with {} on {on}", show(&fold, with))
-                }
+                Skip::Collides { with, paths } => format!(
+                    "collides with {} on {}",
+                    show(&fold, with),
+                    render::paths_phrase(paths)
+                ),
                 Skip::NoVerdict { with } => format!("no verdict vs {}", show(&fold, with)),
             };
             println!(

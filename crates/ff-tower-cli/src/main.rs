@@ -128,7 +128,6 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Hold { .. }) => "hold",
         Some(Command::Answer { .. }) => "answer",
         Some(Command::Done { .. }) => "done",
-        Some(Command::Explain { .. }) => "explain",
         Some(Command::Config { .. }) => "config",
         Some(Command::Bay { action }) => match action {
             None | Some(BayAction::List) => "bay list",
@@ -184,7 +183,6 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             cmd::answer::run(cli.json, flight, message.clone())?
         }
         Some(Command::Done { flight }) => cmd::done::run(cli.json, flight.as_deref())?,
-        Some(Command::Explain { flight }) => cmd::explain::run(cli.json, flight)?,
         Some(Command::Config {
             key,
             value,

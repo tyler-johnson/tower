@@ -80,6 +80,15 @@ pub fn flight_ref(writer: &str, number: u64, short: bool) -> String {
     }
 }
 
+/// The collide path phrase: the one path, or a count — `next`'s grammar,
+/// shared with the brief's beat rows and the board's warn.
+pub fn paths_phrase(paths: &[String]) -> String {
+    match paths {
+        [path] => path.clone(),
+        paths => format!("{} paths", paths.len()),
+    }
+}
+
 /// `4m ago`, `2d ago` — s/m/h/d/w. `now` is an argument so a render is a
 /// pure function of its inputs.
 pub fn age(now: i64, then: i64) -> String {
@@ -119,10 +128,7 @@ fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool
     }
     for collide in &view.collides {
         let with = &refs[collide.with.as_str()];
-        let on = match collide.paths.as_slice() {
-            [path] => path.clone(),
-            paths => format!("{} paths", paths.len()),
-        };
+        let on = paths_phrase(&collide.paths);
         phrases.push(paint_warn(&format!("collides {with} on {on}"), colored));
     }
     for with in &view.unanswered {
