@@ -257,7 +257,7 @@ fn bare_warm_without_the_key_is_refused() {
     );
     assert_eq!(
         envelope["error"]["exits"],
-        serde_json::json!(["git config tower.bays <dir>", "ff tower bay warm <path>"])
+        serde_json::json!(["ff tower config bays <dir>", "ff tower bay warm <path>"])
     );
 }
 

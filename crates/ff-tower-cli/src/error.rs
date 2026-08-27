@@ -12,12 +12,15 @@
 //! verbatim — its id, message, and exits are fufu's words, and wrapping
 //! them in a tower id would hide the one part worth matching on.
 
-use ff_tower_core::{ff, log, procedure};
+use ff_tower_core::{config, ff, log, procedure};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error(transparent)]
     Log(#[from] log::Error),
+    /// A config refusal — its own id, carried through.
+    #[error(transparent)]
+    Config(#[from] config::Error),
     #[error(transparent)]
     Ff(#[from] ff::Error),
     /// A definition the loader declined — its own id, carried through.
@@ -58,6 +61,7 @@ impl CliError {
             CliError::Ff(ff::Error::Mismatched { .. }) => "ff/mismatched",
             CliError::Ff(ff::Error::Unparsable { .. }) => "ff/unparsable",
             CliError::Procedure(err) => err.id(),
+            CliError::Config(err) => err.id(),
         }
     }
 
@@ -71,6 +75,12 @@ impl CliError {
             }
             CliError::Ff(ff::Error::Ff(refusal)) => refusal.exits.clone(),
             CliError::Procedure(_) => vec!["ff tower procedures".to_string()],
+            CliError::Config(config::Error::UnknownKey { .. }) => {
+                vec!["ff tower config".to_string()]
+            }
+            CliError::Config(config::Error::BadValue { .. }) => {
+                vec!["ff tower config <key>".to_string()]
+            }
             _ => Vec::new(),
         }
     }

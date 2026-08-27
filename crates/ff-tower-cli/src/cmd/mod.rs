@@ -14,6 +14,7 @@ pub mod board;
 pub mod brief;
 pub mod claim;
 pub mod comment;
+pub mod config;
 pub mod decompose;
 pub mod doctor;
 pub mod done;

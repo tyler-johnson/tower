@@ -135,6 +135,23 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
     },
+    /// Settings, on fufu's typed-registry model: bare lists them, a key
+    /// gets, key + value sets, `--unset` returns to the default.
+    Config {
+        /// The setting — `bays`, or `tower.bays`; the whole list when
+        /// unsaid.
+        #[arg(value_name = "key")]
+        key: Option<String>,
+        /// The new value; validated before anything touches disk.
+        #[arg(value_name = "value", conflicts_with = "unset")]
+        value: Option<String>,
+        /// Remove the setting — back to the default.
+        #[arg(long, requires = "key")]
+        unset: bool,
+        /// The global git config — every repo — instead of this one.
+        #[arg(long)]
+        global: bool,
+    },
     /// The pool: what is bootstrapped, what is occupied, what is free.
     Bay {
         #[command(subcommand)]

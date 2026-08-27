@@ -59,6 +59,7 @@ fn verb(command: &Option<Command>) -> &'static str {
         Some(Command::Answer { .. }) => "answer",
         Some(Command::Done { .. }) => "done",
         Some(Command::Explain { .. }) => "explain",
+        Some(Command::Config { .. }) => "config",
         Some(Command::Bay { action }) => match action {
             None | Some(BayAction::List) => "bay list",
             Some(BayAction::Warm { .. }) => "bay warm",
@@ -111,6 +112,12 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         }
         Some(Command::Done { flight }) => cmd::done::run(cli.json, flight.as_deref())?,
         Some(Command::Explain { flight }) => cmd::explain::run(cli.json, flight)?,
+        Some(Command::Config {
+            key,
+            value,
+            unset,
+            global,
+        }) => cmd::config::run(cli.json, key.as_deref(), value.clone(), *unset, *global)?,
         Some(Command::Bay { action }) => cmd::bay::run(cli.json, action.as_ref())?,
         Some(Command::Doctor) => return cmd::doctor::run(cli.json),
     }

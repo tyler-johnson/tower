@@ -93,7 +93,7 @@ fn mint_slot(ff: &Ff) -> Result<String, CliError> {
             "usage/needs-path",
             "bare `warm` needs a pool root — set `tower.bays` or name a path",
             vec![
-                "git config tower.bays <dir>".to_string(),
+                "ff tower config bays <dir>".to_string(),
                 "ff tower bay warm <path>".to_string(),
             ],
         ));
@@ -116,7 +116,7 @@ fn mint_slot(ff: &Ff) -> Result<String, CliError> {
         CliError::coded(
             "bay/pool-root",
             format!("pool root `{}`: {err}", root.display()),
-            vec!["git config tower.bays <dir>".to_string()],
+            vec!["ff tower config bays <dir>".to_string()],
         )
     };
     std::fs::create_dir_all(&root).map_err(&io)?;
