@@ -129,6 +129,12 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: Option<String>,
     },
+    /// Why this is here, why this procedure, and what it beat.
+    Explain {
+        /// The flight to explain — a number, `writer#n`, or the event id.
+        #[arg(value_name = "flight")]
+        flight: String,
+    },
     /// The pool: what is bootstrapped, what is occupied, what is free.
     Bay {
         #[command(subcommand)]
