@@ -307,6 +307,51 @@ fn config_works_before_identity_is_set() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn update_check_syncs_cache() {
+    // The write-through: a config write keeps the passive lane's cached
+    // interval honest, so the hot path's one file read never trusts a
+    // stale encoding. Linux-gated like fufu's — the cache root rides
+    // XDG_CACHE_HOME only there.
+    let repo = Repo::new();
+    let cache = tempfile::tempdir().expect("cache tempdir");
+    let state_file = cache.path().join("tower").join("update.json");
+
+    let run = |args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ff-tower"));
+        command
+            .args(args)
+            .env("FF_REPO", repo.path())
+            .env("XDG_CONFIG_HOME", root(repo.path()).join("xdg"))
+            .env("XDG_CACHE_HOME", cache.path())
+            .env("HOME", root(repo.path()))
+            .env_remove("GIT_CONFIG_GLOBAL");
+        command.output().expect("spawn ff-tower")
+    };
+
+    stdout(&run(&["config", "updateCheck", "12h"]));
+    let content = std::fs::read_to_string(&state_file).expect("state file");
+    assert!(
+        content.contains("\"interval_secs\":43200"),
+        "expected 43200: {content}"
+    );
+
+    stdout(&run(&["config", "updateCheck", "false"]));
+    let content = std::fs::read_to_string(&state_file).expect("state file");
+    assert!(
+        content.contains("\"interval_secs\":-1"),
+        "expected -1: {content}"
+    );
+
+    stdout(&run(&["config", "--unset", "updateCheck"]));
+    let content = std::fs::read_to_string(&state_file).expect("state file");
+    assert!(
+        content.contains("\"interval_secs\":0"),
+        "expected 0 after unset: {content}"
+    );
+}
+
+#[test]
 fn bay_warm_refusal_names_the_config_verb() {
     let repo = Repo::new();
     let out = ff_tower(repo.path(), &["bay", "warm", "--json"]);

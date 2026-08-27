@@ -37,6 +37,12 @@ anstream = "1"
 # markdown. See DESIGN.md, "Procedures — Shape".
 toml = "0.9"
 tempfile = "3"
+# The self-update stack, fufu's exactly: ureq over rustls is tower's first
+# and only TLS, and the deny.toml exceptions it needs are already carried.
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 
 [profile.release]
 lto = "fat"

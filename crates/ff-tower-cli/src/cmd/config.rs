@@ -133,6 +133,14 @@ fn set(
     config::validate(setting, value)?;
     config.set(setting, value, global)?;
 
+    // Write-through: the passive lane caches the parsed cadence, and a
+    // config write must keep that cache honest in the same breath.
+    if setting.name == "updateCheck"
+        && let Some(encoded) = config::parse_cadence(value)
+    {
+        crate::selfupdate::notify::sync_interval(encoded);
+    }
+
     if json {
         println!(
             "{}",
@@ -162,6 +170,17 @@ fn unset_run(
     // The snapshot from open, with the written scope held out — what
     // still applies now that this scope no longer answers.
     let still = config.read_excluding(setting, global);
+
+    // Write-through, the unset half: the cache takes whatever encoding
+    // still applies, `0` (the default) when nothing does.
+    if setting.name == "updateCheck" {
+        let encoded = still
+            .value
+            .as_deref()
+            .and_then(config::parse_cadence)
+            .unwrap_or(0);
+        crate::selfupdate::notify::sync_interval(encoded);
+    }
 
     if json {
         let still_json = still

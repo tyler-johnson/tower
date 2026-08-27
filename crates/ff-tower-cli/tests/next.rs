@@ -92,7 +92,10 @@ fn next_claims_the_agent_part_and_the_second_ask_is_the_exit_3_needs_you() {
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(3));
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("nothing ready — two flights need you"), "{text}");
+    assert!(
+        text.contains("nothing ready — two flights need you"),
+        "{text}"
+    );
     assert!(text.contains("ff tower triage"), "{text}");
 }
 
@@ -111,7 +114,10 @@ fn the_needs_you_count_rides_the_envelope() {
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(3));
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("nothing ready — one flight needs you"), "{text}");
+    assert!(
+        text.contains("nothing ready — one flight needs you"),
+        "{text}"
+    );
 }
 
 #[test]

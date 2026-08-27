@@ -91,7 +91,10 @@ fn the_pile_lists_open_flights_and_omits_classified_and_done_ones() {
     let repo = repo();
     install_chore(&repo);
     stdout(&ff_tower(repo.path(), &["file", "still unclassified"]));
-    stdout(&ff_tower(repo.path(), &["file", "already routed", "-p", "chore"]));
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "already routed", "-p", "chore"],
+    ));
     stdout(&ff_tower(repo.path(), &["file", "finished"]));
     stdout(&ff_tower(repo.path(), &["done", "3"]));
     // A claim does not classify — the flight stays in the pile.
@@ -147,7 +150,15 @@ fn a_route_to_a_single_part_procedure_collapses_onto_the_flight() {
 
     let out = ff_tower(
         repo.path(),
-        &["triage", "1", "-p", "chore", "-m", "it is a chore", "--json"],
+        &[
+            "triage",
+            "1",
+            "-p",
+            "chore",
+            "-m",
+            "it is a chore",
+            "--json",
+        ],
     );
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
@@ -156,7 +167,10 @@ fn a_route_to_a_single_part_procedure_collapses_onto_the_flight() {
     assert_eq!(routed["kind"], serde_json::json!("routed"));
     assert_eq!(routed["body"]["flight"], serde_json::json!("pi.1"));
     assert_eq!(routed["body"]["procedure"], serde_json::json!("chore"));
-    assert_eq!(routed["body"]["because"], serde_json::json!("it is a chore"));
+    assert_eq!(
+        routed["body"]["because"],
+        serde_json::json!("it is a chore")
+    );
     assert_eq!(
         routed["body"]["part"],
         serde_json::json!({"id": "do", "crew": "you", "done": "asserted"})
@@ -169,10 +183,7 @@ fn a_route_to_a_single_part_procedure_collapses_onto_the_flight() {
     assert_eq!(brief["data"]["procedure"], serde_json::json!("chore"));
     assert_eq!(brief["data"]["part"]["id"], serde_json::json!("do"));
     assert!(brief["data"]["routed_by"].is_string(), "{brief}");
-    assert_eq!(
-        brief["data"]["because"],
-        serde_json::json!("it is a chore")
-    );
+    assert_eq!(brief["data"]["because"], serde_json::json!("it is a chore"));
 
     let brief = stdout(&ff_tower(repo.path(), &["brief", "1"]));
     assert!(brief.contains("routed chore · by"), "{brief}");
@@ -221,10 +232,7 @@ fn a_route_to_a_multi_part_procedure_makes_the_flight_a_parent() {
         parts[0]["body"]["subject"],
         serde_json::json!("the branch · pass")
     );
-    assert_eq!(
-        parts[0]["body"]["part"]["crew"],
-        serde_json::json!("agent")
-    );
+    assert_eq!(parts[0]["body"]["part"]["crew"], serde_json::json!("agent"));
     assert_eq!(
         parts[1]["body"]["subject"],
         serde_json::json!("the branch · verdict")
@@ -240,8 +248,14 @@ fn a_route_to_a_multi_part_procedure_makes_the_flight_a_parent() {
         })
         .collect();
     // The parent waits on both parts, and `verdict` waits on `pass`.
-    assert!(edges.contains(&("pi.1".to_string(), parts[0]["id"].as_str().unwrap().to_string())));
-    assert!(edges.contains(&("pi.1".to_string(), parts[1]["id"].as_str().unwrap().to_string())));
+    assert!(edges.contains(&(
+        "pi.1".to_string(),
+        parts[0]["id"].as_str().unwrap().to_string()
+    )));
+    assert!(edges.contains(&(
+        "pi.1".to_string(),
+        parts[1]["id"].as_str().unwrap().to_string()
+    )));
     assert!(edges.contains(&(
         parts[1]["id"].as_str().unwrap().to_string(),
         parts[0]["id"].as_str().unwrap().to_string()

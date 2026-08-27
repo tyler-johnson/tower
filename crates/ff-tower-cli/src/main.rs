@@ -24,19 +24,55 @@ mod cmd;
 mod error;
 mod machine;
 mod render;
+mod selfupdate;
 
 use clap::Parser;
 
 use cli::{BayAction, Cli, Command};
 use error::CliError;
+use ff_tower_core::ff::Ff;
 
 fn main() {
     let cli = Cli::parse();
+    // The lanes are decided from the command line, before anything runs:
+    // bare `ff tower` is the board and rides the board's.
+    let lanes = cli
+        .command
+        .as_ref()
+        .map_or(Command::Board.lanes(), Command::lanes);
+
+    // Preflight: the passive lane's background check. A lane must never
+    // change what a command does, so the repository is best-effort — no
+    // repo, no lane, never an error.
+    let repo = if lanes.update {
+        Ff::here().ok().map(|ff| ff.repo().to_path_buf())
+    } else {
+        None
+    };
+    if let Some(repo) = &repo {
+        selfupdate::notify::maybe_spawn_check(repo);
+    }
+
     match run(&cli) {
         // Safe to exit: stdout is line-buffered and every verb ends its
         // output with a newline, so nothing is left unflushed.
-        Ok(code) if code != 0 => std::process::exit(code),
-        Ok(_) => {}
+        Ok(code) => {
+            // The trailer rides every success exit path — `hold`'s 3 and
+            // `next`/`doctor`'s codes included — while errors leave
+            // through `report()` and never reach it, fufu's rule. The
+            // notice is stderr and tty-gated, so `--json` pipes never
+            // see it.
+            if let Some(repo) = &repo
+                && let Some(notice) =
+                    selfupdate::notify::pending(repo, env!("CARGO_PKG_VERSION"), lanes.notice)
+            {
+                eprintln!("{notice}");
+                selfupdate::notify::mark_notified();
+            }
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
         Err(err) => report(cli.json, verb(&cli.command), &err),
     }
 }
@@ -65,6 +101,7 @@ fn verb(command: &Option<Command>) -> &'static str {
             Some(BayAction::Warm { .. }) => "bay warm",
             Some(BayAction::Release { .. }) => "bay release",
         },
+        Some(Command::Update { .. }) => "update",
         Some(Command::Doctor) => "doctor",
     }
 }
@@ -119,6 +156,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             global,
         }) => cmd::config::run(cli.json, key.as_deref(), value.clone(), *unset, *global)?,
         Some(Command::Bay { action }) => cmd::bay::run(cli.json, action.as_ref())?,
+        Some(Command::Update { check }) => cmd::update::run(cli.json, *check)?,
         Some(Command::Doctor) => return cmd::doctor::run(cli.json),
     }
     Ok(0)

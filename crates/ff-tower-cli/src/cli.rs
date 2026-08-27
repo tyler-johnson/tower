@@ -157,9 +157,66 @@ pub enum Command {
         #[command(subcommand)]
         action: Option<BayAction>,
     },
+    /// Download the latest release and replace this binary.
+    Update {
+        /// Refresh the update cache only (used by the background check).
+        #[arg(long)]
+        check: bool,
+    },
     /// Stale bays and drift — doctor observes and complains, never
     /// enforces.
     Doctor,
+}
+
+/// The ambient lanes: what rides an invocation besides the verb itself.
+/// tower has two — fufu carries capture and trim as well, but tower has
+/// neither, so the table is the passive update check and its voice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lanes {
+    /// Refresh the update cache in the background, and let an auto-install fire.
+    pub update: bool,
+    /// Print the "vX.Y.Z available" line on stderr when one is pending.
+    pub notice: bool,
+}
+
+impl Command {
+    /// One exhaustive table, fufu's discipline: a verb added without
+    /// deciding its lanes is a compile error rather than a verb that
+    /// silently never learns about releases.
+    pub fn lanes(&self) -> Lanes {
+        match self {
+            // The detached child must not recurse into another check.
+            Command::Update { .. } => Lanes {
+                update: false,
+                notice: false,
+            },
+            // Doctor rides the check but suppresses the generic notice —
+            // its own `tower/update` row speaks instead.
+            Command::Doctor => Lanes {
+                update: true,
+                notice: false,
+            },
+            Command::Board
+            | Command::Next { .. }
+            | Command::Brief { .. }
+            | Command::File { .. }
+            | Command::Comment { .. }
+            | Command::Link { .. }
+            | Command::Decompose { .. }
+            | Command::Procedures { .. }
+            | Command::Triage { .. }
+            | Command::Claim { .. }
+            | Command::Hold { .. }
+            | Command::Answer { .. }
+            | Command::Done { .. }
+            | Command::Explain { .. }
+            | Command::Config { .. }
+            | Command::Bay { .. } => Lanes {
+                update: true,
+                notice: true,
+            },
+        }
+    }
 }
 
 /// The pool's three verbs; bare `ff tower bay` is the list, the same

@@ -96,11 +96,19 @@ fn a_fresh_repository_is_healthy() {
     let out = ff_tower(repo.path(), &["doctor", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let (rows, findings) = rows(&out);
-    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows.len(), 2, "{rows:?}");
     assert_eq!(rows[0]["level"], serde_json::json!("ok"));
     assert_eq!(rows[0]["check"], serde_json::json!("ff/version"));
     let message = rows[0]["message"].as_str().expect("message");
     assert!(message.contains("contract 1"), "{message}");
+    // The update row: test binaries are never official, so the passive
+    // lane reports the source build — info, never a finding.
+    assert_eq!(rows[1]["level"], serde_json::json!("info"));
+    assert_eq!(rows[1]["check"], serde_json::json!("tower/update"));
+    assert_eq!(
+        rows[1]["message"],
+        serde_json::json!("source build — updates via cargo install")
+    );
     assert_eq!(findings, 0);
 }
 
@@ -177,9 +185,14 @@ printf '%s\n' '{"ff":99,"cmd":"version","data":{"version":"9.9.9"}}'
     let out = ff_tower_via(repo.path(), &["doctor", "--json"], Some(fake.path()));
     assert_eq!(out.status.code(), Some(1));
     let (all, findings) = rows(&out);
-    assert_eq!(all.len(), 1, "the seam row alone: {all:?}");
+    assert_eq!(
+        all.len(),
+        2,
+        "the seam row and the seamless update row: {all:?}"
+    );
     assert_eq!(all[0]["level"], serde_json::json!("warn"));
     assert_eq!(all[0]["check"], serde_json::json!("ff/contract"));
+    row(&all, "tower/update");
     let message = all[0]["message"].as_str().expect("message");
     assert!(message.contains("99") && message.contains('1'), "{message}");
     assert_eq!(findings, 1);

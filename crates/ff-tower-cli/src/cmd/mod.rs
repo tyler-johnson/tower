@@ -25,6 +25,7 @@ pub mod link;
 pub mod next;
 pub mod procedures;
 pub mod triage;
+pub mod update;
 
 use crate::error::CliError;
 use crate::render;

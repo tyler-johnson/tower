@@ -13,7 +13,7 @@
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, Level, Reads, SeamHealth};
+use ff_tower_core::board::{self, DoctorRow, Level, Reads, SeamHealth};
 use ff_tower_core::ff::{self, BranchList};
 use ff_tower_core::log::Store;
 
@@ -28,7 +28,7 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         Err(err) => return Err(err.into()),
     };
 
-    let report = match &seam {
+    let mut report = match &seam {
         SeamHealth::Ok { .. } => {
             let store = Store::open(ff.repo())?;
             let fold = board::fold(&store.read_all()?);
@@ -48,6 +48,10 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         // absence of a bay row asserts nothing.
         _ => board::doctor(&board::fold(&[]), &no_reads(), &seam, &[]),
     };
+    // The update row rides both arms: the passive lane's cache answers
+    // without a seam, and its own row is why doctor suppresses the
+    // generic notice. Info level — never a finding.
+    report.rows.push(update_row());
 
     if json {
         println!("{}", machine::emit("doctor", &report));
@@ -78,6 +82,23 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         }
     }
     Ok(if report.findings == 0 { 0 } else { 1 })
+}
+
+/// The passive lane's cache, read and reported — until `ff tower version`
+/// (#14) lands, doctor is the cache's only reader.
+fn update_row() -> DoctorRow {
+    use crate::selfupdate::notify::CheckStatus;
+    let message = match crate::selfupdate::notify::check_status(env!("CARGO_PKG_VERSION")) {
+        CheckStatus::Unofficial => "source build — updates via cargo install".to_string(),
+        CheckStatus::NoCheckYet => "no check yet".to_string(),
+        CheckStatus::Available(tag) => format!("{tag} available — `ff tower update`"),
+        CheckStatus::UpToDate => format!("up to date (v{})", env!("CARGO_PKG_VERSION")),
+    };
+    DoctorRow {
+        level: Level::Info,
+        check: "tower/update".to_string(),
+        message,
+    }
 }
 
 /// Empty reads for the broken-seam path — nothing was gathered.

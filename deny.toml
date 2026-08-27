@@ -19,7 +19,7 @@ allow = [
     "CC0-1.0",
 ]
 # The one non-permissive license in the tree. MPL-2.0 is file-level copyleft:
-# linking imposes nothing on fufu's code; only modifications to uluru itself
+# linking imposes nothing on tower's code; only modifications to uluru itself
 # would have to be published. Pulled in transitively by gix-pack — unavoidable
 # while we depend on gix. Scoped to this crate so no other MPL code sneaks in.
 exceptions = [
