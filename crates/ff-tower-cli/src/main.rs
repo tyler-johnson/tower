@@ -8,9 +8,11 @@
 //! which one is canonical.
 //!
 //! Exit codes follow the error id's namespace, fufu's derivation:
-//! `usage/*` exits 2, anything else 1. `hold`'s 3 is not one of them — it
-//! is an outcome, not an error, so it rides the success path below with a
-//! full data envelope, and the `held/*` error namespace stays unused.
+//! `usage/*` exits 2, anything else 1. The 3s are not among them — an
+//! outcome, not an error, so they ride the success path below with a full
+//! data envelope, and the `held/*` error namespace stays unused: `hold`'s
+//! 3 says the flight stopped with a question, and `next`'s says the pool
+//! is empty while unclassified or you-crewed work waits.
 //! Success is otherwise 0, an empty board included — a board render is
 //! never a yes/no question. Clap keeps its default 2 for a command line
 //! it refused itself.
@@ -49,6 +51,7 @@ fn verb(command: &Option<Command>) -> &'static str {
         Some(Command::Link { .. }) => "link",
         Some(Command::Decompose { .. }) => "decompose",
         Some(Command::Procedures { .. }) => "procedures",
+        Some(Command::Triage { .. }) => "triage",
         Some(Command::Claim { .. }) => "claim",
         Some(Command::Hold { .. }) => "hold",
         Some(Command::Answer { .. }) => "answer",
@@ -63,7 +66,8 @@ fn verb(command: &Option<Command>) -> &'static str {
 
 /// Run the verb and pick the success exit code — 0 everywhere except
 /// `hold`, whose 3 says the flight stopped with a question, and `next`,
-/// which picks its own: 1 is fufu's "no," an empty pick.
+/// which picks its own: 1 is fufu's "no," a drained board, and 3 an
+/// empty pick with work that needs you.
 fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
         None | Some(Command::Board) => cmd::board::run(cli.json)?,
@@ -82,6 +86,11 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b)?,
         Some(Command::Decompose { flight, parts }) => cmd::decompose::run(cli.json, flight, parts)?,
         Some(Command::Procedures { name }) => cmd::procedures::run(cli.json, name.as_deref())?,
+        Some(Command::Triage {
+            flight,
+            procedure,
+            message,
+        }) => cmd::triage::run(cli.json, flight.as_deref(), procedure.clone(), message.clone())?,
         Some(Command::Claim { flight }) => cmd::claim::run(cli.json, flight)?,
         Some(Command::Hold { flight, message }) => {
             cmd::hold::run(cli.json, flight, message.clone())?;

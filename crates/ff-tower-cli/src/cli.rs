@@ -85,6 +85,19 @@ pub enum Command {
         #[arg(value_name = "name")]
         name: Option<String>,
     },
+    /// The unclassified pile, or route one flight to a procedure.
+    Triage {
+        /// The flight to route — a number, `writer#n`, or the event id;
+        /// the pile when unsaid.
+        #[arg(value_name = "flight")]
+        flight: Option<String>,
+        /// The procedure it routes to.
+        #[arg(short = 'p', long = "procedure", value_name = "name")]
+        procedure: Option<String>,
+        /// Why it routed there.
+        #[arg(short = 'm', value_name = "msg")]
+        message: Option<String>,
+    },
     /// Claim one specific flight, out of order.
     Claim {
         /// The flight to claim — a number, `writer#n`, or the event id.

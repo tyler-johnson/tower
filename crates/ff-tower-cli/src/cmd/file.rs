@@ -22,8 +22,8 @@
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board;
-use ff_tower_core::log::{Kind, PartStamp};
-use ff_tower_core::procedure::{self, Definition, Part};
+use ff_tower_core::log::Kind;
+use ff_tower_core::procedure;
 
 pub fn run(
     json: bool,
@@ -68,7 +68,20 @@ pub fn run(
     })?;
 
     let body = message.unwrap_or_default();
-    let ids = store.append_with(|mint| plan(definition, subject, &body, mint))?;
+    let ids = store.append_with(|mint| {
+        super::classify(
+            definition,
+            subject,
+            super::Parent::Mint,
+            |part| Kind::Filed {
+                procedure: definition.name.clone(),
+                subject: subject.to_string(),
+                body: body.clone(),
+                part,
+            },
+            mint,
+        )
+    })?;
     let (parent, rest) = ids.split_first().expect("the parent is the first event");
     let parts = if definition.parts.len() == 1 {
         0
@@ -116,75 +129,6 @@ pub fn run(
         println!("{}", super::tail(colored));
     }
     Ok(())
-}
-
-/// The batch, in the order the ids are read back out of: the parent, then
-/// one filing per part, then the parent's edge to each part, then the
-/// `after` DAG between parts.
-///
-/// A single-part procedure returns one event and nothing else — the
-/// collapse rule, and the reason this returns a plan rather than a fixed
-/// shape.
-fn plan(
-    definition: &Definition,
-    subject: &str,
-    body: &str,
-    mint: &dyn Fn(usize) -> ff_tower_core::log::EventId,
-) -> Vec<Kind> {
-    let parts = &definition.parts;
-    if let [only] = parts.as_slice() {
-        return vec![Kind::Filed {
-            procedure: definition.name.clone(),
-            subject: subject.to_string(),
-            body: body.to_string(),
-            part: Some(stamp(only)),
-        }];
-    }
-
-    let mut kinds = vec![Kind::Filed {
-        procedure: definition.name.clone(),
-        subject: subject.to_string(),
-        body: body.to_string(),
-        part: None,
-    }];
-    // Every row stands alone: `next` hands one to an agent with no parent
-    // context attached, so the part's subject carries the parent's.
-    kinds.extend(parts.iter().map(|part| Kind::Filed {
-        procedure: definition.name.clone(),
-        subject: format!("{subject} · {}", part.id),
-        body: String::new(),
-        part: Some(stamp(part)),
-    }));
-    kinds.extend((0..parts.len()).map(|offset| Kind::Linked {
-        from: mint(0),
-        to: mint(offset + 1),
-    }));
-    for (offset, part) in parts.iter().enumerate() {
-        for after in &part.after {
-            // Infallible: the loader refused an `after` naming nothing.
-            let at = parts
-                .iter()
-                .position(|other| &other.id == after)
-                .expect("`after` names a part the loader validated");
-            kinds.push(Kind::Linked {
-                from: mint(offset + 1),
-                to: mint(at + 1),
-            });
-        }
-    }
-    kinds
-}
-
-/// A definition's part, as the log carries it. The closed enums become
-/// their names here; the log stays tolerant where the config stays closed.
-fn stamp(part: &Part) -> PartStamp {
-    PartStamp {
-        id: part.id.clone(),
-        crew: part.crew.name().to_string(),
-        skill: part.skill.clone(),
-        done: part.done.name().to_string(),
-        bay: part.bay.map(|bay| bay.name().to_string()),
-    }
 }
 
 fn width(items: &[String]) -> usize {

@@ -2,10 +2,13 @@
 //! set of `k` that collide with neither each other nor anything already
 //! flying.
 //!
-//! The one verb whose success code varies: 0 when anything was picked, 1
-//! when nothing — fufu's "no," on the hold precedent. An empty pick rides
-//! the success path with a full data envelope and only the code says it,
-//! so `while ff tower next` terminates on the code alone. The pipeline is
+//! The one verb whose success code varies: 0 when anything was picked; on
+//! an empty pick, 3 when the crew gate is what emptied it — work exists
+//! and it needs you — and 1 when the board is truly drained, fufu's "no."
+//! DESIGN's loop contract: a loop runs until 1 or 3 and reports which. An
+//! empty pick rides the success path with a full data envelope and only
+//! the code says it, so `while ff tower next` terminates on the code
+//! alone. The pipeline is
 //! the board's — store, fold, gather, probe — with `pick` in place of
 //! `enrich`, and unless `--peek` the picked set becomes one `claimed`
 //! event per flight in a single atomic append.
@@ -24,6 +27,9 @@ struct Data<'a> {
     picked: &'a [Pick],
     claimed: bool,
     passed: &'a [Passed],
+    /// Live and unclaimed, kept out of the pool by the crew stamp alone —
+    /// the count behind exit 3.
+    yours: usize,
 }
 
 pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
@@ -65,6 +71,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
                     picked: &picks.picked,
                     claimed,
                     passed: &picks.passed,
+                    yours: picks.yours,
                 }
             )
         );
@@ -79,7 +86,17 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
             );
         }
         if picks.picked.is_empty() {
-            println!("nothing ready");
+            if picks.yours > 0 {
+                let (count, noun, verb) = if picks.yours == 1 {
+                    ("one".to_string(), "flight", "needs")
+                } else {
+                    (super::count(picks.yours), "flights", "need")
+                };
+                println!("nothing ready — {count} {noun} {verb} you");
+                println!("{}", render::paint_dim("triage: ff tower triage", colored));
+            } else {
+                println!("nothing ready");
+            }
         }
         for passed in &picks.passed {
             let reason = match &passed.reason {
@@ -109,7 +126,11 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         }
         println!("{}", super::tail(colored));
     }
-    Ok(if picks.picked.is_empty() { 1 } else { 0 })
+    Ok(match (picks.picked.is_empty(), picks.yours) {
+        (false, _) => 0,
+        (true, 0) => 1,
+        (true, _) => 3,
+    })
 }
 
 /// A wire id from the pick, in the board's display form. Infallible — the

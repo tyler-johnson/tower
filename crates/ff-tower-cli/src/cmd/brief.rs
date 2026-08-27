@@ -49,6 +49,19 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     if let Some(part) = brief.part.as_ref() {
         out.push_str(&format!("    {}\n", part_line(part, colored)));
     }
+    // The routing, explained — the stored stamp beside who wrote it and
+    // why, so a bad call is correctable in a glance.
+    if let (Some(by), Some(at)) = (brief.routed_by.as_deref(), brief.routed_at) {
+        let mut phrase = format!(
+            "routed {} · by {by} · {}",
+            brief.procedure,
+            render::age(now, at)
+        );
+        if let Some(because) = brief.because.as_deref() {
+            phrase.push_str(&format!(" · {because}"));
+        }
+        out.push_str(&format!("    {}\n", render::paint_dim(&phrase, colored)));
+    }
 
     if !brief.body.is_empty() {
         out.push('\n');
