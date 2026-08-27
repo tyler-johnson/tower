@@ -37,6 +37,7 @@
 //! dependency is declared here rather than inherited from anything.
 
 pub mod board;
+pub mod config;
 pub mod ff;
 pub mod log;
 pub mod procedure;
