@@ -46,6 +46,8 @@ Identity is a caller fact, not a dispatch target: `--as qwen` means qwen is call
 
 Sync follows the same discipline. Upstream is pulled lazily at invocation, gated by a cadence stamp, the way fufu's auto-trim and update check already work. The board is fresh because you just asked for it. Anything that needs to reach you unasked belongs in fufu's ambient shell channel — a heartbeat the user started — not in a process tower spawned.
 
+The passive update lane is the one bounded exception, fufu's carve-out carried over verbatim: official binaries (never dev, dogfood, or test builds; never under CI) spawn a detached `ff tower update --check` at most once per `tower.updateCheck` (default daily) — the one sanctioned self-spawn. It refreshes a small cache file under the user cache dir and exits; foreground commands read the cache, and with `tower.autoUpdate` on (the default) a newer release installs itself silently in the background, or with it off a one-line notice lands on stderr instead. Three throttles keep it polite: the cadence gates the checks, auto-install probes retry at most daily, and a release is announced at most once, ever. `tower.updateCheck false` kills the whole lane. The trust root is deliberately plain — HTTPS to GitHub plus the release's sha256, the same root the install scripts rely on.
+
 Tower cannot enforce, only observe and complain. `ff tower next` prints the bay path; it cannot relocate a running agent and does not try. Work landing on the wrong branch is reported loudly at the next render rather than prevented by a hook. That is fufu's regime boundary, inherited.
 
 ## Deconfliction — the earned existence
@@ -137,7 +139,8 @@ caller          surface        what it does
 ────────────────────────────────────────────────────────────────
 a person        CLI            decide, answer, route, publish
 an agent        MCP            claim, read a brief, report, hold
-nothing         —              no daemon, no cron, no spawns
+nothing         —              no daemon, no cron; one sanctioned
+                               self-spawn, the detached update check
 ```
 
 The board is an inbox, in four sections matching four states of mind: **waiting on you** (agent questions, review requests, changes requested), **in the air** (bays, with live conflict verdicts), **holding** (CI, merge queue, blocked on a person), **open**.
@@ -217,6 +220,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower explain <flight>` | why this is here, why this procedure, and what it beat | you |
 | `ff tower procedures [<name>]` | what is installed, what each matches, and where to fork it | you |
 | `ff tower config` | settings, on fufu's typed-registry model | you |
+| `ff tower update` | move this binary to the latest release: verified download, atomic swap; a passive lane checks ~daily and auto-installs, or prints a one-line notice | you |
 | `ff tower doctor` | stale adapters, bays that no longer resolve | you |
 | `ff tower <adapter> <args>` | passthrough to `tower-<adapter>` on PATH: `ff tower linear`, `ff tower github` | either |
 

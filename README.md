@@ -11,7 +11,7 @@ State is derived from the repository, never entered. Only intent is stored.*
 
 ---
 
-> **Status: design only.** This repository is a scaffold. Nothing described below is built, though nearly everything it stands on is. [DESIGN.md](DESIGN.md) is the founding sketch and the thing to read.
+> [DESIGN.md](DESIGN.md) is the founding sketch and still the thing to read; the flights on the board are what stands built so far.
 
 Every tracker asks a human to say what is happening, and then drifts from the repository the moment attention lapses. fufu already knows: capture runs before every action, futures are computed for free, branches and sessions are observable. So tower stores what a person authored — title, body, links, priority, dependencies — and derives the rest. A flight is `active` because a branch exists with snapshots on it, not because anyone clicked.
 
@@ -44,6 +44,30 @@ That last line is fufu's extension rule unmodified: extensions read fufu state a
 | `ff-tower-testsupport` | shared fixtures |
 
 Forge adapters are separate binaries discovered on PATH — `tower-github`, `tower-linear` — on git's extension model, so a third party can write one without touching this repository.
+
+## Install
+
+tower rides fufu, so install [fufu](https://github.com/tyler-johnson/fufu) first — the verb is reached as `ff tower`.
+
+Linux/macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tyler-johnson/tower/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/tyler-johnson/tower/main/install.ps1 | iex
+```
+
+Homebrew:
+
+```sh
+brew install tyler-johnson/tap/ff-tower
+```
+
+Installed binaries keep themselves fresh: a passive lane checks for releases about daily and auto-installs (`ff tower config updateCheck false` turns it off, `autoUpdate false` downgrades it to a one-line notice), and `ff tower update` moves the binary by hand.
 
 ## Building
 
