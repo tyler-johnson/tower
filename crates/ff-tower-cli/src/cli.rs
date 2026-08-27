@@ -134,6 +134,9 @@ pub enum Command {
         #[command(subcommand)]
         action: Option<BayAction>,
     },
+    /// Stale bays and drift — doctor observes and complains, never
+    /// enforces.
+    Doctor,
 }
 
 /// The pool's three verbs; bare `ff tower bay` is the list, the same

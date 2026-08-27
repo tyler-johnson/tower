@@ -12,7 +12,9 @@
 //! outcome, not an error, so they ride the success path below with a full
 //! data envelope, and the `held/*` error namespace stays unused: `hold`'s
 //! 3 says the flight stopped with a question, and `next`'s says the pool
-//! is empty while unclassified or you-crewed work waits.
+//! is empty while unclassified or you-crewed work waits. `doctor`'s 1 is
+//! the same kind of outcome as `next`'s: findings, reported in a full
+//! data envelope, fufu's doctor precedent.
 //! Success is otherwise 0, an empty board included — a board render is
 //! never a yes/no question. Clap keeps its default 2 for a command line
 //! it refused itself.
@@ -61,13 +63,15 @@ fn verb(command: &Option<Command>) -> &'static str {
             Some(BayAction::Warm { .. }) => "bay warm",
             Some(BayAction::Release { .. }) => "bay release",
         },
+        Some(Command::Doctor) => "doctor",
     }
 }
 
 /// Run the verb and pick the success exit code — 0 everywhere except
-/// `hold`, whose 3 says the flight stopped with a question, and `next`,
-/// which picks its own: 1 is fufu's "no," a drained board, and 3 an
-/// empty pick with work that needs you.
+/// `hold`, whose 3 says the flight stopped with a question, `next`,
+/// which picks its own — 1 is fufu's "no," a drained board, and 3 an
+/// empty pick with work that needs you — and `doctor`, whose 1 says the
+/// checks found something.
 fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
         None | Some(Command::Board) => cmd::board::run(cli.json)?,
@@ -90,7 +94,12 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             flight,
             procedure,
             message,
-        }) => cmd::triage::run(cli.json, flight.as_deref(), procedure.clone(), message.clone())?,
+        }) => cmd::triage::run(
+            cli.json,
+            flight.as_deref(),
+            procedure.clone(),
+            message.clone(),
+        )?,
         Some(Command::Claim { flight }) => cmd::claim::run(cli.json, flight)?,
         Some(Command::Hold { flight, message }) => {
             cmd::hold::run(cli.json, flight, message.clone())?;
@@ -101,6 +110,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         }
         Some(Command::Done { flight }) => cmd::done::run(cli.json, flight.as_deref())?,
         Some(Command::Bay { action }) => cmd::bay::run(cli.json, action.as_ref())?,
+        Some(Command::Doctor) => return cmd::doctor::run(cli.json),
     }
     Ok(0)
 }

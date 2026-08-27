@@ -15,6 +15,7 @@ pub mod brief;
 pub mod claim;
 pub mod comment;
 pub mod decompose;
+pub mod doctor;
 pub mod done;
 pub mod file;
 pub mod hold;

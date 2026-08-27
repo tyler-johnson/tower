@@ -133,12 +133,7 @@ fn pile(json: bool) -> Result<(), CliError> {
 
 /// The route: one `routed` event, and — for a multi-part procedure — the
 /// part filings and edges in the same atomic batch.
-fn route(
-    json: bool,
-    flight: &str,
-    name: &str,
-    message: Option<String>,
-) -> Result<(), CliError> {
+fn route(json: bool, flight: &str, name: &str, message: Option<String>) -> Result<(), CliError> {
     super::parse_ref(flight)?;
     let name = name.trim();
     if name.is_empty() {
