@@ -142,6 +142,7 @@ mod tests {
             },
             current_branch: None,
             worktrees,
+            orphans: Vec::new(),
         }
     }
 

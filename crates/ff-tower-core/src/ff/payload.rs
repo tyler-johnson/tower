@@ -236,9 +236,8 @@ pub struct OpLog {
 ///
 /// `path` is null for a bare repository's main row — tower never usefully
 /// runs bare, but the payload parses what fufu emits. A null `branch` is a
-/// detached HEAD. `chain`, `tip`, and the payload's `orphans` stay
-/// unmirrored: branch tips come from the `branch list` join, and nothing
-/// in tower reads a chain ref by name.
+/// detached HEAD. `chain` and `tip` stay unmirrored: branch tips come from
+/// the `branch list` join, and nothing in tower reads a chain ref by name.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WorktreeInfo {
     /// fufu's worktree id — `main` for the main worktree.
@@ -249,10 +248,30 @@ pub struct WorktreeInfo {
     pub current: bool,
 }
 
-/// `ff worktree list --json` — the survey: every worktree, main first.
+/// One orphan chain in the survey: a bay torn down whose chain remains.
+/// Every `bay release` leaves one by design — fufu guarantees the chain
+/// outlives the bay — so an orphan is a fact, not a fault. `chain` stays
+/// unmirrored: nothing in tower reads a chain ref by name.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrphanInfo {
+    /// The worktree id the chain answered to.
+    pub id: String,
+    /// The chain's newest operation, `ff restore --at-op`'s address.
+    pub tip: Option<String>,
+    /// The branch the bay stood on when it was torn down.
+    pub branch: Option<String>,
+    /// Unix seconds of the tip operation.
+    pub time: Option<i64>,
+}
+
+/// `ff worktree list --json` — the survey: every worktree, main first,
+/// and the orphan chains beside them. `orphans` defaults so an older
+/// fufu's payload without the key still parses.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WorktreeList {
     pub worktrees: Vec<WorktreeInfo>,
+    #[serde(default)]
+    pub orphans: Vec<OrphanInfo>,
 }
 
 /// `ff worktree add --json` — the envelope wrapper around what was made.
@@ -306,4 +325,58 @@ pub struct BranchInfo {
 pub struct BranchList {
     pub named: Vec<BranchInfo>,
     pub anonymous: Vec<BranchInfo>,
+}
+
+/// `ff version --json` — what is actually installed. Repo-independent,
+/// and the doctor's drift check: the call itself is what surfaces an
+/// [`Error::Contract`](super::Error::Contract) when the `ff` on PATH and
+/// tower have moved apart.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Version {
+    pub version: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_survey_with_orphans_parses() {
+        let list: WorktreeList = serde_json::from_str(
+            r#"{"worktrees":[{"id":"main","path":"/repo","branch":"main","chain":"refs/fufu/wt/main/ops","tip":"abc","current":true}],"orphans":[{"id":"bay1","chain":"refs/fufu/wt/bay1/ops","tip":"def","branch":"feather","time":1700000000}]}"#,
+        )
+        .expect("parse");
+        assert_eq!(list.worktrees.len(), 1);
+        assert_eq!(list.orphans.len(), 1);
+        let orphan = &list.orphans[0];
+        assert_eq!(orphan.id, "bay1");
+        assert_eq!(orphan.tip.as_deref(), Some("def"));
+        assert_eq!(orphan.branch.as_deref(), Some("feather"));
+        assert_eq!(orphan.time, Some(1_700_000_000));
+    }
+
+    #[test]
+    fn a_survey_without_the_orphans_key_parses() {
+        // An older fufu's payload — the key defaults instead of failing.
+        let list: WorktreeList = serde_json::from_str(r#"{"worktrees":[]}"#).expect("parse");
+        assert!(list.orphans.is_empty());
+    }
+
+    #[test]
+    fn an_orphan_with_only_an_id_parses() {
+        // The optional fields are absence-tolerant, unknown ones ignored.
+        let orphan: OrphanInfo =
+            serde_json::from_str(r#"{"id":"bay1","a_field_from_next_year":true}"#).expect("parse");
+        assert_eq!(orphan.id, "bay1");
+        assert!(orphan.tip.is_none() && orphan.branch.is_none() && orphan.time.is_none());
+    }
+
+    #[test]
+    fn the_version_payload_parses_and_ignores_unknown_fields() {
+        let version: Version = serde_json::from_str(
+            r#"{"version":"0.9.0","commit":"ae91532","date":"2026-08-27","update":{"status":"unofficial","latest":null}}"#,
+        )
+        .expect("parse");
+        assert_eq!(version.version, "0.9.0");
+    }
 }

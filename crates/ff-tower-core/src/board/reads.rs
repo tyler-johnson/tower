@@ -20,7 +20,9 @@
 
 use std::collections::HashMap;
 
-use crate::ff::{self, BranchInfo, BranchList, Ff, OpEntry, Pairing, UnknownReason, WorktreeInfo};
+use crate::ff::{
+    self, BranchInfo, BranchList, Ff, OpEntry, OrphanInfo, Pairing, UnknownReason, WorktreeInfo,
+};
 
 use super::flight::Fold;
 
@@ -36,6 +38,9 @@ pub struct Reads {
     pub current_branch: Option<String>,
     /// The survey: every worktree, in `worktree list` order, main first.
     pub worktrees: Vec<WorktreeInfo>,
+    /// The survey's orphan chains: bays torn down whose chains remain.
+    /// Every release leaves one by design; only the doctor reads them.
+    pub orphans: Vec<OrphanInfo>,
 }
 
 impl Reads {
@@ -76,15 +81,19 @@ impl Reads {
 /// the first `op_log` already covered the invoking chain, whichever
 /// worktree that is, so a gather run from inside a bay stays coherent. A
 /// bay that refuses mid-poll — the directory can vanish between the
-/// survey and the spawn — is skipped, `probe`'s tolerance; the other
-/// error kinds are the whole seam broken and propagate. `freshest()` is
-/// merge-safe over the extended rows with no dedup: chains are disjoint,
-/// and the max-time rule spans them.
+/// survey and the spawn — is skipped, `probe`'s tolerance. A vanished
+/// directory fails `-C` before verb dispatch, and that error envelope
+/// answers for `map` rather than the verb asked, so the skip covers
+/// `Mismatched` beside the refusal; the other error kinds are the whole
+/// seam broken and propagate. `freshest()` is merge-safe over the
+/// extended rows with no dedup: chains are disjoint, and the max-time
+/// rule spans them.
 pub fn gather(ff: &Ff) -> ff::Result<Reads> {
     let mut ops = ff.op_log("session(glob:*)")?;
     let branches = ff.branch_list()?;
     let status = ff.status()?;
-    let worktrees = ff.worktree_list()?.worktrees;
+    let survey = ff.worktree_list()?;
+    let worktrees = survey.worktrees;
     for row in &worktrees {
         if row.current {
             continue;
@@ -94,7 +103,7 @@ pub fn gather(ff: &Ff) -> ff::Result<Reads> {
         };
         match ff.at_path(path).op_log("session(glob:*)") {
             Ok(rows) => ops.extend(rows),
-            Err(ff::Error::Ff(_)) => {}
+            Err(ff::Error::Ff(_) | ff::Error::Mismatched { .. }) => {}
             Err(err) => return Err(err),
         }
     }
@@ -103,6 +112,7 @@ pub fn gather(ff: &Ff) -> ff::Result<Reads> {
         branches,
         current_branch: status.head.branch().map(str::to_string),
         worktrees,
+        orphans: survey.orphans,
     })
 }
 
@@ -254,6 +264,7 @@ mod tests {
             },
             current_branch: None,
             worktrees: Vec::new(),
+            orphans: Vec::new(),
         }
     }
 

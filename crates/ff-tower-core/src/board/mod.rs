@@ -11,10 +11,13 @@
 //! riding the same probe output as the board. [`brief`] is one flight's
 //! full record over the same reads, no probes. [`bays`] is the pool over
 //! the same reads too: occupancy joined from the survey and the fold,
-//! never registered.
+//! never registered. [`doctor`] is the health fold — stale bays and
+//! drift as rows over the same reads plus the seam's own answer, and it
+//! observes and complains, never enforces.
 
 mod bay;
 mod brief;
+mod doctor;
 mod flight;
 mod model;
 mod pick;
@@ -22,6 +25,7 @@ mod reads;
 
 pub use bay::{BayView, bays};
 pub use brief::{Brief, CommentView, LinkView, brief};
+pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};

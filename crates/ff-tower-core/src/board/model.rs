@@ -346,6 +346,7 @@ mod tests {
             },
             current_branch: current.map(str::to_string),
             worktrees: Vec::new(),
+            orphans: Vec::new(),
         }
     }
 

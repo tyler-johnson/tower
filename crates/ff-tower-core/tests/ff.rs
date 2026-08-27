@@ -320,11 +320,27 @@ fn an_unknown_field_does_not_break_a_parse() {
 }
 
 #[test]
+fn version_reads_the_payload() {
+    // The doctor's seam check. The extra fields are what a real `ff
+    // version` carries today; only `version` is mirrored.
+    let fake = FakeFf::saying(
+        r#"{"ff":1,"cmd":"version","data":{"version":"0.9.0","commit":"ae91532","date":"2026-08-27","update":{"status":"unofficial","latest":null}}}"#,
+        0,
+    );
+    let version = Ff::at("/repo")
+        .program(fake.path())
+        .version()
+        .expect("version");
+    assert_eq!(version.version, "0.9.0");
+}
+
+#[test]
 fn worktree_list_add_remove_round_trips_on_a_real_repository() {
     let repo = Repo::new();
 
     let survey = Ff::at(repo.path()).worktree_list().expect("list");
     assert_eq!(survey.worktrees.len(), 1);
+    assert!(survey.orphans.is_empty(), "nothing released yet");
     let main = &survey.worktrees[0];
     assert_eq!(main.id, "main");
     assert!(main.current);
@@ -355,6 +371,15 @@ fn worktree_list_add_remove_round_trips_on_a_real_repository() {
     assert_eq!(removed.branch.as_deref(), Some("bay1"));
     let survey = Ff::at(repo.path()).worktree_list().expect("list");
     assert_eq!(survey.worktrees.len(), 1, "the bay is gone from the survey");
+
+    // The real-fufu proof the doctor's design leans on: the removed
+    // bay's chain outlives it as an orphan, its branch recorded.
+    assert_eq!(survey.orphans.len(), 1, "the chain outlives the bay");
+    let orphan = &survey.orphans[0];
+    assert_eq!(orphan.id, added.id);
+    assert_eq!(orphan.branch.as_deref(), Some("bay1"));
+    assert!(orphan.tip.is_some(), "the capture is the way back");
+    assert!(orphan.time.is_some());
 }
 
 #[test]

@@ -304,6 +304,7 @@ mod tests {
             },
             current_branch: current.map(str::to_string),
             worktrees: Vec::new(),
+            orphans: Vec::new(),
         }
     }
 
@@ -490,7 +491,10 @@ mod tests {
             )
         };
         let explained = brief(
-            &fold(&[filed("pi.1", 10, "s", ""), route("pi.2", 20, "it is a chore")]),
+            &fold(&[
+                filed("pi.1", 10, "s", ""),
+                route("pi.2", 20, "it is a chore"),
+            ]),
             &reads(Vec::new(), Vec::new(), None),
             &id("pi.1"),
         )

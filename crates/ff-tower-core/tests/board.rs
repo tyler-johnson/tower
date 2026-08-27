@@ -253,3 +253,41 @@ esac
     );
     assert_eq!(reads.current_branch.as_deref(), Some("main"));
 }
+
+#[test]
+fn gather_survives_a_bay_whose_directory_is_gone_and_carries_orphans() {
+    // A hand-deleted bay directory fails `-C` before verb dispatch, and
+    // fufu's error envelope answers for `map` while tower asked `op log`
+    // — `Mismatched`, not a refusal. The fan-out skips it the way it
+    // skips a refusing bay, so the board survives the very state doctor
+    // diagnoses. The survey's orphans ride through into the reads.
+    let fake = ff_tower_testsupport::FakeFf::script(
+        r#"case "$3 $4" in
+  "op log")
+    case "$2" in
+      "/gone/bay") printf '%s
+' '{"ff":1,"cmd":"map","error":{"id":"usage/no-such-directory","message":"-C /gone/bay: No such file or directory (os error 2)","exits":["ff status","ff worktree list"]}}'; exit 2 ;;
+      *) printf '%s
+' '{"ff":1,"cmd":"op log","data":{"ops":[{"branch":"main","session":"pi.1","time":50}]}}' ;;
+    esac ;;
+  "branch list") printf '%s
+' '{"ff":1,"cmd":"branch list","data":{"named":[],"anonymous":[]}}' ;;
+  "status --json") printf '%s
+' '{"ff":1,"cmd":"status","data":{"head":{"state":"branch","name":"main","ref":"refs/heads/main","commit":"abc"},"open":{"id":null,"id_letters":null,"pending":null,"subject":null,"clean":true,"base":null,"time":null},"changes":[],"insertions":0,"deletions":0,"conflicts":[],"held":null,"session":null}}' ;;
+  "worktree list") printf '%s
+' '{"ff":1,"cmd":"worktree list","data":{"worktrees":[{"id":"main","path":"/main","branch":"main","current":true},{"id":"gone","path":"/gone/bay","branch":"lost","current":false}],"orphans":[{"id":"old","chain":"refs/fufu/wt/old/ops","tip":"t","branch":"feather","time":5}]}}' ;;
+esac
+"#,
+    );
+    let ff = Ff::at("/main").program(fake.path());
+    let reads = board::gather(&ff).expect("gather survives the mismatch");
+
+    let sessions: Vec<&str> = reads
+        .ops
+        .iter()
+        .filter_map(|op| op.session.as_deref())
+        .collect();
+    assert_eq!(sessions, ["pi.1"], "the gone bay skipped, not fatal");
+    assert_eq!(reads.orphans.len(), 1, "the survey's orphans are carried");
+    assert_eq!(reads.orphans[0].branch.as_deref(), Some("feather"));
+}

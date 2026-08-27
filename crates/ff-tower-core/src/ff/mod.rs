@@ -45,8 +45,8 @@ use std::process::Command;
 pub use error::{Error, Refusal, Result};
 pub use payload::{
     At, BranchInfo, BranchList, ChangeKind, Collision, Editing, FileStat, Head, Held, OpEntry,
-    OpLog, Open, Pairing, Side, Status, UnknownReason, WorktreeAdd, WorktreeAdded, WorktreeInfo,
-    WorktreeList, WorktreeRemove, WorktreeRemoved,
+    OpLog, Open, OrphanInfo, Pairing, Side, Status, UnknownReason, Version, WorktreeAdd,
+    WorktreeAdded, WorktreeInfo, WorktreeList, WorktreeRemove, WorktreeRemoved,
 };
 
 use serde::Deserialize;
@@ -232,6 +232,16 @@ impl Ff {
         Ok(self
             .run::<WorktreeList>("worktree list", &[] as &[&str])?
             .data)
+    }
+
+    /// `ff version --json` — what is installed, repo-independent.
+    ///
+    /// The doctor's drift check: a fufu speaking another contract fails
+    /// here as [`Error::Contract`] before any bay-facing read is
+    /// attempted, and a missing `ff` as [`Error::NotInstalled`] — for
+    /// doctor those are findings, not failures.
+    pub fn version(&self) -> Result<Version> {
+        Ok(self.run::<Version>("version", &[] as &[&str])?.data)
     }
 
     /// `ff worktree add --json <path> [<branch>]` — warm a bay. fufu lays
