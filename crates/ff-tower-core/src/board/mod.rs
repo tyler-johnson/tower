@@ -9,7 +9,9 @@
 //! section over what the middle already fetched. [`assemble`] is the
 //! wiring, and the one call a render needs. [`pick`] is `next`'s fold,
 //! riding the same probe output as the board. [`brief`] is one flight's
-//! full record over the same reads, no probes. [`bays`] is the pool over
+//! full record over the same reads, no probes. [`explain`] is one
+//! flight's standing over the walk's own output — why it is where it is,
+//! and what it beat. [`bays`] is the pool over
 //! the same reads too: occupancy joined from the survey and the fold,
 //! never registered. [`doctor`] is the health fold — stale bays and
 //! drift as rows over the same reads plus the seam's own answer, and it
@@ -18,6 +20,7 @@
 mod bay;
 mod brief;
 mod doctor;
+mod explain;
 mod flight;
 mod model;
 mod pick;
@@ -26,6 +29,7 @@ mod reads;
 pub use bay::{BayView, bays};
 pub use brief::{Brief, CommentView, LinkView, brief};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
+pub use explain::{Explanation, Standing, explain};
 pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};
