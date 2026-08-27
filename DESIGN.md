@@ -220,6 +220,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower explain <flight>` | why this is here, why this procedure, and what it beat | you |
 | `ff tower procedures [<name>]` | what is installed, what each matches, and where to fork it | you |
 | `ff tower config` | settings, on fufu's typed-registry model | you |
+| `ff tower version` | which tower this is: the release, the commit it was built from, and — read from the update lane's cache, without touching the network — whether it is still the current one. `--json` reports the three as fields | either |
 | `ff tower update` | move this binary to the latest release: verified download, atomic swap; a passive lane checks ~daily and auto-installs, or prints a one-line notice | you |
 | `ff tower doctor` | stale adapters, bays that no longer resolve | you |
 | `ff tower <adapter> <args>` | passthrough to `tower-<adapter>` on PATH: `ff tower linear`, `ff tower github` | either |

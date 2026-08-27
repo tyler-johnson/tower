@@ -84,8 +84,8 @@ pub fn run(json: bool) -> Result<i32, CliError> {
     Ok(if report.findings == 0 { 0 } else { 1 })
 }
 
-/// The passive lane's cache, read and reported — until `ff tower version`
-/// (#14) lands, doctor is the cache's only reader.
+/// The passive lane's cache, read and reported — the cache's two readers
+/// are this row and `ff tower version`'s "available" line.
 fn update_row() -> DoctorRow {
     use crate::selfupdate::notify::CheckStatus;
     let message = match crate::selfupdate::notify::check_status(env!("CARGO_PKG_VERSION")) {

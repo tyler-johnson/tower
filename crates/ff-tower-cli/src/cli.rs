@@ -9,12 +9,56 @@
 
 use clap::{Parser, Subcommand};
 
+/// The name the tool has, as opposed to what it is typed as. The version
+/// is the one place the project name is worth a line: it is what somebody
+/// searches for — it matches the release titles and the README — and
+/// `ff-tower` is dispatch plumbing, not a name.
+pub const NAME: &str = "tower";
+
+/// What `ff tower -v` and `ff tower version` both print: the release, the
+/// commit it was built from, and the project's home under it. Both
+/// spellings go through the verb, which prepends the name by hand — clap
+/// no longer prints this. One constant, so the spellings cannot answer
+/// the same question differently.
+///
+/// The URL comes from the manifest rather than from a literal here — there
+/// is already one place that records where this lives, and a second would
+/// be a place to forget.
+pub const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    env!("TOWER_BUILD_INFO"),
+    "\n",
+    env!("CARGO_PKG_REPOSITORY")
+);
+
 #[derive(Parser)]
-#[command(name = "ff-tower", about = "tower: the board over fufu", version)]
+#[command(
+    name = "ff-tower",
+    about = "tower: the board over fufu",
+    version = VERSION,
+    // Declared by hand below, for the short letter: clap's own flag is `-V`.
+    disable_version_flag = true
+)]
 pub struct Cli {
     /// Emit tower's machine envelope instead of the human render.
     #[arg(long, global = true)]
     pub json: bool,
+    // `-v`, not clap's default `-V`. tower has no verbose flag to reserve
+    // the lowercase letter for — verbosity here is `--json` or a different
+    // verb — so the shifted spelling would buy nothing and cost every
+    // person who typed the lowercase one first. `-V` is gone rather than
+    // kept as an alias: a second spelling for a one-line answer is surface
+    // with no reader.
+    /// Print the version and the commit it was built from
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::SetTrue)]
+    pub version: bool,
+    /// Retired: the version flag is lowercase `-v`
+    ///
+    /// Declared only to stay hidden: `-V` is what almost every other tool
+    /// spells this, so typing it is a question rather than a typo, and
+    /// clap's bare "unexpected argument" answers a different one.
+    #[arg(short = 'V', hide = true, action = clap::ArgAction::SetTrue)]
+    pub version_shouted: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -157,6 +201,8 @@ pub enum Command {
         #[command(subcommand)]
         action: Option<BayAction>,
     },
+    /// Which tower this is, and whether it is the current one.
+    Version,
     /// Download the latest release and replace this binary.
     Update {
         /// Refresh the update cache only (used by the background check).
@@ -190,9 +236,10 @@ impl Command {
                 update: false,
                 notice: false,
             },
-            // Doctor rides the check but suppresses the generic notice —
-            // its own `tower/update` row speaks instead.
-            Command::Doctor => Lanes {
+            // The quiet verbs ride the check but suppress the generic
+            // notice — each has its own voice: doctor's `tower/update`
+            // row, version's dim "available" line.
+            Command::Doctor | Command::Version => Lanes {
                 update: true,
                 notice: false,
             },

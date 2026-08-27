@@ -34,12 +34,44 @@ use ff_tower_core::ff::Ff;
 
 fn main() {
     let cli = Cli::parse();
+    // `-V` is the version flag every other tool has; here it is lowercase.
+    // Answered rather than parsed, so the person who typed the habit is
+    // told the spelling instead of that the flag does not exist.
+    if cli.version_shouted {
+        report(
+            cli.json,
+            "version",
+            &CliError::coded(
+                "usage/bad-flags",
+                "-V is not tower's spelling: the version flag is lowercase, and it is the \
+                 verb — the same answer either way",
+                vec!["ff tower -v".into(), "ff tower version".into()],
+            ),
+        );
+    }
+    // `-v` is the version verb spelled as a flag, and a verb does not ride
+    // another verb: both on one line is two commands, not a flag and its
+    // verb.
+    if cli.version && cli.command.is_some() {
+        report(
+            cli.json,
+            "version",
+            &CliError::coded(
+                "usage/bad-flags",
+                "-v is the version verb spelled as a flag; it does not ride another verb",
+                vec!["ff tower -v".into(), "ff tower version".into()],
+            ),
+        );
+    }
     // The lanes are decided from the command line, before anything runs:
-    // bare `ff tower` is the board and rides the board's.
-    let lanes = cli
-        .command
-        .as_ref()
-        .map_or(Command::Board.lanes(), Command::lanes);
+    // bare `ff tower` is the board and rides the board's, and bare
+    // `ff tower -v` is the version verb spelled as a flag, so it takes
+    // that verb's lane instead.
+    let lanes = match (&cli.command, cli.version) {
+        (None, true) => Command::Version.lanes(),
+        (None, false) => Command::Board.lanes(),
+        (Some(cmd), _) => cmd.lanes(),
+    };
 
     // Preflight: the passive lane's background check. A lane must never
     // change what a command does, so the repository is best-effort — no
@@ -73,14 +105,16 @@ fn main() {
                 std::process::exit(code);
             }
         }
-        Err(err) => report(cli.json, verb(&cli.command), &err),
+        Err(err) => report(cli.json, verb(&cli.command, cli.version), &err),
     }
 }
 
 /// The wire name of the verb being run — the envelope's `cmd`, success or
-/// failure alike.
-fn verb(command: &Option<Command>) -> &'static str {
+/// failure alike. The version flag is the verb spelled as a flag, so the
+/// envelope settles as `version` there too.
+fn verb(command: &Option<Command>, version: bool) -> &'static str {
     match command {
+        None if version => "version",
         None | Some(Command::Board) => "board",
         Some(Command::Next { .. }) => "next",
         Some(Command::Brief { .. }) => "brief",
@@ -101,6 +135,7 @@ fn verb(command: &Option<Command>) -> &'static str {
             Some(BayAction::Warm { .. }) => "bay warm",
             Some(BayAction::Release { .. }) => "bay release",
         },
+        Some(Command::Version) => "version",
         Some(Command::Update { .. }) => "update",
         Some(Command::Doctor) => "doctor",
     }
@@ -113,6 +148,7 @@ fn verb(command: &Option<Command>) -> &'static str {
 /// checks found something.
 fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
+        None if cli.version => cmd::version::run(cli.json)?,
         None | Some(Command::Board) => cmd::board::run(cli.json)?,
         Some(Command::Next { count, peek }) => {
             return cmd::next::run(cli.json, count.unwrap_or(1), *peek);
@@ -156,6 +192,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             global,
         }) => cmd::config::run(cli.json, key.as_deref(), value.clone(), *unset, *global)?,
         Some(Command::Bay { action }) => cmd::bay::run(cli.json, action.as_ref())?,
+        Some(Command::Version) => cmd::version::run(cli.json)?,
         Some(Command::Update { check }) => cmd::update::run(cli.json, *check)?,
         Some(Command::Doctor) => return cmd::doctor::run(cli.json),
     }
