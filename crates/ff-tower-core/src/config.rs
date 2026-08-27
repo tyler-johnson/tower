@@ -215,6 +215,17 @@ pub fn effective(encoded: i64) -> Option<i64> {
     }
 }
 
+/// How many seconds before a cached cadence stamp is considered stale:
+/// `n >= 1` → `n` floored at 60, everything else → the daily default.
+/// `-1` maps to daily on purpose — a disabled lane still re-reads config
+/// daily, so turning it back on does not wait on a stale stamp.
+pub fn stale_after(cached: i64) -> i64 {
+    match cached {
+        n if n >= 1 => n.max(60),
+        _ => 86_400,
+    }
+}
+
 /// The duration grammar under the cadence: `<n>[smhdw]`, or a bare
 /// integer of days.
 fn parse_duration(raw: &str) -> Option<i64> {
@@ -272,6 +283,26 @@ impl Config {
     /// The effective value across every scope.
     pub fn read(&self, setting: &Setting) -> Row {
         self.walk(setting, None)
+    }
+
+    /// A cadence setting's effective value, encoded: absent or invalid
+    /// falls back to `0` (the default), the way every reader falls back —
+    /// fufu's `read_encoded` semantics on tower's scope walk.
+    pub fn read_cadence(&self, setting: &Setting) -> i64 {
+        match self.read(setting).value {
+            Some(value) => parse_cadence(&value).unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// A bool setting's effective value through gix's own boolean
+    /// grammar. `None` when unset or unreadable — the caller supplies
+    /// the default.
+    pub fn read_bool(&self, setting: &Setting) -> Option<bool> {
+        let value = self.read(setting).value?;
+        gix::config::Boolean::try_from(gix::bstr::BStr::new(value.as_str()))
+            .ok()
+            .map(|boolean| boolean.0)
     }
 
     /// The effective value with one scope held out — what still applies
@@ -487,6 +518,42 @@ mod tests {
                 setting.name
             );
         }
+    }
+
+    #[test]
+    fn stale_after_table() {
+        assert_eq!(stale_after(0), 86_400);
+        assert_eq!(stale_after(-1), 86_400); // disabled still re-reads daily
+        assert_eq!(stale_after(30), 60); // floor
+        assert_eq!(stale_after(60), 60);
+        assert_eq!(stale_after(43_200), 43_200);
+    }
+
+    #[test]
+    fn read_cadence_and_read_bool_over_a_real_repository() {
+        let fixture = ff_tower_testsupport::Repo::new();
+        let config = Config::open(fixture.path()).expect("open");
+        let update_check = lookup("updateCheck").expect("registered");
+        let auto_update = lookup("autoUpdate").expect("registered");
+
+        // Absent → 0, the default encoding, and bool absent → None.
+        assert_eq!(config.read_cadence(update_check), 0);
+        assert_eq!(config.read_bool(auto_update), None);
+
+        fixture.git(&["config", "tower.updateCheck", "12h"]);
+        fixture.git(&["config", "tower.autoUpdate", "false"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(config.read_cadence(update_check), 43_200);
+        assert_eq!(config.read_bool(auto_update), Some(false));
+
+        fixture.git(&["config", "tower.autoUpdate", "true"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(config.read_bool(auto_update), Some(true));
+
+        // Garbage falls back like every other reader: cadence → 0.
+        fixture.git(&["config", "tower.updateCheck", "bogus"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(config.read_cadence(update_check), 0);
     }
 
     #[test]
