@@ -113,6 +113,18 @@ pub enum Kind {
         /// before procedures had definitions behind them.
         part: Option<PartStamp>,
     },
+    /// Re-stamps an existing flight's classification — triage's verb.
+    /// The collapse rule rides here as it does on `Filed`: a single-part
+    /// procedure puts its stamp in `part`; a multi-part one leaves `part`
+    /// empty and the same batch files the parts.
+    Routed {
+        flight: EventId,
+        procedure: String,
+        part: Option<PartStamp>,
+        /// Why it routed there — empty when unsaid, `Filed`'s body
+        /// convention.
+        because: String,
+    },
     /// A note on the record, local.
     Commented { flight: EventId, text: String },
     /// `from` depends on `to` — a declared dependency, stored intent.
@@ -136,6 +148,7 @@ impl Kind {
     pub fn name(&self) -> &str {
         match self {
             Kind::Filed { .. } => "filed",
+            Kind::Routed { .. } => "routed",
             Kind::Commented { .. } => "commented",
             Kind::Linked { .. } => "linked",
             Kind::Claimed { .. } => "claimed",
@@ -177,6 +190,17 @@ struct FiledBody {
     procedure: String,
     subject: String,
     body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part: Option<PartStamp>,
+}
+
+/// `part` follows `FiledBody`'s discipline — `default`, skipped when
+/// absent — so a multi-part route's wire bytes carry no `part` key.
+#[derive(Serialize, Deserialize)]
+struct RoutedBody {
+    flight: EventId,
+    procedure: String,
+    because: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     part: Option<PartStamp>,
 }
@@ -227,6 +251,17 @@ impl Serialize for Event {
                 procedure: procedure.clone(),
                 subject: subject.clone(),
                 body: body.clone(),
+                part: part.clone(),
+            }),
+            Kind::Routed {
+                flight,
+                procedure,
+                part,
+                because,
+            } => serde_json::value::to_raw_value(&RoutedBody {
+                flight: flight.clone(),
+                procedure: procedure.clone(),
+                because: because.clone(),
                 part: part.clone(),
             }),
             Kind::Commented { flight, text } => serde_json::value::to_raw_value(&CommentedBody {
@@ -291,6 +326,19 @@ impl<'de> Deserialize<'de> for Event {
                 subject,
                 body,
                 part,
+            }
+        } else if kind == "routed" {
+            let RoutedBody {
+                flight,
+                procedure,
+                because,
+                part,
+            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Routed {
+                flight,
+                procedure,
+                part,
+                because,
             }
         } else if kind == "commented" {
             let CommentedBody { flight, text } =
@@ -444,6 +492,67 @@ mod tests {
         // The lifecycle vocabulary is this binary's own: a `held` with no
         // question is malformed, not a kind from the future.
         let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"held","body":{"flight":"pi.1"}}"#;
+        assert!(serde_json::from_str::<Event>(broken).is_err());
+    }
+
+    #[test]
+    fn a_route_round_trips_with_and_without_its_stamp() {
+        let collapsed = Event {
+            id: "pi.5".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::Routed {
+                flight: "pi.1".parse().expect("id"),
+                procedure: "chore".to_string(),
+                part: Some(PartStamp {
+                    id: "do".to_string(),
+                    crew: "you".to_string(),
+                    skill: None,
+                    done: "asserted".to_string(),
+                    bay: None,
+                }),
+                because: "it is a chore".to_string(),
+            },
+        };
+        let json = serde_json::to_string(&collapsed).expect("serialize");
+        assert!(json.contains(r#""kind":"routed""#), "got {json}");
+        assert!(
+            json.contains(r#""part":{"id":"do","crew":"you","done":"asserted"}"#),
+            "got {json}"
+        );
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        let Kind::Routed { part, because, .. } = back.kind else {
+            panic!("a route parses as a route");
+        };
+        assert_eq!(part.expect("the stamp survives").id, "do");
+        assert_eq!(because, "it is a chore");
+
+        // The parent shape: no stamp, and the wire bytes omit the key.
+        let parent = Event {
+            id: "pi.6".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 8,
+            kind: Kind::Routed {
+                flight: "pi.1".parse().expect("id"),
+                procedure: "review".to_string(),
+                part: None,
+                because: String::new(),
+            },
+        };
+        let json = serde_json::to_string(&parent).expect("serialize");
+        assert!(!json.contains(r#""part""#), "got {json}");
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        let Kind::Routed { part, .. } = back.kind else {
+            panic!("a route parses as a route");
+        };
+        assert!(part.is_none());
+    }
+
+    #[test]
+    fn a_route_with_a_broken_body_is_an_error() {
+        let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"routed","body":{"flight":"pi.1"}}"#;
         assert!(serde_json::from_str::<Event>(broken).is_err());
     }
 

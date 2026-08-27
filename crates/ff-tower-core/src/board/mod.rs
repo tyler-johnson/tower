@@ -22,7 +22,7 @@ mod reads;
 
 pub use bay::{BayView, bays};
 pub use brief::{Brief, CommentView, LinkView, brief};
-pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
+pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};

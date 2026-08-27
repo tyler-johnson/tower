@@ -43,6 +43,8 @@ pub struct Flight {
     pub blocks: Vec<EventId>,
     /// The last claim, when one stands — last wins, a reassignment.
     pub claim: Option<Mark>,
+    /// The last route, when one stands — last wins, the claim precedent.
+    pub route: Option<Route>,
     /// The open question, when the flight is held. Cleared by `answered`.
     pub question: Option<Question>,
     /// Set once `done` lands; the partition drops the flight on it.
@@ -57,6 +59,15 @@ pub struct Flight {
 pub struct Mark {
     pub by: String,
     pub at: i64,
+}
+
+/// The last route, when one stands: who re-stamped the flight, when, and
+/// why. The stamp itself lands on `procedure` and `part`.
+#[derive(Debug, Clone)]
+pub struct Route {
+    pub by: String,
+    pub at: i64,
+    pub because: String,
 }
 
 /// The question a held flight is waiting on.
@@ -131,6 +142,7 @@ pub fn fold(events: &[Event]) -> Fold {
                 depends_on: Vec::new(),
                 blocks: Vec::new(),
                 claim: None,
+                route: None,
                 question: None,
                 done: None,
                 answered_at: None,
@@ -155,6 +167,28 @@ pub fn fold(events: &[Event]) -> Fold {
     for event in events {
         match &event.kind {
             Kind::Filed { .. } => {}
+            Kind::Routed {
+                flight,
+                procedure,
+                part,
+                because,
+            } => match by_id.get(flight) {
+                Some(&at) => {
+                    let flight = &mut flights[at];
+                    // Wholesale, both slices: a multi-part route
+                    // carries no stamp and must still clear the one an
+                    // earlier route wrote, so `part` is overwritten even
+                    // to `None`.
+                    flight.procedure = procedure.clone();
+                    flight.part = part.clone();
+                    flight.route = Some(Route {
+                        by: event.author.clone(),
+                        at: event.time,
+                        because: because.clone(),
+                    });
+                }
+                None => unrouted.push(event.clone()),
+            },
             Kind::Commented { flight, text } => match by_id.get(flight) {
                 Some(&at) => flights[at].comments.push(Comment {
                     id: event.id.clone(),
@@ -225,6 +259,7 @@ pub fn fold(events: &[Event]) -> Fold {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::log::PartStamp;
 
     fn event(id: &str, time: i64, kind: Kind) -> Event {
         let id: EventId = id.parse().expect("id");
@@ -246,6 +281,25 @@ mod tests {
                 subject: subject.to_string(),
                 body: String::new(),
                 part: None,
+            },
+        )
+    }
+
+    fn routed(id: &str, time: i64, flight: &str, procedure: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Routed {
+                flight: flight.parse().expect("id"),
+                procedure: procedure.to_string(),
+                part: Some(PartStamp {
+                    id: "do".to_string(),
+                    crew: "you".to_string(),
+                    skill: None,
+                    done: "asserted".to_string(),
+                    bay: None,
+                }),
+                because: format!("because {procedure}"),
             },
         )
     }
@@ -403,6 +457,67 @@ mod tests {
         assert_eq!(fold.flights.len(), 1);
         assert_eq!(fold.flights[0].subject, "first");
         assert_eq!(fold.unrouted.len(), 1);
+    }
+
+    #[test]
+    fn a_route_re_stamps_the_flight_and_records_who_when_and_why() {
+        let fold = fold(&[filed("pi.1", 10, "s"), routed("pi.2", 20, "pi.1", "chore")]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.procedure, "chore");
+        assert_eq!(flight.part.as_ref().expect("stamped").id, "do");
+        let route = flight.route.as_ref().expect("routed");
+        assert_eq!(route.by, "a@b.c");
+        assert_eq!(route.at, 20);
+        assert_eq!(route.because, "because chore");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn the_last_route_wins_wholesale() {
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            routed("pi.2", 20, "pi.1", "chore"),
+            // A parent-shaped route: no stamp — it must clear the one
+            // the first route wrote.
+            event(
+                "qi.1",
+                30,
+                Kind::Routed {
+                    flight: "pi.1".parse().expect("id"),
+                    procedure: "review".to_string(),
+                    part: None,
+                    because: String::new(),
+                },
+            ),
+        ]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.procedure, "review");
+        assert!(flight.part.is_none(), "the old stamp must not survive");
+        assert_eq!(flight.route.as_ref().expect("routed").at, 30);
+    }
+
+    #[test]
+    fn a_route_delivered_ahead_of_its_filing_still_attaches() {
+        let fold = fold(&[routed("fast.1", 5, "pi.1", "chore"), filed("pi.1", 10, "s")]);
+        assert_eq!(fold.flights[0].procedure, "chore");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_route_for_a_flight_never_filed_is_unrouted() {
+        let fold = fold(&[routed("pi.1", 10, "zz.9", "chore")]);
+        assert!(fold.flights.is_empty());
+        assert_eq!(fold.unrouted.len(), 1);
+    }
+
+    #[test]
+    fn a_route_back_to_open_is_the_undo() {
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            routed("pi.2", 20, "pi.1", "chore"),
+            routed("pi.3", 30, "pi.1", "open"),
+        ]);
+        assert_eq!(fold.flights[0].procedure, "open");
     }
 
     #[test]

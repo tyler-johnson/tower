@@ -4,9 +4,17 @@
 //! walk runs over a [`Fold`], a [`Reads`], and a [`Verdicts`] the caller
 //! already fetched, so admission is unit-testable with hand-built rows.
 //!
-//! The pool is any unclaimed live flight: a standing claim, an open
-//! question, or a fufu hold takes a flight out, and an op row alone does
-//! not. Every live flight *not* in the pool keeps its branch on the gate —
+//! The pool is any unclaimed live flight whose own log stamp says an
+//! agent flies it: a standing claim, an open question, or a fufu hold
+//! takes a flight out, and an op row alone does not. The crew gate reads
+//! `flight.part` — the stamp the filing copied into the log — never the
+//! registry again (principle 11), and unknown never rounds down: a
+//! missing stamp, `you`, or a crew this binary has never heard of are all
+//! out. What the crew clause alone excludes is counted in `yours`, the
+//! number behind `next`'s exit 3; the flights themselves are silent here
+//! because the pile is triage's surface, not this one's.
+//!
+//! Every live flight *not* in the pool keeps its branch on the gate —
 //! waiting and holding flights included, because a warm bay holds real
 //! work that will land. Admission is greedy: candidates walk in filed
 //! order, and one joins the pick when its branch is clear against the
@@ -27,6 +35,9 @@ use super::reads::{Reads, Verdicts};
 pub struct Picks {
     pub picked: Vec<Pick>,
     pub passed: Vec<Passed>,
+    /// Live, unclaimed, unquestioned, not fufu-held — excluded from the
+    /// pool by the crew clause alone. Work that exists and needs you.
+    pub yours: usize,
 }
 
 /// One admitted flight, in wire form.
@@ -73,6 +84,7 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
     // existing idiom.
     let mut candidates = Vec::new();
     let mut gate: Vec<(String, String)> = Vec::new();
+    let mut yours = 0;
     for flight in &fold.flights {
         if flight.done.is_some() {
             continue;
@@ -87,10 +99,23 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
             .as_deref()
             .and_then(|name| index.get(name))
             .is_some_and(|row| row.held || row.resolving);
-        if flight.claim.is_none() && flight.question.is_none() && !fufu_held {
+        // Exact string compare on the stored stamp: `part: None` (a
+        // parent, or a pre-procedure filing) and every other crew —
+        // `"you"`, a future `"pair"` — are out.
+        let agent_crewed = flight
+            .part
+            .as_ref()
+            .is_some_and(|part| part.crew == "agent");
+        let unclaimed = flight.claim.is_none() && flight.question.is_none() && !fufu_held;
+        if unclaimed && agent_crewed {
             candidates.push((flight, id, branch));
-        } else if let Some(branch) = branch {
-            gate.push((id, branch));
+        } else {
+            if unclaimed {
+                yours += 1;
+            }
+            if let Some(branch) = branch {
+                gate.push((id, branch));
+            }
         }
     }
 
@@ -159,7 +184,11 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
         }
     }
 
-    Picks { picked, passed }
+    Picks {
+        picked,
+        passed,
+        yours,
+    }
 }
 
 #[cfg(test)]
@@ -168,9 +197,11 @@ mod tests {
     use super::super::reads::BranchPairing;
     use super::*;
     use crate::ff::{BranchInfo, BranchList, OpEntry, UnknownReason};
-    use crate::log::{Event, EventId, Kind};
+    use crate::log::{Event, EventId, Kind, PartStamp};
 
-    fn filed(id: &str, time: i64) -> Event {
+    /// A filing with the given crew stamped, `None` for the stampless
+    /// shape — a parent, or a pre-procedure filing.
+    fn crewed(id: &str, time: i64, crew: Option<&str>) -> Event {
         let id: EventId = id.parse().expect("id");
         Event {
             writer: id.writer.clone(),
@@ -178,12 +209,23 @@ mod tests {
             time,
             id,
             kind: Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: "review".to_string(),
                 subject: format!("subject of {time}"),
                 body: String::new(),
-                part: None,
+                part: crew.map(|crew| PartStamp {
+                    id: "pass".to_string(),
+                    crew: crew.to_string(),
+                    skill: None,
+                    done: "asserted".to_string(),
+                    bay: None,
+                }),
             },
         }
+    }
+
+    /// The pool's norm once the crew gate stands: an agent-stamped part.
+    fn filed(id: &str, time: i64) -> Event {
+        crewed(id, time, Some("agent"))
     }
 
     fn lifecycle(id: &str, time: i64, kind: Kind) -> Event {
@@ -480,6 +522,63 @@ mod tests {
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.1");
         assert!(picks.passed.is_empty(), "unexamined, so unlisted");
+    }
+
+    #[test]
+    fn only_agent_stamped_flights_enter_the_pool_and_the_rest_are_yours() {
+        let picks = pick(
+            &fold(&[
+                crewed("pi.1", 10, None),
+                crewed("pi.2", 20, Some("you")),
+                crewed("pi.3", 30, Some("pair")),
+                crewed("pi.4", 40, Some("agent")),
+            ]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            4,
+        );
+        assert_eq!(picks.picked.len(), 1);
+        assert_eq!(picks.picked[0].flight, "pi.4");
+        assert!(picks.passed.is_empty(), "excluded silently, never passed");
+        assert_eq!(picks.yours, 3, "unknown never rounds down");
+    }
+
+    #[test]
+    fn a_you_crewed_flights_branch_still_collides_an_agent_candidate_off() {
+        let picks = pick(
+            &fold(&[crewed("pi.1", 10, Some("you")), filed("pi.2", 20)]),
+            &reads(
+                vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
+                vec![branch("left", false, false), branch("right", false, false)],
+            ),
+            &Verdicts {
+                pairs: vec![collide("left", "right", &["shared.txt"])],
+            },
+            1,
+        );
+        assert!(picks.picked.is_empty());
+        match reasons(&picks).as_slice() {
+            [("pi.2", Skip::Collides { with, .. })] => assert_eq!(with, "pi.1"),
+            other => panic!("expected one collides row, got {other:?}"),
+        }
+        assert_eq!(picks.yours, 1);
+    }
+
+    #[test]
+    fn claimed_and_held_flights_are_not_yours() {
+        let picks = pick(
+            &fold(&[
+                crewed("pi.1", 10, Some("you")),
+                crewed("pi.2", 20, None),
+                claimed("pi.3", 30, "pi.1"),
+                held("pi.4", 40, "pi.2", "which?"),
+            ]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            2,
+        );
+        assert!(picks.picked.is_empty());
+        assert_eq!(picks.yours, 0, "a claim or a question already has an owner");
     }
 
     #[test]

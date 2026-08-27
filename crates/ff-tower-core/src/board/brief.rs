@@ -34,6 +34,11 @@ pub struct Brief {
     pub filed_at: i64,
     pub claimed_by: Option<String>,
     pub claimed_at: Option<i64>,
+    /// The last route, flat like the claim. `because` carries the stored
+    /// explanation, `None` when the route said nothing.
+    pub routed_by: Option<String>,
+    pub routed_at: Option<i64>,
+    pub because: Option<String>,
     pub question: Option<String>,
     pub asked_by: Option<String>,
     pub asked_at: Option<i64>,
@@ -117,6 +122,13 @@ pub fn brief(fold: &Fold, reads: &Reads, id: &EventId) -> Option<Brief> {
         filed_at: flight.filed_at,
         claimed_by: flight.claim.as_ref().map(|claim| claim.by.clone()),
         claimed_at: flight.claim.as_ref().map(|claim| claim.at),
+        routed_by: flight.route.as_ref().map(|route| route.by.clone()),
+        routed_at: flight.route.as_ref().map(|route| route.at),
+        because: flight
+            .route
+            .as_ref()
+            .map(|route| route.because.clone())
+            .filter(|because| !because.is_empty()),
         question: flight.question.as_ref().map(|q| q.text.clone()),
         asked_by: flight.question.as_ref().map(|q| q.by.clone()),
         asked_at: flight.question.as_ref().map(|q| q.at),
@@ -460,6 +472,43 @@ mod tests {
         .expect("filed");
         assert_eq!(brief.claimed_by.as_deref(), Some("crew@b.c"));
         assert_eq!(brief.claimed_at, Some(40));
+    }
+
+    #[test]
+    fn a_route_carries_who_when_and_why() {
+        let route = |id: &str, time, because: &str| {
+            lifecycle(
+                id,
+                "router@b.c",
+                time,
+                Kind::Routed {
+                    flight: "pi.1".parse().expect("id"),
+                    procedure: "chore".to_string(),
+                    part: None,
+                    because: because.to_string(),
+                },
+            )
+        };
+        let explained = brief(
+            &fold(&[filed("pi.1", 10, "s", ""), route("pi.2", 20, "it is a chore")]),
+            &reads(Vec::new(), Vec::new(), None),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert_eq!(explained.procedure, "chore");
+        assert_eq!(explained.routed_by.as_deref(), Some("router@b.c"));
+        assert_eq!(explained.routed_at, Some(20));
+        assert_eq!(explained.because.as_deref(), Some("it is a chore"));
+
+        // An unsaid `-m` stores an empty string; the brief carries `None`,
+        // the absent-facts rule.
+        let unsaid = brief(
+            &fold(&[filed("pi.1", 10, "s", ""), route("pi.2", 20, "")]),
+            &reads(Vec::new(), Vec::new(), None),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert!(unsaid.because.is_none());
     }
 
     #[test]
