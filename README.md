@@ -35,6 +35,24 @@ That last line is fufu's extension rule unmodified: extensions read fufu state a
 
 **tower is a thing agents call. It never calls agents.** Every verb is a read plus a local write. No daemon, no cron, no dispatch, no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue.
 
+## Skills
+
+The orchestrator lives in markdown, not in Rust. tower ships three skills — instructions a harness executes, never a process tower spawns:
+
+- **plan** — decompose a goal into linked flights; solo mode's entry point.
+- **work** — claim, do, hold or commit, repeat; the loop that pairs with `ff tower next`, running until exit 1 (drained) or 3 (needs you) and parking holds along the way.
+- **review** — first-pass a branch: commit the mechanical fixes, write the pass as a comment, hold the judgment for a person's verdict.
+
+Skills layer like procedures — built-in, then `~/.config/tower/skills/*.md`, then `.tower/skills/*.md` in the repository, the same name replacing wholesale — and `ff tower skills <name>` prints one raw, byte for byte. The shipped set stops at committed on a branch: no push, no PR, no forge write. Changing that boundary means forking the file, and the fork is visibly the operator's — the listing names the layer every skill came from.
+
+The harness bridge is your own redirect, because tower never writes another program's config:
+
+```sh
+ff tower skills work > .claude/skills/tower-work/SKILL.md
+```
+
+Works verbatim — the built-ins carry the front matter a skill directory expects.
+
 ## Layout
 
 | crate | what it is |
