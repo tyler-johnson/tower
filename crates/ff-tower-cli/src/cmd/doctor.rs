@@ -11,11 +11,15 @@
 //! The exit is fufu's doctor precedent: 0 healthy, 1 findings, an
 //! outcome riding the success path with a full envelope.
 
+use std::path::Path;
+
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, DoctorRow, Level, Reads, SeamHealth};
 use ff_tower_core::ff::{self, BranchList};
 use ff_tower_core::log::Store;
+use ff_tower_core::procedure::Crew;
+use ff_tower_core::{procedure, skill};
 
 pub fn run(json: bool) -> Result<i32, CliError> {
     let ff = super::ff()?;
@@ -48,6 +52,17 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         // absence of a bay row asserts nothing.
         _ => board::doctor(&board::fold(&[]), &no_reads(), &seam, &[]),
     };
+    // The registries ride both arms too: they read files, never the
+    // seam, so a drifted contract cannot hide an unresolved skill.
+    let root = Store::open(ff.repo())
+        .ok()
+        .and_then(|store| store.main_worktree());
+    for row in skill_rows(root.as_deref()) {
+        if row.level == Level::Warn {
+            report.findings += 1;
+        }
+        report.rows.push(row);
+    }
     // The update row rides both arms: the passive lane's cache answers
     // without a seam, and its own row is why doctor suppresses the
     // generic notice. Info level — never a finding.
@@ -82,6 +97,60 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         }
     }
     Ok(if report.findings == 0 { 0 } else { 1 })
+}
+
+/// Principle 5's half of the skill seam: a procedure naming a skill
+/// nothing installs still loads and flies — nothing validates the link
+/// at load — so doctor is where the unresolved name surfaces. A layer
+/// that refuses to load is itself a Warn row naming the path rather
+/// than a dead doctor.
+fn skill_rows(root: Option<&Path>) -> Vec<DoctorRow> {
+    let mut rows = Vec::new();
+    let skills = match skill::registry(root) {
+        Ok(registry) => registry,
+        Err(err) => {
+            rows.push(DoctorRow {
+                level: Level::Warn,
+                check: "skill/invalid".to_string(),
+                message: err.to_string(),
+            });
+            return rows;
+        }
+    };
+    let procedures = match procedure::registry(root) {
+        Ok(registry) => registry,
+        Err(err) => {
+            rows.push(DoctorRow {
+                level: Level::Warn,
+                check: "procedure/invalid".to_string(),
+                message: err.to_string(),
+            });
+            return rows;
+        }
+    };
+    for definition in procedures.definitions() {
+        for part in &definition.parts {
+            if part.crew != Crew::Agent {
+                continue;
+            }
+            let Some(name) = part.skill.as_deref() else {
+                continue;
+            };
+            if skills.get(name).is_none() {
+                rows.push(DoctorRow {
+                    level: Level::Warn,
+                    check: "skill/unresolved".to_string(),
+                    message: format!(
+                        "procedure {} flies part {} with skill `{name}`, which nothing installs — installed: {}",
+                        definition.name,
+                        part.id,
+                        skills.names().join(", ")
+                    ),
+                });
+            }
+        }
+    }
+    rows
 }
 
 /// The passive lane's cache, read and reported — the cache's two readers

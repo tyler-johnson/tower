@@ -207,3 +207,44 @@ printf '%s\n' '{"ff":99,"cmd":"version","data":{"version":"9.9.9"}}'
         "a drifted contract fails every gather spawn — doctor must not try: {recorded}"
     );
 }
+
+#[test]
+fn a_procedure_naming_a_ghost_skill_is_a_finding() {
+    let repo = repo();
+    repo.write(
+        ".tower/procedures/spooky.toml",
+        concat!(
+            "name = \"spooky\"\n\n",
+            "[[part]]\nid    = \"pass\"\ncrew  = \"agent\"\nskill = \"ghost\"\n\n",
+            "[[part]]\nid    = \"end\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+        ),
+    );
+
+    let out = ff_tower(repo.path(), &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let (all, findings) = rows(&out);
+    let unresolved = row(&all, "skill/unresolved");
+    assert_eq!(unresolved["level"], serde_json::json!("warn"));
+    let message = unresolved["message"].as_str().expect("message");
+    assert!(message.contains("spooky"), "{message}");
+    assert!(message.contains("pass"), "{message}");
+    assert!(message.contains("`ghost`"), "{message}");
+    assert!(
+        message.contains("installed: plan, review, work"),
+        "{message}"
+    );
+    assert_eq!(findings, 1);
+
+    // Install the missing prose: the row goes, and the shipped set alone
+    // never warned — `a_fresh_repository_is_healthy` holds that half.
+    repo.write(".tower/skills/ghost.md", "# ghost\n");
+    let out = ff_tower(repo.path(), &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let (all, findings) = rows(&out);
+    assert!(
+        !all.iter()
+            .any(|row| row["check"] == serde_json::json!("skill/unresolved")),
+        "{all:?}"
+    );
+    assert_eq!(findings, 0);
+}
