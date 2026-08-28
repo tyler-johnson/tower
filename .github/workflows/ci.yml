@@ -32,7 +32,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The fufu commit the seam is built against.
-      FUFU_REV: 2c861094
+      FUFU_REV: 0c4ab63f
     steps:
       - uses: actions/checkout@v5
 
