@@ -15,7 +15,7 @@ jobs:
   licenses:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses
@@ -34,7 +34,7 @@ jobs:
       # The fufu commit the seam is built against.
       FUFU_REV: 0c4ab63f
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Worth 1.1x-1.7x on fufu's suite, measured there; tower inherits the
       # win because its fixtures also spawn real `git` and `ff`. It goes
@@ -57,7 +57,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cache fufu
         id: fufu
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin/ff

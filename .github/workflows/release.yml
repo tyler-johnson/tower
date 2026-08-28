@@ -27,7 +27,7 @@ jobs:
           - { os: windows, arch: arm64, runner: windows-11-arm }
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: cargo build --release -p ff-tower-cli
         env:
           TOWER_OFFICIAL_BUILD: "1"
@@ -60,7 +60,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: tag matches workspace version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -100,7 +100,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: tyler-johnson/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
