@@ -13,7 +13,7 @@
 //! verbatim — its id, message, and exits are fufu's words, and wrapping
 //! them in a tower id would hide the one part worth matching on.
 
-use ff_tower_core::{config, ff, log, procedure};
+use ff_tower_core::{config, ff, log, procedure, skill};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -27,6 +27,9 @@ pub enum CliError {
     /// A definition the loader declined — its own id, carried through.
     #[error(transparent)]
     Procedure(#[from] procedure::Error),
+    /// A skill layer that would not read — its own id, carried through.
+    #[error(transparent)]
+    Skill(#[from] skill::Error),
     /// A refusal tower shaped itself — a verb declining its input.
     #[error("{message}")]
     Coded {
@@ -62,6 +65,7 @@ impl CliError {
             CliError::Ff(ff::Error::Mismatched { .. }) => "ff/mismatched",
             CliError::Ff(ff::Error::Unparsable { .. }) => "ff/unparsable",
             CliError::Procedure(err) => err.id(),
+            CliError::Skill(err) => err.id(),
             CliError::Config(err) => err.id(),
         }
     }
@@ -76,6 +80,7 @@ impl CliError {
             }
             CliError::Ff(ff::Error::Ff(refusal)) => refusal.exits.clone(),
             CliError::Procedure(_) => vec!["ff tower procedures".to_string()],
+            CliError::Skill(_) => vec!["ff tower skills".to_string()],
             CliError::Config(config::Error::UnknownKey { .. }) => {
                 vec!["ff tower config".to_string()]
             }

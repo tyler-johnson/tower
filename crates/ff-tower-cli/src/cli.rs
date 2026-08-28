@@ -160,6 +160,13 @@ pub enum Command {
         #[arg(value_name = "name")]
         name: Option<String>,
     },
+    /// What skills are installed, or one printed raw to fork or pipe.
+    #[command(long_about = help::SKILLS, after_long_help = help::SKILLS_EXAMPLES)]
+    Skills {
+        /// One skill, raw; the whole list when unsaid.
+        #[arg(value_name = "name")]
+        name: Option<String>,
+    },
     /// The unclassified pile, or route one flight to a procedure.
     #[command(long_about = help::TRIAGE, after_long_help = help::TRIAGE_EXAMPLES)]
     Triage {
@@ -311,6 +318,7 @@ impl Command {
             | Command::Link { .. }
             | Command::Decompose { .. }
             | Command::Procedures { .. }
+            | Command::Skills { .. }
             | Command::Triage { .. }
             | Command::Claim { .. }
             | Command::Take { .. }

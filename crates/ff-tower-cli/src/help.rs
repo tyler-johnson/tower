@@ -213,6 +213,29 @@ Examples:
   ff tower file \"…\" -p release   file a flight under one
   ff tower triage 17 -p release  route one that is already filed";
 
+pub const SKILLS: &str = "\
+What skills are installed: the prose an agent-crewed part is flown
+with — policy in markdown, forkable like a procedure. Bare lists
+every name with its layer and one-line description; a name prints
+the file raw, byte for byte, so redirecting it into a harness's
+skill directory or a fork's starting point needs no flag.
+
+Three layers, the most specific winning whole: built-in, shipped in
+the binary; user, ~/.config/tower/skills/<name>.md; repo,
+.tower/skills/<name>.md under the main worktree. A procedure's agent
+part names the skill it is flown with, and `next` hands the name out
+on the picked row.
+
+Read-only, and it spawns no fufu. The shipped skills stop at
+committed on a branch — no push, no PR — and editing that boundary
+is a fork of the file, visibly the operator's.";
+
+pub const SKILLS_EXAMPLES: &str = "\
+Examples:
+  ff tower skills          what is installed, and from where
+  ff tower skills work     one, raw — redirect it where a harness reads
+  ff tower procedures      the shapes whose agent parts name a skill";
+
 pub const TRIAGE: &str = "\
 Bare, the unclassified pile: every live flight still filed under
 open, claimed and held ones included — a claim does not classify.

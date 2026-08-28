@@ -326,6 +326,23 @@ pub static ENTRIES: &[Entry] = &[
         exits: &["ff tower procedures"],
     },
     Entry {
+        id: "skill/not-found",
+        summary: "no skill by that name is installed",
+        detail: "The name is in no layer — built-in, user, or repository. Bare \
+                 `ff tower skills` lists what is installed and where each came from, and the \
+                 refusal itself names the set.",
+        exits: &["ff tower skills"],
+    },
+    Entry {
+        id: "skill/invalid",
+        summary: "a skill layer would not read",
+        detail: "A directory or file in a skill layer cannot be read, or its bytes are not \
+                 UTF-8. The message carries the path and the system's own words. A skill you \
+                 cannot see is worse than a refusal, so the layer fails whole rather than \
+                 skipping the file.",
+        exits: &["ff tower skills"],
+    },
+    Entry {
         id: "update/failed",
         summary: "the update did not complete",
         detail: "Somewhere between the release check, the download, the checksum, and the \
@@ -763,6 +780,7 @@ mod tests {
             "ff-tower-cli/src/error.rs",
             "ff-tower-core/src/config.rs",
             "ff-tower-core/src/procedure/mod.rs",
+            "ff-tower-core/src/skill/mod.rs",
         ] {
             let path = crates.join(table);
             let text = std::fs::read_to_string(&path).expect("read id table");

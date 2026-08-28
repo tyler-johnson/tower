@@ -126,6 +126,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Link { .. }) => "link",
         Some(Command::Decompose { .. }) => "decompose",
         Some(Command::Procedures { .. }) => "procedures",
+        Some(Command::Skills { .. }) => "skills",
         Some(Command::Triage { .. }) => "triage",
         Some(Command::Claim { .. }) => "claim",
         Some(Command::Take { .. }) => "take",
@@ -175,6 +176,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b)?,
         Some(Command::Decompose { flight, parts }) => cmd::decompose::run(cli.json, flight, parts)?,
         Some(Command::Procedures { name }) => cmd::procedures::run(cli.json, name.as_deref())?,
+        Some(Command::Skills { name }) => cmd::skills::run(cli.json, name.as_deref())?,
         Some(Command::Triage {
             flight,
             procedure,
