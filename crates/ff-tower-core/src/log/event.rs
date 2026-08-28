@@ -97,10 +97,10 @@ pub struct PartStamp {
     pub bay: Option<String>,
 }
 
-/// One authored gesture. Minting, referencing, pairing, and the four
+/// One authored gesture. Minting, referencing, pairing, and the six
 /// lifecycle marks — enough vocabulary for a flight to be filed, claimed,
-/// held on a question, answered, and finished. `promote` lands with its
-/// verb.
+/// taken, handed back, held on a question, answered, and finished.
+/// `promote` lands with its verb.
 #[derive(Debug, Clone)]
 pub enum Kind {
     /// Mints a flight; the flight's id is this event's id.
@@ -144,6 +144,14 @@ pub enum Kind {
     /// Puts the flight in the air at assignment; the claimant is the
     /// event's author.
     Claimed { flight: EventId },
+    /// Takes the controls: the claim becomes the event's author and the
+    /// agent lane closes. Allowed over someone else's standing claim —
+    /// the human authoring it is the consent `claim` refuses to assume on
+    /// an agent's behalf.
+    Taken { flight: EventId },
+    /// Hands the flight back to the pool — `Taken`'s exact reverse, and
+    /// the recovery path for a claim whose holder never released it.
+    Requeued { flight: EventId },
     /// Stops the flight with a question — waiting on you until answered.
     Held { flight: EventId, question: String },
     /// Answers the open question and releases the hold.
@@ -165,6 +173,8 @@ impl Kind {
             Kind::Edited { .. } => "edited",
             Kind::Linked { .. } => "linked",
             Kind::Claimed { .. } => "claimed",
+            Kind::Taken { .. } => "taken",
+            Kind::Requeued { .. } => "requeued",
             Kind::Held { .. } => "held",
             Kind::Answered { .. } => "answered",
             Kind::Done { .. } => "done",
@@ -247,6 +257,16 @@ struct ClaimedBody {
 }
 
 #[derive(Serialize, Deserialize)]
+struct TakenBody {
+    flight: EventId,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RequeuedBody {
+    flight: EventId,
+}
+
+#[derive(Serialize, Deserialize)]
 struct HeldBody {
     flight: EventId,
     question: String,
@@ -306,6 +326,12 @@ impl Serialize for Event {
                 to: to.clone(),
             }),
             Kind::Claimed { flight } => serde_json::value::to_raw_value(&ClaimedBody {
+                flight: flight.clone(),
+            }),
+            Kind::Taken { flight } => serde_json::value::to_raw_value(&TakenBody {
+                flight: flight.clone(),
+            }),
+            Kind::Requeued { flight } => serde_json::value::to_raw_value(&RequeuedBody {
                 flight: flight.clone(),
             }),
             Kind::Held { flight, question } => serde_json::value::to_raw_value(&HeldBody {
@@ -396,6 +422,14 @@ impl<'de> Deserialize<'de> for Event {
             let ClaimedBody { flight } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Claimed { flight }
+        } else if kind == "taken" {
+            let TakenBody { flight } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Taken { flight }
+        } else if kind == "requeued" {
+            let RequeuedBody { flight } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Requeued { flight }
         } else if kind == "held" {
             let HeldBody { flight, question } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
@@ -660,6 +694,12 @@ mod tests {
         let flight: EventId = "pi.1".parse().expect("id");
         let kinds = [
             Kind::Claimed {
+                flight: flight.clone(),
+            },
+            Kind::Taken {
+                flight: flight.clone(),
+            },
+            Kind::Requeued {
                 flight: flight.clone(),
             },
             Kind::Held {

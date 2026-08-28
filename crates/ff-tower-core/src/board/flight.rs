@@ -43,6 +43,10 @@ pub struct Flight {
     pub blocks: Vec<EventId>,
     /// The last claim, when one stands — last wins, a reassignment.
     pub claim: Option<Mark>,
+    /// The last take, when one stands — the human override's overlay on
+    /// the crew gate. The filed `part` stamp is never mutated, so a
+    /// `requeued` can hand the flight back exactly as it was filed.
+    pub taken: Option<Mark>,
     /// The last route, when one stands — last wins, the claim precedent.
     pub route: Option<Route>,
     /// The open question, when the flight is held. Cleared by `answered`.
@@ -56,6 +60,23 @@ pub struct Flight {
     /// The freshest answer's time — an answer counts as motion even
     /// though its text lives only in the log.
     pub answered_at: Option<i64>,
+    /// The freshest requeue's time, for `answered_at`'s reason: a
+    /// requeue clears the claim, so without it the flight's freshest
+    /// motion would silently roll backward.
+    pub requeued_at: Option<i64>,
+}
+
+impl Flight {
+    /// Whether the pool's crew gate admits this flight: the filing's own
+    /// stamp says an agent flies it, and no `take` stands over it. Exact
+    /// string compare on the stored stamp — `part: None` (a parent, or a
+    /// pre-procedure filing) and every other crew, `"you"` and a future
+    /// `"pair"` alike, are out; unknown never rounds down. One method
+    /// because `pick` and `brief` must agree on it, and two copies of a
+    /// gate is where drift starts.
+    pub fn agent_crewed(&self) -> bool {
+        self.taken.is_none() && self.part.as_ref().is_some_and(|part| part.crew == "agent")
+    }
 }
 
 /// Who made a lifecycle mark, and when.
@@ -147,11 +168,13 @@ pub fn fold(events: &[Event]) -> Fold {
                 depends_on: Vec::new(),
                 blocks: Vec::new(),
                 claim: None,
+                taken: None,
                 route: None,
                 question: None,
                 done: None,
                 edited: None,
                 answered_at: None,
+                requeued_at: None,
             });
         }
     }
@@ -222,6 +245,39 @@ pub fn fold(events: &[Event]) -> Fold {
                         by: event.author.clone(),
                         at: event.time,
                     })
+                }
+                None => unrouted.push(event.clone()),
+            },
+            // The take sets the claim as well as its own mark: one
+            // flight has one owner, and every reader that already asks
+            // `claim` keeps working. The filed `part` stamp is left
+            // exactly as it was — a destructive edit would leave
+            // `requeued` nothing to restore.
+            Kind::Taken { flight } => match by_id.get(flight) {
+                Some(&at) => {
+                    let mark = Mark {
+                        by: event.author.clone(),
+                        at: event.time,
+                    };
+                    flights[at].claim = Some(mark.clone());
+                    flights[at].taken = Some(mark);
+                }
+                None => unrouted.push(event.clone()),
+            },
+            // Both, which is what makes the pair exact inverses: a
+            // flight you took and changed your mind about goes back to
+            // the agent pool, and one an agent merely claimed goes back
+            // untouched.
+            Kind::Requeued { flight } => match by_id.get(flight) {
+                Some(&at) => {
+                    let flight = &mut flights[at];
+                    flight.claim = None;
+                    flight.taken = None;
+                    flight.requeued_at = Some(
+                        flight
+                            .requeued_at
+                            .map_or(event.time, |at| at.max(event.time)),
+                    );
                 }
                 None => unrouted.push(event.clone()),
             },
@@ -393,6 +449,49 @@ mod tests {
             time,
             Kind::Claimed {
                 flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
+    fn taken(id: &str, time: i64, flight: &str, by: &str) -> Event {
+        let mut event = event(
+            id,
+            time,
+            Kind::Taken {
+                flight: flight.parse().expect("id"),
+            },
+        );
+        event.author = by.to_string();
+        event
+    }
+
+    fn requeued(id: &str, time: i64, flight: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Requeued {
+                flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
+    /// A filing carrying an agent-crewed stamp — the shape the crew gate
+    /// and both new verbs are about.
+    fn filed_agent(id: &str, time: i64, subject: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Filed {
+                procedure: "review".to_string(),
+                subject: subject.to_string(),
+                body: String::new(),
+                part: Some(PartStamp {
+                    id: "pass".to_string(),
+                    crew: "agent".to_string(),
+                    skill: None,
+                    done: "asserted".to_string(),
+                    bay: None,
+                }),
             },
         )
     }
@@ -829,6 +928,67 @@ mod tests {
         assert_eq!(fold.flights[0].number, 1);
         assert!(fold.flights[0].done.is_some());
         assert_eq!(fold.flights[1].number, 2);
+    }
+
+    #[test]
+    fn a_requeue_clears_the_claim_and_leaves_the_stamp_alone() {
+        let fold = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            claimed("pi.2", 20, "pi.1"),
+            requeued("pi.3", 30, "pi.1"),
+        ]);
+        let flight = &fold.flights[0];
+        assert!(flight.claim.is_none(), "the claim is released");
+        assert_eq!(flight.requeued_at, Some(30));
+        // The filed stamp is carried, never derived from — a requeue that
+        // rewrote it would have nothing to hand back.
+        assert_eq!(flight.part.as_ref().expect("stamped").crew, "agent");
+        assert!(flight.agent_crewed());
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_take_claims_for_its_author_and_leaves_the_stamp_alone() {
+        let fold = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            claimed("pi.2", 20, "pi.1"),
+            taken("pi.3", 30, "pi.1", "tyler@b.c"),
+        ]);
+        let flight = &fold.flights[0];
+        let mark = flight.taken.as_ref().expect("taken");
+        assert_eq!(mark.by, "tyler@b.c");
+        assert_eq!(mark.at, 30);
+        // One flight, one owner: the claim follows the take, so every
+        // reader that already asks `claim` keeps working.
+        let claim = flight.claim.as_ref().expect("claimed");
+        assert_eq!(claim.by, "tyler@b.c");
+        assert_eq!(claim.at, 30);
+        assert_eq!(flight.part.as_ref().expect("stamped").crew, "agent");
+        assert!(!flight.agent_crewed(), "the take closes the gate");
+    }
+
+    #[test]
+    fn a_requeue_after_a_take_clears_both_and_the_flight_is_agent_crewed_again() {
+        let fold = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            taken("pi.2", 20, "pi.1", "tyler@b.c"),
+            requeued("pi.3", 30, "pi.1"),
+        ]);
+        let flight = &fold.flights[0];
+        assert!(flight.claim.is_none());
+        assert!(flight.taken.is_none());
+        assert_eq!(flight.requeued_at, Some(30));
+        assert!(flight.agent_crewed());
+    }
+
+    #[test]
+    fn a_take_or_a_requeue_for_a_flight_never_filed_is_unrouted() {
+        let fold = fold(&[
+            taken("pi.1", 10, "zz.9", "a@b.c"),
+            requeued("pi.2", 20, "zz.9"),
+        ]);
+        assert!(fold.flights.is_empty());
+        assert_eq!(fold.unrouted.len(), 2);
     }
 
     #[test]

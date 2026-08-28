@@ -22,10 +22,11 @@
 //! flight with undone dependencies is `yours`, never `waiting`.
 //!
 //! Standing precedence is `enrich`'s partition, not pick's one boolean:
-//! done, then the open question, then fufu's branch hold, then the claim,
-//! then the crew stamp, and only a pool candidate takes the walk's
-//! outcome. A brief that said "claimed" where the board shows *holding*
-//! would fail the one-glance test.
+//! done, then the open question, then fufu's branch hold, then the claim
+//! — a take rides in as a claim, which is what it is — then the crew
+//! stamp, and only a pool candidate takes the walk's outcome. A brief
+//! that said "claimed" where the board shows *holding* would fail the
+//! one-glance test.
 
 use serde::Serialize;
 
@@ -57,6 +58,16 @@ pub struct Brief {
     pub filed_at: i64,
     pub claimed_by: Option<String>,
     pub claimed_at: Option<i64>,
+    /// The standing take, flat like the claim. A take sets the claim to
+    /// its own author, so these repeat `claimed_by`/`claimed_at` while
+    /// one stands — the second pair is what says the claim came from the
+    /// human override rather than from `claim` or `next`.
+    pub taken_by: Option<String>,
+    pub taken_at: Option<i64>,
+    /// The freshest requeue, flat like the claim. It outlives the claim
+    /// it released, which is the point: the release is the flight's
+    /// motion.
+    pub requeued_at: Option<i64>,
     /// The last route, flat like the claim. `because` carries the stored
     /// explanation, `None` when the route said nothing.
     pub routed_by: Option<String>,
@@ -114,7 +125,8 @@ pub enum Standing {
     Question,
     /// fufu's branch verdict — derived, not authored.
     Held,
-    /// A standing claim — someone already flies it.
+    /// A standing claim — someone already flies it. A take reads as one
+    /// too: `taken_by` beside `claimed_by` is what distinguishes them.
     Claimed,
     /// Unclaimed, and the crew stamp is what keeps it out of the pool:
     /// no stamp at all — a parent, or a plain filing — or a crew that is
@@ -172,8 +184,10 @@ pub fn brief(fold: &Fold, reads: &Reads, verdicts: &Verdicts, id: &EventId) -> O
     let last_motion = [
         op.map(|op| op.time),
         flight.claim.as_ref().map(|claim| claim.at),
+        flight.taken.as_ref().map(|mark| mark.at),
         flight.question.as_ref().map(|question| question.at),
         flight.answered_at,
+        flight.requeued_at,
         flight.edited.as_ref().map(|mark| mark.at),
     ]
     .into_iter()
@@ -197,6 +211,9 @@ pub fn brief(fold: &Fold, reads: &Reads, verdicts: &Verdicts, id: &EventId) -> O
         filed_at: flight.filed_at,
         claimed_by: flight.claim.as_ref().map(|claim| claim.by.clone()),
         claimed_at: flight.claim.as_ref().map(|claim| claim.at),
+        taken_by: flight.taken.as_ref().map(|mark| mark.by.clone()),
+        taken_at: flight.taken.as_ref().map(|mark| mark.at),
+        requeued_at: flight.requeued_at,
         routed_by: flight.route.as_ref().map(|route| route.by.clone()),
         routed_at: flight.route.as_ref().map(|route| route.at),
         because: flight
@@ -293,10 +310,6 @@ fn standing_and_beat(
         .and_then(|op| op.branch.as_deref())
         .filter(|name| *name != "@detached")
         .and_then(|name| branches.get(name).copied());
-    let agent_crewed = flight
-        .part
-        .as_ref()
-        .is_some_and(|part| part.crew == "agent");
 
     let standing = if flight.done.is_some() {
         Standing::Done
@@ -306,7 +319,7 @@ fn standing_and_beat(
         Standing::Held
     } else if flight.claim.is_some() {
         Standing::Claimed
-    } else if !agent_crewed {
+    } else if !flight.agent_crewed() {
         Standing::Yours
     } else if picks.picked.iter().any(|pick| pick.flight == id) {
         Standing::Ready

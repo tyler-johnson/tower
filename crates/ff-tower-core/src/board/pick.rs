@@ -6,13 +6,15 @@
 //!
 //! The pool is any unclaimed live flight whose own log stamp says an
 //! agent flies it: a standing claim, an open question, or a fufu hold
-//! takes a flight out, and an op row alone does not. The crew gate reads
+//! takes a flight out, and an op row alone does not. The crew gate is
+//! `Flight::agent_crewed`, the one the brief reads too: it asks
 //! `flight.part` — the stamp the filing copied into the log — never the
-//! registry again (principle 11), and unknown never rounds down: a
+//! registry again (principle 11), and unknown never rounds down, so a
 //! missing stamp, `you`, or a crew this binary has never heard of are all
-//! out. What the crew clause alone excludes is counted in `yours`, the
-//! number behind `next`'s exit 3; the flights themselves are silent here
-//! because the pile is triage's surface, not this one's.
+//! out. A `take` closes that gate without touching the stamp. What the
+//! crew clause alone excludes is counted in `yours`, the number behind
+//! `next`'s exit 3; the flights themselves are silent here because the
+//! pile is triage's surface, not this one's.
 //!
 //! Every live flight *not* in the pool keeps its branch on the gate —
 //! waiting and holding flights included, because a warm bay holds real
@@ -99,15 +101,8 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
             .as_deref()
             .and_then(|name| index.get(name))
             .is_some_and(|row| row.held || row.resolving);
-        // Exact string compare on the stored stamp: `part: None` (a
-        // parent, or a pre-procedure filing) and every other crew —
-        // `"you"`, a future `"pair"` — are out.
-        let agent_crewed = flight
-            .part
-            .as_ref()
-            .is_some_and(|part| part.crew == "agent");
         let unclaimed = flight.claim.is_none() && flight.question.is_none() && !fufu_held;
-        if unclaimed && agent_crewed {
+        if unclaimed && flight.agent_crewed() {
             candidates.push((flight, id, branch));
         } else {
             if unclaimed {
@@ -244,6 +239,26 @@ mod tests {
             id,
             time,
             Kind::Claimed {
+                flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
+    fn taken(id: &str, time: i64, flight: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Taken {
+                flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
+    fn requeued(id: &str, time: i64, flight: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Requeued {
                 flight: flight.parse().expect("id"),
             },
         )
@@ -580,6 +595,41 @@ mod tests {
         );
         assert!(picks.picked.is_empty());
         assert_eq!(picks.yours, 0, "a claim or a question already has an owner");
+    }
+
+    #[test]
+    fn a_taken_flight_leaves_the_pool_though_its_stamp_says_agent() {
+        let picks = pick(
+            &fold(&[filed("pi.1", 10), taken("pi.2", 20, "pi.1")]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            1,
+        );
+        assert!(picks.picked.is_empty());
+        assert!(picks.passed.is_empty(), "excluded silently, never passed");
+        assert_eq!(picks.yours, 0, "a take already has an owner");
+    }
+
+    #[test]
+    fn a_requeued_flight_is_back_in_the_pool() {
+        // Both halves of the recovery path: a claim released, and a take
+        // undone. Neither needs a second edit — `unclaimed` already reads
+        // `claim.is_none()`, and the crew gate reads the untouched stamp.
+        let picks = pick(
+            &fold(&[
+                filed("pi.1", 10),
+                claimed("pi.2", 20, "pi.1"),
+                requeued("pi.3", 30, "pi.1"),
+                filed("pi.4", 40),
+                taken("pi.5", 50, "pi.4"),
+                requeued("pi.6", 60, "pi.4"),
+            ]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            2,
+        );
+        let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
+        assert_eq!(ids, ["pi.1", "pi.4"]);
     }
 
     #[test]

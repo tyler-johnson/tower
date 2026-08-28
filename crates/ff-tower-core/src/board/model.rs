@@ -59,6 +59,13 @@ pub struct FlightView {
     pub current: bool,
     /// The standing claim's author, when one stands.
     pub claimed_by: Option<String>,
+    /// A `take` stands over the claim — the human override, which is
+    /// also what closes the crew gate. The claim's author is `claimed_by`
+    /// either way; this says where the claim came from.
+    pub taken: bool,
+    /// The freshest requeue, which outlives the claim it released — a
+    /// render needs it to tell an abandoned tree from a flown one.
+    pub requeued_at: Option<i64>,
     /// The open question tower's own `hold` attached — distinct from
     /// `held`/`resolving`, which stay fufu's branch verdicts.
     pub question: Option<String>,
@@ -89,7 +96,8 @@ pub struct CollideView {
 /// A branch of `None`, `@detached`, or a name absent from the index
 /// (deleted, or landed) cannot be held by definition: the flight stays in
 /// the air. `last_motion` is the max of the freshest op row's time, the
-/// claim, the question, and the freshest answer.
+/// claim, the take, the question, the freshest answer, the freshest
+/// requeue, and the last edit.
 ///
 /// Verdicts land on every live flight against every other live flight on
 /// a distinct branch — waiting and holding rows keep their conflicts,
@@ -135,8 +143,10 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
         let last_motion = [
             op.map(|op| op.time),
             flight.claim.as_ref().map(|claim| claim.at),
+            flight.taken.as_ref().map(|mark| mark.at),
             flight.question.as_ref().map(|question| question.at),
             flight.answered_at,
+            flight.requeued_at,
             flight.edited.as_ref().map(|mark| mark.at),
         ]
         .into_iter()
@@ -236,6 +246,8 @@ fn view(
         held,
         resolving,
         current,
+        taken: flight.taken.is_some(),
+        requeued_at: flight.requeued_at,
         claimed_by: flight.claim.map(|claim| claim.by),
         question,
         asked_at,
