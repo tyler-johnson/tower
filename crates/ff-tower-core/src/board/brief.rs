@@ -62,6 +62,10 @@ pub struct Brief {
     pub routed_by: Option<String>,
     pub routed_at: Option<i64>,
     pub because: Option<String>,
+    /// The last edit touching the record — the flight's own fields or a
+    /// comment's text — flat like the claim.
+    pub edited_by: Option<String>,
+    pub edited_at: Option<i64>,
     pub question: Option<String>,
     pub asked_by: Option<String>,
     pub asked_at: Option<i64>,
@@ -139,6 +143,8 @@ pub struct LinkView {
 /// A note on the record, as the brief carries it.
 #[derive(Debug, Serialize)]
 pub struct CommentView {
+    /// The wire id — a comment's only name, and what `edit` takes.
+    pub id: String,
     pub author: String,
     pub at: i64,
     pub text: String,
@@ -168,6 +174,7 @@ pub fn brief(fold: &Fold, reads: &Reads, verdicts: &Verdicts, id: &EventId) -> O
         flight.claim.as_ref().map(|claim| claim.at),
         flight.question.as_ref().map(|question| question.at),
         flight.answered_at,
+        flight.edited.as_ref().map(|mark| mark.at),
     ]
     .into_iter()
     .flatten()
@@ -197,6 +204,8 @@ pub fn brief(fold: &Fold, reads: &Reads, verdicts: &Verdicts, id: &EventId) -> O
             .as_ref()
             .map(|route| route.because.clone())
             .filter(|because| !because.is_empty()),
+        edited_by: flight.edited.as_ref().map(|mark| mark.by.clone()),
+        edited_at: flight.edited.as_ref().map(|mark| mark.at),
         question: flight.question.as_ref().map(|q| q.text.clone()),
         asked_by: flight.question.as_ref().map(|q| q.by.clone()),
         asked_at: flight.question.as_ref().map(|q| q.at),
@@ -214,6 +223,7 @@ pub fn brief(fold: &Fold, reads: &Reads, verdicts: &Verdicts, id: &EventId) -> O
             .comments
             .iter()
             .map(|comment| CommentView {
+                id: comment.id.to_string(),
                 author: comment.author.clone(),
                 at: comment.at,
                 text: comment.text.clone(),
@@ -417,6 +427,26 @@ mod tests {
         )
     }
 
+    fn edited(
+        id: &str,
+        author: &str,
+        time: i64,
+        target: &str,
+        subject: Option<&str>,
+        body: Option<&str>,
+    ) -> Event {
+        lifecycle(
+            id,
+            author,
+            time,
+            Kind::Edited {
+                target: target.parse().expect("id"),
+                subject: subject.map(str::to_string),
+                body: body.map(str::to_string),
+            },
+        )
+    }
+
     fn linked(id: &str, time: i64, from: &str, to: &str) -> Event {
         lifecycle(
             id,
@@ -593,10 +623,40 @@ mod tests {
         )
         .expect("filed");
         assert_eq!(brief.comments.len(), 2);
+        assert_eq!(brief.comments[0].id, "pi.2");
         assert_eq!(brief.comments[0].author, "one@b.c");
         assert_eq!(brief.comments[0].at, 20);
         assert_eq!(brief.comments[0].text, "first");
+        assert_eq!(brief.comments[1].id, "pi.3");
         assert_eq!(brief.comments[1].text, "second");
+    }
+
+    #[test]
+    fn the_edited_mark_lands_flat_and_counts_as_motion() {
+        let plain = brief(
+            &fold(&[filed("pi.1", 10, "s", "")]),
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert!(plain.edited_by.is_none());
+        assert!(plain.edited_at.is_none());
+
+        let reworded = brief(
+            &fold(&[
+                filed("pi.1", 10, "s", ""),
+                edited("pi.2", "editor@b.c", 30, "pi.1", Some("reworded"), None),
+            ]),
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert_eq!(reworded.subject, "reworded");
+        assert_eq!(reworded.edited_by.as_deref(), Some("editor@b.c"));
+        assert_eq!(reworded.edited_at, Some(30));
+        assert_eq!(reworded.last_motion, Some(30), "an edit is motion");
     }
 
     #[test]

@@ -137,6 +137,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
             flight.claim.as_ref().map(|claim| claim.at),
             flight.question.as_ref().map(|question| question.at),
             flight.answered_at,
+            flight.edited.as_ref().map(|mark| mark.at),
         ]
         .into_iter()
         .flatten()
@@ -575,6 +576,33 @@ mod tests {
         let view = &board.in_the_air[0];
         assert!(view.question.is_none());
         assert_eq!(view.last_motion, Some(80));
+    }
+
+    #[test]
+    fn an_edit_counts_as_motion() {
+        let board = enrich(
+            fold(&[
+                filed("pi.1", 10),
+                lifecycle(
+                    "pi.2",
+                    90,
+                    Kind::Edited {
+                        target: "pi.1".parse().expect("id"),
+                        subject: Some("reworded".to_string()),
+                        body: None,
+                    },
+                ),
+            ]),
+            &reads(
+                vec![op("pi.1", Some("work"), 50)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+            &Verdicts::default(),
+        );
+        let view = &board.in_the_air[0];
+        assert_eq!(view.subject, "reworded");
+        assert_eq!(view.last_motion, Some(90));
     }
 
     #[test]

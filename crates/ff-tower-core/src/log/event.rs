@@ -127,6 +127,18 @@ pub enum Kind {
     },
     /// A note on the record, local.
     Commented { flight: EventId, text: String },
+    /// Rewords a flight's subject/body, or a comment's text — an overlay
+    /// the fold applies last-wins per field; the log keeps every prior
+    /// word.
+    Edited {
+        /// A flight's id, or a comment's event id.
+        target: EventId,
+        /// The new subject; flights only, `None` when unchanged.
+        subject: Option<String>,
+        /// The new body — or, on a comment target, the new text. `None`
+        /// when unchanged.
+        body: Option<String>,
+    },
     /// `from` depends on `to` — a declared dependency, stored intent.
     Linked { from: EventId, to: EventId },
     /// Puts the flight in the air at assignment; the claimant is the
@@ -150,6 +162,7 @@ impl Kind {
             Kind::Filed { .. } => "filed",
             Kind::Routed { .. } => "routed",
             Kind::Commented { .. } => "commented",
+            Kind::Edited { .. } => "edited",
             Kind::Linked { .. } => "linked",
             Kind::Claimed { .. } => "claimed",
             Kind::Held { .. } => "held",
@@ -211,6 +224,17 @@ struct CommentedBody {
     text: String,
 }
 
+/// Both options follow `part`'s discipline — `default`, skipped when
+/// absent — so an unchanged field leaves no key on the wire.
+#[derive(Serialize, Deserialize)]
+struct EditedBody {
+    target: EventId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct LinkedBody {
     from: EventId,
@@ -267,6 +291,15 @@ impl Serialize for Event {
             Kind::Commented { flight, text } => serde_json::value::to_raw_value(&CommentedBody {
                 flight: flight.clone(),
                 text: text.clone(),
+            }),
+            Kind::Edited {
+                target,
+                subject,
+                body,
+            } => serde_json::value::to_raw_value(&EditedBody {
+                target: target.clone(),
+                subject: subject.clone(),
+                body: body.clone(),
             }),
             Kind::Linked { from, to } => serde_json::value::to_raw_value(&LinkedBody {
                 from: from.clone(),
@@ -344,6 +377,17 @@ impl<'de> Deserialize<'de> for Event {
             let CommentedBody { flight, text } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Commented { flight, text }
+        } else if kind == "edited" {
+            let EditedBody {
+                target,
+                subject,
+                body,
+            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Edited {
+                target,
+                subject,
+                body,
+            }
         } else if kind == "linked" {
             let LinkedBody { from, to } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
@@ -553,6 +597,61 @@ mod tests {
     #[test]
     fn a_route_with_a_broken_body_is_an_error() {
         let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"routed","body":{"flight":"pi.1"}}"#;
+        assert!(serde_json::from_str::<Event>(broken).is_err());
+    }
+
+    #[test]
+    fn an_edit_round_trips_and_omits_the_fields_it_does_not_carry() {
+        let edit = |subject: Option<&str>, body: Option<&str>| Event {
+            id: "pi.9".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::Edited {
+                target: "pi.1".parse().expect("id"),
+                subject: subject.map(str::to_string),
+                body: body.map(str::to_string),
+            },
+        };
+
+        let subject_only = serde_json::to_string(&edit(Some("new subject"), None)).expect("json");
+        assert!(
+            subject_only.contains(r#""kind":"edited""#),
+            "got {subject_only}"
+        );
+        assert!(
+            subject_only.contains(r#""body":{"target":"pi.1","subject":"new subject"}"#),
+            "an unchanged field leaves no key: {subject_only}"
+        );
+
+        let body_only = serde_json::to_string(&edit(None, Some("new body"))).expect("json");
+        assert!(
+            body_only.contains(r#""body":{"target":"pi.1","body":"new body"}"#),
+            "got {body_only}"
+        );
+
+        let both: Event = serde_json::from_str(
+            &serde_json::to_string(&edit(Some("s"), Some("b"))).expect("json"),
+        )
+        .expect("parse");
+        let Kind::Edited {
+            target,
+            subject,
+            body,
+        } = both.kind
+        else {
+            panic!("an edit parses as an edit");
+        };
+        assert_eq!(target.to_string(), "pi.1");
+        assert_eq!(subject.as_deref(), Some("s"));
+        assert_eq!(body.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn an_edit_with_no_target_is_an_error() {
+        // A known kind with a broken body is malformed, not a kind from
+        // the future.
+        let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"edited","body":{"subject":"s"}}"#;
         assert!(serde_json::from_str::<Event>(broken).is_err());
     }
 

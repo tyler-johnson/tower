@@ -49,6 +49,10 @@ pub struct Flight {
     pub question: Option<Question>,
     /// Set once `done` lands; the partition drops the flight on it.
     pub done: Option<Mark>,
+    /// The last edit touching this flight's record — its own fields or a
+    /// comment's text, either target type. A reword is a gesture on the
+    /// flight, so it counts as motion.
+    pub edited: Option<Mark>,
     /// The freshest answer's time — an answer counts as motion even
     /// though its text lives only in the log.
     pub answered_at: Option<i64>,
@@ -100,14 +104,15 @@ pub struct Fold {
     pub unrouted: Vec<Event>,
 }
 
-/// Fold the union into flights. Two passes, and that is load-bearing: the
-/// union orders by `(time, writer, seq)` and wall clocks disagree across
-/// machines, so a comment from a fast clock can sort *before* the filing
-/// it names. Pass 1 mints every flight; pass 2 attaches to flights that
-/// exist anywhere in the log, not merely earlier in it. A numbering
-/// post-pass then ranks each writer's filings by seq — by seq and not
-/// union order, so a clock step can reorder the union without ever
-/// renumbering a flight.
+/// Fold the union into flights. Three passes, and that is load-bearing:
+/// the union orders by `(time, writer, seq)` and wall clocks disagree
+/// across machines, so a comment from a fast clock can sort *before* the
+/// filing it names. Pass 1 mints every flight; pass 2 attaches to flights
+/// that exist anywhere in the log, not merely earlier in it; pass 3
+/// applies edits after every comment exists, because an edit can name a
+/// comment and ride the same skew. A numbering post-pass then ranks each
+/// writer's filings by seq — by seq and not union order, so a clock step
+/// can reorder the union without ever renumbering a flight.
 pub fn fold(events: &[Event]) -> Fold {
     let mut flights: Vec<Flight> = Vec::new();
     let mut by_id: HashMap<&EventId, usize> = HashMap::new();
@@ -145,6 +150,7 @@ pub fn fold(events: &[Event]) -> Fold {
                 route: None,
                 question: None,
                 done: None,
+                edited: None,
                 answered_at: None,
             });
         }
@@ -164,9 +170,14 @@ pub fn fold(events: &[Event]) -> Fold {
         }
     }
 
+    let mut edits: Vec<&Event> = Vec::new();
     for event in events {
         match &event.kind {
             Kind::Filed { .. } => {}
+            // Held for pass 3: pass 2 attaches comments in union order,
+            // so clock skew could sort an edit before the comment it
+            // names — the same skew pass 1 absorbs for flights.
+            Kind::Edited { .. } => edits.push(event),
             Kind::Routed {
                 flight,
                 procedure,
@@ -250,6 +261,56 @@ pub fn fold(events: &[Event]) -> Fold {
                 None => unrouted.push(event.clone()),
             },
             Kind::Unknown { .. } => unrouted.push(event.clone()),
+        }
+    }
+
+    // Pass 3: edits, in union order — last-wins is preserved, and every
+    // comment already exists. Per-field overlay, the contrast with the
+    // route's wholesale re-stamp: concurrent subject and body edits from
+    // two writers both land. A part's derived subject (`"{subject} ·
+    // {part.id}"`, composed at file/triage time) never changes when a
+    // parent is reworded — each part is its own flight.
+    for event in edits {
+        let Kind::Edited {
+            target,
+            subject,
+            body,
+        } = &event.kind
+        else {
+            unreachable!("pass 2 collected only edits");
+        };
+        let mark = Mark {
+            by: event.author.clone(),
+            at: event.time,
+        };
+        if let Some(&at) = by_id.get(target) {
+            let flight = &mut flights[at];
+            if let Some(subject) = subject {
+                flight.subject = subject.clone();
+            }
+            if let Some(body) = body {
+                flight.body = body.clone();
+            }
+            flight.edited = Some(mark);
+        } else if let Some(at) = flights
+            .iter()
+            .position(|flight| flight.comments.iter().any(|comment| &comment.id == target))
+        {
+            // `subject` on a comment target is the tolerant-fold rule:
+            // the verb refuses it, the fold shrugs. The mark still lands
+            // — a comment reword is a gesture on the flight.
+            let flight = &mut flights[at];
+            if let Some(body) = body {
+                let comment = flight
+                    .comments
+                    .iter_mut()
+                    .find(|comment| &comment.id == target)
+                    .expect("the position found this comment");
+                comment.text = body.clone();
+            }
+            flight.edited = Some(mark);
+        } else {
+            unrouted.push(event.clone());
         }
     }
 
@@ -364,6 +425,24 @@ mod tests {
             time,
             Kind::Done {
                 flight: flight.parse().expect("id"),
+            },
+        )
+    }
+
+    fn edited(
+        id: &str,
+        time: i64,
+        target: &str,
+        subject: Option<&str>,
+        body: Option<&str>,
+    ) -> Event {
+        event(
+            id,
+            time,
+            Kind::Edited {
+                target: target.parse().expect("id"),
+                subject: subject.map(str::to_string),
+                body: body.map(str::to_string),
             },
         )
     }
@@ -588,6 +667,116 @@ mod tests {
         ]);
         assert!(fold.flights.is_empty());
         assert_eq!(fold.unrouted.len(), 4);
+    }
+
+    #[test]
+    fn the_last_edit_wins_per_field() {
+        let fold = fold(&[
+            filed("pi.1", 10, "first"),
+            edited("pi.2", 20, "pi.1", Some("second"), Some("a body")),
+            edited("pi.3", 30, "pi.1", Some("third"), None),
+        ]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.subject, "third");
+        assert_eq!(
+            flight.body, "a body",
+            "an absent field leaves the last value standing"
+        );
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_subject_edit_and_a_body_edit_from_two_writers_both_land() {
+        // The contrast with `the_last_route_wins_wholesale`: the overlay
+        // is per field, so concurrent partial edits do not clobber each
+        // other.
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            edited("pi.2", 20, "pi.1", Some("new subject"), None),
+            edited("qi.1", 30, "pi.1", None, Some("new body")),
+        ]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.subject, "new subject");
+        assert_eq!(flight.body, "new body");
+    }
+
+    #[test]
+    fn an_edit_delivered_ahead_of_its_filing_still_attaches() {
+        let fold = fold(&[
+            edited("fast.1", 5, "pi.1", Some("reworded"), None),
+            filed("pi.1", 10, "s"),
+        ]);
+        assert_eq!(fold.flights[0].subject, "reworded");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_comment_edit_rewords_the_text_and_preserves_the_rest() {
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            commented("pi.2", 20, "pi.1"),
+            edited("pi.3", 30, "pi.2", None, Some("the corrected note")),
+        ]);
+        let comment = &fold.flights[0].comments[0];
+        assert_eq!(comment.text, "the corrected note");
+        assert_eq!(comment.id, "pi.2".parse().expect("id"));
+        assert_eq!(comment.author, "a@b.c");
+        assert_eq!(comment.at, 20);
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_comment_edit_delivered_ahead_of_its_comment_still_attaches() {
+        // The pass-3 payoff: pass 2 attaches comments in union order, so
+        // an edit riding a fast clock can sort before the comment it
+        // names and must still land.
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            edited("fast.1", 15, "pi.2", None, Some("reworded")),
+            commented("pi.2", 20, "pi.1"),
+        ]);
+        assert_eq!(fold.flights[0].comments[0].text, "reworded");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn an_edit_naming_nothing_is_unrouted() {
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            edited("pi.2", 20, "zz.9", Some("reworded"), None),
+        ]);
+        assert_eq!(fold.flights[0].subject, "s");
+        assert_eq!(fold.unrouted.len(), 1);
+    }
+
+    #[test]
+    fn a_subject_on_a_comment_target_is_ignored() {
+        // The tolerant-fold rule: the verb refuses this shape, the fold
+        // shrugs — but the mark still lands.
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            commented("pi.2", 20, "pi.1"),
+            edited("pi.3", 30, "pi.2", Some("not a subject"), None),
+        ]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.subject, "s");
+        assert_eq!(flight.comments[0].text, "a note");
+        assert_eq!(flight.edited.as_ref().expect("marked").at, 30);
+    }
+
+    #[test]
+    fn the_edited_mark_carries_the_last_editor_comment_edits_included() {
+        let mut late = edited("qi.1", 40, "pi.2", None, Some("reworded"));
+        late.author = "editor@b.c".to_string();
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            commented("pi.2", 20, "pi.1"),
+            edited("pi.3", 30, "pi.1", Some("new subject"), None),
+            late,
+        ]);
+        let mark = fold.flights[0].edited.as_ref().expect("edited");
+        assert_eq!(mark.by, "editor@b.c");
+        assert_eq!(mark.at, 40);
     }
 
     #[test]
