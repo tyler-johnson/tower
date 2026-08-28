@@ -23,6 +23,7 @@ mod cli;
 mod cmd;
 mod error;
 mod explain;
+mod help;
 mod machine;
 mod render;
 mod selfupdate;

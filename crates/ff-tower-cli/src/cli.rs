@@ -9,6 +9,8 @@
 
 use clap::{Parser, Subcommand};
 
+use crate::help;
+
 /// The name the tool has, as opposed to what it is typed as. The version
 /// is the one place the project name is worth a line: it is what somebody
 /// searches for — it matches the release titles and the README — and
@@ -34,7 +36,13 @@ pub const VERSION: &str = concat!(
 #[derive(Parser)]
 #[command(
     name = "ff-tower",
+    // Pinned, not derived from argv[0]: without it usage lines read
+    // `Usage: ff-tower brief`, a spelling nobody types — the binary is
+    // reached through fufu's dispatch, and what you type is `ff tower`.
+    bin_name = "ff tower",
     about = "tower: the board over fufu",
+    long_about = help::ROOT,
+    after_long_help = help::ROOT_EXAMPLES,
     version = VERSION,
     // Declared by hand below, for the short letter: clap's own flag is `-V`.
     disable_version_flag = true
@@ -66,9 +74,11 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     /// The board — what is filed, what is moving, what is stuck.
+    #[command(long_about = help::ROOT, after_long_help = help::ROOT_EXAMPLES)]
     Board,
     /// Claim the next ready flight, or a set of `k` that collide with
     /// neither each other nor anything already flying.
+    #[command(long_about = help::NEXT, after_long_help = help::NEXT_EXAMPLES)]
     Next {
         /// How many flights to hand out; one when unsaid.
         #[arg(short = 'n', value_name = "k")]
@@ -78,12 +88,14 @@ pub enum Command {
         peek: bool,
     },
     /// Everything known about one flight, for whoever picks it up.
+    #[command(long_about = help::BRIEF, after_long_help = help::BRIEF_EXAMPLES)]
     Brief {
         /// The flight to brief — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
     },
     /// File a flight onto the board.
+    #[command(long_about = help::FILE, after_long_help = help::FILE_EXAMPLES)]
     File {
         /// What the flight is about.
         #[arg(value_name = "subject")]
@@ -96,6 +108,7 @@ pub enum Command {
         procedure: Option<String>,
     },
     /// A note on a flight's record.
+    #[command(long_about = help::COMMENT, after_long_help = help::COMMENT_EXAMPLES)]
     Comment {
         /// The flight to comment on — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
@@ -106,6 +119,7 @@ pub enum Command {
     },
     /// Reword a flight or a comment — an overlay on the record; the log
     /// keeps every prior word.
+    #[command(long_about = help::EDIT, after_long_help = help::EDIT_EXAMPLES)]
     Edit {
         /// The target — a flight (number, `writer#n`, event id) or a
         /// comment's event id.
@@ -119,6 +133,7 @@ pub enum Command {
         message: Option<String>,
     },
     /// Declare a dependency: `a` depends on `b`.
+    #[command(long_about = help::LINK, after_long_help = help::LINK_EXAMPLES)]
     Link {
         /// The flight that depends.
         #[arg(value_name = "a")]
@@ -129,6 +144,7 @@ pub enum Command {
     },
     /// Split a flight into parts: each part files as a flight, and the
     /// parent waits on all of them.
+    #[command(long_about = help::DECOMPOSE, after_long_help = help::DECOMPOSE_EXAMPLES)]
     Decompose {
         /// The flight to split — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
@@ -138,12 +154,14 @@ pub enum Command {
         parts: Vec<String>,
     },
     /// What procedures are installed, and where to fork one.
+    #[command(long_about = help::PROCEDURES, after_long_help = help::PROCEDURES_EXAMPLES)]
     Procedures {
         /// One procedure, in full; the whole list when unsaid.
         #[arg(value_name = "name")]
         name: Option<String>,
     },
     /// The unclassified pile, or route one flight to a procedure.
+    #[command(long_about = help::TRIAGE, after_long_help = help::TRIAGE_EXAMPLES)]
     Triage {
         /// The flight to route — a number, `writer#n`, or the event id;
         /// the pile when unsaid.
@@ -157,12 +175,14 @@ pub enum Command {
         message: Option<String>,
     },
     /// Claim one specific flight, out of order.
+    #[command(long_about = help::CLAIM, after_long_help = help::CLAIM_EXAMPLES)]
     Claim {
         /// The flight to claim — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
     },
     /// Stop a flight with a question attached — bay warm, exit 3.
+    #[command(long_about = help::HOLD, after_long_help = help::HOLD_EXAMPLES)]
     Hold {
         /// The flight to hold.
         #[arg(value_name = "flight")]
@@ -172,6 +192,7 @@ pub enum Command {
         message: Option<String>,
     },
     /// Answer the open question and release the hold.
+    #[command(long_about = help::ANSWER, after_long_help = help::ANSWER_EXAMPLES)]
     Answer {
         /// The held flight.
         #[arg(value_name = "flight")]
@@ -181,6 +202,7 @@ pub enum Command {
         message: Option<String>,
     },
     /// Finish a flight — off the board, on the record.
+    #[command(long_about = help::DONE, after_long_help = help::DONE_EXAMPLES)]
     Done {
         /// The flight to finish; the invoking worktree's flight when
         /// unsaid, derived from its newest session-tagged work.
@@ -188,6 +210,7 @@ pub enum Command {
         flight: Option<String>,
     },
     /// Look up an error id and see what it means.
+    #[command(long_about = help::EXPLAIN, after_long_help = help::EXPLAIN_EXAMPLES)]
     Explain {
         /// The error id to look up.
         #[arg(value_name = "id")]
@@ -198,6 +221,7 @@ pub enum Command {
     },
     /// Settings, on fufu's typed-registry model: bare lists them, a key
     /// gets, key + value sets, `--unset` returns to the default.
+    #[command(long_about = help::CONFIG, after_long_help = help::CONFIG_EXAMPLES)]
     Config {
         /// The setting — `bays`, or `tower.bays`; the whole list when
         /// unsaid.
@@ -214,13 +238,16 @@ pub enum Command {
         global: bool,
     },
     /// The pool: what is bootstrapped, what is occupied, what is free.
+    #[command(long_about = help::BAY, after_long_help = help::BAY_EXAMPLES)]
     Bay {
         #[command(subcommand)]
         action: Option<BayAction>,
     },
     /// Which tower this is, and whether it is the current one.
+    #[command(long_about = help::VERSION, after_long_help = help::VERSION_EXAMPLES)]
     Version,
     /// Download the latest release and replace this binary.
+    #[command(long_about = help::UPDATE, after_long_help = help::UPDATE_EXAMPLES)]
     Update {
         /// Refresh the update cache only (used by the background check).
         #[arg(long)]
@@ -228,6 +255,7 @@ pub enum Command {
     },
     /// Stale bays and drift — doctor observes and complains, never
     /// enforces.
+    #[command(long_about = help::DOCTOR, after_long_help = help::DOCTOR_EXAMPLES)]
     Doctor,
 }
 
@@ -289,9 +317,11 @@ impl Command {
 #[derive(Subcommand)]
 pub enum BayAction {
     /// Every bay: id, branch, and the live flight sitting in it.
+    #[command(long_about = help::BAY_LIST, after_long_help = help::BAY_LIST_EXAMPLES)]
     List,
     /// Warm a bay — `ff worktree add`, so the chain floor is laid before
     /// the first command runs in it.
+    #[command(long_about = help::BAY_WARM, after_long_help = help::BAY_WARM_EXAMPLES)]
     Warm {
         /// Where to put it; a relative path resolves against the
         /// repository, not the shell's directory. Minted under
@@ -305,6 +335,7 @@ pub enum BayAction {
     },
     /// Release a bay — refused while a live flight sits in it; fufu
     /// captures the tree before teardown either way.
+    #[command(long_about = help::BAY_RELEASE, after_long_help = help::BAY_RELEASE_EXAMPLES)]
     Release {
         /// The bay, by id or by path.
         #[arg(value_name = "bay")]
