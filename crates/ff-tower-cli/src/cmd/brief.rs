@@ -71,6 +71,17 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         }
         out.push_str(&format!("    {}\n", render::paint_dim(&phrase, colored)));
     }
+    // The last edit, comment rewords included — the record has been
+    // touched, and the mark says by whom.
+    if let (Some(by), Some(at)) = (brief.edited_by.as_deref(), brief.edited_at) {
+        out.push_str(&format!(
+            "    {}\n",
+            render::paint_dim(
+                &format!("edited · by {by} · {}", render::age(now, at)),
+                colored
+            )
+        ));
+    }
     for beaten in &brief.beat {
         let reason = match &beaten.reason {
             Skip::Waiting { .. } => unreachable!("waiting rows never enter beat"),
@@ -118,10 +129,17 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         out.push('\n');
         out.push_str("comments\n");
         for comment in &brief.comments {
+            // The wire id leads the header: it is a comment's only name,
+            // and what `edit` takes — what tower prints, tower accepts.
             out.push_str(&format!(
                 "  {}\n",
                 render::paint_dim(
-                    &format!("{} · {}", comment.author, render::age(now, comment.at)),
+                    &format!(
+                        "{} · {} · {}",
+                        comment.id,
+                        comment.author,
+                        render::age(now, comment.at)
+                    ),
                     colored
                 )
             ));

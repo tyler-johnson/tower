@@ -18,6 +18,7 @@ pub mod config;
 pub mod decompose;
 pub mod doctor;
 pub mod done;
+pub mod edit;
 pub mod explain;
 pub mod file;
 pub mod hold;
@@ -239,6 +240,40 @@ pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, CliError> {
     }
 }
 
+/// Where an edit lands: a flight's record, or one comment on it.
+pub enum EditTarget {
+    Flight(EventId),
+    Comment { flight: EventId, comment: EventId },
+}
+
+/// Resolve `edit`'s target: flights by any reference form, comments by
+/// their full event id alone — the wire id is a comment's only name. A
+/// sibling of `resolve` rather than a change to it, because every other
+/// verb must keep refusing comment ids.
+pub fn resolve_edit_target(fold: &Fold, text: &str) -> Result<EditTarget, CliError> {
+    match parse_ref(text)? {
+        FlightRef::Full(id) => {
+            if fold.flights.iter().any(|flight| flight.id == id) {
+                return Ok(EditTarget::Flight(id));
+            }
+            for flight in &fold.flights {
+                if flight.comments.iter().any(|comment| comment.id == id) {
+                    return Ok(EditTarget::Comment {
+                        flight: flight.id.clone(),
+                        comment: id,
+                    });
+                }
+            }
+            Err(CliError::coded(
+                "flight/not-found",
+                format!("`{text}` names neither a flight nor a comment"),
+                vec!["ff tower".to_string()],
+            ))
+        }
+        _ => resolve(fold, text).map(EditTarget::Flight),
+    }
+}
+
 /// The fold's flight for a resolved id. Infallible after `resolve` — the
 /// id came out of this fold's filed flights.
 pub fn flight<'a>(fold: &'a Fold, id: &EventId) -> &'a Flight {
@@ -249,8 +284,9 @@ pub fn flight<'a>(fold: &'a Fold, id: &EventId) -> &'a Flight {
 }
 
 /// The flight, refused when it is already done. The lifecycle verbs stop
-/// here; `comment` and `link` stay permissive on purpose — a note on the
-/// record is fine.
+/// here; `comment`, `link`, and `edit` stay permissive on purpose — a
+/// note on the record is fine, and a wrong word in a closed record is
+/// exactly what `edit` is for.
 pub fn ensure_active<'a>(fold: &'a Fold, id: &EventId) -> Result<&'a Flight, CliError> {
     let flight = flight(fold, id);
     if flight.done.is_some() {

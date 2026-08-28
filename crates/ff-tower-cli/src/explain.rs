@@ -65,6 +65,26 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/needs-edit",
+        summary: "`edit` has nothing to change",
+        detail: "`edit` rewords through its flags — `-s` the subject, `-m` the body, or a \
+                 comment's text when the target is a comment's event id — and neither was \
+                 given, so there is no overlay to write. Either flag alone is a complete edit; \
+                 the other field stands unchanged.",
+        exits: &[
+            "ff tower edit <target> -s <subject>",
+            "ff tower edit <target> -m <msg>",
+        ],
+    },
+    Entry {
+        id: "usage/subject-on-comment",
+        summary: "a comment has no subject",
+        detail: "The target resolved to a comment, and `-s` names a field only flights carry. \
+                 A comment is one text, and `-m` is how it rewords; the flight the comment \
+                 sits on has the subject, and editing that is a different target.",
+        exits: &["ff tower edit <target> -m <msg>"],
+    },
+    Entry {
         id: "usage/needs-flight",
         summary: "bare `done` could not derive the flight",
         detail: "`done` with no argument reads the invoking worktree's newest session-tagged \
@@ -76,8 +96,8 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "usage/empty-subject",
         summary: "the subject is empty",
-        detail: "`file` and `decompose` trim each subject, and one trimmed to nothing would file \
-                 a flight the board renders as a blank line. The refusal is at write time \
+        detail: "`file`, `decompose`, and `edit -s` trim each subject, and one trimmed to \
+                 nothing would put a blank line on the board. The refusal is at write time \
                  because that is when a typo is cheap to fix; the fold stays tolerant of \
                  whatever got into the log anyway.",
         exits: &[],
@@ -153,7 +173,9 @@ pub static ENTRIES: &[Entry] = &[
         summary: "no such flight on the board",
         detail: "The reference parsed, but nothing filed matches it — across every writer's \
                  chain, done flights included. The board shows what is actually filed, in the \
-                 same display form the reference grammar accepts.",
+                 same display form the reference grammar accepts. `edit` also takes a \
+                 comment's event id, printed on the brief's comment rows; a full id matching \
+                 neither a flight nor a comment is this same refusal.",
         exits: &["ff tower"],
     },
     Entry {
@@ -170,8 +192,9 @@ pub static ENTRIES: &[Entry] = &[
         summary: "the flight is already done",
         detail: "The lifecycle verbs stop at the done mark: claiming, holding, answering, or \
                  finishing a finished flight would write motion onto a closed record. The log \
-                 keeps the record — `brief` still reads it whole — and `comment` and `link` \
-                 stay permissive on purpose, because a note on the record is fine.",
+                 keeps the record — `brief` still reads it whole — and `comment`, `link`, and \
+                 `edit` stay permissive on purpose: a note on the record is fine, and a wrong \
+                 word in a closed record is exactly what `edit` is for.",
         exits: &["ff tower brief <flight>"],
     },
     Entry {

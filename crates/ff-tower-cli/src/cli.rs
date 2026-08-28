@@ -104,6 +104,20 @@ pub enum Command {
         #[arg(short = 'm', value_name = "msg")]
         message: Option<String>,
     },
+    /// Reword a flight or a comment — an overlay on the record; the log
+    /// keeps every prior word.
+    Edit {
+        /// The target — a flight (number, `writer#n`, event id) or a
+        /// comment's event id.
+        #[arg(value_name = "target")]
+        target: String,
+        /// The new subject; flights only.
+        #[arg(short = 's', long = "subject", value_name = "subject")]
+        subject: Option<String>,
+        /// The new body — or the comment's new text.
+        #[arg(short = 'm', value_name = "msg")]
+        message: Option<String>,
+    },
     /// Declare a dependency: `a` depends on `b`.
     Link {
         /// The flight that depends.
@@ -251,6 +265,7 @@ impl Command {
             | Command::Brief { .. }
             | Command::File { .. }
             | Command::Comment { .. }
+            | Command::Edit { .. }
             | Command::Link { .. }
             | Command::Decompose { .. }
             | Command::Procedures { .. }

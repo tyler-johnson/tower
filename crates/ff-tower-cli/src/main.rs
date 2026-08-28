@@ -121,6 +121,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Brief { .. }) => "brief",
         Some(Command::File { .. }) => "file",
         Some(Command::Comment { .. }) => "comment",
+        Some(Command::Edit { .. }) => "edit",
         Some(Command::Link { .. }) => "link",
         Some(Command::Decompose { .. }) => "decompose",
         Some(Command::Procedures { .. }) => "procedures",
@@ -163,6 +164,11 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Comment { flight, message }) => {
             cmd::comment::run(cli.json, flight, message.clone())?
         }
+        Some(Command::Edit {
+            target,
+            subject,
+            message,
+        }) => cmd::edit::run(cli.json, target, subject.clone(), message.clone())?,
         Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b)?,
         Some(Command::Decompose { flight, parts }) => cmd::decompose::run(cli.json, flight, parts)?,
         Some(Command::Procedures { name }) => cmd::procedures::run(cli.json, name.as_deref())?,

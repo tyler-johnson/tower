@@ -158,7 +158,9 @@ fn brief_renders_the_full_record_both_link_directions() {
     assert!(text.contains("the body of the work"), "{text}");
     assert!(text.contains("depends on\n· #2  the dependency"), "{text}");
     assert!(text.contains("comments\n"), "{text}");
-    assert!(text.contains("tests@tower.invalid"), "{text}");
+    // The header leads with the comment's wire id — its only name, and
+    // what `edit` takes.
+    assert!(text.contains("pi.4 · tests@tower.invalid · "), "{text}");
     assert!(text.contains("a note on the record"), "{text}");
     assert!(text.contains("filed "), "{text}");
     assert!(text.contains("board: ff tower"), "{text}");
