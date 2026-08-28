@@ -169,12 +169,15 @@ fn release_of_a_free_bay_removes_it() {
     let repo = repo();
     let first = warm(&repo, "bay1", "feather");
     warm(&repo, "bay2", "quill");
+    // ff will report the removed path canonically — long-form where the
+    // runner's TEMP is an 8.3 alias, separators of its own choosing — so
+    // take the canonical shape now, while the bay still exists to resolve.
+    let canonical = canonicalized(Path::new(&first));
+    let canonical = canonical.to_str().expect("utf8");
 
     let text = stdout(&ff_tower(repo.path(), &["bay", "release", &first]));
     assert!(text.contains("released"), "{text}");
-    // ff reports the removed path with `/` separators on Windows; the
-    // fixture built `first` natively.
-    assert!(slashes(&text).contains(&slashes(&first)), "{text}");
+    assert!(slashes(&text).contains(&slashes(canonical)), "{text}");
 
     let out = ff_tower(repo.path(), &["bay", "release", "bay2", "--json"]);
     assert_eq!(out.status.code(), Some(0));

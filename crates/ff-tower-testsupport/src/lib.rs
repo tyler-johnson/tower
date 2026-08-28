@@ -240,7 +240,7 @@ pub fn canonicalized(path: &Path) -> PathBuf {
     if !cfg!(windows) {
         return full;
     }
-    match full.to_str().and_then(|s| s.strip_prefix(r"\?")) {
+    match full.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
         Some(plain) => PathBuf::from(plain),
         None => full,
     }
