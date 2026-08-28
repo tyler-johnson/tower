@@ -99,6 +99,15 @@ impl Repo {
             .args(args)
             .current_dir(self.path())
             .env("FF_NONINTERACTIVE", "1")
+            // The operator's git config must not reach fixture spawns: a
+            // machine with `fufu.gitPolicy strict` would refuse the `ff git`
+            // setup some tests do, and any global default could bend an
+            // assertion. The local-config pins in `new` stay all the same —
+            // they cover the spawns tower's own binary makes, which do not
+            // inherit this env.
+            .env("GIT_CONFIG_GLOBAL", null_device())
+            .env("GIT_CONFIG_SYSTEM", null_device())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("FF_SESSION")
             .output()
             .unwrap_or_else(|err| panic!("`{program} {}`: {err}", args.join(" ")));
@@ -219,6 +228,29 @@ impl FakeFf {
 /// The OS's null device, for pointing git config paths at nothing.
 pub fn null_device() -> &'static str {
     if cfg!(windows) { "NUL" } else { "/dev/null" }
+}
+
+/// `std::fs::canonicalize` in the shape ff reports paths: symlinks
+/// resolved (macOS tempdirs live behind the `/var` link to `/private/var`),
+/// 8.3 aliases expanded, and without the `\\?\` prefix std adds on
+/// Windows — ff's envelopes carry the plain form git and gix answer with.
+pub fn canonicalized(path: &Path) -> PathBuf {
+    let full = std::fs::canonicalize(path)
+        .unwrap_or_else(|err| panic!("canonicalize {}: {err}", path.display()));
+    if !cfg!(windows) {
+        return full;
+    }
+    match full.to_str().and_then(|s| s.strip_prefix(r"\?")) {
+        Some(plain) => PathBuf::from(plain),
+        None => full,
+    }
+}
+
+/// A string with backslashes flipped to `/`, for containment assertions
+/// where ff chose the separators on one side and the test built the other
+/// natively.
+pub fn slashes(text: &str) -> String {
+    text.replace('\\', "/")
 }
 
 fn shell_quote(text: &str) -> String {

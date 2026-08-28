@@ -6,8 +6,10 @@
 //! tower. The fakes cover what a healthy fufu will not emit on request: a
 //! contract from the future, a held exit, output that is not an envelope.
 
+use std::path::Path;
+
 use ff_tower_core::ff::{Error, Exit, Ff, Head, Pairing};
-use ff_tower_testsupport::{FakeFf, Repo};
+use ff_tower_testsupport::{FakeFf, Repo, canonicalized};
 
 // ---------------------------------------------------------------- real fufu
 
@@ -352,7 +354,9 @@ fn worktree_list_add_remove_round_trips_on_a_real_repository() {
         .worktree_add(bay.to_str().expect("utf8"), None)
         .expect("add");
     assert_eq!(added.branch, "bay1", "a branch named after the directory");
-    assert_eq!(added.path, bay.to_str().expect("utf8"));
+    // ff answers the canonical path with separators of its own choosing,
+    // so compare as paths, against the canonical form.
+    assert_eq!(Path::new(&added.path), canonicalized(&bay));
 
     let survey = Ff::at(repo.path()).worktree_list().expect("list");
     assert_eq!(survey.worktrees.len(), 2);

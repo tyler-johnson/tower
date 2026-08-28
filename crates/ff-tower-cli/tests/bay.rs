@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use ff_tower_core::ff::Ff;
-use ff_tower_testsupport::Repo;
+use ff_tower_testsupport::{Repo, canonicalized, slashes};
 
 fn ff_tower(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ff-tower"))
@@ -172,7 +172,9 @@ fn release_of_a_free_bay_removes_it() {
 
     let text = stdout(&ff_tower(repo.path(), &["bay", "release", &first]));
     assert!(text.contains("released"), "{text}");
-    assert!(text.contains(&first), "{text}");
+    // ff reports the removed path with `/` separators on Windows; the
+    // fixture built `first` natively.
+    assert!(slashes(&text).contains(&slashes(&first)), "{text}");
 
     let out = ff_tower(repo.path(), &["bay", "release", "bay2", "--json"]);
     assert_eq!(out.status.code(), Some(0));
@@ -270,7 +272,9 @@ fn bare_warm_mints_slots_under_the_pool_root() {
     repo.git(&["config", "tower.bays", root.to_str().expect("utf8")]);
 
     let text = stdout(&ff_tower(repo.path(), &["bay", "warm"]));
-    let root = std::fs::canonicalize(&root).expect("warm created the root");
+    // canonicalized panics on a missing path, so this also proves warm
+    // bootstrapped the root.
+    let root = canonicalized(&root);
     assert!(
         text.contains(&format!(
             "warmed bay-1: {} on bay-1",
