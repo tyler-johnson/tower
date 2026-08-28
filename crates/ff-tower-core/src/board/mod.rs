@@ -14,7 +14,9 @@
 //! [`wants_verdicts`] tells the caller when the probes behind that walk
 //! can change the answer. [`bays`] is the pool over
 //! the same reads too: occupancy joined from the survey and the fold,
-//! never registered. [`doctor`] is the health fold — stale bays and
+//! never registered, and [`assign`] hands each pick a bay out of that
+//! same fold — the join `next` binds a flight in. [`doctor`] is the
+//! health fold — stale bays and
 //! drift as rows over the same reads plus the seam's own answer, and it
 //! observes and complains, never enforces.
 
@@ -26,7 +28,7 @@ mod model;
 mod pick;
 mod reads;
 
-pub use bay::{BayView, bays};
+pub use bay::{BayView, Berth, assign, bays};
 pub use brief::{Brief, CommentView, LinkView, Standing, brief, wants_verdicts};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};

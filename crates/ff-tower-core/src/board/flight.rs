@@ -415,6 +415,7 @@ mod tests {
                     skill: None,
                     done: "asserted".to_string(),
                     bay: None,
+                    branch: None,
                 }),
                 because: format!("because {procedure}"),
             },
@@ -491,6 +492,7 @@ mod tests {
                     skill: None,
                     done: "asserted".to_string(),
                     bay: None,
+                    branch: None,
                 }),
             },
         )

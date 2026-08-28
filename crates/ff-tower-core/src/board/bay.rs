@@ -11,10 +11,11 @@
 use serde::Serialize;
 
 use super::flight::{Flight, Fold};
+use super::pick::Pick;
 use super::reads::Reads;
 
 /// One bay, as the pool render and the release gate see it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BayView {
     /// fufu's worktree id — `main` for the main worktree.
     pub id: String,
@@ -76,6 +77,65 @@ pub fn bays(fold: &Fold, reads: &Reads) -> Vec<BayView> {
                 subject: occupant.map(|flight| flight.subject.clone()),
                 current: row.current,
             })
+        })
+        .collect()
+}
+
+/// One pick and the bay it flies in — `next`'s half of the assignment.
+#[derive(Debug)]
+pub struct Berth {
+    /// The wire id of the picked flight, [`super::Pick::flight`]'s.
+    pub flight: String,
+    /// The bay the flight takes; `None` when the pool was full.
+    pub bay: Option<BayView>,
+    /// Its part stamped `bay = "warm"` and nothing was free — the one
+    /// case that earns a new slot. False whenever a bay was taken.
+    pub wants_warm: bool,
+}
+
+/// Join each pick to a bay, in pick order.
+///
+/// Pure, like [`bays`] it folds over: the assignment is a walk, not a
+/// spawn, and warming is the caller's to do with what `wants_warm` says.
+/// A pick prefers a bay already standing on its derived branch — a
+/// requeued flight resumes where it left off rather than being moved —
+/// and otherwise takes the first free bay in survey order, main included,
+/// because in the solo norm main *is* the bay. A bay is available to a
+/// pick when no live flight sits in it or the flight sitting in it is
+/// this one; either way it is consumed for the rest of the walk, so two
+/// picks in one `-n 2` can never be handed the same tree.
+pub fn assign(fold: &Fold, reads: &Reads, picked: &[Pick]) -> Vec<Berth> {
+    let pool = bays(fold, reads);
+    let mut taken = vec![false; pool.len()];
+
+    picked
+        .iter()
+        .map(|pick| {
+            let free = |view: &BayView| {
+                view.flight.is_none() || view.flight.as_deref() == Some(pick.flight.as_str())
+            };
+            let available = |at: &usize| !taken[*at] && free(&pool[*at]);
+            let slot = (0..pool.len())
+                .find(|at| {
+                    available(at) && pool[*at].branch.is_some() && pool[*at].branch == pick.branch
+                })
+                .or_else(|| (0..pool.len()).find(available));
+            if let Some(at) = slot {
+                taken[at] = true;
+            }
+            let wants_warm = slot.is_none()
+                && fold
+                    .flights
+                    .iter()
+                    .find(|flight| flight.id.to_string() == pick.flight)
+                    .and_then(|flight| flight.part.as_ref())
+                    .and_then(|part| part.bay.as_deref())
+                    == Some("warm");
+            Berth {
+                flight: pick.flight.clone(),
+                bay: slot.map(|at| pool[at].clone()),
+                wants_warm,
+            }
         })
         .collect()
 }
@@ -229,6 +289,95 @@ mod tests {
             ),
         );
         assert_eq!(views[0].flight.as_deref(), Some("pi.1"));
+    }
+
+    /// A filing whose part carries the given `bay` stamp — the only
+    /// thing `assign` reads off the fold beyond the occupancy join.
+    fn stamped(id: &str, time: i64, bay: Option<&str>) -> Event {
+        let mut event = filed(id, time);
+        let Kind::Filed { part, .. } = &mut event.kind else {
+            unreachable!("filed");
+        };
+        *part = Some(crate::log::PartStamp {
+            id: "pass".to_string(),
+            crew: "agent".to_string(),
+            skill: None,
+            done: "asserted".to_string(),
+            bay: bay.map(str::to_string),
+            branch: None,
+        });
+        event
+    }
+
+    fn want(flight: &str, branch: Option<&str>) -> Pick {
+        Pick {
+            flight: flight.to_string(),
+            number: 1,
+            subject: "s".to_string(),
+            branch: branch.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_pick_resumes_the_bay_already_on_its_branch() {
+        // The requeue-and-resume case: the flight's own bay reads as
+        // occupied by the flight itself, and it is still the right one.
+        let fold = fold(&[filed("pi.1", 10)]);
+        let reads = reads(
+            vec![op("pi.1", Some("work"), 50)],
+            vec![
+                worktree("main", Some("/repo"), Some("main"), true),
+                worktree("bay1", Some("/bay1"), Some("work"), false),
+            ],
+        );
+        let berths = assign(&fold, &reads, &[want("pi.1", Some("work"))]);
+        let bay = berths[0].bay.as_ref().expect("a bay");
+        assert_eq!(bay.id, "bay1");
+        assert!(!berths[0].wants_warm);
+    }
+
+    #[test]
+    fn two_picks_never_share_one_bay_and_the_pool_runs_out() {
+        let fold = fold(&[]);
+        let reads = reads(
+            Vec::new(),
+            vec![
+                worktree("main", Some("/repo"), Some("main"), true),
+                worktree("bay1", Some("/bay1"), Some("idle"), false),
+            ],
+        );
+        let berths = assign(
+            &fold,
+            &reads,
+            &[want("pi.1", None), want("pi.2", None), want("pi.3", None)],
+        );
+        let taken: Vec<Option<&str>> = berths
+            .iter()
+            .map(|berth| berth.bay.as_ref().map(|bay| bay.id.as_str()))
+            .collect();
+        // Main is assignable and first in survey order — in the solo
+        // norm it *is* the bay.
+        assert_eq!(taken, [Some("main"), Some("bay1"), None]);
+    }
+
+    #[test]
+    fn warming_is_asked_for_by_the_stamp_alone_and_only_when_nothing_is_free() {
+        let fold = fold(&[stamped("pi.1", 10, Some("warm")), stamped("pi.2", 20, None)]);
+        let reads = reads(
+            Vec::new(),
+            vec![worktree("main", Some("/repo"), Some("main"), true)],
+        );
+
+        // One bay for two picks: the stamped flight asks for a slot, the
+        // unstamped one claims anyway with no bay.
+        let berths = assign(&fold, &reads, &[want("pi.2", None), want("pi.1", None)]);
+        assert!(berths[0].bay.is_some() && !berths[0].wants_warm);
+        assert!(berths[1].bay.is_none() && berths[1].wants_warm);
+
+        // The stamp alone never warms — a bay was free, so it took it.
+        let berths = assign(&fold, &reads, &[want("pi.1", None)]);
+        assert!(berths[0].bay.is_some());
+        assert!(!berths[0].wants_warm, "a free bay outranks the stamp");
     }
 
     #[test]

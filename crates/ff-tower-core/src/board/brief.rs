@@ -407,6 +407,7 @@ mod tests {
                     skill: None,
                     done: "asserted".to_string(),
                     bay: None,
+                    branch: None,
                 }),
             },
         }
@@ -606,6 +607,7 @@ mod tests {
             skill: Some("review".to_string()),
             done: "asserted".to_string(),
             bay: None,
+            branch: None,
         });
 
         let brief = brief(

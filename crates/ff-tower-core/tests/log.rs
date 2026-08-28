@@ -42,6 +42,7 @@ fn a_part_stamp_rides_the_store_onto_the_folds_flight() {
                 skill: None,
                 done: "asserted".to_string(),
                 bay: Some("warm".to_string()),
+                branch: None,
             }),
         }])
         .expect("append");

@@ -95,6 +95,11 @@ pub struct PartStamp {
     pub done: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bay: Option<String>,
+    /// The branch this part flies on, resolved at file time from the
+    /// definition's `subject = "branch"`. The definition is read once, so
+    /// a later `next` reads this rather than the registry (principle 11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// One authored gesture. Minting, referencing, pairing, and the six
@@ -525,6 +530,7 @@ mod tests {
                     skill: Some("review".to_string()),
                     done: "asserted".to_string(),
                     bay: None,
+                    branch: None,
                 }),
             },
         };
@@ -589,6 +595,7 @@ mod tests {
                     skill: None,
                     done: "asserted".to_string(),
                     bay: None,
+                    branch: None,
                 }),
                 because: "it is a chore".to_string(),
             },

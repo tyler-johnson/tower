@@ -288,6 +288,39 @@ pub struct WorktreeAdded {
     pub branch: String,
 }
 
+/// `ff start --json` — the envelope wrapper around the fork.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Start {
+    pub start: Started,
+}
+
+/// The line of work `ff start` opened. `parked` is whatever was open on
+/// the branch left behind — fufu never carries a change across a fork,
+/// and it says where the change went rather than losing it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Started {
+    pub minted: String,
+    pub forked_from: String,
+    pub parked: Option<String>,
+    pub parked_from: Option<String>,
+}
+
+/// `ff switch --json` — the envelope wrapper around the move.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Switch {
+    pub switch: Switched,
+}
+
+/// Where `ff switch` went, and what it parked on the way out. The arrival
+/// half — what came back at the destination — stays unmirrored: tower
+/// binds a flight to a branch and does not read the tree it lands in.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Switched {
+    pub from: String,
+    pub to: String,
+    pub parked: Option<String>,
+}
+
 /// `ff worktree remove --json` — the envelope wrapper around what was
 /// torn down.
 #[derive(Debug, Clone, Deserialize)]

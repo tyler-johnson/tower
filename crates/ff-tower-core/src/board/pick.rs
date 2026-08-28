@@ -213,6 +213,7 @@ mod tests {
                     skill: None,
                     done: "asserted".to_string(),
                     bay: None,
+                    branch: None,
                 }),
             },
         }

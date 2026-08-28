@@ -45,8 +45,9 @@ use std::process::Command;
 pub use error::{Error, Refusal, Result};
 pub use payload::{
     At, BranchInfo, BranchList, ChangeKind, Collision, Editing, FileStat, Head, Held, OpEntry,
-    OpLog, Open, OrphanInfo, Pairing, Side, Status, UnknownReason, Version, WorktreeAdd,
-    WorktreeAdded, WorktreeInfo, WorktreeList, WorktreeRemove, WorktreeRemoved,
+    OpLog, Open, OrphanInfo, Pairing, Side, Start, Started, Status, Switch, Switched,
+    UnknownReason, Version, WorktreeAdd, WorktreeAdded, WorktreeInfo, WorktreeList, WorktreeRemove,
+    WorktreeRemoved,
 };
 
 use serde::Deserialize;
@@ -254,6 +255,29 @@ impl Ff {
             args.push(branch);
         }
         Ok(self.run::<WorktreeAdd>("worktree add", &args)?.data.added)
+    }
+
+    /// `ff start --json [-b <branch>]` — fork a fresh line of work here.
+    ///
+    /// Bare it forks from trunk and mints an anonymous branch; `-b` names
+    /// the minted one. Whatever was open parks where it was and the new
+    /// branch opens clean, so this is safe to point at a bay someone left
+    /// mid-edit — the park is reported and `ff undo` rolls it back.
+    pub fn start(&self, branch: Option<&str>) -> Result<Started> {
+        let args = match branch {
+            Some(branch) => vec!["-b", branch],
+            None => Vec::new(),
+        };
+        Ok(self.run::<Start>("start", &args)?.data.start)
+    }
+
+    /// `ff switch --json <branch>` — resume an existing branch here.
+    ///
+    /// The complement of [`Ff::start`]: `start` begins, `switch` returns.
+    /// The open change parks with the branch being left and whatever was
+    /// parked at the destination comes back, so neither end loses work.
+    pub fn switch(&self, branch: &str) -> Result<Switched> {
+        Ok(self.run::<Switch>("switch", &[branch])?.data.switch)
     }
 
     /// `ff worktree remove --json <worktree>` — tear a bay down, by path
