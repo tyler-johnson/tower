@@ -17,6 +17,9 @@ fn ff_tower(repo: &Path, args: &[&str]) -> Output {
         .env("FF_REPO", repo)
         .env("XDG_CONFIG_HOME", root(repo).join("xdg"))
         .env("HOME", root(repo))
+        // Windows' `HOME`: gix and git.exe read the profile from it, so
+        // setting `HOME` alone leaves the runner's real one reachable.
+        .env("USERPROFILE", root(repo))
         .env_remove("GIT_CONFIG_GLOBAL")
         .output()
         .expect("spawn ff-tower")

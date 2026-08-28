@@ -424,8 +424,8 @@ fn a_missing_identity_is_a_coded_envelope() {
         .args(["file", "a subject", "--json"])
         .env("FF_REPO", repo.path())
         // The machine's own git config must not answer for the fixture.
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_GLOBAL", ff_tower_testsupport::null_device())
+        .env("GIT_CONFIG_SYSTEM", ff_tower_testsupport::null_device())
         .env_remove("GIT_AUTHOR_EMAIL")
         .env_remove("GIT_COMMITTER_EMAIL")
         .env_remove("EMAIL")

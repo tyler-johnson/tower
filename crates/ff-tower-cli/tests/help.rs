@@ -13,8 +13,13 @@ fn ff_tower(dir: &Path, args: &[&str]) -> Output {
         .current_dir(dir)
         .env("TOWER_FF", "/nonexistent")
         .env("XDG_CACHE_HOME", dir.join("cache"))
+        // The update cache root forks to `LOCALAPPDATA` on Windows.
+        .env("LOCALAPPDATA", dir.join("cache"))
         .env("XDG_CONFIG_HOME", dir.join("xdg"))
         .env("HOME", dir)
+        // Windows' `HOME`: gix and git.exe read the profile from it, so
+        // setting `HOME` alone leaves the runner's real one reachable.
+        .env("USERPROFILE", dir)
         .env_remove("FF_REPO")
         .output()
         .expect("spawn ff-tower")

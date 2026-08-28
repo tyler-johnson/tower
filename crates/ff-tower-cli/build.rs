@@ -40,9 +40,10 @@
 //! fufu's build.rs also reserves an 8 MiB main-thread stack on Windows,
 //! because its clap tree outgrew the platform's 1 MiB default. Tower's
 //! tree is a fraction of that size, and fufu's own porting note says take
-//! the block only for a comparably large one — so it stays behind. If a
-//! Windows release binary ever dies with `STATUS_STACK_OVERFLOW`, this is
-//! where the `reserve_windows_stack()` block goes.
+//! the block only for a comparably large one — so it stays behind. CI runs
+//! the suite on Windows, so an overflow would surface there as a test
+//! binary dying with `STATUS_STACK_OVERFLOW` before any user's release
+//! binary — and this is where the `reserve_windows_stack()` block goes.
 
 use std::process::Command;
 

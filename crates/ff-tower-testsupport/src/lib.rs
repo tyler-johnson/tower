@@ -40,11 +40,16 @@ impl Repo {
         let repo = Repo { dir, repo: path };
 
         repo.ff(&["init"]);
-        // Identity and a quiet default branch: a test repository must not
-        // read the machine's git config for either, or the assertions below
-        // depend on whose machine it is.
+        // Identity, a quiet default branch, and byte-for-byte line endings:
+        // a test repository must not read the machine's git config for any
+        // of them, or the assertions below depend on whose machine it is.
+        // The line-ending pin earns its keep on the Windows runners, where
+        // Git for Windows' system config sets `core.autocrlf=true`; local
+        // config wins, and rides with the repository through every later
+        // spawn.
         repo.git(&["config", "user.name", "tower tests"]);
         repo.git(&["config", "user.email", "tests@tower.invalid"]);
+        repo.git(&["config", "core.autocrlf", "false"]);
         repo.git(&["symbolic-ref", "HEAD", "refs/heads/main"]);
 
         repo.write("README.md", "tower test fixture\n");
@@ -136,6 +141,11 @@ impl FakeFf {
 
     /// A fake with an arbitrary body. `$@` is the argv tower built, which is
     /// how the command-line assertions read it back.
+    ///
+    /// The body is POSIX sh on every platform: unix runs it directly, and
+    /// Windows runs the same body under Git Bash through a `.cmd`
+    /// trampoline, so call sites write one dialect.
+    #[cfg(unix)]
     pub fn script(body: &str) -> FakeFf {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("ff");
@@ -155,6 +165,45 @@ impl FakeFf {
         FakeFf { dir, path }
     }
 
+    /// A fake with an arbitrary body. `$@` is the argv tower built, which is
+    /// how the command-line assertions read it back.
+    ///
+    /// The body is POSIX sh on every platform: unix runs it directly, and
+    /// Windows runs the same body under Git Bash through a `.cmd`
+    /// trampoline, so call sites write one dialect.
+    #[cfg(windows)]
+    pub fn script(body: &str) -> FakeFf {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // CreateProcess cannot exec a shebang, so the sh body is not the
+        // spawned program; the `.cmd` trampoline below hands it to bash.
+        // The body lands at `ff` — extensionless, exactly the unix name —
+        // because bodies write `"$0.argv"` and `$(dirname "$0")/calls.log`
+        // and tests read those paths back through `dir()`, so `$0` must be
+        // `.../ff` exactly. Written directly where unix needs the
+        // child-process dance: ETXTBSY is a fork/exec artifact, and Windows
+        // handles are not inherited unless marked, so no concurrent spawn
+        // ever holds this write handle open.
+        let body_path = dir.path().join("ff");
+        std::fs::write(&body_path, body).expect("write fake body");
+        // The trampoline flips `%~dp0`'s backslashes to forward slashes
+        // before handing bash the path: with backslashes, `dirname "$0"`
+        // answers `.` and the $0-relative writes above land in the spawn's
+        // working directory instead of the fake's.
+        let path = dir.path().join("ff.cmd");
+        let trampoline = [
+            "@echo off",
+            "setlocal",
+            "set \"DIR=%~dp0\"",
+            "set \"DIR=%DIR:\\=/%\"",
+            "bash \"%DIR%ff\" %*",
+            "exit /b %ERRORLEVEL%",
+            "",
+        ]
+        .join("\r\n");
+        std::fs::write(&path, trampoline).expect("write trampoline");
+        FakeFf { dir, path }
+    }
+
     /// The path to hand `Ff::program()`.
     pub fn path(&self) -> &Path {
         &self.path
@@ -165,6 +214,11 @@ impl FakeFf {
     pub fn dir(&self) -> &Path {
         self.dir.path()
     }
+}
+
+/// The OS's null device, for pointing git config paths at nothing.
+pub fn null_device() -> &'static str {
+    if cfg!(windows) { "NUL" } else { "/dev/null" }
 }
 
 fn shell_quote(text: &str) -> String {
