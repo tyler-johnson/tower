@@ -41,3 +41,4 @@ pub mod config;
 pub mod ff;
 pub mod log;
 pub mod procedure;
+pub mod skill;
