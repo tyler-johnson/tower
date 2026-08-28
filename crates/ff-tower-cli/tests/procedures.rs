@@ -94,7 +94,11 @@ fn the_detail_carries_the_parts_the_inert_rule_and_where_to_fork() {
     assert!(
         out.contains(&format!(
             "fork: {}\n",
-            repo.path().join(".tower/procedures/review.toml").display()
+            repo.path()
+                .join(".tower")
+                .join("procedures")
+                .join("review.toml")
+                .display()
         )),
         "{out}"
     );
@@ -158,7 +162,11 @@ fn a_repo_definition_overrides_the_built_in_and_says_so() {
     assert!(
         detail.contains(&format!(
             "file: {}\n",
-            repo.path().join(".tower/procedures/review.toml").display()
+            repo.path()
+                .join(".tower")
+                .join("procedures")
+                .join("review.toml")
+                .display()
         )),
         "{detail}"
     );
