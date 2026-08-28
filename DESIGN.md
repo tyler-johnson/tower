@@ -214,6 +214,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower done [<flight>]` | finish a part whose completion nothing can derive; a smoke test that went fine leaves no trace | you |
 | `ff tower link <a> <b>` | declare that one flight depends on another — discovered conflicts need no verb | either |
 | `ff tower comment <flight> -m <note>` | a note on the record, local; saying it to the team is a separate, deliberate gesture | either |
+| `ff tower edit <target> [-s <subject>] [-m <msg>]` | reword a flight's subject/body, or a comment's text by its event id — an overlay event, the log keeps every prior word | either |
 | `ff tower decompose <flight> <part>…` | file the parts as flights the parent waits on — a procedure's, or by hand | either |
 | `ff tower promote <flight>` | mint the upstream ticket, link it, keep local history — the publish boundary | you |
 | `ff tower bay <list\|warm\|release>` | the pool: what is bootstrapped, what is occupied, what to build ahead of you; bare `warm` mints the next slot under `tower.bays` | either |
