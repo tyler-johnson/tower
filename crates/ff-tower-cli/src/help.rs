@@ -242,7 +242,9 @@ the board answers who has a flight without waiting for a keystroke.
 
 A claim does not classify, route, or start anything running — tower
 runs nothing. Re-claiming is refused, even by the same author: a
-silent success that appended nothing would lie.";
+silent success that appended nothing would lie, and reassigning a
+flight somebody already flies would be a handoff nobody agreed to.
+`ff tower take <flight>` is the human override for that refusal.";
 
 pub const CLAIM_EXAMPLES: &str = "\
 Examples:
@@ -250,6 +252,52 @@ Examples:
   ff tower next                  the picked-for-you spelling
   ff tower brief 17              read before you fly
   ff tower done 17               the claim's other end";
+
+pub const TAKE: &str = "\
+Take the controls: the flight becomes yours and the agent lane
+closes. This is the human override for `claim`'s refusal — `claim`
+will not reassign a flight somebody already flies, because an agent
+stealing another's work would be a handoff nobody agreed to, and a
+person typing this is the consent that refusal declines to assume.
+So a take over someone else's claim is allowed, and the line names
+who the flight came from.
+
+The filing's own crew stamp is never rewritten; the take sits over
+it. `ff tower brief <flight>` still shows the part exactly as filed,
+and `ff tower requeue <flight>` hands the flight back with nothing
+to undo. Taking twice is refused: a silent success that appended
+nothing would lie.";
+
+pub const TAKE_EXAMPLES: &str = "\
+Examples:
+  ff tower take 17               yours now, agent off
+  ff tower requeue 17            the way back out
+  ff tower brief 17              who has it, and why it is not picked
+  ff tower claim 17              the spelling that refuses to reassign";
+
+pub const REQUEUE: &str = "\
+Hand a flight back to the pool: the claim and the take clear
+together, and `ff tower next` can pick it again. Clearing both is
+what makes this `take`'s exact inverse — a flight you took and
+changed your mind about goes back to the agent lane, and one an
+agent merely claimed goes back untouched.
+
+This is the recovery path an unattended loop needs. Nothing else in
+the vocabulary takes a claim back, so an agent that dies mid-flight
+would otherwise keep its flight out of the pool for good.
+
+A flight with an open question requeues fine — `answer` does not
+clear a claim, and the question keeps the flight out of the pool
+until it is answered anyway. A flight fufu holds requeues too: that
+is a branch verdict, not tower's. A flight with neither a claim nor
+a take is refused, because there is nothing to hand back.";
+
+pub const REQUEUE_EXAMPLES: &str = "\
+Examples:
+  ff tower requeue 17            back to the pool
+  ff tower next --peek           who would be handed it now
+  ff tower take 17               the reverse
+  ff tower                       the row carries `requeued`";
 
 pub const HOLD: &str = "\
 Stop a flight with a question attached. The hold moves it to waiting

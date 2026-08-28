@@ -128,6 +128,8 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Procedures { .. }) => "procedures",
         Some(Command::Triage { .. }) => "triage",
         Some(Command::Claim { .. }) => "claim",
+        Some(Command::Take { .. }) => "take",
+        Some(Command::Requeue { .. }) => "requeue",
         Some(Command::Hold { .. }) => "hold",
         Some(Command::Answer { .. }) => "answer",
         Some(Command::Done { .. }) => "done",
@@ -184,6 +186,8 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             message.clone(),
         )?,
         Some(Command::Claim { flight }) => cmd::claim::run(cli.json, flight)?,
+        Some(Command::Take { flight }) => cmd::take::run(cli.json, flight)?,
+        Some(Command::Requeue { flight }) => cmd::requeue::run(cli.json, flight)?,
         Some(Command::Hold { flight, message }) => {
             cmd::hold::run(cli.json, flight, message.clone())?;
             return Ok(3);

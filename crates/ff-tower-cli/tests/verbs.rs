@@ -519,6 +519,171 @@ fn a_second_claim_is_refused_naming_the_claimant() {
     );
 }
 
+/// The minimal claimable shape principle 12 admits: an agent-crewed part
+/// with a you-crewed end. Filing under it mints a parent and two parts, so
+/// `#2` is the flight the pool is about.
+fn install_pipeline(repo: &Repo) {
+    repo.write(
+        ".tower/procedures/pipeline.toml",
+        concat!(
+            "name = \"pipeline\"\n\n",
+            "[[part]]\nid   = \"pass\"\ncrew = \"agent\"\n\n",
+            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+        ),
+    );
+}
+
+/// One pipeline filing: the parent `#1`, the agent part `#2`, and the
+/// you-crewed `#3`.
+fn file_pipeline(repo: &Repo, subject: &str) {
+    stdout(&ff_tower(repo.path(), &["file", subject, "-p", "pipeline"]));
+}
+
+/// The wire ids `next` would hand out right now, written by nothing — the
+/// membership both new verbs exist to move.
+fn peeked(repo: &Repo) -> Vec<String> {
+    let envelope = envelope(&ff_tower(repo.path(), &["next", "--peek", "--json"]));
+    envelope["data"]["picked"]
+        .as_array()
+        .expect("a picked list")
+        .iter()
+        .map(|pick| pick["flight"].as_str().expect("a wire id").to_string())
+        .collect()
+}
+
+#[test]
+fn requeue_hands_a_claimed_flight_back_and_next_picks_it_again() {
+    let repo = repo();
+    install_pipeline(&repo);
+    file_pipeline(&repo, "the recovery");
+    stdout(&ff_tower(repo.path(), &["claim", "2"]));
+    assert!(
+        peeked(&repo).is_empty(),
+        "the claim holds it out of the pool"
+    );
+
+    let out = stdout(&ff_tower(repo.path(), &["requeue", "2"]));
+    assert_eq!(out, "requeued #2: the recovery · pass\nboard: ff tower\n");
+
+    // The recovery path end to end: the claim is gone and the pool has
+    // the flight back, with no second edit anywhere.
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["in_the_air"], serde_json::json!([]));
+    let requeued = board["data"]["open"]
+        .as_array()
+        .expect("the open section")
+        .iter()
+        .find(|view| view["id"] == serde_json::json!("pi.2"))
+        .expect("pi.2 back in open");
+    assert!(requeued["claimed_by"].is_null());
+    assert_eq!(requeued["taken"], serde_json::json!(false));
+    assert!(requeued["requeued_at"].is_number());
+    // The filed stamp is untouched — the requeue restored nothing
+    // because nothing was destroyed.
+    assert_eq!(requeued["part"]["crew"], serde_json::json!("agent"));
+    assert_eq!(peeked(&repo), ["pi.2"]);
+}
+
+#[test]
+fn a_requeue_with_nothing_claimed_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "never claimed"]));
+    let out = ff_tower(repo.path(), &["requeue", "1", "--json"]);
+    let envelope = refusal(&out, 1, "requeue/unclaimed");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is not claimed — nothing to hand back")
+    );
+    // The raise site says nothing, so the exits are the registry's.
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower", "ff tower next"])
+    );
+}
+
+#[test]
+fn take_over_a_claim_names_where_it_came_from_and_closes_the_pool() {
+    let repo = repo();
+    install_pipeline(&repo);
+    file_pipeline(&repo, "the override");
+    stdout(&ff_tower(repo.path(), &["claim", "2"]));
+
+    let out = stdout(&ff_tower(repo.path(), &["take", "2"]));
+    assert_eq!(
+        out,
+        "took #2 from tests@tower.invalid: the override · pass\nboard: ff tower\n"
+    );
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let flown = &board["data"]["in_the_air"][0];
+    assert_eq!(flown["id"], serde_json::json!("pi.2"));
+    assert_eq!(flown["taken"], serde_json::json!(true));
+    assert_eq!(
+        flown["claimed_by"],
+        serde_json::json!("tests@tower.invalid")
+    );
+    // The stamp still says `agent`; the take is an overlay, not an edit.
+    assert_eq!(flown["part"]["crew"], serde_json::json!("agent"));
+    assert!(peeked(&repo).is_empty(), "agent off");
+
+    let brief = envelope(&ff_tower(repo.path(), &["brief", "2", "--json"]));
+    assert_eq!(
+        brief["data"]["taken_by"],
+        serde_json::json!("tests@tower.invalid")
+    );
+    assert!(brief["data"]["taken_at"].is_number());
+    assert_eq!(brief["data"]["standing"], serde_json::json!("claimed"));
+    let rendered = stdout(&ff_tower(repo.path(), &["brief", "2"]));
+    assert!(
+        rendered.contains("taken by tests@tower.invalid"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn a_take_with_no_claim_standing_names_nobody() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "unclaimed"]));
+    let out = stdout(&ff_tower(repo.path(), &["take", "1"]));
+    assert_eq!(out, "took #1: unclaimed\nboard: ff tower\n");
+}
+
+#[test]
+fn a_second_take_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "taken once"]));
+    stdout(&ff_tower(repo.path(), &["take", "1"]));
+    let out = ff_tower(repo.path(), &["take", "1", "--json"]);
+    let envelope = refusal(&out, 1, "take/taken");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is already yours")
+    );
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower requeue <flight>", "ff tower brief <flight>"])
+    );
+}
+
+#[test]
+fn the_note_line_carries_taken_and_then_requeued() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the ownership phrase"]));
+    stdout(&ff_tower(repo.path(), &["take", "1"]));
+    let rendered = stdout(&ff_tower(repo.path(), &[]));
+    assert!(rendered.contains("in the air"), "{rendered}");
+    assert!(rendered.contains("taken"), "{rendered}");
+    assert!(
+        !rendered.contains("claimed"),
+        "one phrase, not two: {rendered}"
+    );
+
+    stdout(&ff_tower(repo.path(), &["requeue", "1"]));
+    let rendered = stdout(&ff_tower(repo.path(), &[]));
+    assert!(rendered.contains("requeued"), "{rendered}");
+    assert!(!rendered.contains("taken"), "{rendered}");
+}
+
 #[test]
 fn hold_exits_three_with_a_data_envelope() {
     // Never through the stdout() helper — 3 is a success this helper

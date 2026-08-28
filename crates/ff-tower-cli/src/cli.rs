@@ -181,6 +181,20 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
     },
+    /// Take the controls: crew one flight to you, agent off.
+    #[command(long_about = help::TAKE, after_long_help = help::TAKE_EXAMPLES)]
+    Take {
+        /// The flight to take — a number, `writer#n`, or the event id.
+        #[arg(value_name = "flight")]
+        flight: String,
+    },
+    /// Hand a flight back to the pool — take's reverse.
+    #[command(long_about = help::REQUEUE, after_long_help = help::REQUEUE_EXAMPLES)]
+    Requeue {
+        /// The flight to hand back — a number, `writer#n`, or the event id.
+        #[arg(value_name = "flight")]
+        flight: String,
+    },
     /// Stop a flight with a question attached — bay warm, exit 3.
     #[command(long_about = help::HOLD, after_long_help = help::HOLD_EXAMPLES)]
     Hold {
@@ -299,6 +313,8 @@ impl Command {
             | Command::Procedures { .. }
             | Command::Triage { .. }
             | Command::Claim { .. }
+            | Command::Take { .. }
+            | Command::Requeue { .. }
             | Command::Hold { .. }
             | Command::Answer { .. }
             | Command::Done { .. }

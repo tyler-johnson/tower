@@ -194,7 +194,14 @@ fn note(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         phrases.push(render::paint_warn("resolving", colored));
     }
     if let Some(by) = brief.claimed_by.as_deref() {
-        phrases.push(render::paint_dim(&format!("claimed by {by}"), colored));
+        // A take is a claim with a provenance: same owner, different
+        // gesture, and the word is what says the agent lane is closed.
+        let how = if brief.taken_by.is_some() {
+            "taken"
+        } else {
+            "claimed"
+        };
+        phrases.push(render::paint_dim(&format!("{how} by {by}"), colored));
     }
     match &brief.standing {
         // Said above, from the brief's own flat facts.

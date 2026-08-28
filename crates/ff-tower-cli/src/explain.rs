@@ -231,6 +231,25 @@ pub static ENTRIES: &[Entry] = &[
         exits: &["ff tower", "ff tower next"],
     },
     Entry {
+        id: "take/taken",
+        summary: "the flight is already yours",
+        detail: "`take` crews a flight to you and closes the agent lane, and one already \
+                 stands on this flight. Taking it twice would append a gesture that changed \
+                 nothing — the same reason a second `claim` is refused. `requeue` is the way \
+                 back out: it clears the take and the claim together, and the flight returns to \
+                 the pool with its filed stamp untouched.",
+        exits: &["ff tower requeue <flight>", "ff tower brief <flight>"],
+    },
+    Entry {
+        id: "requeue/unclaimed",
+        summary: "nothing to hand back",
+        detail: "`requeue` releases a standing claim or take, and this flight has neither — it \
+                 is already in the pool, or its own crew stamp is what keeps it out of one. A \
+                 requeue that appended nothing would read as a release that happened. An open \
+                 question is not a claim: `answer` is what clears that.",
+        exits: &["ff tower", "ff tower next"],
+    },
+    Entry {
         id: "bay/pool-root",
         summary: "the pool root could not be prepared",
         detail: "Minting a slot creates and canonicalizes the directory `tower.bays` points at, \
