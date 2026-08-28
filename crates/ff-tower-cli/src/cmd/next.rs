@@ -69,6 +69,11 @@ struct Row {
     bay_id: Option<String>,
     /// True when this run minted the bay.
     warmed: bool,
+    /// The skill the flight's part is flown with, for the harness to
+    /// resolve through `ff tower skills <name>`. Absent, not null, when
+    /// the part names none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skill: Option<String>,
     /// A warm or bind refusal, in fufu's words or tower's. The claim
     /// stands regardless.
     refused: Option<String>,
@@ -127,11 +132,15 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         let colored = render::colored();
         let verb = if peek { "ready" } else { "claimed" };
         for row in &rows {
-            println!(
+            let mut line = format!(
                 "{verb} {}: {}",
                 render::paint_id(&show(&fold, &row.flight), colored),
                 row.subject
             );
+            if let Some(skill) = &row.skill {
+                line.push_str(&render::paint_dim(&format!(" · skill {skill}"), colored));
+            }
+            println!("{line}");
             println!("  {}", render::paint_dim(&berth_line(row), colored));
         }
         if picks.picked.is_empty() {
@@ -197,12 +206,13 @@ fn berth_row(
     berth: &Berth,
     peek: bool,
 ) -> Result<Row, CliError> {
-    let stamped = fold
+    let part = fold
         .flights
         .iter()
         .find(|flight| flight.id.to_string() == pick.flight)
-        .and_then(|flight| flight.part.as_ref())
-        .and_then(|part| part.branch.clone());
+        .and_then(|flight| flight.part.as_ref());
+    let stamped = part.and_then(|part| part.branch.clone());
+    let skill = part.and_then(|part| part.skill.clone());
 
     let mut bay = berth.bay.as_ref().map(|view| Slot {
         id: view.id.clone(),
@@ -265,6 +275,7 @@ fn berth_row(
         bay: bay.as_ref().map(|slot| slot.path.clone()),
         bay_id: bay.as_ref().map(|slot| slot.id.clone()),
         warmed: bay.is_some_and(|slot| slot.warmed),
+        skill,
         refused,
     })
 }

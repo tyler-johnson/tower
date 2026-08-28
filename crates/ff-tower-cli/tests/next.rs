@@ -522,3 +522,51 @@ fn a_warm_stamp_with_no_pool_root_lands_the_refusal_on_the_row_and_still_exits_z
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
 }
+
+#[test]
+fn a_picked_part_hands_out_its_skill() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    repo.write(
+        ".tower/procedures/skilled.toml",
+        concat!(
+            "name = \"skilled\"\n\n",
+            "[[part]]\nid    = \"pass\"\ncrew  = \"agent\"\nskill = \"review\"\n\n",
+            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+        ),
+    );
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "look this over", "-p", "skilled"],
+    ));
+
+    let envelope = envelope(&ff_tower(repo.path(), &["next", "--peek", "--json"]));
+    assert_eq!(
+        envelope["data"]["picked"][0]["skill"],
+        serde_json::json!("review")
+    );
+
+    // The human render says it on the picked line, where the loop reads.
+    let text = stdout(&ff_tower(repo.path(), &["next"]));
+    assert!(
+        text.contains("claimed #2: look this over · pass · skill review"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_part_naming_no_skill_omits_the_field() {
+    let repo = repo();
+    file_pipeline(&repo, "plain work");
+
+    let envelope = envelope(&ff_tower(repo.path(), &["next", "--peek", "--json"]));
+    let row = &envelope["data"]["picked"][0];
+    assert_eq!(row["flight"], serde_json::json!("pi.2"));
+    assert!(
+        row.get("skill").is_none(),
+        "absent, not null, when the part names none: {row}"
+    );
+
+    let text = stdout(&ff_tower(repo.path(), &["next"]));
+    assert!(!text.contains("skill"), "{text}");
+}
