@@ -167,6 +167,9 @@ fn part_line(part: &PartStamp, colored: bool) -> String {
     if let Some(bay) = part.bay.as_deref() {
         phrases.push(format!("bay {bay}"));
     }
+    if let Some(branch) = part.branch.as_deref() {
+        phrases.push(format!("branch {branch}"));
+    }
     phrases.push(format!("done {}", part.done));
     render::paint_dim(&phrases.join(" · "), colored)
 }

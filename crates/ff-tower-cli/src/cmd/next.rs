@@ -1,6 +1,6 @@
 //! `ff tower next [-n <k>] [--peek]` — claim the next ready flight, or a
 //! set of `k` that collide with neither each other nor anything already
-//! flying.
+//! flying, and hand each one a tree to fly in.
 //!
 //! The one verb whose success code varies: 0 when anything was picked; on
 //! an empty pick, 3 when the crew gate is what emptied it — work exists
@@ -12,24 +12,66 @@
 //! the board's — store, fold, gather, probe — with `pick` in place of
 //! `enrich`, and unless `--peek` the picked set becomes one `claimed`
 //! event per flight in a single atomic append.
+//!
+//! # The bay, and the branch
+//!
+//! A pick with nothing but an id and a subject makes the agent find its
+//! own tree, so the claim is only half the hand-off. [`board::assign`]
+//! joins each pick to a free bay out of the fold `pick` already ran over,
+//! and this verb spends that: a part stamped `bay = "warm"` with nothing
+//! free mints a slot, and then the flight is bound to a branch in the bay
+//! with a session-tagged `ff start` or `ff switch` — the op row every
+//! later flight-to-branch derivation reads. The target is the part's own
+//! stamped branch, else the branch the flight is already derived onto,
+//! else a minted `flight/<wire id>`, unique by construction because the
+//! session tag is.
+//!
+//! Claims append *before* any fufu write, and a warm or bind refusal
+//! lands on that pick's row rather than ending the walk — `probe` and
+//! `gather`'s idiom. A bind that fails therefore leaves a claimed,
+//! unbound flight, which is exactly the state `requeue` hands back.
+//! `--peek` writes nothing: it reports the bay it would take and the
+//! branch it would bind, and warms and binds neither.
 
 use serde::Serialize;
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, Fold, Passed, Pick, Skip};
+use ff_tower_core::board::{self, Berth, Fold, Passed, Pick, Skip};
+use ff_tower_core::ff::{self, Ff};
 use ff_tower_core::log::{Kind, Store};
 
 /// One shape either way: `claimed` is `false` under `--peek`, so the
 /// envelope never lies about whether the write happened.
 #[derive(Serialize)]
 struct Data<'a> {
-    picked: &'a [Pick],
+    picked: &'a [Row],
     claimed: bool,
     passed: &'a [Passed],
     /// Live and unclaimed, kept out of the pool by the crew stamp alone —
     /// the count behind exit 3.
     yours: usize,
+}
+
+/// One claimed flight and where it flies. The pick's own `branch` is the
+/// stale one — what the log said before this run — so it does not ride
+/// out under that name: `branch` here is effective, the branch the flight
+/// was bound to when a bind happened and the derived one otherwise.
+#[derive(Serialize)]
+struct Row {
+    flight: String,
+    number: u64,
+    subject: String,
+    branch: Option<String>,
+    /// The bay's path; `None` when the pool was full and no stamp asked
+    /// for a slot.
+    bay: Option<String>,
+    bay_id: Option<String>,
+    /// True when this run minted the bay.
+    warmed: bool,
+    /// A warm or bind refusal, in fufu's words or tower's. The claim
+    /// stands regardless.
+    refused: Option<String>,
 }
 
 pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
@@ -48,6 +90,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     let reads = board::gather(&ff)?;
     let verdicts = board::probe(&ff, &fold, &reads)?;
     let picks = board::pick(&fold, &reads, &verdicts, count);
+    let berths = board::assign(&fold, &reads, &picks.picked);
 
     let claimed = !peek && !picks.picked.is_empty();
     if claimed {
@@ -62,13 +105,18 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         )?;
     }
 
+    let mut rows = Vec::new();
+    for (pick, berth) in picks.picked.iter().zip(&berths) {
+        rows.push(berth_row(&ff, &fold, pick, berth, peek)?);
+    }
+
     if json {
         println!(
             "{}",
             machine::emit(
                 "next",
                 &Data {
-                    picked: &picks.picked,
+                    picked: &rows,
                     claimed,
                     passed: &picks.passed,
                     yours: picks.yours,
@@ -78,12 +126,13 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     } else {
         let colored = render::colored();
         let verb = if peek { "ready" } else { "claimed" };
-        for pick in &picks.picked {
+        for row in &rows {
             println!(
                 "{verb} {}: {}",
-                render::paint_id(&show(&fold, &pick.flight), colored),
-                pick.subject
+                render::paint_id(&show(&fold, &row.flight), colored),
+                row.subject
             );
+            println!("  {}", render::paint_dim(&berth_line(row), colored));
         }
         if picks.picked.is_empty() {
             if picks.yours > 0 {
@@ -129,6 +178,139 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         (true, 0) => 1,
         (true, _) => 3,
     })
+}
+
+/// Spend one berth: warm what the stamp asked for, bind the flight to a
+/// branch in the bay, and say what happened. Under `--peek` nothing is
+/// written and the row reports the bay that would be taken and the branch
+/// that would be bound.
+///
+/// Tolerance is per row and deliberate. A refusal fufu shaped — a branch
+/// checked out elsewhere, a pool root that is not there — is this pick's
+/// news and not the walk's, so it lands in `refused` and the next pick
+/// still gets its tree. Anything else is the seam failing to get an
+/// answer at all, and that propagates.
+fn berth_row(
+    ff: &Ff,
+    fold: &Fold,
+    pick: &Pick,
+    berth: &Berth,
+    peek: bool,
+) -> Result<Row, CliError> {
+    let stamped = fold
+        .flights
+        .iter()
+        .find(|flight| flight.id.to_string() == pick.flight)
+        .and_then(|flight| flight.part.as_ref())
+        .and_then(|part| part.branch.clone());
+
+    let mut bay = berth.bay.as_ref().map(|view| Slot {
+        id: view.id.clone(),
+        path: view.path.clone(),
+        standing: view.branch.clone(),
+        warmed: false,
+    });
+    let mut refused = None;
+
+    if !peek && bay.is_none() && berth.wants_warm {
+        match warm(ff) {
+            Ok(added) => {
+                bay = Some(Slot {
+                    id: added.id,
+                    path: added.path,
+                    standing: Some(added.branch),
+                    warmed: true,
+                });
+            }
+            Err(err) => refused = Some(err),
+        }
+    }
+
+    let mut branch = pick.branch.clone();
+    if let Some(slot) = &bay {
+        // The branch to fly on: what the procedure resolved at file time,
+        // else wherever the flight is already derived, else one minted
+        // off the session tag — unique because the tag is.
+        let existing = stamped.or_else(|| pick.branch.clone());
+        let target = existing
+            .clone()
+            .unwrap_or_else(|| format!("flight/{}", pick.flight));
+
+        if peek || slot.standing.as_deref() == Some(target.as_str()) {
+            // Already standing on it: nothing to move, and no op row to
+            // write that is not there already.
+            branch = Some(target);
+        } else {
+            // The one production use of the session tag: this call is
+            // what puts the flight's name on the bay's operation chain,
+            // and every later flight-to-branch derivation reads it back.
+            let handle = ff.at_path(&slot.path).session(&pick.flight);
+            let bound = match &existing {
+                Some(existing) => handle.switch(existing).map(|switched| switched.to),
+                None => handle.start(Some(&target)).map(|started| started.minted),
+            };
+            match bound {
+                Ok(bound) => branch = Some(bound),
+                Err(err @ ff::Error::Ff(_)) => refused = Some(err.to_string()),
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    Ok(Row {
+        flight: pick.flight.clone(),
+        number: pick.number,
+        subject: pick.subject.clone(),
+        branch,
+        bay: bay.as_ref().map(|slot| slot.path.clone()),
+        bay_id: bay.as_ref().map(|slot| slot.id.clone()),
+        warmed: bay.is_some_and(|slot| slot.warmed),
+        refused,
+    })
+}
+
+/// The bay a pick ends up in, whether it was standing or minted here.
+struct Slot {
+    id: String,
+    path: String,
+    /// The branch the bay is on before any bind — a bay already there
+    /// needs no move.
+    standing: Option<String>,
+    warmed: bool,
+}
+
+/// Mint the next slot under `tower.bays` and add the worktree — bare
+/// `ff tower bay warm`, without the render. A warm is opportunistic, so
+/// every way it can fail comes back as text for a row rather than as an
+/// error: `usage/needs-path` when no pool root is set, `bay/pool-root`
+/// when the one that is set will not open, and fufu's own refusal when
+/// the tree cannot be made.
+fn warm(ff: &Ff) -> Result<ff_tower_core::ff::WorktreeAdded, String> {
+    let path = super::bay::mint_slot(ff).map_err(|err| err.to_string())?;
+    ff.worktree_add(&path, None).map_err(|err| err.to_string())
+}
+
+/// The indented line under a claim: where the flight flies, and what went
+/// wrong if something did. A full pool with no stamp asking for a slot is
+/// not a failure — it is a claim with no tree, and the way out of it is
+/// one command, so the line says the command.
+fn berth_line(row: &Row) -> String {
+    let mut phrases = Vec::new();
+    match (&row.bay, &row.branch) {
+        (Some(path), Some(branch)) => {
+            phrases.push(path.clone());
+            phrases.push(branch.clone());
+        }
+        (Some(path), None) => phrases.push(path.clone()),
+        (None, _) if row.refused.is_none() => {
+            phrases.push("no free bay · ff tower bay warm".to_string());
+        }
+        (None, _) => {}
+    }
+    if let Some(refused) = &row.refused {
+        phrases.push(refused.clone());
+    }
+    phrases.join("  ")
 }
 
 /// A wire id from the pick, in the board's display form. Infallible — the

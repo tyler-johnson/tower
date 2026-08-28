@@ -87,7 +87,7 @@ fn warm(json: bool, path: Option<&str>, branch: Option<&str>) -> Result<(), CliE
 /// keeps a leftover or foreign directory from colliding — and since
 /// `ff worktree remove` deletes the directory, released numbers come back
 /// on their own.
-fn mint_slot(ff: &Ff) -> Result<String, CliError> {
+pub(crate) fn mint_slot(ff: &Ff) -> Result<String, CliError> {
     let Some(root) = Store::open(ff.repo())?.pool_root() else {
         return Err(CliError::coded(
             "usage/needs-path",

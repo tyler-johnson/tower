@@ -110,7 +110,7 @@ pub fn classify(
 ) -> Vec<Kind> {
     let parts = &definition.parts;
     if let [only] = parts.as_slice() {
-        return vec![head(Some(stamp(only)))];
+        return vec![head(Some(stamp(definition, subject, only)))];
     }
 
     let mut kinds = vec![head(None)];
@@ -120,7 +120,7 @@ pub fn classify(
         procedure: definition.name.clone(),
         subject: format!("{subject} · {}", part.id),
         body: String::new(),
-        part: Some(stamp(part)),
+        part: Some(stamp(definition, subject, part)),
     }));
     let from = match &parent {
         Parent::Mint => mint(0),
@@ -148,13 +148,21 @@ pub fn classify(
 
 /// A definition's part, as the log carries it. The closed enums become
 /// their names here; the log stays tolerant where the config stays closed.
-pub fn stamp(part: &Part) -> PartStamp {
+///
+/// `branch` is the definition's `subject` rule resolved once, at file
+/// time: a procedure whose subject *is* a branch stamps the branch each
+/// part flies on, so `next` binds from the stamp rather than reading the
+/// definition again. The subject handed in is the flight's own, never the
+/// `"{subject} · {part.id}"` a part is filed under — for `review`, the
+/// branch is the parent's subject.
+pub fn stamp(definition: &Definition, subject: &str, part: &Part) -> PartStamp {
     PartStamp {
         id: part.id.clone(),
         crew: part.crew.name().to_string(),
         skill: part.skill.clone(),
         done: part.done.name().to_string(),
         bay: part.bay.map(|bay| bay.name().to_string()),
+        branch: (definition.subject.as_deref() == Some("branch")).then(|| subject.to_string()),
     }
 }
 

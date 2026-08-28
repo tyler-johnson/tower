@@ -186,13 +186,15 @@ fn a_part_stamp_gets_its_own_line_under_the_head() {
     let text = stdout(&ff_tower(repo.path(), &["brief", "2"]));
     assert!(text.contains("#2  the retry test · pass\n"), "{text}");
     assert!(
-        text.contains("    part pass · agent · skill review · done asserted\n"),
+        text.contains(
+            "    part pass · agent · skill review · branch the retry test · done asserted\n"
+        ),
         "{text}"
     );
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "3"]));
     assert!(
-        text.contains("    part smoke · you · bay warm · done asserted\n"),
+        text.contains("    part smoke · you · bay warm · branch the retry test · done asserted\n"),
         "{text}"
     );
 

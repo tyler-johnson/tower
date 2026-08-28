@@ -210,15 +210,29 @@ fn file_under_review_json_carries_the_parent_three_parts_and_five_edges() {
             "crew": "agent",
             "skill": "review",
             "done": "asserted",
+            // `review` resolves its subject against a branch, so file
+            // time stamps the branch each part flies on.
+            "branch": "the retry test",
         })
     );
     assert_eq!(
         parts[1]["body"]["part"],
-        serde_json::json!({"id": "smoke", "crew": "you", "done": "asserted", "bay": "warm"})
+        serde_json::json!({
+            "id": "smoke",
+            "crew": "you",
+            "done": "asserted",
+            "bay": "warm",
+            "branch": "the retry test"
+        })
     );
     assert_eq!(
         parts[2]["body"]["part"],
-        serde_json::json!({"id": "verdict", "crew": "you", "done": "asserted"})
+        serde_json::json!({
+            "id": "verdict",
+            "crew": "you",
+            "done": "asserted",
+            "branch": "the retry test"
+        })
     );
 
     // Three edges from the parent, then the `after` DAG: `verdict` waits
