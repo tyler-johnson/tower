@@ -285,6 +285,50 @@ export interface Pool {
 	bays: BayView[];
 }
 
+/// One procedure as the registry holds it, mirroring
+/// ff-tower-core/src/procedure/mod.rs. This is the *definition* — a file
+/// on disk; `PartStamp` above is the flight's own copy of one part of it,
+/// taken at file or route time and never re-read.
+export interface Definition {
+	name: string;
+	/// What the flight's subject resolves against later; `branch` on
+	/// `review`. Nothing derives from it yet.
+	subject: string | null;
+	matches: ProcedureMatch[];
+	parts: Part[];
+	source: Source;
+}
+
+/// One intake rule: an adapter's name, and the event it sent. Named
+/// ProcedureMatch to avoid the DOM's Match.
+export interface ProcedureMatch {
+	source: string;
+	event: string;
+}
+
+/// One part of a definition. `done` stays a free string for the reason
+/// `PartStamp.done` is one: a newer tower's completion word must not fail
+/// an older tower's parse.
+export interface Part {
+	id: string;
+	crew: 'you' | 'agent';
+	skill: string | null;
+	after: string[];
+	done: string;
+	bay: string | null;
+}
+
+/// Which layer a definition was read from, and the file it came from —
+/// `null` for what ships in the binary.
+export interface Source {
+	layer: 'built-in' | 'user' | 'repo';
+	path: string | null;
+}
+
+export interface Listing {
+	procedures: Definition[];
+}
+
 /// A flight's display form, or its wire id when the board has no entry —
 /// a linked or beat flight that is done has left the board, and its wire
 /// id is still a name that resolves.

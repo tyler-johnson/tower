@@ -1,13 +1,16 @@
-// The open flight's own state: the brief, the bay flying it, the standing
-// refusal, and whether a verb is in the air. One instance, because one
-// flight is open at a time — the route is what says which.
+// The open flight's own state: the brief, the standing refusal, and
+// whether a verb is in the air. One instance, because one flight is open
+// at a time — the route is what says which.
+//
+// The bay flying it is not here: the pool is a shared store the strip
+// keeps live, so the panel's bay line derives from it rather than costing
+// a second request per open.
 
 import { get, post } from './api';
-import type { BayView, Brief, Pool, TowerError } from './tower';
+import type { Brief, TowerError } from './tower';
 
 class Panel {
 	brief = $state<Brief | null>(null);
-	bay = $state<BayView | null>(null);
 	error = $state<TowerError | null>(null);
 	busy = $state(false);
 
@@ -21,29 +24,18 @@ class Panel {
 	async refresh(flight: string) {
 		if (flight !== this.#showing) {
 			this.brief = null;
-			this.bay = null;
 			this.error = null;
 			this.#showing = flight;
 		}
 		const token = ++this.#latest;
-		// One round trip, not two in sequence: the panel is opened by a
-		// click and the bay row is part of the same answer.
-		const [brief, pool] = await Promise.all([
-			get<Brief>(`/api/brief/${encodeURIComponent(flight)}`),
-			get<Pool>('/api/bays')
-		]);
+		const brief = await get<Brief>(`/api/brief/${encodeURIComponent(flight)}`);
 		if (token !== this.#latest) return;
 		if (brief.error || !brief.data) {
 			this.brief = null;
-			this.bay = null;
 			this.error = brief.error ?? null;
 			return;
 		}
 		this.brief = brief.data;
-		// A bay flies a flight or it does not; a failed pool read leaves
-		// the row off rather than the panel empty, because the bay is the
-		// least of what a brief is for.
-		this.bay = pool.data?.bays.find((bay) => bay.flight === brief.data?.id) ?? null;
 	}
 
 	/// A verb, against the flight on screen. The refusal envelope is kept

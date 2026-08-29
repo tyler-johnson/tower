@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import VerbBar from './VerbBar.svelte';
+	import { bays } from './bays.svelte';
 	import { feed } from './board.svelte';
 	import { panel } from './panel.svelte';
 	import {
@@ -27,6 +28,9 @@
 		brief ? (refs.get(brief.id) ?? flightRef(writerOf(brief.id), brief.number, false)) : ''
 	);
 	let note = $derived(brief ? briefNote(brief, refs, now) : []);
+	// The bay flying it, off the shared pool the strip keeps live: one
+	// fewer request per open, and the line moves with the strip.
+	let bay = $derived(brief ? (bays.pool.find((row) => row.flight === brief.id) ?? null) : null);
 	let other = $derived(brief ? unknownRows(brief) : []);
 	let links = $derived(
 		brief
@@ -85,10 +89,10 @@
 				{#each brief.beat as beaten (beaten.flight)}
 					<p class="text-sm text-base-content/40">{beatLine(beaten, refs)}</p>
 				{/each}
-				{#if panel.bay}
+				{#if bay}
 					<p class="text-sm text-base-content/40">
-						bay {panel.bay.id} · {panel.bay.path}{#if panel.bay.branch}
-							· on {panel.bay.branch}{/if}
+						bay {bay.id} · {bay.path}{#if bay.branch}
+							· on {bay.branch}{/if}
 					</p>
 				{/if}
 			</header>

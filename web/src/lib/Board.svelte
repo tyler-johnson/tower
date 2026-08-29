@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import FlightRow from './FlightRow.svelte';
 	import { feed } from './board.svelte';
+	import { procedures } from './procedures.svelte';
 	import { age, buildRefs, type FlightView } from './tower';
 
 	$effect(() => {
@@ -16,6 +17,29 @@
 	// The open flight, straight off the path — the board marks its row
 	// without holding any state of its own.
 	let open = $derived(page.params.flight ?? null);
+	// Triage is a mode of the pile, not a section of its own. And the pile
+	// is not the `open` section: the board's `open` means no branch op,
+	// unclaimed, unheld, while the pile is every live flight whose stored
+	// stamp still says `open` — a claimed unclassified flight sits in
+	// `in_the_air` and is still unclassified. `FlightView.procedure` is
+	// already on the wire, so the count costs no extra read, and the
+	// number on the button is what explains the picker's reach.
+	let triage = $state(false);
+	let pile = $derived(
+		b
+			? [b.waiting_on_you, b.in_the_air, b.holding, b.open]
+					.flat()
+					.filter((view) => view.procedure === 'open').length
+			: 0
+	);
+
+	function toggle() {
+		triage = !triage;
+		// A definition is a file on disk, so the options are read once, on
+		// the first switch-on, and never again on a board frame.
+		if (triage) procedures.ensure();
+	}
+
 	let sections = $derived(
 		b
 			? ([
@@ -57,9 +81,22 @@
 	{#each sections as [title, glyph, views] (title)}
 		{#if views.length > 0}
 			<section class="flex flex-col gap-1">
-				<h2 class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60">{title}</h2>
+				<h2
+					class="flex items-baseline gap-3 font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
+				>
+					{title}
+					{#if title === 'open'}
+						<button
+							type="button"
+							class="btn btn-ghost btn-xs {triage ? 'btn-active' : ''}"
+							onclick={toggle}
+						>
+							triage {pile}
+						</button>
+					{/if}
+				</h2>
 				{#each views as view (view.id)}
-					<FlightRow {view} {refs} {glyph} now={feed.now} open={view.id === open} />
+					<FlightRow {view} {refs} {glyph} now={feed.now} open={view.id === open} {triage} />
 				{/each}
 			</section>
 		{/if}
