@@ -49,6 +49,18 @@ jobs:
           Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
           Add-MpPreference -ExclusionProcess "git.exe"
 
+      # build.rs runs the web build inside cargo, so every cargo step —
+      # clippy compiles build scripts too — needs pnpm and Node first.
+      # The pnpm version comes from web/package.json's packageManager.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

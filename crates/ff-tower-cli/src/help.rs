@@ -511,9 +511,10 @@ Examples:
   ff tower bay                   the pool it is judging";
 
 pub const SERVE: &str = "\
-Run tower's standing process: a server the browser board mounts
-into as it lands. Today it serves the read API, the verb API, the
-change feed, and a placeholder page.
+Run tower's standing process: the server behind the browser board.
+It serves the read API, the verb API, the change feed, and the board
+itself — the web app is embedded in the binary at build time, and
+every path outside /api answers a build file or the app shell.
 
 The read API is four GET routes — /api/board, /api/brief/<flight>,
 /api/bays, and /api/procedures, bare or /<name> — each answering the

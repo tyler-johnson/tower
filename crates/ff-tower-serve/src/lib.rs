@@ -6,11 +6,15 @@
 //! working with it down, just staler. A person starts it, and tower never
 //! starts it for them.
 //!
-//! Today it is the placeholder page and the API under `/api`: every GET
-//! a fresh fold answering the CLI's own `--json` envelope, the verb
-//! API — eight POSTs appending to the log and answering the same way —
-//! and the change feed: `GET /api/feed`, one SSE stream pushing the full
-//! board envelope whenever the repository moves, whoever moved it.
+//! Today it is the board and the API under `/api`. The board is the
+//! SvelteKit build, embedded at compile time and answered by the
+//! fallback (see `assets`): every non-`/api` path is a file out of the
+//! build or `index.html`, so the binary serves the real app with no
+//! Node at runtime. The API is every GET a fresh fold answering the
+//! CLI's own `--json` envelope, the verb API — POSTs appending to the
+//! log and answering the same way — and the change feed: `GET
+//! /api/feed`, one SSE stream pushing the full board envelope whenever
+//! the repository moves, whoever moved it.
 //!
 //! # Shape
 //!
@@ -32,6 +36,7 @@
 //! `Drop` does not run on a default SIGINT.
 
 mod api;
+mod assets;
 mod error;
 mod feed;
 
@@ -42,21 +47,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
-use axum::http::StatusCode;
-use axum::response::Html;
-use axum::routing::get;
 use ff_tower_core::log::{Store, WatchPaths};
 use tokio::net::TcpListener;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::watch;
 
 use feed::Latest;
-
-/// The page `GET /` answers with until there is a real build output to
-/// serve. Embedded next to the Rust, `integ`'s convention: the constant
-/// is the staleness fingerprint, so the file carries no version or hash
-/// of its own.
-const PLACEHOLDER: &str = include_str!("placeholder.html");
 
 /// A bound server: the socket is open and the address is settled, and
 /// nothing is being answered yet.
@@ -177,22 +173,13 @@ pub fn run(repo: &Path, host: IpAddr, port: u16) -> Result<Bound> {
     })
 }
 
-/// The placeholder, the read API, and a fallback. The fallback is the
-/// point of the fallback: an unmounted path is visibly not there yet
-/// rather than mysteriously blank — and it stays plain text even under
-/// `/api/`, because an envelope needs a `cmd` and an unmounted path has
-/// no verb.
+/// The API and the app. `api::router` owns everything under `/api`, and
+/// the fallback is the embedded web build — the file the path names, or
+/// `index.html` for everything the build does not, `/` included. The
+/// unmounted answers survive in the fallback too: a non-GET, or an
+/// `/api` path nothing is mounted on, is visibly not there yet rather
+/// than mysteriously blank — and stays plain text even under `/api/`,
+/// because an envelope needs a `cmd` and an unmounted path has no verb.
 fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
-    Router::new()
-        .route("/", get(placeholder))
-        .merge(api::router(repo, feed))
-        .fallback(missing)
-}
-
-async fn placeholder() -> Html<&'static str> {
-    Html(PLACEHOLDER)
-}
-
-async fn missing() -> (StatusCode, &'static str) {
-    (StatusCode::NOT_FOUND, "nothing is mounted here yet\n")
+    api::router(repo, feed).fallback(assets::spa)
 }

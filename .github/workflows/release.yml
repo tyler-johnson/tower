@@ -28,6 +28,16 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+      # build.rs runs the web build inside cargo; Node and pnpm are
+      # build dependencies, pinned by web/package.json's packageManager.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - run: cargo build --release -p ff-tower-cli
         env:
           TOWER_OFFICIAL_BUILD: "1"

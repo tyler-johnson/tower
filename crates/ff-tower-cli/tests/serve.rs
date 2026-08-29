@@ -1,5 +1,5 @@
 //! `ff tower serve` against the real binary: the two lanes and their four
-//! sources each, the socket, the placeholder, and the fallback.
+//! sources each, the socket, the embedded app, and the fallback.
 //!
 //! What this file deliberately does not prove is anything about the
 //! board: every assertion here is about the verb, the socket, and the
@@ -120,17 +120,41 @@ fn the_startup_envelope_names_the_address_it_bound() {
 }
 
 #[test]
-fn the_root_is_the_placeholder_and_anything_else_is_not_found() {
+fn the_root_is_the_app_and_unknown_paths_fall_back_to_it() {
     let repo = Repo::new();
     let server = Server::start(repo.path(), &["--port", &free_port().to_string()], &[]);
 
-    let (status, _, body) = http(&server.addr, "/");
+    // The shell is the SvelteKit build, embedded at compile time.
+    let (status, head, index) = http(&server.addr, "/");
     assert_eq!(status, 200);
-    assert!(body.contains("<title>tower</title>"), "{body}");
+    assert!(index.contains("_app/"), "{index}");
+    assert!(head.contains("content-type: text/html"), "{head}");
 
-    // The unmounted half: a path nothing answers for says it is not
-    // there rather than answering blank — under `/api/` included.
+    // The named landmine: a wire id carries a dot, and lookup is exact
+    // match rather than extension sniffing, so an open flight's path
+    // answers the shell byte for byte instead of 404ing as a file of
+    // unknown type.
+    let (status, _, body) = http(&server.addr, "/f/pi-2118.94");
+    assert_eq!(status, 200);
+    assert_eq!(body, index);
+
+    // The unmounted half survives the app landing: a path nothing
+    // answers for under `/api/` says it is not there, in plain text.
     assert_eq!(http(&server.addr, "/api/nothing").0, 404);
+
+    // A real file by its one stable unhashed name, revalidated always.
+    let (status, head, _) = http(&server.addr, "/_app/version.json");
+    assert_eq!(status, 200);
+    assert!(head.contains("content-type: application/json"), "{head}");
+
+    // A hashed asset out of the shell, cacheable forever.
+    let asset = index
+        .split('"')
+        .find(|value| value.starts_with("/_app/immutable/"))
+        .expect("an immutable asset in the shell");
+    let (status, head, _) = http(&server.addr, asset);
+    assert_eq!(status, 200, "{asset}");
+    assert!(head.contains("immutable"), "{head}");
 }
 
 #[test]

@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 ff-tower-core.workspace = true
 axum.workspace = true
+include_dir.workspace = true
 notify.workspace = true
 serde.workspace = true
 serde_json.workspace = true

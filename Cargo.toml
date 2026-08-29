@@ -87,6 +87,12 @@ notify = { version = "8", default-features = false, features = [
 tokio-stream = { version = "0.1", default-features = false, features = [
     "sync",
 ] }
+# The web build, embedded whole: build.rs runs the SvelteKit build and
+# stages it in OUT_DIR, and this compiles that tree into the binary.
+# Chosen over rust-embed: it always embeds regardless of profile, has no
+# runtime read-from-disk mode to accidentally ship, and its build-dep
+# tree is smaller. MIT, already on deny.toml's allowlist.
+include_dir = "0.7"
 
 [profile.release]
 lto = "fat"
