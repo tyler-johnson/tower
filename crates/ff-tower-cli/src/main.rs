@@ -147,6 +147,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Version) => "version",
         Some(Command::Update { .. }) => "update",
         Some(Command::Doctor) => "doctor",
+        Some(Command::Serve { .. }) => "serve",
     }
 }
 
@@ -212,6 +213,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Version) => cmd::version::run(cli.json)?,
         Some(Command::Update { check }) => cmd::update::run(cli.json, *check)?,
         Some(Command::Doctor) => return cmd::doctor::run(cli.json),
+        Some(Command::Serve { port }) => cmd::serve::run(cli.json, port.as_deref())?,
     }
     Ok(0)
 }

@@ -411,10 +411,10 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: bays, tower.bays, and BAYS all name one
 setting.
 
-Three settings ship — bays, the pool root bare `ff tower bay warm`
-mints slots under; updateCheck, how often the background release
-check runs; autoUpdate, whether a new release installs itself
-silently. This verb opens no store and spawns no fufu, so settings
+Four settings ship — bays, the pool root bare `ff tower bay warm`
+mints slots under; servePort, the port `ff tower serve` binds;
+updateCheck, how often the background release check runs; autoUpdate,
+whether a new release installs itself silently. This verb opens no store and spawns no fufu, so settings
 stay reachable on a half-configured machine, before an identity
 exists.";
 
@@ -508,6 +508,37 @@ Examples:
   ff tower doctor                read the pool and the seam
   ff tower doctor --json         the same rows, for machines
   ff tower bay                   the pool it is judging";
+
+pub const SERVE: &str = "\
+Run tower's standing process: a server on 127.0.0.1 that the browser
+board, the read API, and the change feed mount into as they land.
+Today it is a bound socket and a placeholder page — the verb comes
+first so the rest has somewhere to attach.
+
+It runs in the foreground the way `ff watch` does, and Ctrl-C ends
+it. It holds no state the log does not, decides nothing, and
+dispatches nothing, so every other interface keeps working with it
+down — just staler. A person starts it; tower never starts it for
+you.
+
+The port resolves through four lanes, highest first: --port, then
+TOWER_PORT, then tower.servePort in git config, then 7420. A value
+none of them can parse is the same refusal wherever it came from.
+Nothing is locked — a second server is another writer, which the log
+already handles — so the one conflict worth naming is the port, and
+the socket names it.
+
+The repository is checked before the socket is bound, so a wrong
+directory or a missing git user.email is a refusal at startup rather
+than a blank page later. --json emits one envelope carrying the
+address it bound, then keeps serving.";
+
+pub const SERVE_EXAMPLES: &str = "\
+Examples:
+  ff tower serve                 bind 7420 and serve until Ctrl-C
+  ff tower serve --port 9000     bind somewhere else, once
+  ff tower config servePort 9000          the same, remembered
+  ff tower serve --json          the address as an envelope, then serve";
 
 pub const BAY_LIST: &str = "\
 Every bay, one row: the painted id, the branch it stands on, and the

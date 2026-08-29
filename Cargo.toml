@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/ff-tower-core",
     "crates/ff-tower-cli",
+    "crates/ff-tower-serve",
     "crates/ff-tower-testsupport",
 ]
 
@@ -14,6 +15,7 @@ repository = "https://github.com/tyler-johnson/tower"
 
 [workspace.dependencies]
 ff-tower-core = { path = "crates/ff-tower-core" }
+ff-tower-serve = { path = "crates/ff-tower-serve" }
 ff-tower-testsupport = { path = "crates/ff-tower-testsupport" }
 
 # For tower's own store, and for nothing else. `refs/tower/log/<author>/<writer>`
@@ -43,6 +45,29 @@ ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 sha2 = "0.10"
 tar = { version = "0.4", default-features = false }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+
+# `ff tower serve`, and nothing else. One route over HTTP/1.1 on the
+# loopback needs routing and a listener; it needs no tracing, no
+# multipart, no compression, so the default set is off and the two
+# features the server actually reaches for are named. Note that axum's own
+# tree carries crates named `tower`, `tower-layer`, and `tower-service` —
+# Rust's service abstraction, no relation to this project. `cargo tree` in
+# this repository is ambiguous by accident, and reading a `tower` line
+# there as ours is the mistake to expect.
+axum = { version = "0.8", default-features = false, features = [
+    "http1",
+    "tokio",
+] }
+# The runtime under axum, and tower's first async anything. Named
+# feature by feature rather than `full`: worker threads for the server,
+# sockets to bind, the signal handler Ctrl-C arrives on, and the macros
+# the async plumbing is written with.
+tokio = { version = "1", default-features = false, features = [
+    "rt-multi-thread",
+    "net",
+    "signal",
+    "macros",
+] }
 
 [profile.release]
 lto = "fat"

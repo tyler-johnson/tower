@@ -278,6 +278,19 @@ pub enum Command {
     /// enforces.
     #[command(long_about = help::DOCTOR, after_long_help = help::DOCTOR_EXAMPLES)]
     Doctor,
+    /// Run tower's standing process: a server on the loopback, until
+    /// Ctrl-C.
+    #[command(long_about = help::SERVE, after_long_help = help::SERVE_EXAMPLES)]
+    Serve {
+        /// The port to bind; TOWER_PORT, then tower.servePort, then 7420.
+        ///
+        /// A string, not a `u16`, for the same reason `-m` is an
+        /// `Option<String>`: a bad value has to be the verb's own coded
+        /// refusal, so a `--json` caller gets an envelope instead of
+        /// clap's usage text and its exit 2.
+        #[arg(long, value_name = "n")]
+        port: Option<String>,
+    },
 }
 
 /// The ambient lanes: what rides an invocation besides the verb itself.
@@ -299,6 +312,14 @@ impl Command {
         match self {
             // The detached child must not recurse into another check.
             Command::Update { .. } => Lanes {
+                update: false,
+                notice: false,
+            },
+            // A process that runs for hours is the wrong place for a
+            // lane that fires once per invocation: nothing should spawn
+            // update children at startup, and a notice printed at
+            // shutdown would report a release that landed hours ago.
+            Command::Serve { .. } => Lanes {
                 update: false,
                 notice: false,
             },

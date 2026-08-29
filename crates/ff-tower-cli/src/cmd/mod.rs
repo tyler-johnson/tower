@@ -26,6 +26,7 @@ pub mod link;
 pub mod next;
 pub mod procedures;
 pub mod requeue;
+pub mod serve;
 pub mod skills;
 pub mod take;
 pub mod triage;

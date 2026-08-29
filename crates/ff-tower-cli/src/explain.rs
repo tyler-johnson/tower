@@ -48,6 +48,17 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/bad-port",
+        summary: "that is not a port",
+        detail: "A port is a number from 0 to 65535, and `ff tower serve` takes one from the \
+                 first of four lanes that speaks: --port, then TOWER_PORT, then \
+                 tower.servePort in git config, then the compiled default. All four run one \
+                 parser, so the refusal reads the same wherever the value came from, and it \
+                 names the lane — that is the one to go fix. Whether the port can actually be \
+                 had is a later and separate answer, from the socket at bind.",
+        exits: &[],
+    },
+    Entry {
         id: "usage/needs-path",
         summary: "bare `warm` needs a pool root",
         detail: "`bay warm` with no path mints the next slot under the `tower.bays` setting, and \
@@ -341,6 +352,28 @@ pub static ENTRIES: &[Entry] = &[
                  cannot see is worse than a refusal, so the layer fails whole rather than \
                  skipping the file.",
         exits: &["ff tower skills"],
+    },
+    Entry {
+        id: "serve/address-in-use",
+        summary: "something is already serving on that port",
+        detail: "The socket would not bind: another `ff tower serve`, or anything else holding \
+                 the number. tower takes no lock of its own — a second server is just another \
+                 writer, which the log already handles, and a lock file would go stale on every \
+                 Ctrl-C because Drop does not run on a default SIGINT. So the port is the one \
+                 conflict worth naming, and the operating system is what names it. Serve \
+                 somewhere else, or stop what is there.",
+        exits: &["ff tower serve --port <n>"],
+    },
+    Entry {
+        id: "serve/failed",
+        summary: "the server would not start",
+        detail: "Not the port being taken — something else: a runtime that would not build, a \
+                 bind the system refused for its own reason, or an accept loop that stopped \
+                 with an error. The message carries the system's own words, which are the whole \
+                 of what is known. The common one is a permission denial below port 1024: those \
+                 numbers parse fine and fail here, because whether this user may have that port \
+                 is the machine's rule rather than tower's.",
+        exits: &["ff tower serve --port <n>"],
     },
     Entry {
         id: "update/failed",
@@ -778,6 +811,7 @@ mod tests {
         }
         for table in [
             "ff-tower-cli/src/error.rs",
+            "ff-tower-serve/src/error.rs",
             "ff-tower-core/src/config.rs",
             "ff-tower-core/src/procedure/mod.rs",
             "ff-tower-core/src/skill/mod.rs",

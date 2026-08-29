@@ -30,6 +30,11 @@ pub enum CliError {
     /// A skill layer that would not read — its own id, carried through.
     #[error(transparent)]
     Skill(#[from] skill::Error),
+    /// The server declining to start: a taken port, or a socket that
+    /// would not open. The repository half of `serve`'s startup never
+    /// lands here — see the `From` below.
+    #[error(transparent)]
+    Serve(ff_tower_serve::Error),
     /// A refusal tower shaped itself — a verb declining its input.
     #[error("{message}")]
     Coded {
@@ -64,6 +69,10 @@ impl CliError {
             CliError::Ff(ff::Error::Contract { .. }) => "ff/contract",
             CliError::Ff(ff::Error::Mismatched { .. }) => "ff/mismatched",
             CliError::Ff(ff::Error::Unparsable { .. }) => "ff/unparsable",
+            // `Serve`'s repository half is flattened into `Log` by the
+            // `From` below, so what survives to here always names
+            // itself; the fallback is the id that half would have had.
+            CliError::Serve(err) => err.id().unwrap_or("repo/error"),
             CliError::Procedure(err) => err.id(),
             CliError::Skill(err) => err.id(),
             CliError::Config(err) => err.id(),
@@ -100,6 +109,20 @@ impl CliError {
             3
         } else {
             1
+        }
+    }
+}
+
+/// Written by hand rather than derived, for the flattening: the server
+/// validates the repository before it binds, and a store that refuses is
+/// core's `log::Error` wearing a thin wrapper. It lands in `Log`, where
+/// `identity/missing` and the rest already have their ids, instead of
+/// growing a second table that could disagree with the first.
+impl From<ff_tower_serve::Error> for CliError {
+    fn from(err: ff_tower_serve::Error) -> CliError {
+        match err {
+            ff_tower_serve::Error::Repo(err) => CliError::Log(err),
+            err => CliError::Serve(err),
         }
     }
 }

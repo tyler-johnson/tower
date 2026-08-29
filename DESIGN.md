@@ -228,9 +228,10 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower version` | which tower this is: the release, the commit it was built from, and — read from the update lane's cache, without touching the network — whether it is still the current one. `--json` reports the three as fields | either |
 | `ff tower update` | move this binary to the latest release: verified download, atomic swap; a passive lane checks ~daily and auto-installs, or prints a one-line notice | you |
 | `ff tower doctor` | stale adapters, bays that no longer resolve | you |
+| `ff tower serve` | run the standing process: a server on the loopback the browser board and its API mount into, in the foreground until Ctrl-C; `--port`, then `TOWER_PORT`, then `tower.servePort`, then 7420 | you |
 | `ff tower <adapter> <args>` | passthrough to `tower-<adapter>` on PATH: `ff tower linear`, `ff tower github` | either |
 
-Every one of them is a read plus a local write. Nothing in the column on the right is a dispatch target.
+Every one of them is a read plus a local write — `serve` excepted, which is a process rather than an answer, and still decides nothing. Nothing in the column on the right is a dispatch target.
 
 ## Triage
 

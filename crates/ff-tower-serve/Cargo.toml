@@ -1,0 +1,14 @@
+[package]
+name = "ff-tower-serve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "tower's standing process: the server `ff tower serve` runs"
+publish = false
+
+[dependencies]
+ff-tower-core.workspace = true
+axum.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

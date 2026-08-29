@@ -81,6 +81,7 @@ pub enum SettingKind {
     Dir,
     Cadence,
     Bool,
+    Port,
 }
 
 impl SettingKind {
@@ -90,6 +91,7 @@ impl SettingKind {
             SettingKind::Dir => "dir",
             SettingKind::Cadence => "cadence",
             SettingKind::Bool => "bool",
+            SettingKind::Port => "port",
         }
     }
 }
@@ -105,6 +107,13 @@ pub struct Setting {
     pub desc: &'static [&'static str],
 }
 
+/// The port `ff tower serve` binds when nothing else says otherwise —
+/// the last of the four lanes, behind `--port`, `TOWER_PORT`, and
+/// `tower.servePort`. Compiled in rather than configured because a
+/// default that has to be configured is not one; the registry row below
+/// spells it, and a test holds the two together.
+pub const DEFAULT_PORT: u16 = 7420;
+
 /// Every setting tower ships, in display order. `tower.writer` is
 /// deliberately absent: identity minted at first append, not a tunable —
 /// setting it to another machine's id forks that writer's chain.
@@ -119,6 +128,17 @@ pub fn registry() -> &'static [Setting] {
                 "The pool root bare `bay warm` mints bay-<n> slots under: absolute,",
                 "or relative to the main worktree. Unset, bare warm refuses and",
                 "asks for a path.",
+            ],
+        },
+        Setting {
+            name: "servePort",
+            key: "tower.servePort",
+            def: "7420",
+            kind: SettingKind::Port,
+            desc: &[
+                "The port `ff tower serve` binds on 127.0.0.1. --port beats",
+                "TOWER_PORT beats this beats the default. A port already in use is",
+                "refused at bind, by the socket rather than by a lock.",
             ],
         },
         Setting {
@@ -175,6 +195,7 @@ pub fn validate(setting: &Setting, value: &str) -> Result<()> {
             gix::config::Boolean::try_from(gix::bstr::BStr::new(value)).is_ok(),
             "want true or false",
         ),
+        SettingKind::Port => (parse_port(value).is_some(), "want a port, 0 to 65535"),
     };
     if ok {
         Ok(())
@@ -202,6 +223,14 @@ pub fn parse_cadence(raw: &str) -> Option<i64> {
         _ => {}
     }
     parse_duration(raw).map(|secs| secs.max(60))
+}
+
+/// Parse a port, the one parser all four lanes run: the flag, the
+/// environment, this registry's validation, and the reader that resolves
+/// them. A value below 1024 parses and then fails at bind — that is the
+/// operating system's rule to state, not a second opinion here.
+pub fn parse_port(raw: &str) -> Option<u16> {
+    raw.trim().parse().ok()
 }
 
 /// Decode an encoded cadence into an effective interval in seconds:
@@ -508,6 +537,7 @@ mod tests {
                 SettingKind::Dir => "   ",
                 SettingKind::Cadence => "5x",
                 SettingKind::Bool => "maybe",
+                SettingKind::Port => "70000",
             };
             let err = validate(setting, bad).expect_err("a bad value refuses");
             assert_eq!(err.id(), "usage/bad-value");
@@ -518,6 +548,24 @@ mod tests {
                 setting.name
             );
         }
+    }
+
+    #[test]
+    fn the_port_default_matches_its_registry_row() {
+        let setting = lookup("servePort").expect("registered");
+        assert_eq!(parse_port(setting.def), Some(DEFAULT_PORT));
+    }
+
+    #[test]
+    fn port_parse_table() {
+        assert_eq!(parse_port("7420"), Some(7420));
+        assert_eq!(parse_port("  9000  "), Some(9000));
+        assert_eq!(parse_port("0"), Some(0));
+        assert_eq!(parse_port("65535"), Some(65535));
+        assert!(parse_port("65536").is_none());
+        assert!(parse_port("-1").is_none());
+        assert!(parse_port("banana").is_none());
+        assert!(parse_port("").is_none());
     }
 
     #[test]
