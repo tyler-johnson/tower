@@ -31,6 +31,17 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/bad-body",
+        summary: "the POST body is not the verb's JSON",
+        detail: "Only the server raises this — the CLI has clap where the verb API has JSON. A \
+                 write route takes the verb's arguments as a small JSON object (`{\"flight\": \
+                 …}`, and `file`'s `{\"subject\": …}`), and a body that is not JSON, misses a \
+                 required field, or carries a field the verb does not take is refused whole, \
+                 before anything is read or written. The refusal's message quotes what the \
+                 parser objected to.",
+        exits: &[],
+    },
+    Entry {
         id: "usage/bad-flight",
         summary: "that is not a flight reference",
         detail: "A flight is named by its bare number `<n>`, by `<writer>#<n>` when boards span \
@@ -839,6 +850,7 @@ mod tests {
         }
         for table in [
             "ff-tower-cli/src/error.rs",
+            "ff-tower-serve/src/api.rs",
             "ff-tower-serve/src/error.rs",
             "ff-tower-core/src/board/resolve.rs",
             "ff-tower-core/src/config.rs",

@@ -511,16 +511,24 @@ Examples:
   ff tower bay                   the pool it is judging";
 
 pub const SERVE: &str = "\
-Run tower's standing process: a server the browser board, the read
-API, and the change feed mount into as they land. Today it serves
-the read API and a placeholder page.
+Run tower's standing process: a server the browser board, the API,
+and the change feed mount into as they land. Today it serves the
+read API, the verb API, and a placeholder page.
 
 The read API is four GET routes — /api/board, /api/brief/<flight>,
 /api/bays, and /api/procedures, bare or /<name> — each answering the
 same envelope the matching verb emits under --json, folded fresh per
-request; nothing is cached. A refusal is the same one-line error
-envelope: 400 for a reference that does not parse, 404 for one that
-names nothing, 500 when the fold itself failed.
+request; nothing is cached. The verb API is eight POST routes —
+/api/file, /api/claim, /api/take, /api/requeue, /api/hold,
+/api/answer, /api/done, /api/comment — each taking the verb's
+arguments as a small JSON body ({\"flight\": …} with an optional
+\"message\", and file's {\"subject\": …}), appending to the log, and
+answering the verb's own data envelope; hold answers 200, its exit-3
+outcome being the CLI's channel, and done requires the flight named.
+A refusal is the same one-line error envelope: 400 for a reference
+or body that does not parse, 404 for a reference that names nothing,
+409 when the board's standing state refuses the write, 503 when the
+log is contended, 500 when the pipeline itself failed.
 
 It runs in the foreground the way `ff watch` does, and Ctrl-C ends
 it. It holds no state the log does not, decides nothing, and

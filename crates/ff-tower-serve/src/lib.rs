@@ -6,9 +6,10 @@
 //! working with it down, just staler. A person starts it, and tower never
 //! starts it for them.
 //!
-//! Today it is the placeholder page and the read API under `/api` —
-//! every GET a fresh fold answering the CLI's own `--json` envelope.
-//! The verb API and the change feed mount onto this as they land.
+//! Today it is the placeholder page and the API under `/api`: every GET
+//! a fresh fold answering the CLI's own `--json` envelope, and the verb
+//! API — eight POSTs appending to the log and answering the same way.
+//! The change feed mounts onto this as it lands.
 //!
 //! # Shape
 //!

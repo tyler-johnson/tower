@@ -62,7 +62,7 @@ pub fn run(json: bool, host: Option<&str>, port: Option<&str>) -> Result<(), Cli
         eprintln!(
             "{}",
             render::paint_dim(
-                "reachable from the network — this board has no authentication in front of it",
+                "reachable from the network — this board has no authentication in front of it, and the verb API accepts writes",
                 render::colored(),
             )
         );

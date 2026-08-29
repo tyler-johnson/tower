@@ -198,21 +198,39 @@ pub fn http(addr: &str, path: &str) -> (u16, String, String) {
     request(addr, "GET", path)
 }
 
+/// One POST over the same raw socket, the body carried with its length
+/// and the JSON content type.
+pub fn post(addr: &str, path: &str, body: &str) -> (u16, String, String) {
+    exchange(addr, "POST", path, Some(body))
+}
+
 /// One HTTP/1.1 request over a raw socket, answering with the status
 /// code, the header block, and the body. The suites need a client for a
 /// handful of requests, and `Connection: close` ends the response at EOF
 /// — so nothing here has to understand keep-alive or chunking.
 pub fn request(addr: &str, method: &str, path: &str) -> (u16, String, String) {
+    exchange(addr, method, path, None)
+}
+
+fn exchange(addr: &str, method: &str, path: &str, body: Option<&str>) -> (u16, String, String) {
     let mut stream = connect(addr);
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .expect("a read timeout");
+    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+    if let Some(body) = body {
+        head.push_str(&format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            body.len()
+        ));
+    }
+    head.push_str("\r\n");
     stream
-        .write_all(
-            format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n")
-                .as_bytes(),
-        )
+        .write_all(head.as_bytes())
         .expect("write the request");
+    if let Some(body) = body {
+        stream.write_all(body.as_bytes()).expect("write the body");
+    }
 
     let mut response = String::new();
     stream
