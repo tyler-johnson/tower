@@ -6,8 +6,9 @@
 //! working with it down, just staler. A person starts it, and tower never
 //! starts it for them.
 //!
-//! Today it is a bound socket and a placeholder page. The read API, the
-//! verb API and the change feed mount onto this; nothing of them is here.
+//! Today it is the placeholder page and the read API under `/api` —
+//! every GET a fresh fold answering the CLI's own `--json` envelope.
+//! The verb API and the change feed mount onto this as they land.
 //!
 //! # Shape
 //!
@@ -28,6 +29,7 @@
 //! tower refusal. A lock file would go stale on every Ctrl-C, since
 //! `Drop` does not run on a default SIGINT.
 
+mod api;
 mod error;
 
 pub use error::{Error, Result};
@@ -55,6 +57,7 @@ pub struct Bound {
     addr: SocketAddr,
     listener: TcpListener,
     runtime: Runtime,
+    router: Router,
 }
 
 impl Bound {
@@ -73,10 +76,11 @@ impl Bound {
             addr,
             listener,
             runtime,
+            router,
         } = self;
         runtime
             .block_on(async {
-                axum::serve(listener, router())
+                axum::serve(listener, router)
                     .with_graceful_shutdown(async {
                         let _ = tokio::signal::ctrl_c().await;
                     })
@@ -133,14 +137,20 @@ pub fn run(repo: &Path, host: IpAddr, port: u16) -> Result<Bound> {
         addr,
         listener,
         runtime,
+        router: router(repo),
     })
 }
 
-/// One route and a fallback. The fallback is the point of the fallback:
-/// an unmounted path is visibly not there yet rather than mysteriously
-/// blank.
-fn router() -> Router {
-    Router::new().route("/", get(placeholder)).fallback(missing)
+/// The placeholder, the read API, and a fallback. The fallback is the
+/// point of the fallback: an unmounted path is visibly not there yet
+/// rather than mysteriously blank — and it stays plain text even under
+/// `/api/`, because an envelope needs a `cmd` and an unmounted path has
+/// no verb.
+fn router(repo: &Path) -> Router {
+    Router::new()
+        .route("/", get(placeholder))
+        .merge(api::router(repo))
+        .fallback(missing)
 }
 
 async fn placeholder() -> Html<&'static str> {

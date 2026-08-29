@@ -386,7 +386,8 @@ pub static ENTRIES: &[Entry] = &[
                  with an error. The message carries the system's own words, which are the whole \
                  of what is known. The common one is a permission denial below port 1024: those \
                  numbers parse fine and fail here, because whether this user may have that port \
-                 is the machine's rule rather than tower's.",
+                 is the machine's rule rather than tower's. The same id answers an API request \
+                 whose fold panicked — the server survives it, and the one request says so.",
         exits: &["ff tower serve --port <n>"],
     },
     Entry {

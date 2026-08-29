@@ -512,9 +512,15 @@ Examples:
 
 pub const SERVE: &str = "\
 Run tower's standing process: a server the browser board, the read
-API, and the change feed mount into as they land. Today it is a bound
-socket and a placeholder page — the verb comes first so the rest has
-somewhere to attach.
+API, and the change feed mount into as they land. Today it serves
+the read API and a placeholder page.
+
+The read API is four GET routes — /api/board, /api/brief/<flight>,
+/api/bays, and /api/procedures, bare or /<name> — each answering the
+same envelope the matching verb emits under --json, folded fresh per
+request; nothing is cached. A refusal is the same one-line error
+envelope: 400 for a reference that does not parse, 404 for one that
+names nothing, 500 when the fold itself failed.
 
 It runs in the foreground the way `ff watch` does, and Ctrl-C ends
 it. It holds no state the log does not, decides nothing, and
