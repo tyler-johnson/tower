@@ -30,7 +30,7 @@
 
 <main class="mx-auto flex max-w-4xl flex-col gap-6 p-4">
 	<header class="flex items-baseline gap-3">
-		<h1 class="text-lg font-semibold">tower</h1>
+		<h1 class="font-mono text-lg font-semibold">tower</h1>
 		{#if feed.conn === 'live'}
 			<span class="flex items-center gap-2 text-sm text-base-content/60">
 				<span class="status status-success"></span> live
@@ -53,7 +53,7 @@
 	{#each sections as [title, glyph, views] (title)}
 		{#if views.length > 0}
 			<section class="flex flex-col gap-1">
-				<h2 class="text-sm font-medium text-base-content/60">{title}</h2>
+				<h2 class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60">{title}</h2>
 				{#each views as view (view.id)}
 					<FlightRow {view} {refs} {glyph} now={feed.now} />
 				{/each}
