@@ -5,13 +5,29 @@
 		view,
 		refs,
 		glyph,
-		now
-	}: { view: FlightView; refs: Map<string, string>; glyph: string; now: number } = $props();
+		now,
+		open
+	}: {
+		view: FlightView;
+		refs: Map<string, string>;
+		glyph: string;
+		now: number;
+		open: boolean;
+	} = $props();
 
 	let phrases = $derived(notePhrases(view, refs, now));
 </script>
 
-<div class="grid grid-cols-[1ch_max-content_1fr_max-content] items-baseline gap-x-2">
+<!--
+	A row is a link to the flight's own path, so back/forward work and a
+	panel is something you can send someone.
+-->
+<a
+	href="/f/{view.id}"
+	class="grid grid-cols-[1ch_max-content_1fr_max-content] items-baseline gap-x-2 rounded-field px-1 text-left hover:bg-base-200 {open
+		? 'bg-base-200'
+		: ''}"
+>
 	<span class="text-base-content/60">{glyph}</span>
 	<span class="font-mono text-primary">{refs.get(view.id)}</span>
 	<span class="truncate">{view.subject}</span>
@@ -22,4 +38,4 @@
 			<span class={phrase.tone === 'warn' ? 'text-warning' : ''}>{phrase.text}</span>
 		{/each}
 	</div>
-</div>
+</a>

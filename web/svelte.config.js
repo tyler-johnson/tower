@@ -5,7 +5,11 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
 	preprocess: vitePreprocess(),
 	kit: {
-		adapter: adapter()
+		// A fallback SPA, not a prerendered page: an open flight is a real
+		// path (`/f/pi-2118.94`), and only the client knows which paths
+		// exist. Every non-/api request answers index.html and the router
+		// takes it from there.
+		adapter: adapter({ fallback: 'index.html' })
 	}
 };
 
