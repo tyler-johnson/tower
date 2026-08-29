@@ -511,9 +511,9 @@ Examples:
   ff tower bay                   the pool it is judging";
 
 pub const SERVE: &str = "\
-Run tower's standing process: a server the browser board, the API,
-and the change feed mount into as they land. Today it serves the
-read API, the verb API, and a placeholder page.
+Run tower's standing process: a server the browser board mounts
+into as it lands. Today it serves the read API, the verb API, the
+change feed, and a placeholder page.
 
 The read API is four GET routes — /api/board, /api/brief/<flight>,
 /api/bays, and /api/procedures, bare or /<name> — each answering the
@@ -529,6 +529,13 @@ A refusal is the same one-line error envelope: 400 for a reference
 or body that does not parse, 404 for a reference that names nothing,
 409 when the board's standing state refuses the write, 503 when the
 log is contended, 500 when the pipeline itself failed.
+
+The change feed is GET /api/feed, one SSE stream: the current board
+on connect, then an event whenever the repository moves, each
+event's data being the board envelope — the same bytes /api/board
+answers, minus the trailing newline. Updates arrive whoever wrote —
+this server's own POSTs, the CLI, an agent in a bay, a push landing
+— including writes that never touched this server.
 
 It runs in the foreground the way `ff watch` does, and Ctrl-C ends
 it. It holds no state the log does not, decides nothing, and

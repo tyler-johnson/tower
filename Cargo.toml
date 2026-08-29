@@ -60,13 +60,32 @@ axum = { version = "0.8", default-features = false, features = [
 ] }
 # The runtime under axum, and tower's first async anything. Named
 # feature by feature rather than `full`: worker threads for the server,
-# sockets to bind, the signal handler Ctrl-C arrives on, and the macros
-# the async plumbing is written with.
+# sockets to bind, the signal handler Ctrl-C arrives on, the macros the
+# async plumbing is written with, and the change feed's four — the watch
+# channel and dirty flag (sync), the debounce timer (time), the watch
+# child (process), and its line reader (io-util).
 tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread",
     "net",
     "signal",
     "macros",
+    "sync",
+    "time",
+    "process",
+    "io-util",
+] }
+# The change feed's filesystem half: one watcher over the tower log refs
+# and packed-refs. Defaults off drops the crossbeam channel the callback
+# API never uses; the inotify and Windows backends are not feature-gated,
+# and `macos_fsevent` names the mac one. CC0-1.0 rides in its tree and
+# deny.toml already allows it.
+notify = { version = "8", default-features = false, features = [
+    "macos_fsevent",
+] }
+# `WatchStream` alone: the adapter that turns the feed's watch channel
+# into the stream axum's SSE response wants.
+tokio-stream = { version = "0.1", default-features = false, features = [
+    "sync",
 ] }
 
 [profile.release]

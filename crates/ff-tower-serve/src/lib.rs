@@ -7,9 +7,10 @@
 //! starts it for them.
 //!
 //! Today it is the placeholder page and the API under `/api`: every GET
-//! a fresh fold answering the CLI's own `--json` envelope, and the verb
-//! API — eight POSTs appending to the log and answering the same way.
-//! The change feed mounts onto this as it lands.
+//! a fresh fold answering the CLI's own `--json` envelope, the verb
+//! API — eight POSTs appending to the log and answering the same way —
+//! and the change feed: `GET /api/feed`, one SSE stream pushing the full
+//! board envelope whenever the repository moves, whoever moved it.
 //!
 //! # Shape
 //!
@@ -32,19 +33,24 @@
 
 mod api;
 mod error;
+mod feed;
 
 pub use error::{Error, Result};
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::get;
-use ff_tower_core::log::Store;
+use ff_tower_core::log::{Store, WatchPaths};
 use tokio::net::TcpListener;
 use tokio::runtime::{Builder, Runtime};
+use tokio::sync::watch;
+
+use feed::Latest;
 
 /// The page `GET /` answers with until there is a real build output to
 /// serve. Embedded next to the Rust, `integ`'s convention: the constant
@@ -59,6 +65,9 @@ pub struct Bound {
     listener: TcpListener,
     runtime: Runtime,
     router: Router,
+    repo: PathBuf,
+    paths: WatchPaths,
+    feed: Arc<watch::Sender<Latest>>,
 }
 
 impl Bound {
@@ -69,25 +78,41 @@ impl Bound {
         self.addr
     }
 
-    /// Answer requests until Ctrl-C. Graceful shutdown is not
-    /// load-bearing without a lock to release, but it is free and it is
-    /// what a person pressing Ctrl-C means.
+    /// Start the change feed, then answer requests until Ctrl-C.
+    ///
+    /// The feed comes first, and its watcher failing to install is a
+    /// hard startup failure under the id that already means "the server
+    /// failed for its own reason": a feed that silently missed tower's
+    /// own ref writes is the one outcome the design forbids.
+    ///
+    /// Graceful shutdown sends [`Latest::Closing`] before the drain, and
+    /// that send is load-bearing: hyper waits for in-flight responses,
+    /// an SSE stream never finishes on its own, and without the close a
+    /// Ctrl-C with a browser attached would hang forever. The watch
+    /// child is `kill_on_drop`, so the runtime going down reaps it.
     pub fn serve(self) -> Result<()> {
         let Bound {
             addr,
             listener,
             runtime,
             router,
+            repo,
+            paths,
+            feed,
         } = self;
-        runtime
-            .block_on(async {
-                axum::serve(listener, router)
-                    .with_graceful_shutdown(async {
-                        let _ = tokio::signal::ctrl_c().await;
-                    })
-                    .await
-            })
-            .map_err(|source| Error::Failed { addr, source })
+        runtime.block_on(async {
+            feed::start(repo, paths, Arc::clone(&feed)).map_err(|source| Error::Failed {
+                addr,
+                source: std::io::Error::other(source),
+            })?;
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    let _ = tokio::signal::ctrl_c().await;
+                    let _ = feed.send(Latest::Closing);
+                })
+                .await
+                .map_err(|source| Error::Failed { addr, source })
+        })
     }
 }
 
@@ -107,7 +132,10 @@ impl Bound {
 /// a wider bind means for a board with no authentication in front of it
 /// is the verb's sentence to say, once, where a person can read it.
 pub fn run(repo: &Path, host: IpAddr, port: u16) -> Result<Bound> {
-    drop(Store::open(repo)?);
+    // The store is the validation, and the watch paths ride out before
+    // it drops: they are plain paths off the common dir, the one thing
+    // the feed needs from gix.
+    let paths = Store::open(repo)?.watch_paths();
 
     let wanted = SocketAddr::from((host, port));
 
@@ -134,11 +162,18 @@ pub fn run(repo: &Path, host: IpAddr, port: u16) -> Result<Bound> {
         source,
     })?;
 
+    // Seeded `Pending`, which no stream forwards: the first thing a
+    // subscriber can see is the first fold.
+    let (tx, rx) = watch::channel(Latest::Pending);
+
     Ok(Bound {
         addr,
         listener,
         runtime,
-        router: router(repo),
+        router: router(repo, rx),
+        repo: repo.to_path_buf(),
+        paths,
+        feed: Arc::new(tx),
     })
 }
 
@@ -147,10 +182,10 @@ pub fn run(repo: &Path, host: IpAddr, port: u16) -> Result<Bound> {
 /// rather than mysteriously blank — and it stays plain text even under
 /// `/api/`, because an envelope needs a `cmd` and an unmounted path has
 /// no verb.
-fn router(repo: &Path) -> Router {
+fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
     Router::new()
         .route("/", get(placeholder))
-        .merge(api::router(repo))
+        .merge(api::router(repo, feed))
         .fallback(missing)
 }
 

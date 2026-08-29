@@ -18,14 +18,18 @@
 //! Every handler runs its whole pipeline inside `spawn_blocking` — the
 //! folds spawn ff processes and `Store` is not `Sync` — opening a fresh
 //! `Ff` and `Store` per request, exactly what [`run`](crate::run)'s doc
-//! promised. The only state is the repository path, so serving stale
-//! data is impossible by construction.
+//! promised. The state is the repository path and the feed's receiving
+//! end, and only `/api/feed` reads the channel: every GET stays a fresh
+//! fold, so serving stale data on the pull side is impossible by
+//! construction. The feed itself is one SSE stream pushing the full
+//! board envelope — the bytes `/api/board` answers, minus the trailing
+//! newline — whenever the repository moves, and a POST appends and
+//! answers without publishing anything: the board it changed arrives on
+//! the feed through the watcher, the way every writer's does.
 //!
 //! # Non-goals
 //!
-//! No caching: every response is a fresh fold at request time. No change
-//! feed — a POST appends and answers its envelope, and pushing the board
-//! that changed is SSE's flight, not this one's. No exit-code channel:
+//! No caching: every GET is a fresh fold at request time. No exit-code channel:
 //! `hold`'s success is a 200 with the full data envelope, and only the
 //! CLI says 3. No auth: that posture is deliberately unfiled, and the
 //! verb's wide-bind warning says so — the loopback default is the
@@ -36,6 +40,7 @@
 //! cost is accepted — a board or a brief is a handful of local ff
 //! spawns, and "render never blocks on the network" holds untouched.
 
+use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -43,6 +48,7 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Path as RoutePath, State};
 use axum::http::{HeaderName, StatusCode, header};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use ff_tower_core::board::{self, ResolveError, Verdicts};
 use ff_tower_core::ff::{self, Ff};
@@ -51,13 +57,26 @@ use ff_tower_core::machine;
 use ff_tower_core::{procedure, verb};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use tokio::sync::watch;
+use tokio_stream::wrappers::WatchStream;
+use tokio_stream::{Stream, StreamExt};
 
-/// The routes, mounted under `/api`. State is the repository path and
-/// nothing else — plain data, `Sync`, and structurally incapable of
-/// caching a fold.
-pub(crate) fn router(repo: &Path) -> Router {
+use crate::feed::Latest;
+
+/// What every route shares: the repository path the handlers fold from,
+/// and the feed channel's receiving end — read by `/api/feed` alone, so
+/// the state stays structurally incapable of serving a GET a cached
+/// fold.
+pub(crate) struct AppState {
+    repo: PathBuf,
+    feed: watch::Receiver<Latest>,
+}
+
+/// The routes, mounted under `/api`.
+pub(crate) fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
     Router::new()
         .route("/api/board", get(board))
+        .route("/api/feed", get(feed_route))
         .route("/api/brief/{flight}", get(brief))
         .route("/api/bays", get(bays))
         .route("/api/procedures", get(procedures))
@@ -70,7 +89,10 @@ pub(crate) fn router(repo: &Path) -> Router {
         .route("/api/answer", post(answer))
         .route("/api/done", post(done))
         .route("/api/comment", post(comment))
-        .with_state(Arc::new(repo.to_path_buf()))
+        .with_state(Arc::new(AppState {
+            repo: repo.to_path_buf(),
+            feed,
+        }))
 }
 
 /// What every route answers with: a status, the JSON content type, and
@@ -81,10 +103,10 @@ type Reply = (StatusCode, [(HeaderName, &'static str); 1], String);
 /// data or error — as the body.
 async fn respond(
     cmd: &'static str,
-    repo: Arc<PathBuf>,
+    state: Arc<AppState>,
     work: impl FnOnce(&Path) -> Result<String, ApiError> + Send + 'static,
 ) -> Reply {
-    match tokio::task::spawn_blocking(move || work(&repo)).await {
+    match tokio::task::spawn_blocking(move || work(&state.repo)).await {
         Ok(Ok(envelope)) => reply(StatusCode::OK, envelope),
         Ok(Err(err)) => refusal(cmd, &err),
         // The pipeline panicked. The server survives it — that is what
@@ -110,12 +132,12 @@ async fn respond(
 /// as `usage/bad-body`, before any thread is spawned.
 async fn act<Body: DeserializeOwned + Send + 'static>(
     cmd: &'static str,
-    repo: Arc<PathBuf>,
+    state: Arc<AppState>,
     body: Bytes,
     verb: impl FnOnce(&Path, Body) -> Result<String, ApiError> + Send + 'static,
 ) -> Reply {
     match serde_json::from_slice::<Body>(&body) {
-        Ok(parsed) => respond(cmd, repo, move |repo| verb(repo, parsed)).await,
+        Ok(parsed) => respond(cmd, state, move |repo| verb(repo, parsed)).await,
         Err(err) => refusal(
             cmd,
             &ApiError::Body {
@@ -143,19 +165,45 @@ fn reply(status: StatusCode, line: String) -> Reply {
     )
 }
 
-async fn board(State(repo): State<Arc<PathBuf>>) -> Reply {
-    respond("board", repo, |repo| {
-        let ff = Ff::at(repo).env_program();
-        let store = Store::open(repo)?;
-        let events = store.read_all()?;
-        let board = board::assemble(&ff, &events)?;
-        Ok(machine::emit("board", &board))
-    })
-    .await
+/// The board's envelope, folded fresh. Shared verbatim between the
+/// `/api/board` handler and the feed's refold loop, so a pushed board
+/// and a pulled one can only ever be the same bytes.
+pub(crate) fn board_envelope(repo: &Path) -> Result<String, ApiError> {
+    let ff = Ff::at(repo).env_program();
+    let store = Store::open(repo)?;
+    let events = store.read_all()?;
+    let board = board::assemble(&ff, &events)?;
+    Ok(machine::emit("board", &board))
 }
 
-async fn brief(State(repo): State<Arc<PathBuf>>, RoutePath(flight): RoutePath<String>) -> Reply {
-    respond("brief", repo, move |repo| {
+async fn board(State(state): State<Arc<AppState>>) -> Reply {
+    respond("board", state, board_envelope).await
+}
+
+/// The feed: one SSE stream over the watch channel. `WatchStream` hands
+/// a new subscriber the current value — the initial board on connect —
+/// and laggards skip intermediates, which is right for a full-board
+/// broadcast. `Pending` is skipped, `Closing` ends the stream so
+/// graceful shutdown can drain, and the default `message` event type
+/// stays: the envelope's `cmd` is the contract, the route is only the
+/// door.
+async fn feed_route(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream = WatchStream::new(state.feed.clone())
+        .map_while(|latest| match latest {
+            Latest::Closing => None,
+            live => Some(live),
+        })
+        .filter_map(|latest| match latest {
+            Latest::Board(envelope) => Some(Ok(Event::default().data(envelope))),
+            _ => None,
+        });
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<String>) -> Reply {
+    respond("brief", state, move |repo| {
         // Syntax first, so a reference that could never name a flight
         // costs no I/O — the CLI verb's own order. `writer#n` arrives
         // percent-encoded (`pi%231`) and the extractor already decoded
@@ -178,8 +226,8 @@ async fn brief(State(repo): State<Arc<PathBuf>>, RoutePath(flight): RoutePath<St
     .await
 }
 
-async fn bays(State(repo): State<Arc<PathBuf>>) -> Reply {
-    respond("bay list", repo, |repo| {
+async fn bays(State(state): State<Arc<AppState>>) -> Reply {
+    respond("bay list", state, |repo| {
         let ff = Ff::at(repo).env_program();
         let store = Store::open(repo)?;
         let fold = board::fold(&store.read_all()?);
@@ -190,8 +238,8 @@ async fn bays(State(repo): State<Arc<PathBuf>>) -> Reply {
     .await
 }
 
-async fn procedures(State(repo): State<Arc<PathBuf>>) -> Reply {
-    respond("procedures", repo, |repo| {
+async fn procedures(State(state): State<Arc<AppState>>) -> Reply {
+    respond("procedures", state, |repo| {
         let store = Store::open(repo)?;
         let root = store.main_worktree();
         let installed = procedure::registry(root.as_deref())?;
@@ -205,8 +253,11 @@ async fn procedures(State(repo): State<Arc<PathBuf>>) -> Reply {
     .await
 }
 
-async fn procedure(State(repo): State<Arc<PathBuf>>, RoutePath(name): RoutePath<String>) -> Reply {
-    respond("procedures", repo, move |repo| {
+async fn procedure(
+    State(state): State<Arc<AppState>>,
+    RoutePath(name): RoutePath<String>,
+) -> Reply {
+    respond("procedures", state, move |repo| {
         let store = Store::open(repo)?;
         let root = store.main_worktree();
         let installed = procedure::registry(root.as_deref())?;
@@ -249,8 +300,8 @@ struct MessageBody {
     message: Option<String>,
 }
 
-async fn file(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("file", repo, body, |repo, body: FileBody| {
+async fn file(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("file", state, body, |repo, body: FileBody| {
         let store = Store::open(repo)?;
         let outcome = verb::file(&store, &body.subject, body.message, body.procedure)?;
         Ok(machine::emit("file", &outcome.payload))
@@ -258,8 +309,8 @@ async fn file(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
     .await
 }
 
-async fn claim(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("claim", repo, body, |repo, body: FlightBody| {
+async fn claim(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("claim", state, body, |repo, body: FlightBody| {
         let store = Store::open(repo)?;
         let outcome = verb::claim(&store, &body.flight)?;
         Ok(machine::emit("claim", &outcome.payload))
@@ -267,8 +318,8 @@ async fn claim(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
     .await
 }
 
-async fn take(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("take", repo, body, |repo, body: FlightBody| {
+async fn take(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("take", state, body, |repo, body: FlightBody| {
         let store = Store::open(repo)?;
         let outcome = verb::take(&store, &body.flight)?;
         Ok(machine::emit("take", &outcome.payload))
@@ -276,8 +327,8 @@ async fn take(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
     .await
 }
 
-async fn requeue(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("requeue", repo, body, |repo, body: FlightBody| {
+async fn requeue(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("requeue", state, body, |repo, body: FlightBody| {
         let store = Store::open(repo)?;
         let outcome = verb::requeue(&store, &body.flight)?;
         Ok(machine::emit("requeue", &outcome.payload))
@@ -288,8 +339,8 @@ async fn requeue(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
 /// A hold's success is a 200 like any verb's: the exit-code channel that
 /// makes it a 3 on the CLI does not exist here, and the envelope's held
 /// event already says the flight stopped with a question.
-async fn hold(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("hold", repo, body, |repo, body: MessageBody| {
+async fn hold(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("hold", state, body, |repo, body: MessageBody| {
         let store = Store::open(repo)?;
         let outcome = verb::hold(&store, &body.flight, body.message)?;
         Ok(machine::emit("hold", &outcome.payload))
@@ -297,8 +348,8 @@ async fn hold(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
     .await
 }
 
-async fn answer(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("answer", repo, body, |repo, body: MessageBody| {
+async fn answer(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("answer", state, body, |repo, body: MessageBody| {
         let store = Store::open(repo)?;
         let outcome = verb::answer(&store, &body.flight, body.message)?;
         Ok(machine::emit("answer", &outcome.payload))
@@ -306,8 +357,8 @@ async fn answer(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
     .await
 }
 
-async fn done(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("done", repo, body, |repo, body: FlightBody| {
+async fn done(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("done", state, body, |repo, body: FlightBody| {
         let store = Store::open(repo)?;
         let outcome = verb::done(&store, &body.flight)?;
         Ok(machine::emit("done", &outcome.payload))
@@ -315,8 +366,8 @@ async fn done(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
     .await
 }
 
-async fn comment(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
-    act("comment", repo, body, |repo, body: MessageBody| {
+async fn comment(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("comment", state, body, |repo, body: MessageBody| {
         let store = Store::open(repo)?;
         let outcome = verb::comment(&store, &body.flight, body.message)?;
         Ok(machine::emit("comment", &outcome.payload))
@@ -329,7 +380,7 @@ async fn comment(State(repo): State<Arc<PathBuf>>, body: Bytes) -> Reply {
 /// raise: everything else delegates id, message, and exits to the
 /// methods core keeps beside each error's variants.
 #[derive(Debug, thiserror::Error)]
-enum ApiError {
+pub(crate) enum ApiError {
     #[error(transparent)]
     Resolve(#[from] ResolveError),
     #[error(transparent)]

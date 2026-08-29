@@ -398,7 +398,9 @@ pub static ENTRIES: &[Entry] = &[
                  of what is known. The common one is a permission denial below port 1024: those \
                  numbers parse fine and fail here, because whether this user may have that port \
                  is the machine's rule rather than tower's. The same id answers an API request \
-                 whose fold panicked — the server survives it, and the one request says so.",
+                 whose fold panicked — the server survives it, and the one request says so — and \
+                 covers the change feed's watcher failing to install, which stops startup \
+                 because a feed blind to the log's own refs would push stale boards.",
         exits: &["ff tower serve --port <n>"],
     },
     Entry {

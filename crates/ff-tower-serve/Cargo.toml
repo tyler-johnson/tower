@@ -10,7 +10,13 @@ publish = false
 [dependencies]
 ff-tower-core.workspace = true
 axum.workspace = true
+notify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
+
+[dev-dependencies]
+# `test-util` for the paused clock the debounce unit test runs on.
+tokio = { workspace = true, features = ["test-util"] }
