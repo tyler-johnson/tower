@@ -18,7 +18,9 @@
 //! same fold — the join `next` binds a flight in. [`doctor`] is the
 //! health fold — stale bays and
 //! drift as rows over the same reads plus the seam's own answer, and it
-//! observes and complains, never enforces.
+//! observes and complains, never enforces. [`resolve`] is how a typed
+//! reference becomes a flight id against the fold — every surface's
+//! front door to one flight.
 
 mod bay;
 mod brief;
@@ -27,14 +29,16 @@ mod flight;
 mod model;
 mod pick;
 mod reads;
+mod resolve;
 
-pub use bay::{BayView, Berth, assign, bays};
+pub use bay::{BayView, Berth, Pool, assign, bays};
 pub use brief::{Brief, CommentView, LinkView, Standing, brief, wants_verdicts};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};
+pub use resolve::{FlightRef, ResolveError, count, parse_ref, resolve};
 
 use crate::ff::{self, Ff};
 use crate::log::Event;

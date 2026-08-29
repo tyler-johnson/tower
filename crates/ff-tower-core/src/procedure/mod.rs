@@ -194,6 +194,16 @@ impl Registry {
         self.by_name.get(name)
     }
 
+    /// The definition under this name, or the refusal that lists what
+    /// is installed — for the surfaces where a missing name is an error
+    /// rather than a branch.
+    pub fn require(&self, name: &str) -> Result<&Definition> {
+        self.get(name).ok_or_else(|| Error::NotFound {
+            name: name.to_string(),
+            installed: self.names().join(", "),
+        })
+    }
+
     /// Every installed definition, by name.
     pub fn definitions(&self) -> impl Iterator<Item = &Definition> {
         self.by_name.values()
@@ -228,6 +238,20 @@ const BUILT_INS: [&str; 2] = [
     include_str!("builtin/open.toml"),
     include_str!("builtin/review.toml"),
 ];
+
+/// The registry as one payload — what a bare `procedures` envelope
+/// carries as `data`. Named structs rather than ad-hoc maps so the key
+/// and the field order are the same on every emitting surface.
+#[derive(Serialize)]
+pub struct Listing<'a> {
+    pub procedures: Vec<&'a Definition>,
+}
+
+/// The detail payload: one definition, whole.
+#[derive(Serialize)]
+pub struct One<'a> {
+    pub procedure: &'a Definition,
+}
 
 /// The three layers, lowest first: built-in, then user, then repository.
 ///
@@ -531,6 +555,12 @@ pub enum Error {
         at: String,
         part: String,
     },
+
+    /// A name the registry does not carry — the one refusal here about
+    /// the asking rather than the definition. Raised by
+    /// [`Registry::require`], never by the loader.
+    #[error("no procedure `{name}` — installed: {installed}")]
+    NotFound { name: String, installed: String },
 }
 
 impl Error {
@@ -543,7 +573,15 @@ impl Error {
             Error::UnknownAfter { .. } => "procedure/unknown-after",
             Error::Cyclic { .. } => "procedure/cyclic",
             Error::NoHumanEnd { .. } => "procedure/no-human-end",
+            Error::NotFound { .. } => "procedure/not-found",
         }
+    }
+
+    /// Commands that lead out of it. One answer for every variant: the
+    /// list is where a bad definition and a missing name both get
+    /// diagnosed.
+    pub fn exits(&self) -> Vec<String> {
+        vec!["ff tower procedures".to_string()]
     }
 }
 
@@ -575,6 +613,20 @@ mod tests {
         assert_eq!(review.subject.as_deref(), Some("branch"));
         assert_eq!(review.matches.len(), 1);
         assert_eq!(review.parts.len(), 3);
+    }
+
+    #[test]
+    fn require_answers_or_refuses_with_the_installed_list() {
+        let installed = layered(None, None).expect("the built-ins load");
+        assert_eq!(installed.require("open").expect("installed").name, "open");
+
+        let err = installed.require("nope").expect_err("not installed");
+        assert_eq!(err.id(), "procedure/not-found");
+        assert_eq!(
+            err.to_string(),
+            "no procedure `nope` — installed: open, review"
+        );
+        assert_eq!(err.exits(), ["ff tower procedures"]);
     }
 
     #[test]

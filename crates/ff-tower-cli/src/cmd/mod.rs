@@ -36,22 +36,18 @@ pub mod version;
 use crate::error::CliError;
 use crate::render;
 use ff_tower_core::board::{Flight, Fold};
+// The reference grammar and its resolution live in core now, every
+// surface's front door to one flight; the verbs keep calling them as
+// `super::parse_ref` and `super::resolve` through this re-export.
+pub use ff_tower_core::board::{FlightRef, count, parse_ref, resolve};
 use ff_tower_core::ff::Ff;
 use ff_tower_core::log::{Event, EventId, Kind, PartStamp, Store};
 use ff_tower_core::procedure::{Definition, Part};
 
-/// The repository handle for the verbs that spawn fufu. The test seam:
-/// environment carries addressing, argv carries verbs — the seam's own
-/// discipline — and an env var cannot leak into an interactive shell the
-/// way a hidden flag one autocomplete away could.
+/// The repository handle for the verbs that spawn fufu, with core's
+/// `TOWER_FF` test seam applied.
 pub fn ff() -> Result<Ff, CliError> {
-    let mut ff = Ff::here()?;
-    if let Some(program) = std::env::var_os("TOWER_FF")
-        && !program.is_empty()
-    {
-        ff = ff.program(program);
-    }
-    Ok(ff)
+    Ok(Ff::here()?.env_program())
 }
 
 /// The store, opened on the repository fufu's dispatch handed us.
@@ -168,90 +164,6 @@ pub fn stamp(definition: &Definition, subject: &str, part: &Part) -> PartStamp {
     }
 }
 
-/// A flight reference as typed: a bare number, a `writer#n` pair, or the
-/// full wire form `<writer>.<seq>`.
-pub enum FlightRef {
-    Number(u64),
-    WriterNumber(String, u64),
-    Full(EventId),
-}
-
-/// The syntactic half of naming a flight, before any store is opened. One
-/// leading `#` is stripped for paste tolerance — output prints numbers
-/// `#`-prefixed, and what tower prints, tower accepts (`#pi#3` pasted
-/// still parses: the split is at the last `#`).
-pub fn parse_ref(text: &str) -> Result<FlightRef, CliError> {
-    let bare = text.strip_prefix('#').unwrap_or(text);
-    if let Ok(number) = bare.parse::<u64>() {
-        return Ok(FlightRef::Number(number));
-    }
-    if let Some((writer, digits)) = bare.rsplit_once('#')
-        && let Ok(number) = digits.parse::<u64>()
-    {
-        return Ok(FlightRef::WriterNumber(writer.to_string(), number));
-    }
-    if let Ok(id) = bare.parse::<EventId>() {
-        return Ok(FlightRef::Full(id));
-    }
-    Err(CliError::coded(
-        "usage/bad-flight",
-        format!("`{text}` is not a flight — `<n>`, `<writer>#<n>`, or `<writer>.<seq>`"),
-        Vec::new(),
-    ))
-}
-
-/// Resolve a reference against the fold's filed flights. A bare number
-/// must match exactly one flight across writers; the refusals quote the
-/// reference as the user typed it, and an ambiguity names every candidate
-/// in `writer#n` form.
-pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, CliError> {
-    let not_found = || {
-        CliError::coded(
-            "flight/not-found",
-            format!("no flight `{text}` on the board"),
-            vec!["ff tower".to_string()],
-        )
-    };
-    match parse_ref(text)? {
-        FlightRef::Full(id) => {
-            if fold.flights.iter().any(|flight| flight.id == id) {
-                Ok(id)
-            } else {
-                Err(not_found())
-            }
-        }
-        FlightRef::WriterNumber(writer, number) => fold
-            .flights
-            .iter()
-            .find(|flight| flight.id.writer == writer && flight.number == number)
-            .map(|flight| flight.id.clone())
-            .ok_or_else(not_found),
-        FlightRef::Number(number) => {
-            let candidates: Vec<&Flight> = fold
-                .flights
-                .iter()
-                .filter(|flight| flight.number == number)
-                .collect();
-            match candidates.as_slice() {
-                [] => Err(not_found()),
-                [flight] => Ok(flight.id.clone()),
-                many => Err(CliError::coded(
-                    "flight/ambiguous",
-                    format!(
-                        "`{text}` names {} flights: {}",
-                        count(many.len()),
-                        many.iter()
-                            .map(|flight| format!("`{}#{}`", flight.id.writer, flight.number))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                    vec!["ff tower".to_string()],
-                )),
-            }
-        }
-    }
-}
-
 /// Where an edit lands: a flight's record, or one comment on it.
 pub enum EditTarget {
     Flight(EventId),
@@ -282,7 +194,7 @@ pub fn resolve_edit_target(fold: &Fold, text: &str) -> Result<EditTarget, CliErr
                 vec!["ff tower".to_string()],
             ))
         }
-        _ => resolve(fold, text).map(EditTarget::Flight),
+        _ => Ok(EditTarget::Flight(resolve(fold, text)?)),
     }
 }
 
@@ -309,17 +221,6 @@ pub fn ensure_active<'a>(fold: &'a Fold, id: &EventId) -> Result<&'a Flight, Cli
         ));
     }
     Ok(flight)
-}
-
-/// Small counts in words, matching the refusal grammar's register.
-fn count(n: usize) -> String {
-    match n {
-        1 => "one".to_string(),
-        2 => "two".to_string(),
-        3 => "three".to_string(),
-        4 => "four".to_string(),
-        _ => n.to_string(),
-    }
 }
 
 /// A resolved id in the board's display form — `#n`, or `writer#n` when

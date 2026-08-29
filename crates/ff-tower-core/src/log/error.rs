@@ -52,6 +52,29 @@ pub enum Error {
 }
 
 impl Error {
+    /// The stable id, tower's `category/kebab-case` — the
+    /// machine-matchable half of every failure, next to the variants it
+    /// names so the two cannot drift apart.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Error::Identity => "identity/missing",
+            Error::Contended { .. } => "log/contended",
+            Error::RefName { .. } => "log/ref-name",
+            Error::NotTowerLog { .. } => "log/not-tower",
+            Error::Version { .. } => "log/version",
+            Error::Repo(_) => "repo/error",
+        }
+    }
+
+    /// Commands that lead out of it. Empty where no command helps — an
+    /// envelope carries `[]`, never null.
+    pub fn exits(&self) -> Vec<String> {
+        match self {
+            Error::Identity => vec!["git config user.email <email>".to_string()],
+            _ => Vec::new(),
+        }
+    }
+
     pub(crate) fn repo(err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Error {
         Error::Repo(err.into())
     }

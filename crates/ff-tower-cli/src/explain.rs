@@ -676,9 +676,9 @@ mod tests {
     /// here rather than at a user's terminal.
     ///
     /// Tower's ids come from two places fufu's come from one: the
-    /// `CliError::coded(` literals, and the three `fn id()` match tables
-    /// that name wrapped errors (`cli/src/error.rs`, `core/src/config.rs`,
-    /// `core/src/procedure/mod.rs`). The tables are scanned by file name,
+    /// `CliError::coded(` literals, and the `fn id()` match tables that
+    /// name wrapped errors, listed by file in `raised_everywhere`. The
+    /// tables are scanned by file name,
     /// which is what keeps the walk off `board/doctor.rs` — its check
     /// names wear the same `category/kebab-case` shape and are not
     /// errors. Forwarded fufu refusals never enter either scan:
@@ -825,8 +825,8 @@ mod tests {
 
     /// Every raised id in the workspace, with the file it came from:
     /// `CliError::coded(` first-literals across every crate, plus the
-    /// slash-shaped literals inside the three wrapped-error `fn id()`
-    /// tables.
+    /// slash-shaped literals inside the wrapped-error `fn id()` tables —
+    /// each of which must be the first `fn id(` in its file.
     fn raised_everywhere() -> Vec<(String, String)> {
         let crates = crates_root();
         let mut found = Vec::new();
@@ -839,7 +839,10 @@ mod tests {
         for table in [
             "ff-tower-cli/src/error.rs",
             "ff-tower-serve/src/error.rs",
+            "ff-tower-core/src/board/resolve.rs",
             "ff-tower-core/src/config.rs",
+            "ff-tower-core/src/ff/error.rs",
+            "ff-tower-core/src/log/error.rs",
             "ff-tower-core/src/procedure/mod.rs",
             "ff-tower-core/src/skill/mod.rs",
         ] {

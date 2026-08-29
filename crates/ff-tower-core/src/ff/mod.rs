@@ -179,6 +179,22 @@ impl Ff {
         self
     }
 
+    /// [`program`](Ff::program) from the environment: a non-empty
+    /// `TOWER_FF` names the `ff` to spawn. The test seam for every
+    /// surface that answers requests — environment carries addressing,
+    /// argv carries verbs, the seam's own discipline — and an env var
+    /// cannot leak into an interactive shell the way a hidden flag one
+    /// autocomplete away could.
+    #[must_use]
+    pub fn env_program(mut self) -> Ff {
+        if let Some(program) = std::env::var_os("TOWER_FF")
+            && !program.is_empty()
+        {
+            self.program = program;
+        }
+        self
+    }
+
     /// The worktree this handle asks about.
     pub fn repo(&self) -> &Path {
         &self.repo

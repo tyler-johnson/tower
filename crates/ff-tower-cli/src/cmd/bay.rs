@@ -34,7 +34,7 @@ fn list(json: bool) -> Result<(), CliError> {
     if json {
         println!(
             "{}",
-            machine::emit("bay list", &serde_json::json!({ "bays": views }))
+            machine::emit("bay list", &board::Pool { bays: views })
         );
     } else {
         print!("{}", page(&fold, &views, render::colored()));

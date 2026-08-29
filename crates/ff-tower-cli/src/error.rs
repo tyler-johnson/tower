@@ -7,18 +7,24 @@
 //! hold's 3 is an outcome, and it rides the success path in `main.rs`.
 //! The prose behind each id lives in `explain.rs`'s registry — `ff tower
 //! explain <id>` — and the sync guards there hold the two surfaces
-//! together; the mapping for wrapped errors stays the match below.
+//! together; the wrapped errors name themselves through `id()` tables in
+//! core, beside the variants, where the server reads the same answers.
 //!
 //! One forwarding rule: a refusal fufu shaped itself passes through
 //! verbatim — its id, message, and exits are fufu's words, and wrapping
 //! them in a tower id would hide the one part worth matching on.
 
+use ff_tower_core::board::ResolveError;
 use ff_tower_core::{config, ff, log, procedure, skill};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error(transparent)]
     Log(#[from] log::Error),
+    /// A flight reference refused by core's resolver — its own id and
+    /// exits, carried through.
+    #[error(transparent)]
+    Resolve(#[from] ResolveError),
     /// A config refusal — its own id, carried through.
     #[error(transparent)]
     Config(#[from] config::Error),
@@ -54,21 +60,14 @@ impl CliError {
     }
 
     /// The stable id — the machine-matchable half of every failure.
+    /// Almost everything forwards: the wrapped errors name themselves in
+    /// core, where the server reads the same tables.
     pub fn id(&self) -> &str {
         match self {
             CliError::Coded { id, .. } => id,
-            CliError::Log(log::Error::Identity) => "identity/missing",
-            CliError::Log(log::Error::Contended { .. }) => "log/contended",
-            CliError::Log(log::Error::RefName { .. }) => "log/ref-name",
-            CliError::Log(log::Error::NotTowerLog { .. }) => "log/not-tower",
-            CliError::Log(log::Error::Version { .. }) => "log/version",
-            CliError::Log(log::Error::Repo(_)) => "repo/error",
-            CliError::Ff(ff::Error::Ff(refusal)) => &refusal.id,
-            CliError::Ff(ff::Error::NotInstalled { .. }) => "ff/not-installed",
-            CliError::Ff(ff::Error::Spawn { .. }) => "ff/spawn",
-            CliError::Ff(ff::Error::Contract { .. }) => "ff/contract",
-            CliError::Ff(ff::Error::Mismatched { .. }) => "ff/mismatched",
-            CliError::Ff(ff::Error::Unparsable { .. }) => "ff/unparsable",
+            CliError::Log(err) => err.id(),
+            CliError::Resolve(err) => err.id(),
+            CliError::Ff(err) => err.id(),
             // `Serve`'s repository half is flattened into `Log` by the
             // `From` below, so what survives to here always names
             // itself; the fallback is the id that half would have had.
@@ -84,11 +83,10 @@ impl CliError {
     pub fn exits(&self) -> Vec<String> {
         match self {
             CliError::Coded { exits, .. } => exits.clone(),
-            CliError::Log(log::Error::Identity) => {
-                vec!["git config user.email <email>".to_string()]
-            }
-            CliError::Ff(ff::Error::Ff(refusal)) => refusal.exits.clone(),
-            CliError::Procedure(_) => vec!["ff tower procedures".to_string()],
+            CliError::Log(err) => err.exits(),
+            CliError::Resolve(err) => err.exits(),
+            CliError::Ff(err) => err.exits(),
+            CliError::Procedure(err) => err.exits(),
             CliError::Skill(_) => vec!["ff tower skills".to_string()],
             CliError::Config(config::Error::UnknownKey { .. }) => {
                 vec!["ff tower config".to_string()]

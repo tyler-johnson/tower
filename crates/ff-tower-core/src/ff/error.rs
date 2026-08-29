@@ -87,6 +87,30 @@ pub enum Error {
 }
 
 impl Error {
+    /// The stable id, tower's `category/kebab-case`. One forwarding rule:
+    /// a refusal fufu shaped itself passes through verbatim — its id is
+    /// fufu's words, and wrapping it in a tower id would hide the one
+    /// part worth matching on.
+    pub fn id(&self) -> &str {
+        match self {
+            Error::Ff(refusal) => &refusal.id,
+            Error::NotInstalled { .. } => "ff/not-installed",
+            Error::Spawn { .. } => "ff/spawn",
+            Error::Contract { .. } => "ff/contract",
+            Error::Mismatched { .. } => "ff/mismatched",
+            Error::Unparsable { .. } => "ff/unparsable",
+        }
+    }
+
+    /// Commands that lead out of it: fufu's own exits when fufu said no,
+    /// carried verbatim for the reason the id is; nothing otherwise.
+    pub fn exits(&self) -> Vec<String> {
+        match self {
+            Error::Ff(refusal) => refusal.exits.clone(),
+            _ => Vec::new(),
+        }
+    }
+
     /// The fufu error id when fufu is the one who said no, so a caller can
     /// match on `repo/not-found` without unwrapping the variant by hand.
     pub fn ff_id(&self) -> Option<&str> {

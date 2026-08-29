@@ -25,32 +25,29 @@ pub fn run(json: bool, name: Option<&str>) -> Result<(), CliError> {
     match name {
         None => {
             if json {
-                let all: Vec<&Definition> = installed.definitions().collect();
                 println!(
                     "{}",
-                    machine::emit("procedures", &serde_json::json!({ "procedures": all }))
+                    machine::emit(
+                        "procedures",
+                        &procedure::Listing {
+                            procedures: installed.definitions().collect()
+                        }
+                    )
                 );
             } else {
                 print!("{}", list(&installed, render::colored()));
             }
         }
         Some(name) => {
-            let definition = installed.get(name).ok_or_else(|| {
-                CliError::coded(
-                    "procedure/not-found",
-                    format!(
-                        "no procedure `{name}` — installed: {}",
-                        installed.names().join(", ")
-                    ),
-                    vec!["ff tower procedures".to_string()],
-                )
-            })?;
+            let definition = installed.require(name)?;
             if json {
                 println!(
                     "{}",
                     machine::emit(
                         "procedures",
-                        &serde_json::json!({ "procedure": definition })
+                        &procedure::One {
+                            procedure: definition
+                        }
                     )
                 );
             } else {

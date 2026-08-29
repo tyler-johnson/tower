@@ -30,6 +30,14 @@ pub struct BayView {
     pub current: bool,
 }
 
+/// The pool as one payload — what a `bay list` envelope carries as
+/// `data`. A named struct rather than an ad-hoc map so the key and the
+/// field order are the same on every emitting surface.
+#[derive(Serialize)]
+pub struct Pool {
+    pub bays: Vec<BayView>,
+}
+
 /// Every worktree with a path, in survey order — main is listed, because
 /// the survey returns it, work genuinely flies on main's tree in the solo
 /// norm, and hiding where a flight sits would lie; its `current` flag and
