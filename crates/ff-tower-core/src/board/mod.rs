@@ -12,7 +12,10 @@
 //! full record over the same reads, plus its standing over the walk's
 //! own output — why it is where it is, and what it beat;
 //! [`wants_verdicts`] tells the caller when the probes behind that walk
-//! can change the answer. [`bays`] is the pool over
+//! can change the answer, and [`history`] is the one thing the brief
+//! cannot read off the fold — the moments themselves, filtered out of
+//! the log the fold was built from, because last-wins marks keep no
+//! record of how often a flight changed hands. [`bays`] is the pool over
 //! the same reads too: occupancy joined from the survey and the fold,
 //! never registered, and [`assign`] hands each pick a bay out of that
 //! same fold — the join `next` binds a flight in. [`doctor`] is the
@@ -26,6 +29,7 @@ mod bay;
 mod brief;
 mod doctor;
 mod flight;
+mod history;
 mod model;
 mod pick;
 mod reads;
@@ -35,6 +39,7 @@ pub use bay::{BayView, Berth, Pool, assign, bays};
 pub use brief::{Brief, CommentView, LinkView, Standing, brief, wants_verdicts};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};
+pub use history::{Moment, history};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};

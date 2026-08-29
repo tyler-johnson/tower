@@ -20,7 +20,8 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     super::parse_ref(flight)?;
 
     let store = super::store()?;
-    let fold = board::fold(&store.read_all()?);
+    let events = store.read_all()?;
+    let fold = board::fold(&events);
     let id = super::resolve(&fold, flight)?;
 
     let ff = super::ff()?;
@@ -30,7 +31,8 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     } else {
         Verdicts::default()
     };
-    let brief = board::brief(&fold, &reads, &verdicts, &id).expect("resolved to a filed flight");
+    let brief =
+        board::brief(&fold, &events, &reads, &verdicts, &id).expect("resolved to a filed flight");
 
     if json {
         println!("{}", machine::emit("brief", &brief));
@@ -45,7 +47,8 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 }
 
 /// The detail page: head and note in the board's grammar, then the body
-/// verbatim, the link sections, and the comments in reading order. The
+/// verbatim, the link sections, the comments in reading order, and the
+/// history last — the record before the log of how it got that way. The
 /// beat rows land right after the routing line — one dim line per row.
 fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     let mut out = String::new();
@@ -146,6 +149,31 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
             for line in comment.text.lines() {
                 out.push_str(&format!("  {line}\n"));
             }
+        }
+    }
+
+    // What happened, in the comments' grammar and their reading order.
+    // One dim line per moment and nothing more: the words behind a
+    // gesture — the question, the comment's text, the route's `because`
+    // — are already printed above, and repeating them here would make
+    // the section a second, staler copy of the page.
+    if !brief.history.is_empty() {
+        out.push('\n');
+        out.push_str("history\n");
+        for moment in &brief.history {
+            out.push_str(&format!(
+                "  {}\n",
+                render::paint_dim(
+                    &format!(
+                        "{} · {} · {} · {}",
+                        moment.id,
+                        moment.what,
+                        moment.by,
+                        render::age(now, moment.at)
+                    ),
+                    colored
+                )
+            ));
         }
     }
 

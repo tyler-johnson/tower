@@ -2,8 +2,10 @@
 //! plus its standing on `next`'s walk and what it beat.
 //!
 //! Pure like `flight.rs` and `pick.rs` — no `crate::ff` spawns, no
-//! `std::process`; the brief runs over a [`Fold`], a [`Reads`], and a
-//! [`Verdicts`] the caller already fetched. Laziness belongs to the
+//! `std::process`; the brief runs over a [`Fold`], the events it was
+//! folded from, a [`Reads`], and a [`Verdicts`] the caller already
+//! fetched. The events ride along for the history alone: every other
+//! field is the fold's, and both call sites hold the slice already. Laziness belongs to the
 //! caller: [`wants_verdicts`] says when probes can change the answer, and
 //! when it says no, [`Verdicts::default()`] briefs byte-identically to
 //! the probed run. A done flight briefs like any other — the log keeps
@@ -30,9 +32,10 @@
 
 use serde::Serialize;
 
-use crate::log::{EventId, PartStamp};
+use crate::log::{Event, EventId, PartStamp};
 
 use super::flight::{Flight, Fold};
+use super::history::{Moment, history};
 use super::pick::{Passed, Skip, pick};
 use super::reads::{Reads, Verdicts, branch_pairs};
 
@@ -96,6 +99,9 @@ pub struct Brief {
     pub blocks: Vec<LinkView>,
     /// Reading order, the fold's order.
     pub comments: Vec<CommentView>,
+    /// What happened to this flight, oldest first — the log's own
+    /// gestures, which the last-wins fold cannot reconstruct.
+    pub history: Vec<Moment>,
     /// The arbitrated verdict, flat on the envelope beside the raw facts
     /// it arbitrates — the reader gets `"standing": "collides"` beside
     /// `with` and `paths`, no inner nesting.
@@ -164,12 +170,21 @@ pub struct CommentView {
 
 /// The brief for one flight, or `None` when no such flight is filed.
 ///
+/// `events` is the slice `fold` was built from — the history's only
+/// source, since the fold keeps marks rather than gestures.
+///
 /// Enrichment is `enrich`'s per-flight derivation, reused: branch from the
 /// freshest op row (carried literal, `@detached` included), tip and holds
 /// from the branch row — `@detached` and a name absent from the index
 /// cannot be held — `current` against the reader's own branch, and
 /// `last_motion` by the same max-of formula.
-pub fn brief(fold: &Fold, reads: &Reads, verdicts: &Verdicts, id: &EventId) -> Option<Brief> {
+pub fn brief(
+    fold: &Fold,
+    events: &[Event],
+    reads: &Reads,
+    verdicts: &Verdicts,
+    id: &EventId,
+) -> Option<Brief> {
     let flight = fold.flights.iter().find(|flight| &flight.id == id)?;
     let freshest = reads.freshest();
     let branches = reads.branch_index();
@@ -246,6 +261,7 @@ pub fn brief(fold: &Fold, reads: &Reads, verdicts: &Verdicts, id: &EventId) -> O
                 text: comment.text.clone(),
             })
             .collect(),
+        history: history(events, id),
         standing,
         beat,
     })
@@ -573,10 +589,21 @@ mod tests {
         text.parse().expect("id")
     }
 
+    /// `brief` over one slice of events — the fold and the history from
+    /// the same log, which is the only honest way to pair them.
+    fn brief_of(
+        events: &[Event],
+        reads: &Reads,
+        verdicts: &Verdicts,
+        id: &EventId,
+    ) -> Option<Brief> {
+        brief(&fold(events), events, reads, verdicts, id)
+    }
+
     #[test]
     fn the_filing_is_carried_whole() {
-        let brief = brief(
-            &fold(&[filed("pi.1", 10, "the subject", "the body\ntwo lines")]),
+        let brief = brief_of(
+            &[filed("pi.1", 10, "the subject", "the body\ntwo lines")],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -610,8 +637,8 @@ mod tests {
             branch: None,
         });
 
-        let brief = brief(
-            &fold(&[event]),
+        let brief = brief_of(
+            &[event],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -626,12 +653,12 @@ mod tests {
 
     #[test]
     fn comments_arrive_in_reading_order_with_author_and_time() {
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 filed("pi.1", 10, "s", ""),
                 commented("pi.2", "one@b.c", 20, "pi.1", "first"),
                 commented("pi.3", "two@b.c", 30, "pi.1", "second"),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -648,8 +675,8 @@ mod tests {
 
     #[test]
     fn the_edited_mark_lands_flat_and_counts_as_motion() {
-        let plain = brief(
-            &fold(&[filed("pi.1", 10, "s", "")]),
+        let plain = brief_of(
+            &[filed("pi.1", 10, "s", "")],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -658,11 +685,11 @@ mod tests {
         assert!(plain.edited_by.is_none());
         assert!(plain.edited_at.is_none());
 
-        let reworded = brief(
-            &fold(&[
+        let reworded = brief_of(
+            &[
                 filed("pi.1", 10, "s", ""),
                 edited("pi.2", "editor@b.c", 30, "pi.1", Some("reworded"), None),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -682,17 +709,16 @@ mod tests {
             linked("pi.3", 30, "pi.1", "pi.2"),
             done("pi.4", "a@b.c", 40, "pi.2"),
         ];
-        let fold = fold(&events);
         let empty = reads(Vec::new(), Vec::new(), None);
 
-        let one = brief(&fold, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+        let one = brief_of(&events, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
         assert_eq!(one.depends_on.len(), 1);
         assert_eq!(one.depends_on[0].flight, "pi.2");
         assert_eq!(one.depends_on[0].subject, "the dependency");
         assert!(one.depends_on[0].done);
         assert!(one.blocks.is_empty());
 
-        let two = brief(&fold, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
+        let two = brief_of(&events, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
         assert_eq!(two.blocks.len(), 1);
         assert_eq!(two.blocks[0].flight, "pi.1");
         assert_eq!(two.blocks[0].subject, "the dependent");
@@ -702,8 +728,8 @@ mod tests {
 
     #[test]
     fn the_reads_facts_land_on_the_brief() {
-        let brief = brief(
-            &fold(&[filed("pi.1", 10, "s", "")]),
+        let brief = brief_of(
+            &[filed("pi.1", 10, "s", "")],
             &reads(
                 vec![op("pi.1", Some("work"), 50)],
                 vec![branch("work", true, true)],
@@ -725,8 +751,8 @@ mod tests {
     fn a_detached_flight_carries_the_sentinel_with_no_tip_and_is_never_held() {
         // Even with a held `@detached` row in the index — the sentinel
         // names nothing and must not accidentally resolve.
-        let brief = brief(
-            &fold(&[filed("pi.1", 10, "s", "")]),
+        let brief = brief_of(
+            &[filed("pi.1", 10, "s", "")],
             &reads(
                 vec![op("pi.1", Some("@detached"), 50)],
                 vec![branch("@detached", true, true)],
@@ -743,11 +769,11 @@ mod tests {
 
     #[test]
     fn the_open_question_carries_who_and_when() {
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 filed("pi.1", 10, "s", ""),
                 held("pi.2", "asker@b.c", 60, "pi.1", "which?"),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -761,11 +787,11 @@ mod tests {
 
     #[test]
     fn the_claim_carries_who_and_when() {
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 filed("pi.1", 10, "s", ""),
                 claimed("pi.2", "crew@b.c", 40, "pi.1"),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -791,11 +817,11 @@ mod tests {
                 },
             )
         };
-        let explained = brief(
-            &fold(&[
+        let explained = brief_of(
+            &[
                 filed("pi.1", 10, "s", ""),
                 route("pi.2", 20, "it is a chore"),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -808,8 +834,8 @@ mod tests {
 
         // An unsaid `-m` stores an empty string; the brief carries `None`,
         // the absent-facts rule.
-        let unsaid = brief(
-            &fold(&[filed("pi.1", 10, "s", ""), route("pi.2", 20, "")]),
+        let unsaid = brief_of(
+            &[filed("pi.1", 10, "s", ""), route("pi.2", 20, "")],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -820,11 +846,11 @@ mod tests {
 
     #[test]
     fn a_done_flight_briefs_with_its_mark() {
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 filed("pi.1", 10, "s", "the body"),
                 done("pi.2", "closer@b.c", 90, "pi.1"),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -841,13 +867,13 @@ mod tests {
 
     #[test]
     fn last_motion_is_the_max_of_op_claim_question_and_answer() {
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 filed("pi.1", 10, "s", ""),
                 claimed("pi.2", "a@b.c", 40, "pi.1"),
                 held("pi.3", "a@b.c", 60, "pi.1", "which?"),
                 answered("pi.4", 80, "pi.1"),
-            ]),
+            ],
             &reads(vec![op("pi.1", Some("work"), 50)], Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -859,8 +885,8 @@ mod tests {
     #[test]
     fn an_unfiled_id_is_none() {
         assert!(
-            brief(
-                &fold(&[filed("pi.1", 10, "s", "")]),
+            brief_of(
+                &[filed("pi.1", 10, "s", "")],
                 &reads(Vec::new(), Vec::new(), None),
                 &Verdicts::default(),
                 &id("pi.99"),
@@ -872,12 +898,12 @@ mod tests {
     #[test]
     fn question_outranks_held_outranks_claimed() {
         // One flight carrying all three: the question wins.
-        let all = brief(
-            &fold(&[
+        let all = brief_of(
+            &[
                 agent("pi.1", 10),
                 claimed("pi.2", "a@b.c", 20, "pi.1"),
                 held("pi.3", "a@b.c", 30, "pi.1", "which?"),
-            ]),
+            ],
             &reads(
                 vec![op("pi.1", Some("work"), 40)],
                 vec![branch("work", true, false)],
@@ -890,8 +916,8 @@ mod tests {
         assert!(matches!(all.standing, Standing::Question));
 
         // Held and claimed, no question: enrich's order says held.
-        let fufu_held = brief(
-            &fold(&[agent("pi.1", 10), claimed("pi.2", "a@b.c", 20, "pi.1")]),
+        let fufu_held = brief_of(
+            &[agent("pi.1", 10), claimed("pi.2", "a@b.c", 20, "pi.1")],
             &reads(
                 vec![op("pi.1", Some("work"), 40)],
                 vec![branch("work", false, true)],
@@ -909,12 +935,12 @@ mod tests {
     fn a_you_crewed_flight_is_yours_never_waiting() {
         // The crew gate runs before readiness: undone dependencies and
         // all, the stamp is the answer.
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 crewed("pi.1", 10, Some("you")),
                 agent("pi.2", 20),
                 linked("pi.3", 30, "pi.1", "pi.2"),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -930,8 +956,8 @@ mod tests {
 
     #[test]
     fn a_stampless_parent_is_yours_with_no_crew() {
-        let brief = brief(
-            &fold(&[crewed("pi.1", 10, None)]),
+        let brief = brief_of(
+            &[crewed("pi.1", 10, None)],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -947,8 +973,8 @@ mod tests {
         // first gate hit; pi.3 clears pi.1 and admits — the b/c pair
         // never fires because a passed row is not on the gate. pi.1's
         // beat is the naming row alone.
-        let brief = brief(
-            &fold(&[agent("pi.1", 10), agent("pi.2", 20), agent("pi.3", 30)]),
+        let brief = brief_of(
+            &[agent("pi.1", 10), agent("pi.2", 20), agent("pi.3", 30)],
             &reads(
                 vec![
                     op("pi.1", Some("a"), 40),
@@ -985,12 +1011,12 @@ mod tests {
 
     #[test]
     fn a_claimed_flights_beat_is_what_its_branch_blocks() {
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 agent("pi.1", 10),
                 agent("pi.2", 20),
                 claimed("pi.3", "a@b.c", 30, "pi.1"),
-            ]),
+            ],
             &reads(
                 vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
                 vec![branch("left", false, false), branch("right", false, false)],
@@ -1015,8 +1041,8 @@ mod tests {
     fn a_passed_flights_beat_is_empty() {
         // Only gate entries and admitted candidates are ever named, so
         // the loser blocks nothing.
-        let brief = brief(
-            &fold(&[agent("pi.1", 10), agent("pi.2", 20)]),
+        let brief = brief_of(
+            &[agent("pi.1", 10), agent("pi.2", 20)],
             &reads(
                 vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
                 vec![branch("left", false, false), branch("right", false, false)],
@@ -1042,8 +1068,8 @@ mod tests {
     fn the_walk_ignores_want_and_reaches_late_candidates() {
         // `next`'s default want is 1; the full walk still reaches the
         // third candidate.
-        let brief = brief(
-            &fold(&[agent("pi.1", 10), agent("pi.2", 20), agent("pi.3", 30)]),
+        let brief = brief_of(
+            &[agent("pi.1", 10), agent("pi.2", 20), agent("pi.3", 30)],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.3"),
@@ -1062,7 +1088,7 @@ mod tests {
         let empty = reads(Vec::new(), Vec::new(), None);
 
         let dependent =
-            brief(&fold(&events), &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+            brief_of(&events, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
         match &dependent.standing {
             Standing::Waiting { on } => assert_eq!(on, &["pi.2"]),
             other => panic!("expected waiting, got {other:?}"),
@@ -1071,7 +1097,7 @@ mod tests {
         // The waiting row names pi.2 as a dependency, not a competitor —
         // its beat stays empty.
         let dependency =
-            brief(&fold(&events), &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
+            brief_of(&events, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
         assert!(matches!(dependency.standing, Standing::Ready));
         assert!(dependency.beat.is_empty());
     }
@@ -1081,11 +1107,11 @@ mod tests {
         // The mark variants flatten to the tag alone: `done_by` appears
         // once, from the brief's own field, never a second time from the
         // standing.
-        let brief = brief(
-            &fold(&[
+        let brief = brief_of(
+            &[
                 filed("pi.1", 10, "s", ""),
                 done("pi.2", "closer@b.c", 90, "pi.1"),
-            ]),
+            ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
@@ -1227,8 +1253,8 @@ mod tests {
                 collide("right", "gone", &["shared.txt"]),
             ],
         };
-        let lazy = brief(&fold, &board, &Verdicts::default(), &id("pi.3")).expect("filed");
-        let full = brief(&fold, &board, &probed, &id("pi.3")).expect("filed");
+        let lazy = brief_of(&events, &board, &Verdicts::default(), &id("pi.3")).expect("filed");
+        let full = brief_of(&events, &board, &probed, &id("pi.3")).expect("filed");
         assert_eq!(
             serde_json::to_string(&lazy).expect("serializes"),
             serde_json::to_string(&full).expect("serializes"),

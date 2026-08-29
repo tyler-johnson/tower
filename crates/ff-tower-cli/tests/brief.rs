@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use ff_tower_core::ff::Ff;
+use ff_tower_core::log::{Kind, Store};
 use ff_tower_testsupport::{FakeFf, Repo};
 
 fn ff_tower(repo: &Path, args: &[&str]) -> Output {
@@ -309,6 +310,112 @@ fn a_done_dependency_marks_its_link_row() {
     let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
     let data = &envelope(&out)["data"];
     assert_eq!(data["depends_on"][0]["done"], serde_json::json!(true));
+}
+
+#[test]
+fn the_history_lists_every_gesture_in_log_order() {
+    let repo = repo();
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "the work", "-m", "the body of the work"],
+    ));
+    stdout(&ff_tower(repo.path(), &["comment", "1", "-m", "a note"]));
+    stdout(&ff_tower(repo.path(), &["claim", "1"]));
+    let held = ff_tower(repo.path(), &["hold", "1", "-m", "which way?"]);
+    assert_eq!(held.status.code(), Some(3));
+    stdout(&ff_tower(repo.path(), &["answer", "1", "-m", "that way"]));
+    stdout(&ff_tower(
+        repo.path(),
+        &["edit", "1", "-s", "the reworded work"],
+    ));
+    // A reword of the comment, targeting its event id rather than the
+    // flight's — a gesture on this flight all the same.
+    stdout(&ff_tower(
+        repo.path(),
+        &["edit", "pi.2", "-m", "a fuller note"],
+    ));
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    // The filing leads, and each row is the wire id, the kind's own
+    // name, the author, and the age.
+    assert!(
+        text.contains("history\n  pi.1 · filed · tests@tower.invalid · "),
+        "{text}"
+    );
+    assert!(
+        text.contains("pi.7 · edited · tests@tower.invalid · "),
+        "{text}"
+    );
+
+    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let data = &envelope(&out)["data"];
+    let history = data["history"].as_array().expect("a history");
+    let what: Vec<&str> = history
+        .iter()
+        .map(|moment| moment["what"].as_str().expect("a kind name"))
+        .collect();
+    assert_eq!(
+        what,
+        [
+            "filed",
+            "commented",
+            "claimed",
+            "held",
+            "answered",
+            "edited",
+            "edited",
+        ]
+    );
+    assert_eq!(history[0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(history[0]["by"], serde_json::json!("tests@tower.invalid"));
+    assert!(history[0]["at"].is_i64(), "{data}");
+}
+
+#[test]
+fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "work worth promoting"]));
+
+    // A gesture from a newer tower. The fold cannot route it — it lands
+    // in `unrouted` — but its body names this flight, so the history
+    // carries it under the kind's own string instead of dropping it.
+    Store::open(repo.path())
+        .expect("open")
+        .append(vec![Kind::Unknown {
+            kind: "promoted".to_string(),
+            body: serde_json::value::RawValue::from_string(
+                r#"{"flight":"pi.1","upstream":"LIN-123"}"#.to_string(),
+            )
+            .expect("raw"),
+        }])
+        .expect("append");
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    assert!(text.contains("pi.2 · promoted · "), "{text}");
+
+    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let history = envelope(&out)["data"]["history"]
+        .as_array()
+        .expect("a history")
+        .clone();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1]["what"], serde_json::json!("promoted"));
+
+    // A body naming some other flight stays off this one's history.
+    Store::open(repo.path())
+        .expect("open")
+        .append(vec![Kind::Unknown {
+            kind: "promoted".to_string(),
+            body: serde_json::value::RawValue::from_string(r#"{"flight":"pi.99"}"#.to_string())
+                .expect("raw"),
+        }])
+        .expect("append");
+    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let history = envelope(&out)["data"]["history"]
+        .as_array()
+        .expect("a history")
+        .clone();
+    assert_eq!(history.len(), 2);
 }
 
 #[test]

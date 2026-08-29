@@ -212,7 +212,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower triage` | walk the unclassified pile and route each item to a procedure | you |
 | `ff tower take <flight>` | take the controls: crew this to you, agent off | you |
 | `ff tower requeue <flight>` | the reverse — hand it back to the pool | either |
-| `ff tower brief <flight>` | everything known about this flight: subject, files, prior art, verify command, handoff notes — plus its standing on `next`'s walk, why it is where it is, and what it beat | an agent |
+| `ff tower brief <flight>` | everything known about this flight: subject, files, prior art, verify command, handoff notes — plus its standing on `next`'s walk, why it is where it is, what it beat, and a basic history of what happened to it | an agent |
 | `ff tower hold <flight> -m <question>` | stop with a question attached — bay warm, session open, exit 3 | an agent |
 | `ff tower answer <flight> -m <answer>` | answer it and release the hold | you |
 | `ff tower done [<flight>]` | finish a part whose completion nothing can derive; a smoke test that went fine leaves no trace | you |
