@@ -9,6 +9,7 @@ export default defineConfig({
 			// 127.0.0.1, not localhost: the server binds v4 only, and node
 			// may resolve localhost to ::1.
 			'/api': { target: 'http://127.0.0.1:7420' }
-		}
+		},
+		allowedHosts: true
 	}
 });
