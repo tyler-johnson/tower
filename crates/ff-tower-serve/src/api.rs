@@ -3,17 +3,18 @@
 //! Two halves, one contract. The read half is four resources over five
 //! GET routes, every one answering the exact envelope the matching verb
 //! emits under `--json` — same fold, same serializer, same bytes,
-//! trailing newline included. The write half is the verb API: eight POST
-//! routes — file, claim, take, requeue, hold, answer, done, comment —
-//! each taking the verb's arguments as a small JSON body, appending to
-//! the log, and answering the verb's own data envelope. The arguments
-//! ride the body rather than the path on purpose: a flight reference can
-//! carry `#`, and `#` is a URL fragment. `cmd` on each envelope keeps
-//! the CLI's wire name (`/api/bays` answers `bay list`), because the
-//! envelope is the contract and the route is only the door. A refusal is
-//! the same one-line error envelope, with the id tables and Display
-//! strings read from core rather than re-implemented here; only the
-//! status varies by surface, the way only the exit code does on the CLI.
+//! trailing newline included. The write half is the verb API: nine POST
+//! routes — file, claim, take, requeue, hold, answer, done, comment,
+//! triage — each taking the verb's arguments as a small JSON body,
+//! appending to the log, and answering the verb's own data envelope. The
+//! arguments ride the body rather than the path on purpose: a flight
+//! reference can carry `#`, and `#` is a URL fragment. `cmd` on each
+//! envelope keeps the CLI's wire name (`/api/bays` answers `bay list`),
+//! because the envelope is the contract and the route is only the door.
+//! A refusal is the same one-line error envelope, with the id tables and
+//! Display strings read from core rather than re-implemented here; only
+//! the status varies by surface, the way only the exit code does on the
+//! CLI.
 //!
 //! Every handler runs its whole pipeline inside `spawn_blocking` — the
 //! folds spawn ff processes and `Store` is not `Sync` — opening a fresh
@@ -89,6 +90,7 @@ pub(crate) fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
         .route("/api/answer", post(answer))
         .route("/api/done", post(done))
         .route("/api/comment", post(comment))
+        .route("/api/triage", post(triage))
         .with_state(Arc::new(AppState {
             repo: repo.to_path_buf(),
             feed,
@@ -372,6 +374,30 @@ async fn comment(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
         let store = Store::open(repo)?;
         let outcome = verb::comment(&store, &body.flight, body.message)?;
         Ok(machine::emit("comment", &outcome.payload))
+    })
+    .await
+}
+
+/// `triage`'s arguments. `message` is the `-m` explanation, stored
+/// beside the route and never recomputed.
+///
+/// `procedure` is required where `-p` is optional on the CLI: the CLI's
+/// flight-without-procedure branch is a clap-shaped `usage/no-procedure`
+/// refusal that has no meaning over a body, where a missing field is
+/// `usage/bad-body` — the same 400.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TriageBody {
+    flight: String,
+    procedure: String,
+    message: Option<String>,
+}
+
+async fn triage(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("triage", state, body, |repo, body: TriageBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::route(&store, &body.flight, &body.procedure, body.message)?;
+        Ok(machine::emit("triage", &outcome.payload))
     })
     .await
 }

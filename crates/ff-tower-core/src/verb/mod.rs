@@ -23,6 +23,7 @@ mod error;
 mod file;
 mod hold;
 mod requeue;
+mod route;
 mod take;
 
 pub use answer::{Answer, Answered, answer};
@@ -34,6 +35,7 @@ pub use error::Error;
 pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
 pub use requeue::{Requeue, Requeued, requeue};
+pub use route::{Route, Routed, route};
 pub use take::{Take, Taken, take};
 
 use crate::board::{Flight, Fold, display};

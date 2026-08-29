@@ -7,21 +7,18 @@
 //! flights stay listed, because a claim does not classify. The pile is a
 //! pure log read — no gather, no probe — and rendering it always exits 0.
 //!
-//! Named is the route: one `routed` event re-stamps the flight, with the
-//! explanation stored beside it — deterministic and stored, never
-//! recomputed, principle 11 applied to routing. The collapse rule is
-//! `file`'s: a single-part procedure stamps the flight itself; a
-//! multi-part one makes the flight a parent and the same atomic batch
-//! files its parts on `decompose`'s edges, so no part is ever live and
-//! unlinked. Routing a claimed flight is allowed and the claim stands;
-//! routing back to `open` is the undo, no special case. Re-routing after
-//! a multi-part route leaves the old part flights live, closed by hand.
+//! Named is the route, whose body lives in core's `verb::route` where
+//! the server mounts it too; what stays here is the human echo — the
+//! routed line, and one row per part when the definition had two or
+//! more. The part rows read off the payload's own events, so the echo
+//! shows what the log holds, and the re-fold here is for their display
+//! numbers alone.
 
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, Flight};
 use ff_tower_core::log::Kind;
-use ff_tower_core::procedure;
+use ff_tower_core::verb;
 
 pub fn run(
     json: bool,
@@ -90,7 +87,7 @@ fn pile(json: bool) -> Result<(), CliError> {
         .iter()
         .map(|flight| super::display(&fold, &flight.id))
         .collect();
-    let id_width = width(&refs);
+    let id_width = width(refs.iter().map(String::as_str));
     for (reference, flight) in refs.iter().zip(&pile) {
         println!(
             "· {}  {}",
@@ -134,103 +131,67 @@ fn pile(json: bool) -> Result<(), CliError> {
 /// The route: one `routed` event, and — for a multi-part procedure — the
 /// part filings and edges in the same atomic batch.
 fn route(json: bool, flight: &str, name: &str, message: Option<String>) -> Result<(), CliError> {
-    super::parse_ref(flight)?;
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(CliError::coded(
-            "usage/empty-procedure",
-            "`-p` names an empty procedure",
-            Vec::new(),
-        ));
-    }
-
     let store = super::store()?;
-    let installed = procedure::registry(store.main_worktree().as_deref())?;
-    let fold = board::fold(&store.read_all()?);
-    let id = super::resolve(&fold, flight)?;
-    let subject = super::ensure_active(&fold, &id)?.subject.clone();
-    let definition = installed.get(name).ok_or_else(|| {
-        CliError::coded(
-            "procedure/not-found",
-            format!(
-                "no procedure `{name}` — installed: {}",
-                installed.names().join(", ")
-            ),
-            vec!["ff tower procedures".to_string()],
-        )
-    })?;
-
-    let because = message.unwrap_or_default();
-    let ids = store.append_with(|mint| {
-        super::classify(
-            definition,
-            &subject,
-            super::Parent::Existing(id.clone()),
-            |part| Kind::Routed {
-                flight: id.clone(),
-                procedure: definition.name.clone(),
-                part,
-                because: because.clone(),
-            },
-            mint,
-        )
-    })?;
-    let (routed, rest) = ids.split_first().expect("the routed event is the first");
-    let parts = if definition.parts.len() == 1 {
-        0
-    } else {
-        definition.parts.len()
-    };
-    let (minted, linked) = rest.split_at(parts);
+    let outcome = verb::route(&store, flight, name, message)?;
 
     if json {
-        println!(
-            "{}",
-            machine::emit(
-                "triage",
-                &serde_json::json!({
-                    "routed": super::appended(&store, routed)?,
-                    "parts": super::appended_all(&store, minted)?,
-                    "linked": super::appended_all(&store, linked)?,
-                })
-            )
-        );
+        println!("{}", machine::emit("triage", &outcome.payload));
     } else {
         // Re-fold after the append: the echo's numbers live on the fold's
         // flights, so the minted parts must be in it.
         let fold = board::fold(&store.read_all()?);
         let colored = render::colored();
+        let Kind::Routed {
+            procedure: name,
+            because,
+            ..
+        } = &outcome.payload.routed.kind
+        else {
+            unreachable!("`triage` routes");
+        };
         println!(
-            "routed {} to {name}: {subject}",
-            render::paint_id(&super::display(&fold, &id), colored)
+            "routed {} to {name}: {}",
+            render::paint_id(&super::display(&fold, &outcome.flight), colored),
+            super::flight(&fold, &outcome.flight).subject
         );
-        let refs: Vec<String> = minted.iter().map(|id| super::display(&fold, id)).collect();
-        let subjects: Vec<String> = definition
+        let refs: Vec<String> = outcome
+            .part_ids
+            .iter()
+            .map(|id| super::display(&fold, id))
+            .collect();
+        let rows: Vec<(&str, &str)> = outcome
+            .payload
             .parts
             .iter()
-            .map(|part| format!("{subject} · {}", part.id))
+            .map(|event| {
+                let Kind::Filed {
+                    subject,
+                    part: Some(stamp),
+                    ..
+                } = &event.kind
+                else {
+                    unreachable!("a part row is a stamped filing")
+                };
+                (subject.as_str(), stamp.crew.as_str())
+            })
             .collect();
-        let id_width = width(&refs);
-        let subject_width = width(&subjects);
-        for ((reference, text), part) in refs.iter().zip(&subjects).zip(&definition.parts) {
+        let id_width = width(refs.iter().map(String::as_str));
+        let subject_width = width(rows.iter().map(|(subject, _)| *subject));
+        for (reference, (text, crew)) in refs.iter().zip(&rows) {
             println!(
                 "· {}  {text:<subject_width$}  {}",
                 render::paint_id(&format!("{reference:<id_width$}"), colored),
-                render::paint_dim(part.crew.name(), colored),
+                render::paint_dim(crew, colored),
             );
         }
         if !because.is_empty() {
-            println!("{}", render::paint_dim(&because, colored));
+            println!("{}", render::paint_dim(because, colored));
         }
         println!("{}", super::tail(colored));
     }
     Ok(())
 }
 
-fn width(items: &[String]) -> usize {
-    items
-        .iter()
-        .map(|text| text.chars().count())
-        .max()
-        .unwrap_or(0)
+fn width<'a>(items: impl Iterator<Item = &'a str>) -> usize {
+    items.map(|text| text.chars().count()).max().unwrap_or(0)
 }

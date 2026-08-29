@@ -115,6 +115,24 @@ fn a_post_verb_rides_the_same_loop() {
 }
 
 #[test]
+fn a_route_posted_over_http_arrives_as_a_fresh_frame() {
+    let (_repo, server) = served();
+    let mut feed = sse(&server.addr, "/api/feed");
+    let _initial = feed.next_data();
+
+    // The routed stamp is a board change like any other, and the handler
+    // publishes none of it: the frame carrying `review`'s parts got
+    // there through the watcher.
+    let (status, _, body) = post(
+        &server.addr,
+        "/api/triage",
+        r#"{"flight":"1","procedure":"review"}"#,
+    );
+    assert_eq!(status, 200, "{body}");
+    await_subject(&mut feed, "write the doctor verb · verdict");
+}
+
+#[test]
 fn the_server_survives_its_watch_child_dying() {
     let repo = repo_with_a_filing();
 

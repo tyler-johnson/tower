@@ -239,6 +239,52 @@ fn file_appends_the_whole_batch_and_answers_it() {
     read_after_write(&server, repo.path());
 }
 
+/// The route: the third writing surface gaining a verb the other two
+/// already have. `review` is a three-part built-in, so the batch is the
+/// routed head, its parts, and the edges that hang them off the flight —
+/// the same shape `file` appends, minus the parent it does not mint.
+#[test]
+fn triage_routes_over_http_and_the_board_reads_the_stamp_back() {
+    let (repo, server) = served();
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/triage",
+        r#"{"flight":"1","procedure":"review","message":"it is a review"}"#,
+    );
+    let chain = chain(repo.path());
+    let batch = &chain[1..];
+    assert_eq!(batch.len(), 9, "the routed head, three parts, five edges");
+    let (routed, rest) = batch.split_first().expect("the routed head");
+    let (parts, linked) = rest.split_at(3);
+    ok(
+        "/api/triage",
+        status,
+        &head,
+        &body,
+        machine::emit(
+            "triage",
+            &verb::Routed {
+                routed: routed.clone(),
+                parts: parts.to_vec(),
+                linked: linked.to_vec(),
+            },
+        ),
+    );
+
+    // The stamp is on the board the next GET folds: the flight left the
+    // open pile for `review`.
+    let (status, _, board) = http(&server.addr, "/api/board");
+    assert_eq!(status, 200, "{board}");
+    let board: serde_json::Value = serde_json::from_str(&board).expect("the board envelope");
+    let flights = board["data"]["open"].as_array().expect("open");
+    let parent = flights
+        .iter()
+        .find(|view| view["subject"] == json!("write the doctor verb"))
+        .expect("the routed flight is still open — a route is not a claim");
+    assert_eq!(parent["procedure"], json!("review"));
+    read_after_write(&server, repo.path());
+}
+
 #[test]
 fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
     let (repo, server) = served();
@@ -381,6 +427,15 @@ fn a_reference_naming_nothing_is_a_four_oh_four() {
         &["file", "a subject", "-p", "ghost", "--json"],
         "procedure/not-found",
     );
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/triage",
+        r#"{"flight":"1","procedure":"ghost"}"#,
+        404,
+        &["triage", "1", "-p", "ghost", "--json"],
+        "procedure/not-found",
+    );
 }
 
 /// A body the verb cannot read is `usage/bad-body` — the one id only the
@@ -397,6 +452,13 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
         ("/api/claim", r#"{"flight":"1","extra":true}"#),
         ("/api/done", r#"{}"#),
         ("/api/file", r#"{"flight":"1"}"#),
+        // `procedure` is required here where `-p` is optional on the
+        // CLI: a missing field is the body's refusal, not the verb's.
+        ("/api/triage", r#"{"flight":"1"}"#),
+        (
+            "/api/triage",
+            r#"{"flight":"1","procedure":"review","extra":true}"#,
+        ),
     ] {
         let (status, _, answered) = post(&server.addr, path, body);
         assert_eq!(status, 400, "{path} {body}: {answered}");
@@ -420,4 +482,5 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
 fn a_read_method_on_a_write_route_is_405() {
     let (_repo, server) = served();
     assert_eq!(request(&server.addr, "GET", "/api/claim").0, 405);
+    assert_eq!(request(&server.addr, "GET", "/api/triage").0, 405);
 }
