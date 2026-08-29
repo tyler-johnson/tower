@@ -32,7 +32,7 @@ mod error;
 
 pub use error::{Error, Result};
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 
 use axum::Router;
@@ -82,10 +82,7 @@ impl Bound {
                     })
                     .await
             })
-            .map_err(|source| Error::Failed {
-                port: addr.port(),
-                source,
-            })
+            .map_err(|source| Error::Failed { addr, source })
     }
 }
 
@@ -100,25 +97,37 @@ impl Bound {
 /// route that needs the log opens its own, the way every CLI verb calls
 /// `cmd::store()` fresh.
 ///
-/// The socket is `127.0.0.1` and never `0.0.0.0`. This is a process a
-/// person started for themselves.
-pub fn run(repo: &Path, port: u16) -> Result<Bound> {
+/// The default is the loopback, and the caller may say otherwise: the
+/// address arrives already parsed and this crate does not judge it. What
+/// a wider bind means for a board with no authentication in front of it
+/// is the verb's sentence to say, once, where a person can read it.
+pub fn run(repo: &Path, host: IpAddr, port: u16) -> Result<Bound> {
     drop(Store::open(repo)?);
+
+    let wanted = SocketAddr::from((host, port));
 
     let runtime = Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|source| Error::Failed { port, source })?;
+        .map_err(|source| Error::Failed {
+            addr: wanted,
+            source,
+        })?;
 
     let listener = runtime
-        .block_on(TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))))
+        .block_on(TcpListener::bind(wanted))
         .map_err(|source| match source.kind() {
-            std::io::ErrorKind::AddrInUse => Error::AddressInUse { port },
-            _ => Error::Failed { port, source },
+            std::io::ErrorKind::AddrInUse => Error::AddressInUse { addr: wanted },
+            std::io::ErrorKind::AddrNotAvailable => Error::NoSuchAddress { addr: wanted },
+            _ => Error::Failed {
+                addr: wanted,
+                source,
+            },
         })?;
-    let addr = listener
-        .local_addr()
-        .map_err(|source| Error::Failed { port, source })?;
+    let addr = listener.local_addr().map_err(|source| Error::Failed {
+        addr: wanted,
+        source,
+    })?;
 
     Ok(Bound {
         addr,

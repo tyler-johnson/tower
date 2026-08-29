@@ -1,5 +1,5 @@
-//! `ff tower serve` against the real binary: the port's four lanes, the
-//! socket, and what the two mounted routes answer.
+//! `ff tower serve` against the real binary: the two lanes and their four
+//! sources each, the socket, and what the two mounted routes answer.
 //!
 //! What this file deliberately does not prove is anything about the
 //! board. The server serves one placeholder page — there is no read API,
@@ -14,8 +14,14 @@
 //! exit. [`Server`] spawns one with `--json`, reads the startup envelope
 //! for the address it actually bound, and kills it on drop. Every spawn
 //! points `HOME` and `XDG_CONFIG_HOME` into the fixture and clears
-//! `TOWER_PORT`, so neither the developer's git config nor their
-//! environment can decide which port a test binds.
+//! `TOWER_HOST` and `TOWER_PORT`, so neither the developer's git config
+//! nor their environment can decide where a test binds.
+//!
+//! The only non-loopback address any test names is `0.0.0.0`: it binds on
+//! every platform CI runs, and a wildcard bind is reachable through the
+//! loopback, which is what makes a wide bind testable at all. `127.0.0.2`
+//! is local on Linux and not on macOS without an alias, and `::1` is left
+//! alone for the same kind of reason.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -35,6 +41,7 @@ fn command(repo: &Path) -> Command {
         // setting `HOME` alone leaves the runner's real one reachable.
         .env("USERPROFILE", root(repo))
         .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("TOWER_HOST")
         .env_remove("TOWER_PORT");
     command
 }
@@ -82,12 +89,23 @@ impl Server {
     /// bound. `--json` rides every start: the envelope is the only honest
     /// way to learn the address, and it is worth asserting anyway.
     fn start(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Server {
+        Server::spawn(repo, args, env, Stdio::inherit())
+    }
+
+    /// The same spawn with stderr held, for the one case that asserts on
+    /// what the verb says there rather than on stdout.
+    fn watching_stderr(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Server {
+        Server::spawn(repo, args, env, Stdio::piped())
+    }
+
+    fn spawn(repo: &Path, args: &[&str], env: &[(&str, &str)], stderr: Stdio) -> Server {
         let mut command = command(repo);
         command
             .arg("serve")
             .arg("--json")
             .args(args)
-            .stdout(Stdio::piped());
+            .stdout(Stdio::piped())
+            .stderr(stderr);
         for (name, value) in env {
             command.env(name, value);
         }
@@ -119,6 +137,28 @@ impl Server {
     fn port(&self) -> u16 {
         let port = self.startup["data"]["port"].as_u64().expect("a port");
         u16::try_from(port).expect("a port fits a u16")
+    }
+
+    fn host(&self) -> String {
+        self.startup["data"]["host"]
+            .as_str()
+            .expect("a host")
+            .to_string()
+    }
+
+    /// Everything the child wrote to stderr, read after the kill: the
+    /// pipe reaches EOF only once the process is gone.
+    fn stderr(mut self) -> String {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let mut text = String::new();
+        self.child
+            .stderr
+            .take()
+            .expect("piped stderr")
+            .read_to_string(&mut text)
+            .expect("read stderr");
+        text
     }
 }
 
@@ -313,16 +353,24 @@ fn a_second_server_on_one_port_is_refused_by_the_socket() {
 fn outside_a_repository_it_refuses_before_it_binds() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let port = free_port();
-    // `--port` on purpose: it skips the config lane, so the refusal comes
-    // from the server validating the repository at startup rather than
-    // from a config read on the way to it.
+    // Both flags on purpose: they skip the config lane, so the refusal
+    // comes from the server validating the repository at startup rather
+    // than from a config read on the way to it.
     let out = Command::new(env!("CARGO_BIN_EXE_ff-tower"))
-        .args(["serve", "--json", "--port", &port.to_string()])
+        .args([
+            "serve",
+            "--json",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ])
         .current_dir(dir.path())
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .env("XDG_CONFIG_HOME", dir.path().join("xdg"))
         .env_remove("FF_REPO")
+        .env_remove("TOWER_HOST")
         .env_remove("TOWER_PORT")
         .env_remove("GIT_CONFIG_GLOBAL")
         .output()
@@ -334,4 +382,130 @@ fn outside_a_repository_it_refuses_before_it_binds() {
         TcpListener::bind(("127.0.0.1", port)).is_ok(),
         "the port was bound before the repository was checked"
     );
+}
+
+#[test]
+fn a_host_that_does_not_parse_is_the_usage_envelope() {
+    let repo = Repo::new();
+    let out = ff_tower(repo.path(), &["serve", "--json", "--host", "banana"]);
+    let envelope = refusal(&out, 2, "usage/bad-host");
+    let message = envelope["error"]["message"].as_str().expect("a message");
+    assert!(message.contains("--host"), "{message}");
+    assert!(message.contains("banana"), "{message}");
+    assert_eq!(
+        envelope["error"]["exits"][0],
+        serde_json::json!("ff tower serve --host <addr>")
+    );
+}
+
+#[test]
+fn localhost_is_refused_and_the_refusal_names_the_spelling_that_works() {
+    let repo = Repo::new();
+    // A name is not an address: nothing resolves DNS on the way to a
+    // bind, so the one word a person is most likely to try is refused —
+    // and told what to type instead.
+    let out = ff_tower(repo.path(), &["serve", "--json", "--host", "localhost"]);
+    let message = refusal(&out, 2, "usage/bad-host")["error"]["message"].to_string();
+    assert!(message.contains("localhost"), "{message}");
+    assert!(message.contains("127.0.0.1"), "{message}");
+}
+
+#[test]
+fn the_environment_and_the_config_refuse_a_host_the_same_way() {
+    let repo = Repo::new();
+
+    let out = command(repo.path())
+        .args(["serve", "--json"])
+        .env("TOWER_HOST", "localhost")
+        .output()
+        .expect("spawn ff-tower");
+    let message = refusal(&out, 2, "usage/bad-host")["error"]["message"].to_string();
+    assert!(message.contains("TOWER_HOST"), "{message}");
+
+    // The registry refuses an unusable address on the way in, so the only
+    // way to have one stored is to have stored it with git.
+    let out = ff_tower(repo.path(), &["config", "--json", "serveHost", "localhost"]);
+    refusal(&out, 2, "usage/bad-value");
+
+    repo.git(&["config", "tower.serveHost", "banana"]);
+    let out = ff_tower(repo.path(), &["serve", "--json"]);
+    let message = refusal(&out, 2, "usage/bad-host")["error"]["message"].to_string();
+    assert!(message.contains("tower.serveHost"), "{message}");
+}
+
+#[test]
+fn the_host_flag_beats_the_environment_beats_the_config() {
+    let repo = Repo::new();
+    let ports = free_ports(3);
+    repo.git(&["config", "tower.serveHost", "127.0.0.1"]);
+
+    let server = Server::start(
+        repo.path(),
+        &["--host", "0.0.0.0", "--port", &ports[0].to_string()],
+        &[("TOWER_HOST", "127.0.0.1")],
+    );
+    assert_eq!(server.host(), "0.0.0.0");
+    drop(server);
+
+    let server = Server::start(
+        repo.path(),
+        &["--port", &ports[1].to_string()],
+        &[("TOWER_HOST", "0.0.0.0")],
+    );
+    assert_eq!(server.host(), "0.0.0.0");
+    drop(server);
+
+    let server = Server::start(repo.path(), &["--port", &ports[2].to_string()], &[]);
+    assert_eq!(server.host(), "127.0.0.1");
+    drop(server);
+
+    // And the config lane over the compiled default.
+    repo.git(&["config", "tower.serveHost", "0.0.0.0"]);
+    let server = Server::start(repo.path(), &["--port", &free_port().to_string()], &[]);
+    assert_eq!(server.host(), "0.0.0.0");
+}
+
+#[test]
+fn a_wide_bind_is_reachable_through_the_loopback() {
+    let repo = Repo::new();
+    let port = free_port();
+    let server = Server::start(
+        repo.path(),
+        &["--host", "0.0.0.0", "--port", &port.to_string()],
+        &[],
+    );
+
+    assert_eq!(server.startup["data"]["host"], serde_json::json!("0.0.0.0"));
+    assert_eq!(
+        server.startup["data"]["address"],
+        serde_json::json!(format!("0.0.0.0:{port}"))
+    );
+
+    // The wildcard includes the loopback, which is the only interface a
+    // test can name and reach on every platform.
+    assert_eq!(http(&format!("127.0.0.1:{port}"), "/").0, 200);
+}
+
+#[test]
+fn a_bind_beyond_the_loopback_says_so_once_on_stderr() {
+    let repo = Repo::new();
+
+    let server = Server::watching_stderr(
+        repo.path(),
+        &["--host", "0.0.0.0", "--port", &free_port().to_string()],
+        &[],
+    );
+    let said = server.stderr();
+    assert!(said.contains("no authentication"), "{said}");
+    // stderr and not stdout, so a --json caller still gets exactly one
+    // envelope and a person still gets the sentence.
+    assert_eq!(said.lines().count(), 1, "{said}");
+
+    let server = Server::watching_stderr(
+        repo.path(),
+        &["--host", "127.0.0.1", "--port", &free_port().to_string()],
+        &[],
+    );
+    let quiet = server.stderr();
+    assert!(quiet.is_empty(), "the loopback said something: {quiet}");
 }

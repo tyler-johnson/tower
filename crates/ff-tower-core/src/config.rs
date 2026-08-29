@@ -21,6 +21,7 @@
 //! should refuse fast.
 
 use std::io::Write as _;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use gix::config::Source;
@@ -82,6 +83,7 @@ pub enum SettingKind {
     Cadence,
     Bool,
     Port,
+    Host,
 }
 
 impl SettingKind {
@@ -92,6 +94,7 @@ impl SettingKind {
             SettingKind::Cadence => "cadence",
             SettingKind::Bool => "bool",
             SettingKind::Port => "port",
+            SettingKind::Host => "host",
         }
     }
 }
@@ -114,6 +117,13 @@ pub struct Setting {
 /// spells it, and a test holds the two together.
 pub const DEFAULT_PORT: u16 = 7420;
 
+/// The address `ff tower serve` binds when nothing else says otherwise,
+/// behind `--host`, `TOWER_HOST`, and `tower.serveHost`. A `&str` rather
+/// than an `IpAddr` so the registry row below can be this constant
+/// rather than a second literal that drifts from it; the reader parses
+/// it through [`parse_host`] like any other lane.
+pub const DEFAULT_HOST: &str = "127.0.0.1";
+
 /// Every setting tower ships, in display order. `tower.writer` is
 /// deliberately absent: identity minted at first append, not a tunable —
 /// setting it to another machine's id forks that writer's chain.
@@ -131,14 +141,27 @@ pub fn registry() -> &'static [Setting] {
             ],
         },
         Setting {
+            name: "serveHost",
+            key: "tower.serveHost",
+            def: DEFAULT_HOST,
+            kind: SettingKind::Host,
+            desc: &[
+                "The address `ff tower serve` binds. --host beats TOWER_HOST beats",
+                "this beats 127.0.0.1. An IP literal and never a name: 0.0.0.0 for",
+                "every interface, ::1 for v6 loopback. Anything but the loopback is",
+                "reachable from the network, and the board has no authentication in",
+                "front of it.",
+            ],
+        },
+        Setting {
             name: "servePort",
             key: "tower.servePort",
             def: "7420",
             kind: SettingKind::Port,
             desc: &[
-                "The port `ff tower serve` binds on 127.0.0.1. --port beats",
-                "TOWER_PORT beats this beats the default. A port already in use is",
-                "refused at bind, by the socket rather than by a lock.",
+                "The port `ff tower serve` binds. --port beats TOWER_PORT beats",
+                "this beats the default. A port already in use is refused at bind,",
+                "by the socket rather than by a lock.",
             ],
         },
         Setting {
@@ -196,6 +219,10 @@ pub fn validate(setting: &Setting, value: &str) -> Result<()> {
             "want true or false",
         ),
         SettingKind::Port => (parse_port(value).is_some(), "want a port, 0 to 65535"),
+        SettingKind::Host => (
+            parse_host(value).is_some(),
+            "want an IP address like 127.0.0.1, 0.0.0.0, or ::1",
+        ),
     };
     if ok {
         Ok(())
@@ -230,6 +257,15 @@ pub fn parse_cadence(raw: &str) -> Option<i64> {
 /// them. A value below 1024 parses and then fails at bind — that is the
 /// operating system's rule to state, not a second opinion here.
 pub fn parse_port(raw: &str) -> Option<u16> {
+    raw.trim().parse().ok()
+}
+
+/// Parse a bind address, the one parser all four host lanes run. An IP
+/// literal and nothing else: no name is resolved here, so `tower.serveHost`
+/// stays validatable offline through the parser its reader runs, and a
+/// startup path never waits on DNS. `localhost` is refused, and the
+/// refusal names the spelling that works.
+pub fn parse_host(raw: &str) -> Option<IpAddr> {
     raw.trim().parse().ok()
 }
 
@@ -538,6 +574,7 @@ mod tests {
                 SettingKind::Cadence => "5x",
                 SettingKind::Bool => "maybe",
                 SettingKind::Port => "70000",
+                SettingKind::Host => "localhost",
             };
             let err = validate(setting, bad).expect_err("a bad value refuses");
             assert_eq!(err.id(), "usage/bad-value");
@@ -557,6 +594,13 @@ mod tests {
     }
 
     #[test]
+    fn the_host_default_matches_its_registry_row() {
+        let setting = lookup("serveHost").expect("registered");
+        assert_eq!(setting.def, DEFAULT_HOST);
+        assert!(parse_host(setting.def).expect("parses").is_loopback());
+    }
+
+    #[test]
     fn port_parse_table() {
         assert_eq!(parse_port("7420"), Some(7420));
         assert_eq!(parse_port("  9000  "), Some(9000));
@@ -566,6 +610,24 @@ mod tests {
         assert!(parse_port("-1").is_none());
         assert!(parse_port("banana").is_none());
         assert!(parse_port("").is_none());
+    }
+
+    #[test]
+    fn host_parse_table() {
+        assert_eq!(parse_host("127.0.0.1"), Some(IpAddr::from([127, 0, 0, 1])));
+        assert_eq!(parse_host("  0.0.0.0  "), Some(IpAddr::from([0, 0, 0, 0])));
+        assert_eq!(parse_host("::1"), Some("::1".parse::<IpAddr>().unwrap()));
+        assert_eq!(parse_host("::"), Some("::".parse::<IpAddr>().unwrap()));
+        assert_eq!(
+            parse_host("100.64.0.1"),
+            Some(IpAddr::from([100, 64, 0, 1]))
+        );
+        // A name is not an address here: no DNS in the startup path.
+        assert!(parse_host("localhost").is_none());
+        assert!(parse_host("example.com").is_none());
+        assert!(parse_host("127.0.0.1:7420").is_none());
+        assert!(parse_host("999.0.0.1").is_none());
+        assert!(parse_host("").is_none());
     }
 
     #[test]

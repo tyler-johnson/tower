@@ -48,6 +48,20 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/bad-host",
+        summary: "that is not an address",
+        detail: "An address here is an IP literal — 127.0.0.1, 0.0.0.0, ::1, or a tailnet \
+                 100.x.y.z — and never a name, so `localhost` is refused and 127.0.0.1 is how \
+                 it is spelled. Nothing resolves DNS on the way to a bind: a startup path that \
+                 waited on a nameserver would be a new way to hang, and tower.serveHost stays \
+                 validatable offline through the same parser its reader runs. `ff tower serve` \
+                 takes the address from the first of four lanes that speaks — --host, then \
+                 TOWER_HOST, then tower.serveHost, then the compiled 127.0.0.1 — and the \
+                 refusal names the lane, which is the one to go fix. Whether this machine has \
+                 that address is a later and separate answer, from the socket at bind.",
+        exits: &["ff tower serve --host <addr>"],
+    },
+    Entry {
         id: "usage/bad-port",
         summary: "that is not a port",
         detail: "A port is a number from 0 to 65535, and `ff tower serve` takes one from the \
@@ -374,6 +388,19 @@ pub static ENTRIES: &[Entry] = &[
                  numbers parse fine and fail here, because whether this user may have that port \
                  is the machine's rule rather than tower's.",
         exits: &["ff tower serve --port <n>"],
+    },
+    Entry {
+        id: "serve/no-such-address",
+        summary: "nothing on this machine has that address",
+        detail: "The address parsed and the bind was refused: a socket can only listen on an \
+                 address one of this machine's interfaces actually holds. Usually a typo, or an \
+                 address that belongs to another machine, or an interface that is not up yet — \
+                 a tailnet 100.x.y.z with tailscale down does this. `ip addr` (`ifconfig` on \
+                 macOS) lists what is available. 127.0.0.1 always works, 0.0.0.0 binds every \
+                 interface including the ones that appear later, and reaching this board from \
+                 another device needs no wide bind at all if `tailscale serve` is proxying the \
+                 loopback socket.",
+        exits: &["ff tower serve --host <addr>"],
     },
     Entry {
         id: "update/failed",

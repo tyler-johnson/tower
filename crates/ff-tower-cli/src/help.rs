@@ -411,10 +411,11 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: bays, tower.bays, and BAYS all name one
 setting.
 
-Four settings ship — bays, the pool root bare `ff tower bay warm`
-mints slots under; servePort, the port `ff tower serve` binds;
-updateCheck, how often the background release check runs; autoUpdate,
-whether a new release installs itself silently. This verb opens no store and spawns no fufu, so settings
+Five settings ship — bays, the pool root bare `ff tower bay warm`
+mints slots under; serveHost and servePort, the address and the port
+`ff tower serve` binds; updateCheck, how often the background release
+check runs; autoUpdate, whether a new release installs itself
+silently. This verb opens no store and spawns no fufu, so settings
 stay reachable on a half-configured machine, before an identity
 exists.";
 
@@ -510,10 +511,10 @@ Examples:
   ff tower bay                   the pool it is judging";
 
 pub const SERVE: &str = "\
-Run tower's standing process: a server on 127.0.0.1 that the browser
-board, the read API, and the change feed mount into as they land.
-Today it is a bound socket and a placeholder page — the verb comes
-first so the rest has somewhere to attach.
+Run tower's standing process: a server the browser board, the read
+API, and the change feed mount into as they land. Today it is a bound
+socket and a placeholder page — the verb comes first so the rest has
+somewhere to attach.
 
 It runs in the foreground the way `ff watch` does, and Ctrl-C ends
 it. It holds no state the log does not, decides nothing, and
@@ -521,22 +522,33 @@ dispatches nothing, so every other interface keeps working with it
 down — just staler. A person starts it; tower never starts it for
 you.
 
-The port resolves through four lanes, highest first: --port, then
-TOWER_PORT, then tower.servePort in git config, then 7420. A value
-none of them can parse is the same refusal wherever it came from.
+Two lanes settle where it listens, each resolving through four
+sources, highest first. The address: --host, then TOWER_HOST, then
+tower.serveHost in git config, then 127.0.0.1. The port: --port, then
+TOWER_PORT, then tower.servePort, then 7420. A value none of them can
+parse is the same refusal wherever it came from, and the refusal
+names the lane. An address is an IP literal and never a name — no DNS
+in the startup path — so localhost is refused and 127.0.0.1 is how it
+is spelled.
+
+The default is the loopback, because this is a process a person
+started for themselves. Binding wider works — 0.0.0.0 reaches the
+tailnet, which is the case the flag exists for — and puts a board
+with no authentication on every interface it reaches, so the verb
+says so once on stderr and binds anyway.
+
 Nothing is locked — a second server is another writer, which the log
 already handles — so the one conflict worth naming is the port, and
-the socket names it.
-
-The repository is checked before the socket is bound, so a wrong
-directory or a missing git user.email is a refusal at startup rather
-than a blank page later. --json emits one envelope carrying the
-address it bound, then keeps serving.";
+the socket names it. The repository is checked before the socket is
+bound, so a wrong directory or a missing git user.email is a refusal
+at startup rather than a blank page later. --json emits one envelope
+carrying the address it bound, then keeps serving.";
 
 pub const SERVE_EXAMPLES: &str = "\
 Examples:
-  ff tower serve                 bind 7420 and serve until Ctrl-C
+  ff tower serve                 bind 127.0.0.1:7420 until Ctrl-C
   ff tower serve --port 9000     bind somewhere else, once
+  ff tower serve --host 0.0.0.0  every interface — reachable, unguarded
   ff tower config servePort 9000          the same, remembered
   ff tower serve --json          the address as an envelope, then serve";
 

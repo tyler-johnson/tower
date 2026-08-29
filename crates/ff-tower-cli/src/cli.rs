@@ -278,10 +278,20 @@ pub enum Command {
     /// enforces.
     #[command(long_about = help::DOCTOR, after_long_help = help::DOCTOR_EXAMPLES)]
     Doctor,
-    /// Run tower's standing process: a server on the loopback, until
-    /// Ctrl-C.
+    /// Run tower's standing process: a server the browser board mounts
+    /// into, until Ctrl-C.
     #[command(long_about = help::SERVE, after_long_help = help::SERVE_EXAMPLES)]
     Serve {
+        /// The address to bind; TOWER_HOST, then tower.serveHost, then
+        /// 127.0.0.1.
+        ///
+        /// An IP literal and never a name, for the same reason the
+        /// setting is one: no DNS in the startup path, and a stored value
+        /// stays validatable offline. A string, not an `IpAddr`, so a bad
+        /// value is the verb's own coded refusal rather than clap's.
+        #[arg(long, value_name = "addr")]
+        host: Option<String>,
+
         /// The port to bind; TOWER_PORT, then tower.servePort, then 7420.
         ///
         /// A string, not a `u16`, for the same reason `-m` is an
