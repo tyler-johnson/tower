@@ -30,4 +30,8 @@ exceptions = [
     { allow = ["ISC"], crate = "untrusted" },
     { allow = ["ISC"], crate = "rustls-webpki" },
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    # The change feed's Linux watch backend, under notify. Same ISC
+    # reading as ring's: permissive, no copyleft.
+    { allow = ["ISC"], crate = "inotify" },
+    { allow = ["ISC"], crate = "inotify-sys" },
 ]

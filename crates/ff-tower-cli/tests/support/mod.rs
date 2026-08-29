@@ -261,3 +261,70 @@ fn connect(addr: &str) -> TcpStream {
         }
     }
 }
+
+/// One SSE subscription, held open. The request goes as HTTP/1.0 on
+/// purpose: hyper answers a 1.0 request without chunked framing — the
+/// body is close-delimited instead — so the reader stays line-wise and
+/// needs no chunk decoder. `exchange` cannot serve here: it reads to
+/// EOF, and a stream's EOF is the server shutting down.
+pub struct Sse {
+    reader: BufReader<TcpStream>,
+}
+
+/// Subscribe: send the GET, assert the 200 and the `text/event-stream`
+/// content type, consume the header block, and hand back the stream.
+pub fn sse(addr: &str, path: &str) -> Sse {
+    let mut stream = connect(addr);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("a read timeout");
+    stream
+        .write_all(format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\n\r\n").as_bytes())
+        .expect("write the request");
+
+    let mut reader = BufReader::new(stream);
+    let mut status = String::new();
+    reader.read_line(&mut status).expect("a status line");
+    assert!(status.contains(" 200 "), "not a 200: {status}");
+    let mut event_stream = false;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("a header line");
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if line.to_lowercase().contains("content-type") {
+            assert!(line.to_lowercase().contains("text/event-stream"), "{line}");
+            event_stream = true;
+        }
+    }
+    assert!(event_stream, "no content type on the feed");
+    Sse { reader }
+}
+
+impl Sse {
+    /// Block for the next event's `data:` payload — lines joined with
+    /// newlines, keep-alive comments skipped — with the socket's 10s
+    /// read timeout as the deadline.
+    pub fn next_data(&mut self) -> String {
+        let mut data: Vec<String> = Vec::new();
+        loop {
+            let mut line = String::new();
+            let read = self.reader.read_line(&mut line).expect("an event line");
+            assert!(read > 0, "the stream ended mid-event");
+            let line = line.trim_end_matches(['\r', '\n']);
+            if line.is_empty() {
+                if !data.is_empty() {
+                    return data.join("\n");
+                }
+                continue;
+            }
+            if line.starts_with(':') {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("data:") {
+                data.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
+            }
+        }
+    }
+}
