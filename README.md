@@ -33,7 +33,7 @@ That last line is fufu's extension rule unmodified: extensions read fufu state a
 
 ## Passive by construction
 
-**tower is a thing agents call. It never calls agents.** Every verb is a read plus a local write. No daemon, no cron, no dispatch, no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue.
+**tower is a thing agents call. It never calls agents.** Passive is about initiative, not process count: every verb is a read plus a local write, and there is no dispatch and no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue. `ff tower serve` runs standing, but it is a clock and a subscriber — it refolds on repository motion and pulls on a cadence, decides nothing, and every interface works without it, just staler.
 
 ## Skills
 

@@ -38,15 +38,17 @@ That last line is fufu's extension rule, unmodified: extensions read fufu state 
 
 **tower is a thing agents call. It never calls agents.**
 
-Every verb is a read plus a local write. There is no daemon, no cron, no dispatch, no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue.
+Passive is a statement about initiative, not about process count. tower starts no agent work and owns no agent lifecycle; it does not claim that no tower process runs. Every verb is a read plus a local write, and there is no dispatch and no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue.
 
-The reasons compound. Initiating means owning agent lifecycle: keys, model selection, retries, context limits, per-vendor quirks — a second product, and a moving one. Staying passive makes tower vendor-neutral by construction, because it never learns who is calling. And a queue that dispatches on its own is a background process making outward-facing decisions nobody asked for that minute, which fufu's principle 9 already forbids in its own domain.
+`ff tower serve` is a standing process, a daemon by any honest reading, and it stays inside the line because it is a clock and a subscriber rather than an actor. It refolds when the repository moves, pulls upstream on a cadence, and everything it learns lands in the log as the same events a lazy pull would have written. It holds no state the log does not, decides nothing, and dispatches nothing. Every interface works without it, just staler — an accelerant, never a dependency. A person starts it; tower never starts it for them.
+
+The reasons to stay passive compound. Initiating means owning agent lifecycle: keys, model selection, retries, context limits, per-vendor quirks — a second product, and a moving one. Staying passive makes tower vendor-neutral by construction, because it never learns who is calling. And a queue that dispatches on its own is a background process making outward-facing decisions nobody asked for that minute, which fufu's principle 9 already forbids in its own domain.
 
 Identity is a caller fact, not a dispatch target: `--as qwen` means qwen is calling, never send this to qwen.
 
-Sync follows the same discipline. Upstream is pulled lazily at invocation, gated by a cadence stamp, the way fufu's auto-trim and update check already work. The board is fresh because you just asked for it. Anything that needs to reach you unasked belongs in fufu's ambient shell channel — a heartbeat the user started — not in a process tower spawned.
+Sync follows the same discipline. Upstream is pulled lazily at invocation, gated by a cadence stamp, the way fufu's auto-trim and update check already work. With the standing process up, that same pull runs on its cadence and appends the same events — the cadence is config it reads, never authority it holds. The board is fresh because you just asked for it, or because a subscriber refolded it, and the fold is identical either way. Anything that needs to reach you unasked belongs in fufu's ambient shell channel — a heartbeat the user started — or in a process the user started, never in one tower spawned behind them.
 
-The passive update lane is the one bounded exception, fufu's carve-out carried over verbatim: official binaries (never dev, dogfood, or test builds; never under CI) spawn a detached `ff tower update --check` at most once per `tower.updateCheck` (default daily) — the one sanctioned self-spawn. It refreshes a small cache file under the user cache dir and exits; foreground commands read the cache, and with `tower.autoUpdate` on (the default) a newer release installs itself silently in the background, or with it off a one-line notice lands on stderr instead. Three throttles keep it polite: the cadence gates the checks, auto-install probes retry at most daily, and a release is announced at most once, ever. `tower.updateCheck false` kills the whole lane. The trust root is deliberately plain — HTTPS to GitHub plus the release's sha256, the same root the install scripts rely on.
+The passive update lane remains the one process tower starts for itself, fufu's carve-out carried over verbatim: official binaries (never dev, dogfood, or test builds; never under CI) spawn a detached `ff tower update --check` at most once per `tower.updateCheck` (default daily) — the one sanctioned self-spawn. It refreshes a small cache file under the user cache dir and exits; foreground commands read the cache, and with `tower.autoUpdate` on (the default) a newer release installs itself silently in the background, or with it off a one-line notice lands on stderr instead. Three throttles keep it polite: the cadence gates the checks, auto-install probes retry at most daily, and a release is announced at most once, ever. `tower.updateCheck false` kills the whole lane. The trust root is deliberately plain — HTTPS to GitHub plus the release's sha256, the same root the install scripts rely on.
 
 Tower cannot enforce, only observe and complain. `ff tower next` prints the bay path; it cannot relocate a running agent and does not try. Work landing on the wrong branch is reported loudly at the next render rather than prevented by a hook. That is fufu's regime boundary, inherited.
 
@@ -96,7 +98,7 @@ An agent that hits a real question holds the flight with the question attached: 
 
 This is fufu's `held` verbatim — nothing was touched and a human decision is required, exit code 3 — and it inherits principle 8 with it: announced at creation, pinned until answered, exits blocked. An agent question that goes quiet is how the whole system rots.
 
-Waiting is a state, not a process. Nothing resumes a held flight until someone asks; no daemon is required for any of it.
+Waiting is a state, not a process. Nothing resumes a held flight until someone asks, and a standing process does not change that — a subscriber refolds the board, it does not answer questions.
 
 ## Bays
 
@@ -139,8 +141,10 @@ caller          surface        what it does
 ────────────────────────────────────────────────────────────────
 a person        CLI            decide, answer, route, publish
 an agent        MCP            claim, read a brief, report, hold
-nothing         —              no daemon, no cron; one sanctioned
-                               self-spawn, the detached update check
+the clock       serve          refold on motion, pull on cadence;
+                               no verb a caller did not ask for
+nothing         —              one sanctioned self-spawn, the
+                               detached update check
 ```
 
 The board is an inbox, in four sections matching four states of mind: **waiting on you** (agent questions, review requests, changes requested), **in the air** (bays, with live conflict verdicts), **holding** (CI, merge queue, blocked on a person), **open**.
@@ -358,7 +362,7 @@ Three layers of memory stay apart: a **skill** knows how to drive tower, the **a
 ## Principles
 
 1. **Derived, not entered.** State comes from the repository. Only authored intent is stored.
-2. **tower is called; it never calls.** No daemon, no dispatch, no loop. The harness schedules; tower queues.
+2. **tower is called; it never calls.** No dispatch, no agent loop. A standing process may refold and subscribe; it decides nothing. The harness schedules; tower queues.
 3. **Never auto-outward.** Local state moves freely; anything the team sees is a deliberate gesture.
 4. **Upstream owns its fields.** tower is never authoritative over someone else's tracker, and never merges into their model.
 5. **Observe and complain, never enforce.** tower prints the path, reports the drift, and does not hook or veto.

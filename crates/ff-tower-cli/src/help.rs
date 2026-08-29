@@ -17,7 +17,7 @@ tower: the board over fufu
 Work is filed as flights on a board, and the board is derived: every
 verb appends an event to a log kept as ordinary git refs in the
 repository, and every render folds that log fresh. Nothing is entered
-twice, no daemon runs, and a render never blocks on the network.
+twice, and a render never blocks on the network.
 
 Bare `ff tower` is the board — an inbox in four sections matching four
 states of mind: waiting on you, in the air, holding, and open. Type it
