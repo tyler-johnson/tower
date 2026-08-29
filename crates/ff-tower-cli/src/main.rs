@@ -24,6 +24,9 @@ mod cmd;
 mod error;
 mod explain;
 mod help;
+// The Claude Code plugin body; #39's install verbs consume it.
+#[allow(dead_code)]
+mod integ;
 mod machine;
 mod render;
 mod selfupdate;
