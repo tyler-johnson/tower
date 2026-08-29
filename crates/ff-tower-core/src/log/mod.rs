@@ -106,6 +106,26 @@ impl Store {
             .map(Path::to_path_buf)
     }
 
+    /// The filesystem paths a change feed watches to notice this store
+    /// moving, however it was moved — this process, another tower, a
+    /// push landing, `git pack-refs`.
+    ///
+    /// Beside [`Store::main_worktree`] and on its pattern: everything is
+    /// derived from the common dir, which `common_dir()` already
+    /// resolves through the `.git`-file of a linked worktree. `refs`
+    /// always exists; `log` may not before the first append; the
+    /// packed-refs file may never. The append lock lives at
+    /// `<common>/tower/`, outside all three, so lock churn never reaches
+    /// a watch.
+    pub fn watch_paths(&self) -> WatchPaths {
+        let common = self.repo.common_dir();
+        WatchPaths {
+            refs: common.join("refs"),
+            log: common.join(chain::LOG_PREFIX.trim_end_matches('/')),
+            packed_refs: common.join("packed-refs"),
+        }
+    }
+
     /// Append events as one commit, assigning ids `<writer>.<seq>` in
     /// order. Returns the assigned ids; an empty batch writes nothing.
     pub fn append(&self, kinds: Vec<Kind>) -> Result<Vec<EventId>> {
@@ -246,6 +266,19 @@ impl Store {
         let _ = self.writer.set(minted.clone());
         Ok(minted)
     }
+}
+
+/// Where the log shows up on disk, for a watcher. Loose ref writes land
+/// under `log`, `git pack-refs` moves tips into `packed_refs`, and
+/// `refs` is the directory that exists before either does.
+pub struct WatchPaths {
+    /// `<common>/refs` — always present, the root a recursive watch
+    /// installs on so it sees `refs/tower/log` born.
+    pub refs: PathBuf,
+    /// `<common>/refs/tower/log` — where every chain's loose ref lives.
+    pub log: PathBuf,
+    /// `<common>/packed-refs` — where `git pack-refs` moves tips.
+    pub packed_refs: PathBuf,
 }
 
 /// Parent walk from the tip, newest-first, reversed at the end. The decode
@@ -467,5 +500,34 @@ fn hostname() -> String {
         "host".to_string()
     } else {
         cleaned.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The three watch paths hang off one common dir: `refs` and
+    /// `packed-refs` directly, the log two components under `refs`.
+    #[test]
+    fn watch_paths_share_one_common_dir() {
+        let fixture = ff_tower_testsupport::Repo::new();
+        let store = Store::open(fixture.path()).expect("open");
+        let paths = store.watch_paths();
+
+        assert!(paths.refs.ends_with("refs"), "{:?}", paths.refs);
+        assert!(paths.log.ends_with("refs/tower/log"), "{:?}", paths.log);
+        assert!(
+            paths.packed_refs.ends_with("packed-refs"),
+            "{:?}",
+            paths.packed_refs
+        );
+
+        let common = paths.refs.parent().expect("a common dir");
+        assert_eq!(paths.packed_refs.parent(), Some(common));
+        assert_eq!(
+            paths.log.parent().and_then(Path::parent),
+            Some(paths.refs.as_path())
+        );
     }
 }

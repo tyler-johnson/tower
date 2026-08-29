@@ -29,11 +29,13 @@
 //! it is fufu's floor doing its job — but "tower only reads" is true of
 //! tower's own store and not of the repository underneath it.
 //!
-//! # Not the streaming half
+//! # The streaming half
 //!
 //! `ff watch` is newline-delimited JSON over a process that does not exit,
-//! and it needs a subscription rather than a call. It gets its own path when
-//! there is something to subscribe on its behalf.
+//! so the buffered spawn behind every other verb cannot carry it.
+//! [`Ff::watch_all`] builds that command line and hands it over unspawned;
+//! the subscriber — serve's change feed — owns the child, its lines, and
+//! its respawn.
 
 mod error;
 mod payload;
@@ -307,6 +309,25 @@ impl Ff {
             .removed)
     }
 
+    /// `ff watch --all` — the streaming half, built and handed over
+    /// rather than spawned: watch never exits, so [`Ff::run`]'s buffered
+    /// spawn cannot carry it and the caller owns the child.
+    ///
+    /// It mirrors the buffered spawn's conventions where they apply —
+    /// `-C <repo>`, `FF_NONINTERACTIVE=1`, and `FF_SESSION` scrubbed
+    /// unconditionally — and drops the two that do not: no `--json`,
+    /// because watch is always JSON, and never `--session`, because on
+    /// watch it is a filter and a feed subscribes to everything.
+    #[must_use]
+    pub fn watch_all(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.arg("-C").arg(&self.repo);
+        command.arg("watch").arg("--all");
+        command.env("FF_NONINTERACTIVE", "1");
+        command.env_remove("FF_SESSION");
+        command
+    }
+
     /// Run one fufu verb and deserialize its `data` payload.
     ///
     /// Public because the seam is meant to be widened by callers rather than
@@ -445,5 +466,30 @@ fn snippet(text: &str) -> String {
     match text.char_indices().nth(SNIPPET) {
         Some((cut, _)) => format!("{}…", &text[..cut]),
         None => text.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The watch command line, read back without a spawn: the argv is
+    /// exactly `-C <repo> watch --all`, the environment is
+    /// noninteractive, and the session is scrubbed even when the handle
+    /// carries one — on watch it would be a filter, and the feed
+    /// subscribes to everything.
+    #[test]
+    fn watch_all_builds_the_argv_and_spawns_nothing() {
+        let command = Ff::at("/somewhere").session("s-flight").watch_all();
+
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["-C", "/somewhere", "watch", "--all"]);
+
+        let envs: Vec<_> = command.get_envs().collect();
+        assert!(envs.contains(&(OsStr::new("FF_NONINTERACTIVE"), Some(OsStr::new("1")))));
+        assert!(envs.contains(&(OsStr::new("FF_SESSION"), None)));
     }
 }
