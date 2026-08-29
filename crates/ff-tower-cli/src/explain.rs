@@ -842,6 +842,7 @@ mod tests {
             "ff-tower-serve/src/error.rs",
             "ff-tower-core/src/board/resolve.rs",
             "ff-tower-core/src/config.rs",
+            "ff-tower-core/src/verb/error.rs",
             "ff-tower-core/src/ff/error.rs",
             "ff-tower-core/src/log/error.rs",
             "ff-tower-core/src/procedure/mod.rs",

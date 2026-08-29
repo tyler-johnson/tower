@@ -15,7 +15,7 @@
 //! them in a tower id would hide the one part worth matching on.
 
 use ff_tower_core::board::ResolveError;
-use ff_tower_core::{config, ff, log, procedure, skill};
+use ff_tower_core::{config, ff, log, procedure, skill, verb};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -36,6 +36,10 @@ pub enum CliError {
     /// A skill layer that would not read — its own id, carried through.
     #[error(transparent)]
     Skill(#[from] skill::Error),
+    /// A write verb refusing its input — core's table, so the server
+    /// answers in the same words.
+    #[error(transparent)]
+    Verb(#[from] verb::Error),
     /// The server declining to start: a taken port, or a socket that
     /// would not open. The repository half of `serve`'s startup never
     /// lands here — see the `From` below.
@@ -75,6 +79,7 @@ impl CliError {
             CliError::Procedure(err) => err.id(),
             CliError::Skill(err) => err.id(),
             CliError::Config(err) => err.id(),
+            CliError::Verb(err) => err.id(),
         }
     }
 
@@ -87,6 +92,7 @@ impl CliError {
             CliError::Resolve(err) => err.exits(),
             CliError::Ff(err) => err.exits(),
             CliError::Procedure(err) => err.exits(),
+            CliError::Verb(err) => err.exits(),
             CliError::Skill(_) => vec!["ff tower skills".to_string()],
             CliError::Config(config::Error::UnknownKey { .. }) => {
                 vec!["ff tower config".to_string()]

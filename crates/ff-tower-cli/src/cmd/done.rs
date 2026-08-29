@@ -1,17 +1,18 @@
 //! `ff tower done [<flight>]` — finish a flight: off the board, on the
 //! record.
 //!
-//! Always the asserted done this slice; DESIGN's done enum arrives with
-//! procedures. Bare `done` derives the current flight from the invoking
+//! The verb's body lives in core's `verb::done`, flight required, where
+//! the server mounts it too. What stays here is the bare form: `done`
+//! with no argument derives the current flight from the invoking
 //! worktree's chain — the newest session-tagged operation names it — so
-//! the bare path is the one place this verb spawns fufu, once. Finishing
-//! a waiting flight is allowed: abandoning the question is deliberate
-//! when the flight itself is over.
+//! the bare path is the one place this verb spawns fufu, once, and it
+//! passes the derived id down like a typed one.
 
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, Fold};
-use ff_tower_core::log::{EventId, Kind};
+use ff_tower_core::log::EventId;
+use ff_tower_core::verb;
 
 pub fn run(json: bool, flight: Option<&str>) -> Result<(), CliError> {
     if let Some(text) = flight {
@@ -19,39 +20,23 @@ pub fn run(json: bool, flight: Option<&str>) -> Result<(), CliError> {
     }
 
     let store = super::store()?;
-    let fold = board::fold(&store.read_all()?);
     let flight = match flight {
-        Some(text) => super::resolve(&fold, text)?,
-        None => derived(&fold)?,
+        Some(text) => text.to_string(),
+        None => {
+            let fold = board::fold(&store.read_all()?);
+            derived(&fold)?.to_string()
+        }
     };
-    // Not `ensure_active` — the duplicate case earns "already" wording,
-    // and a derived flight already done lands here too.
-    let filed = super::flight(&fold, &flight);
-    if filed.done.is_some() {
-        return Err(CliError::coded(
-            "flight/done",
-            format!("`{}` is already done", super::display(&fold, &flight)),
-            vec!["ff tower".to_string()],
-        ));
-    }
-    let subject = filed.subject.clone();
-
-    let ids = store.append(vec![Kind::Done {
-        flight: flight.clone(),
-    }])?;
-    let id = ids.into_iter().next().expect("one done event");
+    let outcome = verb::done(&store, &flight)?;
 
     if json {
-        let event = super::appended(&store, &id)?;
-        println!(
-            "{}",
-            machine::emit("done", &serde_json::json!({ "done": event }))
-        );
+        println!("{}", machine::emit("done", &outcome.payload));
     } else {
         let colored = render::colored();
         println!(
-            "done {}: {subject}",
-            render::paint_id(&super::display(&fold, &flight), colored)
+            "done {}: {}",
+            render::paint_id(&outcome.display, colored),
+            outcome.subject
         );
         println!("{}", super::tail(colored));
     }

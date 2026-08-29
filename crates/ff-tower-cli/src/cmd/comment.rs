@@ -1,45 +1,23 @@
 //! `ff tower comment <flight> -m <note>` — a note on a flight's record.
 //!
-//! fufu's `describe` gate minus the editor: tower opens no editor this
-//! slice, so a missing `-m` refuses unconditionally — a coded refusal,
-//! never a clap `required = true`, so a `--json` caller gets an envelope.
+//! The verb's body lives in core's `verb::comment`, where the server
+//! mounts it too; this file is the argument order and the echo.
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board;
-use ff_tower_core::log::Kind;
+use ff_tower_core::verb;
 
 pub fn run(json: bool, flight: &str, message: Option<String>) -> Result<(), CliError> {
-    let Some(text) = message else {
-        return Err(CliError::coded(
-            "usage/needs-message",
-            "no note given",
-            vec!["ff tower comment <flight> -m <note>".to_string()],
-        ));
-    };
-    super::parse_ref(flight)?;
-
     let store = super::store()?;
-    let fold = board::fold(&store.read_all()?);
-    let flight = super::resolve(&fold, flight)?;
-
-    let ids = store.append(vec![Kind::Commented {
-        flight: flight.clone(),
-        text,
-    }])?;
-    let id = ids.into_iter().next().expect("one commented event");
+    let outcome = verb::comment(&store, flight, message)?;
 
     if json {
-        let event = super::appended(&store, &id)?;
-        println!(
-            "{}",
-            machine::emit("comment", &serde_json::json!({ "commented": event }))
-        );
+        println!("{}", machine::emit("comment", &outcome.payload));
     } else {
         let colored = render::colored();
         println!(
             "commented on {}",
-            render::paint_id(&super::display(&fold, &flight), colored)
+            render::paint_id(&outcome.display, colored)
         );
         println!("{}", super::tail(colored));
     }

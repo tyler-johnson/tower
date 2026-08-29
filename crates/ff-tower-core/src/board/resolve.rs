@@ -124,6 +124,35 @@ pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, ResolveError> {
     }
 }
 
+/// The fold's flight for a resolved id. Infallible after `resolve` — the
+/// id came out of this fold's filed flights.
+pub fn flight<'a>(fold: &'a Fold, id: &EventId) -> &'a Flight {
+    fold.flights
+        .iter()
+        .find(|flight| &flight.id == id)
+        .expect("resolved to a filed flight")
+}
+
+/// A resolved id in the board's display form — `#n`, or `writer#n` when
+/// the fold's filed flights span more than one writer. The long form
+/// takes no leading `#` — the interior `#` is the marker, and it binds a
+/// writer to a flight number the way `.` binds one to an event seq, so
+/// the two names cannot be confused. Infallible after `resolve`: the
+/// number lives on the fold's flight, so the flight must be present —
+/// `file` re-folds after its append for exactly this.
+pub fn display(fold: &Fold, id: &EventId) -> String {
+    let short = fold
+        .flights
+        .iter()
+        .all(|flight| flight.id.writer == id.writer);
+    let number = flight(fold, id).number;
+    if short {
+        format!("#{number}")
+    } else {
+        format!("{}#{number}", id.writer)
+    }
+}
+
 /// Small counts in words, matching the refusal grammar's register.
 pub fn count(n: usize) -> String {
     match n {

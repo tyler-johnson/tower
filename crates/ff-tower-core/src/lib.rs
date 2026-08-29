@@ -43,3 +43,4 @@ pub mod log;
 pub mod machine;
 pub mod procedure;
 pub mod skill;
+pub mod verb;

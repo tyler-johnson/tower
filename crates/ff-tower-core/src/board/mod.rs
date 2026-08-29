@@ -38,7 +38,7 @@ pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};
-pub use resolve::{FlightRef, ResolveError, count, parse_ref, resolve};
+pub use resolve::{FlightRef, ResolveError, count, display, flight, parse_ref, resolve};
 
 use crate::ff::{self, Ff};
 use crate::log::Event;
