@@ -30,7 +30,7 @@ pub enum Error {
 
     #[error("the subject is empty")]
     EmptySubject,
-    #[error("`-p` names an empty procedure")]
+    #[error("the procedure name is empty")]
     EmptyProcedure,
     #[error("no question given")]
     NeedsQuestion,
@@ -38,18 +38,24 @@ pub enum Error {
     NeedsAnswer,
     #[error("no note given")]
     NeedsNote,
+    /// A word the status vocabulary does not carry.
+    #[error(
+        "`{word}` is not a status — triage, waiting, ready, in_progress, held, done, or canceled"
+    )]
+    BadStatus { word: String },
+    /// A word the assignee vocabulary does not carry.
+    #[error("`{word}` is not a lane — me, agent, or none")]
+    BadAssignee { word: String },
     /// A lifecycle verb reaching a flight that is already off the board.
     #[error("`{display}` is done — the log keeps its record")]
     FlightDone { display: String },
     /// `done` twice — the same id, with "already" wording.
     #[error("`{display}` is already done")]
     AlreadyDone { display: String },
-    #[error("`{display}` is already claimed by {by}")]
-    AlreadyClaimed { display: String, by: String },
-    #[error("`{display}` is already yours")]
-    AlreadyTaken { display: String },
-    #[error("`{display}` is not claimed — nothing to hand back")]
-    Unclaimed { display: String },
+    /// A status move over an open question — only `done` and `canceled`
+    /// may override it.
+    #[error("`{display}` is held on a question: {question}")]
+    StatusHeld { display: String, question: String },
     #[error("`{display}` is already held: {question}")]
     AlreadyHeld { display: String, question: String },
     #[error("`{display}` has no open question")]
@@ -66,10 +72,10 @@ impl Error {
             Error::EmptySubject => "usage/empty-subject",
             Error::EmptyProcedure => "usage/empty-procedure",
             Error::NeedsQuestion | Error::NeedsAnswer | Error::NeedsNote => "usage/needs-message",
+            Error::BadStatus { .. } => "usage/bad-status",
+            Error::BadAssignee { .. } => "usage/bad-assignee",
             Error::FlightDone { .. } | Error::AlreadyDone { .. } => "flight/done",
-            Error::AlreadyClaimed { .. } => "claim/taken",
-            Error::AlreadyTaken { .. } => "take/taken",
-            Error::Unclaimed { .. } => "requeue/unclaimed",
+            Error::StatusHeld { .. } => "status/held",
             Error::AlreadyHeld { .. } => "hold/exists",
             Error::NotHeld { .. } => "answer/not-held",
         }
@@ -85,17 +91,14 @@ impl Error {
             Error::EmptySubject => &[],
             Error::EmptyProcedure => &["ff tower procedures"],
             Error::NeedsQuestion => &["ff tower hold <flight> -m <question>"],
-            Error::NeedsAnswer | Error::AlreadyHeld { .. } => {
+            Error::NeedsAnswer | Error::AlreadyHeld { .. } | Error::StatusHeld { .. } => {
                 &["ff tower answer <flight> -m <answer>"]
             }
             Error::NeedsNote => &["ff tower comment <flight> -m <note>"],
             Error::FlightDone { .. } | Error::AlreadyDone { .. } | Error::NotHeld { .. } => {
                 &["ff tower"]
             }
-            Error::AlreadyClaimed { .. } | Error::Unclaimed { .. } => {
-                &["ff tower", "ff tower next"]
-            }
-            Error::AlreadyTaken { .. } => &["ff tower requeue <flight>", "ff tower brief <flight>"],
+            Error::BadStatus { .. } | Error::BadAssignee { .. } => &[],
         };
         exits.iter().map(|exit| (*exit).to_string()).collect()
     }

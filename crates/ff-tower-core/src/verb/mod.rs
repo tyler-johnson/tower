@@ -15,28 +15,22 @@
 //! live in [`Error`], one table beneath both surfaces.
 
 mod answer;
-mod claim;
+mod assign;
 mod classify;
 mod comment;
-mod done;
 mod error;
 mod file;
 mod hold;
-mod requeue;
-mod route;
-mod take;
+mod status;
 
 pub use answer::{Answer, Answered, answer};
-pub use claim::{Claim, Claimed, claim};
-pub use classify::{Parent, classify, stamp};
+pub use assign::{Assign, Assigned, assign};
+pub use classify::{Fields, Parent, classify};
 pub use comment::{Comment, Commented, comment};
-pub use done::{Done, Finished, done};
 pub use error::Error;
 pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
-pub use requeue::{Requeue, Requeued, requeue};
-pub use route::{Route, Routed, route};
-pub use take::{Take, Taken, take};
+pub use status::{Move, Moved, cancel, done, status};
 
 use crate::board::{Flight, Fold, display};
 use crate::log::{self, Event, EventId, Store};
@@ -67,13 +61,13 @@ pub fn appended_all(store: &Store, ids: &[EventId]) -> Result<Vec<Event>, log::E
         .collect())
 }
 
-/// The flight, refused when it is already done. The lifecycle verbs stop
-/// here; `comment`, `link`, and `edit` stay permissive on purpose — a
-/// note on the record is fine, and a wrong word in a closed record is
-/// exactly what `edit` is for.
+/// The flight, refused when it is already closed — done or canceled.
+/// The lifecycle verbs stop here; `comment`, `link`, and `edit` stay
+/// permissive on purpose — a note on the record is fine, and a wrong
+/// word in a closed record is exactly what `edit` is for.
 pub fn ensure_active<'a>(fold: &'a Fold, id: &EventId) -> Result<&'a Flight, Error> {
     let flight = crate::board::flight(fold, id);
-    if flight.done.is_some() {
+    if flight.closed() {
         return Err(Error::FlightDone {
             display: display(fold, id),
         });
@@ -98,10 +92,17 @@ mod tests {
     fn filed(store: &Store, subject: &str) {
         store
             .append(vec![Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: None,
                 subject: subject.to_string(),
                 body: String::new(),
-                part: None,
+                status: "triage".to_string(),
+                assignee: None,
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             }])
             .expect("append");
     }
@@ -142,7 +143,7 @@ mod tests {
     fn an_empty_subject_or_procedure_refuses_before_the_registry() {
         let (_repo, store) = store();
         pinned(
-            &file(&store, "   ", None, None)
+            &file(&store, "   ", Fields::default(), None)
                 .err()
                 .expect("empty subject"),
             "usage/empty-subject",
@@ -150,33 +151,55 @@ mod tests {
             &[],
         );
         pinned(
-            &file(&store, "a subject", None, Some("  ".to_string()))
+            &file(&store, "a subject", Fields::default(), Some("  "))
                 .err()
                 .expect("empty name"),
             "usage/empty-procedure",
-            "`-p` names an empty procedure",
+            "the procedure name is empty",
             &["ff tower procedures"],
         );
     }
 
     #[test]
-    fn a_second_claim_take_or_hold_is_refused() {
+    fn a_bad_status_or_lane_refuses_before_the_store() {
+        let (_repo, store) = store();
+        filed(&store, "standing");
+        pinned(
+            &status(&store, "1", "claimed", None)
+                .err()
+                .expect("not a status"),
+            "usage/bad-status",
+            "`claimed` is not a status — triage, waiting, ready, in_progress, held, done, or canceled",
+            &[],
+        );
+        pinned(
+            &assign(&store, "1", "you").err().expect("not a lane"),
+            "usage/bad-assignee",
+            "`you` is not a lane — me, agent, or none",
+            &[],
+        );
+        pinned(
+            &file(
+                &store,
+                "laned",
+                Fields {
+                    assignee: Some("pair".to_string()),
+                    ..Fields::default()
+                },
+                None,
+            )
+            .err()
+            .expect("not a lane"),
+            "usage/bad-assignee",
+            "`pair` is not a lane — me, agent, or none",
+            &[],
+        );
+    }
+
+    #[test]
+    fn a_second_hold_is_refused_and_a_held_flight_refuses_a_move() {
         let (_repo, store) = store();
         filed(&store, "contested");
-        claim(&store, "1").expect("the first claim lands");
-        pinned(
-            &claim(&store, "1").err().expect("claimed once already"),
-            "claim/taken",
-            "`#1` is already claimed by tests@tower.invalid",
-            &["ff tower", "ff tower next"],
-        );
-        take(&store, "1").expect("the take overrides");
-        pinned(
-            &take(&store, "1").err().expect("taken once already"),
-            "take/taken",
-            "`#1` is already yours",
-            &["ff tower requeue <flight>", "ff tower brief <flight>"],
-        );
         hold(&store, "1", Some("which way?".to_string())).expect("the hold lands");
         pinned(
             &hold(&store, "1", Some("another?".to_string()))
@@ -186,18 +209,23 @@ mod tests {
             "`#1` is already held: which way?",
             &["ff tower answer <flight> -m <answer>"],
         );
+        pinned(
+            &status(&store, "1", "ready", None)
+                .err()
+                .expect("the question stands"),
+            "status/held",
+            "`#1` is held on a question: which way?",
+            &["ff tower answer <flight> -m <answer>"],
+        );
+        // The two exceptions: closing the flight abandons the question
+        // deliberately.
+        cancel(&store, "1", None).expect("cancel overrides the hold");
     }
 
     #[test]
-    fn a_requeue_with_nothing_claimed_and_an_answer_to_nothing_refuse() {
+    fn an_answer_to_nothing_refuses() {
         let (_repo, store) = store();
         filed(&store, "untouched");
-        pinned(
-            &requeue(&store, "1").err().expect("nothing claimed"),
-            "requeue/unclaimed",
-            "`#1` is not claimed — nothing to hand back",
-            &["ff tower", "ff tower next"],
-        );
         pinned(
             &answer(&store, "1", Some("to what?".to_string()))
                 .err()
@@ -209,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn a_done_flight_refuses_the_lifecycle_in_both_wordings() {
+    fn a_closed_flight_refuses_the_lifecycle_in_both_wordings() {
         let (_repo, store) = store();
         filed(&store, "finished");
         done(&store, "1").expect("the finish lands");
@@ -220,7 +248,23 @@ mod tests {
             &["ff tower"],
         );
         pinned(
-            &claim(&store, "1").err().expect("the record is closed"),
+            &status(&store, "1", "ready", None)
+                .err()
+                .expect("the record is closed"),
+            "flight/done",
+            "`#1` is done — the log keeps its record",
+            &["ff tower"],
+        );
+        pinned(
+            &assign(&store, "1", "agent")
+                .err()
+                .expect("the record is closed"),
+            "flight/done",
+            "`#1` is done — the log keeps its record",
+            &["ff tower"],
+        );
+        pinned(
+            &cancel(&store, "1", None).err().expect("closed already"),
             "flight/done",
             "`#1` is done — the log keeps its record",
             &["ff tower"],
