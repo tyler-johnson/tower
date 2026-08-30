@@ -3,10 +3,10 @@
 //! Two halves, one contract. The read half is four resources over five
 //! GET routes, every one answering the exact envelope the matching verb
 //! emits under `--json` — same fold, same serializer, same bytes,
-//! trailing newline included. The write half is the verb API: nine POST
-//! routes — file, claim, take, requeue, hold, answer, done, comment,
-//! triage — each taking the verb's arguments as a small JSON body,
-//! appending to the log, and answering the verb's own data envelope. The
+//! trailing newline included. The write half is the verb API: eight POST
+//! routes — file, assign, status, hold, answer, done, cancel, comment —
+//! each taking the verb's arguments as a small JSON body, appending to
+//! the log, and answering the verb's own data envelope. The
 //! arguments ride the body rather than the path on purpose: a flight
 //! reference can carry `#`, and `#` is a URL fragment. `cmd` on each
 //! envelope keeps the CLI's wire name (`/api/bays` answers `bay list`),
@@ -83,14 +83,13 @@ pub(crate) fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
         .route("/api/procedures", get(procedures))
         .route("/api/procedures/{name}", get(procedure))
         .route("/api/file", post(file))
-        .route("/api/claim", post(claim))
-        .route("/api/take", post(take))
-        .route("/api/requeue", post(requeue))
+        .route("/api/assign", post(assign))
+        .route("/api/status", post(status))
         .route("/api/hold", post(hold))
         .route("/api/answer", post(answer))
         .route("/api/done", post(done))
+        .route("/api/cancel", post(cancel))
         .route("/api/comment", post(comment))
-        .route("/api/triage", post(triage))
         .with_state(Arc::new(AppState {
             repo: repo.to_path_buf(),
             feed,
@@ -275,13 +274,37 @@ async fn procedure(
     .await
 }
 
-/// `file`'s arguments, as the POST body carries them.
+/// `file`'s arguments, as the POST body carries them — every stored
+/// field the CLI's flags set.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileBody {
     subject: String,
     message: Option<String>,
     procedure: Option<String>,
+    priority: Option<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    skill: Option<String>,
+    assignee: Option<String>,
+    bay: Option<String>,
+}
+
+/// `assign`'s arguments: the lane is required — `none` clears it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssignBody {
+    flight: String,
+    assignee: String,
+}
+
+/// `status`'s arguments: the move is required, the reason optional.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StatusBody {
+    flight: String,
+    status: String,
+    message: Option<String>,
 }
 
 /// The single-argument verbs: claim, take, requeue, done. The flight is
@@ -306,35 +329,38 @@ struct MessageBody {
 async fn file(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     act("file", state, body, |repo, body: FileBody| {
         let store = Store::open(repo)?;
-        let outcome = verb::file(&store, &body.subject, body.message, body.procedure)?;
+        let outcome = verb::file(
+            &store,
+            &body.subject,
+            verb::Fields {
+                message: body.message,
+                priority: body.priority,
+                labels: body.labels,
+                skill: body.skill,
+                assignee: body.assignee,
+                bay: body.bay,
+            },
+            body.procedure.as_deref(),
+        )?;
         Ok(machine::emit("file", &outcome.payload))
     })
     .await
 }
 
-async fn claim(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
-    act("claim", state, body, |repo, body: FlightBody| {
+async fn assign(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("assign", state, body, |repo, body: AssignBody| {
         let store = Store::open(repo)?;
-        let outcome = verb::claim(&store, &body.flight)?;
-        Ok(machine::emit("claim", &outcome.payload))
+        let outcome = verb::assign(&store, &body.flight, &body.assignee)?;
+        Ok(machine::emit("assign", &outcome.payload))
     })
     .await
 }
 
-async fn take(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
-    act("take", state, body, |repo, body: FlightBody| {
+async fn status(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("status", state, body, |repo, body: StatusBody| {
         let store = Store::open(repo)?;
-        let outcome = verb::take(&store, &body.flight)?;
-        Ok(machine::emit("take", &outcome.payload))
-    })
-    .await
-}
-
-async fn requeue(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
-    act("requeue", state, body, |repo, body: FlightBody| {
-        let store = Store::open(repo)?;
-        let outcome = verb::requeue(&store, &body.flight)?;
-        Ok(machine::emit("requeue", &outcome.payload))
+        let outcome = verb::status(&store, &body.flight, &body.status, body.message)?;
+        Ok(machine::emit("status", &outcome.payload))
     })
     .await
 }
@@ -369,35 +395,20 @@ async fn done(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     .await
 }
 
+async fn cancel(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("cancel", state, body, |repo, body: MessageBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::cancel(&store, &body.flight, body.message)?;
+        Ok(machine::emit("cancel", &outcome.payload))
+    })
+    .await
+}
+
 async fn comment(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     act("comment", state, body, |repo, body: MessageBody| {
         let store = Store::open(repo)?;
         let outcome = verb::comment(&store, &body.flight, body.message)?;
         Ok(machine::emit("comment", &outcome.payload))
-    })
-    .await
-}
-
-/// `triage`'s arguments. `message` is the `-m` explanation, stored
-/// beside the route and never recomputed.
-///
-/// `procedure` is required where `-p` is optional on the CLI: the CLI's
-/// flight-without-procedure branch is a clap-shaped `usage/no-procedure`
-/// refusal that has no meaning over a body, where a missing field is
-/// `usage/bad-body` — the same 400.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TriageBody {
-    flight: String,
-    procedure: String,
-    message: Option<String>,
-}
-
-async fn triage(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
-    act("triage", state, body, |repo, body: TriageBody| {
-        let store = Store::open(repo)?;
-        let outcome = verb::route(&store, &body.flight, &body.procedure, body.message)?;
-        Ok(machine::emit("triage", &outcome.payload))
     })
     .await
 }
@@ -481,12 +492,7 @@ impl ApiError {
             StatusCode::NOT_FOUND
         } else if matches!(
             id,
-            "claim/taken"
-                | "take/taken"
-                | "requeue/unclaimed"
-                | "hold/exists"
-                | "answer/not-held"
-                | "flight/done"
+            "flight/done" | "hold/exists" | "answer/not-held" | "status/held"
         ) {
             StatusCode::CONFLICT
         } else if id == "log/contended" {
@@ -512,11 +518,11 @@ mod tests {
         });
         assert_eq!(contended.status(), StatusCode::SERVICE_UNAVAILABLE);
 
-        let taken = ApiError::Verb(verb::Error::AlreadyClaimed {
+        let held = ApiError::Verb(verb::Error::StatusHeld {
             display: "#1".to_string(),
-            by: "someone@tower.invalid".to_string(),
+            question: "which way?".to_string(),
         });
-        assert_eq!(taken.status(), StatusCode::CONFLICT);
+        assert_eq!(held.status(), StatusCode::CONFLICT);
 
         let garbled = ApiError::Body {
             detail: "expected value".to_string(),
