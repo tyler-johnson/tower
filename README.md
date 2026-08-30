@@ -5,17 +5,17 @@
 **it doesn't fly anything — it keeps things from colliding**
 
 *Project management for people and agents, built on [fufu](https://github.com/tyler-johnson/fufu).<br>
-State is derived from the repository, never entered. Only intent is stored.*
+Intent is stored; the repository audits it.*
 
 </div>
 
 ---
 
-> [DESIGN.md](DESIGN.md) is the founding sketch and still the thing to read; the flights on the board are what stands built so far.
+> [DESIGN.md](DESIGN.md) is the design and the thing to read; the flights on the board are what stands built so far.
 
-Every tracker asks a human to say what is happening, and then drifts from the repository the moment attention lapses. fufu already knows: capture runs before every action, futures are computed for free, branches and sessions are observable. So tower stores what a person authored — title, body, links, priority, dependencies — and derives the rest. A flight is `active` because a branch exists with snapshots on it, not because anyone clicked.
+The model is the one every tracker uses, on purpose: a flight is an issue with a status, an assignee, a priority, labels, and links, recognizable in one glance to anyone who has used Linear. The engine underneath is what no other tracker has. fufu's capture floor runs before every action, so tower checks the claims its own board makes — a flight marked In Progress with no motion says so on its row, work is visible before the first commit exists, and two agents editing the same hunk on different branches is a discovered conflict, not a surprise at merge. Drift is flagged, never corrected.
 
-The consequence worth the whole design: tower sees work start before the first commit exists, because the capture floor does. An agent that edits for twenty minutes and commits nothing is visible.
+**tower is a thing agents call. It never calls agents.** There is no dispatch and no iteration verb: the harness loops and calls `ff tower next`, which hands back the next conflict-free set of ready work — the harness is the scheduler, tower is only the queue. And the engine ships empty: no built-in procedures, no built-in skills, no default opinions about how work should flow. Structure and judgment are files their owner authors; the documentation teaches by example.
 
 ## The seam
 
@@ -25,33 +25,11 @@ tower is a separate program with its own authority, its own store, and its own c
 reads     ff status --json · ff log --json · ff collide --json · ff watch --all
 calls     ff start · ff switch · ff worktree add|remove, tagged --session <flight>
 stores    refs/tower/log/<author>/<writer>
-derives   state · progress · conflicts · land order
+derives   motion · conflicts · drift · land order
 writes    nothing under refs/fufu/*, ever
 ```
 
 That last line is fufu's extension rule unmodified: extensions read fufu state and call fufu verbs; only fufu writes fufu state.
-
-## Passive by construction
-
-**tower is a thing agents call. It never calls agents.** Passive is about initiative, not process count: every verb is a read plus a local write, and there is no dispatch and no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue. `ff tower serve` runs standing, but it is a clock and a subscriber — it refolds on repository motion and pulls on a cadence, decides nothing, and every interface works without it, just staler.
-
-## Skills
-
-The orchestrator lives in markdown, not in Rust. tower ships three skills — instructions a harness executes, never a process tower spawns:
-
-- **plan** — decompose a goal into linked flights; solo mode's entry point.
-- **work** — claim, do, hold or commit, repeat; the loop that pairs with `ff tower next`, running until exit 1 (drained) or 3 (needs you) and parking holds along the way.
-- **review** — first-pass a branch: commit the mechanical fixes, write the pass as a comment, hold the judgment for a person's verdict.
-
-Skills layer like procedures — built-in, then `~/.config/tower/skills/*.md`, then `.tower/skills/*.md` in the repository, the same name replacing wholesale — and `ff tower skills <name>` prints one raw, byte for byte. The shipped set stops at committed on a branch: no push, no PR, no forge write. Changing that boundary means forking the file, and the fork is visibly the operator's — the listing names the layer every skill came from.
-
-The harness bridge is your own redirect, because tower never writes another program's config:
-
-```sh
-ff tower skills work > .claude/skills/tower-work/SKILL.md
-```
-
-Works verbatim — the built-ins carry the front matter a skill directory expects.
 
 ## Layout
 
@@ -59,6 +37,7 @@ Works verbatim — the built-ins carry the front matter a skill directory expect
 |---|---|
 | `ff-tower-core` | the flight log, the fold that becomes a board, procedures, intake, land order |
 | `ff-tower-cli` | the one binary, `ff-tower`, which fufu's dispatch finds for `ff tower` |
+| `ff-tower-serve` | the standing server: the embedded web board, its API, and the change feed |
 | `ff-tower-testsupport` | shared fixtures |
 
 Forge adapters are separate binaries discovered on PATH — `tower-github`, `tower-linear` — on git's extension model, so a third party can write one without touching this repository.
