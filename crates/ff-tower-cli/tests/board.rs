@@ -44,10 +44,17 @@ fn repo_with_a_filing() -> Repo {
     Store::open(repo.path())
         .expect("open")
         .append(vec![Kind::Filed {
-            procedure: "open".to_string(),
+            procedure: None,
             subject: "write the doctor verb".to_string(),
             body: String::new(),
-            part: None,
+            status: "triage".to_string(),
+            assignee: None,
+            priority: "none".to_string(),
+            labels: Vec::new(),
+            skill: None,
+            bay: None,
+            done: "asserted".to_string(),
+            branch: None,
         }])
         .expect("append");
     repo
@@ -200,7 +207,7 @@ fn colliding_flights_carry_the_warn_phrase_and_the_json_verdicts() {
 }
 
 #[test]
-fn a_decomposed_parent_carries_the_waiting_phrase_until_its_parts_land() {
+fn a_decomposed_parent_carries_the_waiting_phrase_until_its_children_land() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
@@ -213,10 +220,13 @@ fn a_decomposed_parent_carries_the_waiting_phrase_until_its_parts_land() {
     assert!(out.contains("waiting on 2 flights"), "{out}");
 
     // A done dependency has left the board, so the phrase narrows to the
-    // live part and then clears itself.
+    // live child and then clears itself.
     stdout(&ff_tower(repo.path(), &["done", "2"]));
     let out = stdout(&ff_tower(repo.path(), &[]));
-    assert!(out.contains("waiting on #3"), "one live part, named: {out}");
+    assert!(
+        out.contains("waiting on #3"),
+        "one live child, named: {out}"
+    );
 
     stdout(&ff_tower(repo.path(), &["done", "3"]));
     let out = stdout(&ff_tower(repo.path(), &[]));

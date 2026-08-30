@@ -18,7 +18,7 @@ use crate::{machine, render};
 use ff_tower_core::board::{self, DoctorRow, Level, Reads, SeamHealth};
 use ff_tower_core::ff::{self, BranchList};
 use ff_tower_core::log::Store;
-use ff_tower_core::procedure::Crew;
+use ff_tower_core::procedure::Assignee;
 use ff_tower_core::{procedure, skill};
 
 pub fn run(json: bool) -> Result<i32, CliError> {
@@ -129,11 +129,11 @@ fn skill_rows(root: Option<&Path>) -> Vec<DoctorRow> {
         }
     };
     for definition in procedures.definitions() {
-        for part in &definition.parts {
-            if part.crew != Crew::Agent {
+        for flight in &definition.flights {
+            if flight.assignee != Assignee::Agent {
                 continue;
             }
-            let Some(name) = part.skill.as_deref() else {
+            let Some(name) = flight.skill.as_deref() else {
                 continue;
             };
             if skills.get(name).is_none() {
@@ -141,9 +141,9 @@ fn skill_rows(root: Option<&Path>) -> Vec<DoctorRow> {
                     level: Level::Warn,
                     check: "skill/unresolved".to_string(),
                     message: format!(
-                        "procedure {} flies part {} with skill `{name}`, which nothing installs — installed: {}",
+                        "procedure {} flies flight {} with skill `{name}`, which nothing installs — installed: {}",
                         definition.name,
-                        part.id,
+                        flight.id,
                         skills.names().join(", ")
                     ),
                 });

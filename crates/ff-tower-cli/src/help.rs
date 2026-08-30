@@ -45,7 +45,7 @@ machine with no fufu on it.";
 pub const ROOT_EXAMPLES: &str = "\
 Examples:
   ff tower                       the board: what needs you, what is moving
-  ff tower next                  claim the next ready flight
+  ff tower next                  pull the next Ready flight
   ff tower brief 17              everything known about one flight
   ff tower file \"fix the login redirect\"   put work on the board
   ff tower hold 17 -m \"which flow wins?\"   stop with a question, bay warm
@@ -55,19 +55,20 @@ Examples:
 `ff tower help <command>` (or `ff tower <command> --help`) has the details.";
 
 pub const NEXT: &str = "\
-Claim the next ready flight, or with -n <k> a set of k that collide
-with neither each other nor anything already flying. The pool is any
-unclaimed live flight; readiness is declared dependencies done.
-Admission is greedy, in filed order, and a pairing fufu could not
+Pull the next Ready flight from the agent lane, or with -n <k> a set
+of k that collide with neither each other nor anything already
+flying. The pool is every Ready flight assigned to the agent lane;
+admission is greedy, in filed order, and a pairing fufu could not
 judge excludes — unknown never rounds down to clear.
 
-The picked set is claimed in one atomic append, so two agents pulling
-at once cannot take the same flight. --peek is the same computation
-with no claim written, and the envelope says which happened either
-way.
+The pull sets each picked flight In Progress in one atomic append, so
+two agents pulling at once cannot take one flight — the append is the
+exclusivity, and the event's byline is the pilot. --peek is the same
+computation with nothing written, and the envelope says which
+happened either way.
 
 An empty pick is an outcome riding a full data envelope, and only the
-exit code says which one: 3 when the crew gate emptied it — work
+exit code says which one: 3 when the lane emptied it — Ready work
 exists and it needs you — and 1 when the board is truly drained,
 fufu's \"no.\" A loop over `ff tower next` terminates on the code
 alone.
@@ -79,16 +80,17 @@ the ask rather than the board.";
 
 pub const NEXT_EXAMPLES: &str = "\
 Examples:
-  ff tower next                  claim the next ready flight
+  ff tower next                  pull the next Ready flight
   ff tower next -n 4             a set of four that cannot collide
   ff tower next --peek           the same computation, nothing written
-  ff tower claim 17              one specific flight, out of order";
+  ff tower status 17 in_progress          take one by hand instead";
 
 pub const BRIEF: &str = "\
 Everything the log and the repository know about one flight, in one
-read: subject and body, the comments in reading order, each link with
-the linked flight's subject and done state, the open question, and
-the reads' facts — branch, tip, holds, whether the branch is yours.
+read: subject and body, every stored field, the comments in reading
+order, each link with the linked flight's subject and status, the
+open question, and the reads' facts — branch, tip, holds, whether the
+branch is yours.
 The standing says where the flight sits on `ff tower next`'s walk and
 what it beat.
 
@@ -105,24 +107,35 @@ Examples:
   ff tower next                  where the flight id came from";
 
 pub const FILE: &str = "\
-Put work on the board. The subject is the flight's one line; -m is
-the body, detail beyond it; -p files under an installed procedure,
-and a name that is not installed is refused. Unsaid, the flight lands
-unclassified in the open pile, where `ff tower triage` finds it.
+Put work on the board. One argument is a bare filing: the subject is
+the flight's one line, and the flight lands in Triage — nothing
+clears work to Ready but a procedure or your own `status` move. Two
+arguments name a procedure first, then the subject; a name
+that is not installed is refused, and one word is never guessed as a
+procedure name.
+
+Every stored field is a flag: -m the body, -p the priority, --label
+(repeatable), --skill, --assignee (me or agent), --bay. A procedure
+is nothing more than those same fields saved across a graph of
+flights.
 
 A procedure's definition is read at filing and never again — each
-part's crew, skill, done, and bay are copied into the log, so editing
-a definition afterwards cannot disturb a flight already in the air.
-One part collapses onto the flight: saying one thing must not cost
-two flights. Two or more file a parent plus one flight per part, on
-the same edges `ff tower decompose <flight> <part>…` writes, all in
-one append, so no part is ever live, unlinked, and claimable.";
+flight's fields are copied into the log, so editing a definition
+afterwards cannot disturb a flight already in the air. Statuses fall
+out of the edges at mint: no `after` is born Ready, dependencies are
+born Waiting, and the parent waits on them all. One flight collapses
+onto the filing — born Ready, your flags winning over the
+definition's fields — because saying one thing must not cost two
+flights. Two or more file a parent plus one flight each, on the same
+edges `decompose` writes, all in one append, so no flight is ever
+live, unlinked, and pullable.";
 
 pub const FILE_EXAMPLES: &str = "\
 Examples:
-  ff tower file \"fix the login redirect\"        one line, unclassified
+  ff tower file \"fix the login redirect\"        one line, into Triage
   ff tower file \"rotate the keys\" -m \"…\"        with a body
-  ff tower file \"cut a release\" -p release      under a procedure
+  ff tower file review feather                  under a procedure
+  ff tower file \"upgrade axum\" -p high --label chore --assignee agent   fields at filing
   ff tower procedures                           what there is to file under";
 
 pub const COMMENT: &str = "\
@@ -142,19 +155,23 @@ Examples:
   ff tower edit <id> -m \"…\"      reword one, by its event id";
 
 pub const EDIT: &str = "\
-Reword a flight — its subject with -s, its body with -m — or a
-comment's text with -m, naming the comment by its event id. An
-overlay, not a rewrite: the fold applies the newest word per field,
-and the log keeps every prior one.
+Reword a flight — its subject with -s, its body with -m — or reset
+its fields: --priority, --label (repeatable, replacing the label set
+wholesale), --skill, --bay. A comment's text rewords with -m, naming
+the comment by its event id. An overlay, not a rewrite: the fold
+applies the newest value per field, and the log keeps every prior
+one.
 
 An empty -m is a legitimate edit — clearing a body, or blanking a
-comment's text. A done flight's record edits like any other: a wrong
-word in a closed record is the motivating case.";
+comment's text. A closed flight's record edits like any other: a
+wrong word in a closed record is the motivating case. Status and
+assignee are not edits — `status` and `assign` are their own verbs,
+attributed as moves.";
 
 pub const EDIT_EXAMPLES: &str = "\
 Examples:
   ff tower edit 17 -s \"the real subject\"   reword the subject
-  ff tower edit 17 -m \"…\"        replace the body; prior words stay
+  ff tower edit 17 -p high --label chore    reset the fields
   ff tower edit pi-8c2e.41 -m \"…\"          a comment, by its event id
   ff tower brief 17              the record, overlay applied";
 
@@ -175,43 +192,47 @@ Examples:
   ff tower brief 17              the edge, read from both sides";
 
 pub const DECOMPOSE: &str = "\
-Split a flight into parts: each part files as its own flight, one
-subject per argument, and the parent waits on all of them. Parts ride
-ordinary link edges — `ff tower link <a> <b>` declares the same edge
-by hand, and every reader works on both unchanged. The filings and
-the edges land in one append, so no part is ever live, unlinked, and
-claimable.
+Make a flight a parent. Exactly one argument that names an installed
+procedure mints the definition's flights beneath it — statuses
+falling out of the edges, Ready with no `after` and Waiting with any.
+Anything else is the by-hand form: each argument files as one
+sub-flight, born in Triage like any bare filing, cleared by your own
+gesture. A subject that happens to collide with a procedure name is
+spelled around by giving two subjects or renaming one.
 
-Every part done makes the parent claimable, not finished: whether the
-broad task is over is a judgment, and `ff tower done` is where it
-gets made. Parts inherit the parent's procedure stamp, and a part's
-body is a comment — a per-part -m would have to pair with a subject
-positionally.";
+Either way the children ride ordinary link edges —
+`ff tower link <a> <b>` declares the same edge by hand, and every
+reader works on both unchanged — and the filings and the edges land
+in one append, so no sub-flight is ever live, unlinked, and pullable.
+Every sub-flight closed makes the parent Ready, not finished: whether
+the broad task is over is a judgment, and `ff tower done` is where it
+gets made.";
 
 pub const DECOMPOSE_EXAMPLES: &str = "\
 Examples:
-  ff tower decompose 17 \"the parser\" \"the render\"   two parts, linked
-  ff tower brief 17              the parent, its parts under depends on
-  ff tower next                  parts are what it hands out first";
+  ff tower decompose 17 \"the parser\" \"the render\"   two sub-flights, linked
+  ff tower decompose 17 review   the definition's flights, minted under it
+  ff tower brief 17              the parent, its children under depends on
+  ff tower next                  sub-flights are what it hands out first";
 
 pub const PROCEDURES: &str = "\
 What is installed: every procedure's name, the layer it came from,
-and its parts with their crews. A name is the detail page — the match
-rules, marked inert because no adapter exists to fire them; every
-part with crew, skill, after, and done; and the path a fork of it
-belongs at.
+and the flights it stamps out with their lanes. A name is the detail
+page — the match rules, marked inert because no adapter exists to
+fire them; every flight with assignee, skill, after, and done; and
+the path a fork of it belongs at.
 
 Read-only, and it spawns no fufu. Filing under one is
-`ff tower file <subject> -p <name>`, and the definition is copied
-into the log at filing, so editing an installed procedure never
-disturbs a flight already in the air.";
+`ff tower file <name> <subject>`, and the definition is copied into
+the log at filing, so editing an installed procedure never disturbs a
+flight already in the air.";
 
 pub const PROCEDURES_EXAMPLES: &str = "\
 Examples:
   ff tower procedures            every installed procedure
-  ff tower procedures release    one in full: parts, rules, fork path
-  ff tower file \"…\" -p release   file a flight under one
-  ff tower triage 17 -p release  route one that is already filed";
+  ff tower procedures release    one in full: flights, rules, fork path
+  ff tower file release \"…\"     file a flight under one
+  ff tower decompose 17 release  mint one under a flight already filed";
 
 pub const SKILLS: &str = "\
 What skills are installed: the prose an agent-crewed part is flown
@@ -222,9 +243,9 @@ skill directory or a fork's starting point needs no flag.
 
 Three layers, the most specific winning whole: built-in, shipped in
 the binary; user, ~/.config/tower/skills/<name>.md; repo,
-.tower/skills/<name>.md under the main worktree. A procedure's agent
-part names the skill it is flown with, and `next` hands the name out
-on the picked row.
+.tower/skills/<name>.md under the main worktree. A flight names the
+skill it is flown with, and `next` hands the name out on the picked
+row.
 
 Read-only, and it spawns no fufu. The shipped skills stop at
 committed on a branch — no push, no PR — and editing that boundary
@@ -236,91 +257,57 @@ Examples:
   ff tower skills work     one, raw — redirect it where a harness reads
   ff tower procedures      the shapes whose agent parts name a skill";
 
-pub const TRIAGE: &str = "\
-Bare, the unclassified pile: every live flight still filed under
-open, claimed and held ones included — a claim does not classify.
-Rendering the pile is a pure log read and always exits 0.
+pub const ASSIGN: &str = "\
+Set a flight's lane: me, agent, or none to clear it. The lane is the
+routing decision — whose queue this is in — and it is all the field
+carries: the queue draws only from Ready flights in the agent lane,
+so assigning is what opens or closes the gate. Which agent actually
+flies it needs no field — every event carries the byline of whoever
+wrote it, so the history shows the pilot.
 
-A flight plus -p is the route: one event re-stamps it, and -m goes
-down beside it as the explanation — stored, never recomputed. The
-collapse rule is the same one filing under -p obeys: a single-part
-procedure stamps the flight itself, a multi-part one makes it a
-parent and files its parts in the same atomic batch. Routing back to
-open is the undo, no special case; routing a claimed flight is
-allowed and the claim stands.";
+A closed flight refuses; everything else re-lanes freely, and the
+move is on the record with your name on it.";
 
-pub const TRIAGE_EXAMPLES: &str = "\
+pub const ASSIGN_EXAMPLES: &str = "\
 Examples:
-  ff tower triage                the unclassified pile
-  ff tower triage 17 -p release  route one flight
-  ff tower triage 17 -p release -m \"…\"   and say why, on the record
-  ff tower triage 17 -p open     the undo
-  ff tower procedures            what there is to route to";
+  ff tower assign 17 agent       into the agent queue
+  ff tower assign 17 me          back to yours
+  ff tower assign 17 none        no lane at all
+  ff tower next --peek           what the agent lane would hand out";
 
-pub const CLAIM: &str = "\
-Claim one specific flight, out of order — `ff tower next` picks for
-you, this is you picking. The claim is the motion: the flight moves
-into the air at assignment, before any capture exists in a bay, so
-the board answers who has a flight without waiting for a keystroke.
+pub const STATUS: &str = "\
+Move a flight: triage, waiting, ready, in_progress, held, done, or
+canceled. One event, last-wins, with your byline — the lifecycle
+verbs are this verb carrying a payload, and the board is grouped by
+what this verb stores.
 
-A claim does not classify, route, or start anything running — tower
-runs nothing. Re-claiming is refused, even by the same author: a
-silent success that appended nothing would lie, and reassigning a
-flight somebody already flies would be a handoff nobody agreed to.
-`ff tower take <flight>` is the human override for that refusal.";
+A closed flight refuses every move — the log keeps its record. An
+open question refuses any move except done and canceled: abandoning
+the question is deliberate when the flight itself is over, and
+everything short of that goes through
+`ff tower answer <flight> -m <answer>`.";
 
-pub const CLAIM_EXAMPLES: &str = "\
+pub const STATUS_EXAMPLES: &str = "\
 Examples:
-  ff tower claim 17              this one, now
-  ff tower next                  the picked-for-you spelling
-  ff tower brief 17              read before you fly
-  ff tower done 17               the claim's other end";
+  ff tower status 17 ready       cleared for work
+  ff tower status 17 in_progress          take it by hand
+  ff tower done 17               the same append, its own verb
+  ff tower cancel 17 -m \"…\"     off the board without the finish";
 
-pub const TAKE: &str = "\
-Take the controls: the flight becomes yours and the agent lane
-closes. This is the human override for `claim`'s refusal — `claim`
-will not reassign a flight somebody already flies, because an agent
-stealing another's work would be a handoff nobody agreed to, and a
-person typing this is the consent that refusal declines to assume.
-So a take over someone else's claim is allowed, and the line names
-who the flight came from.
+pub const CANCEL: &str = "\
+Cancel a flight: off the board without the finish, on the record in
+full. -m says why, stored on the move itself — a canceled flight
+with no reason is a question your future self will ask.
 
-The filing's own crew stamp is never rewritten; the take sits over
-it. `ff tower brief <flight>` still shows the part exactly as filed,
-and `ff tower requeue <flight>` hands the flight back with nothing
-to undo. Taking twice is refused: a silent success that appended
-nothing would lie.";
+Canceled and done are the two closed statuses, and they close alike:
+comments and edits still land, the id still resolves, the flight
+still briefs. Only the meaning differs, and the board drops both.";
 
-pub const TAKE_EXAMPLES: &str = "\
+pub const CANCEL_EXAMPLES: &str = "\
 Examples:
-  ff tower take 17               yours now, agent off
-  ff tower requeue 17            the way back out
-  ff tower brief 17              who has it, and why it is not picked
-  ff tower claim 17              the spelling that refuses to reassign";
-
-pub const REQUEUE: &str = "\
-Hand a flight back to the pool: the claim and the take clear
-together, and `ff tower next` can pick it again. Clearing both is
-what makes this `take`'s exact inverse — a flight you took and
-changed your mind about goes back to the agent lane, and one an
-agent merely claimed goes back untouched.
-
-This is the recovery path an unattended loop needs. Nothing else in
-the vocabulary takes a claim back, so an agent that dies mid-flight
-would otherwise keep its flight out of the pool for good.
-
-A flight with an open question requeues fine — `answer` does not
-clear a claim, and the question keeps the flight out of the pool
-until it is answered anyway. A flight fufu holds requeues too: that
-is a branch verdict, not tower's. A flight with neither a claim nor
-a take is refused, because there is nothing to hand back.";
-
-pub const REQUEUE_EXAMPLES: &str = "\
-Examples:
-  ff tower requeue 17            back to the pool
-  ff tower next --peek           who would be handed it now
-  ff tower take 17               the reverse
-  ff tower                       the row carries `requeued`";
+  ff tower cancel 17 -m \"superseded by #21\"    closed, with the why
+  ff tower brief 17              a canceled flight still briefs
+  ff tower done 17               the other closed status";
 
 pub const HOLD: &str = "\
 Stop a flight with a question attached. The hold moves it to waiting
@@ -520,12 +507,13 @@ The read API is four GET routes — /api/board, /api/brief/<flight>,
 /api/bays, and /api/procedures, bare or /<name> — each answering the
 same envelope the matching verb emits under --json, folded fresh per
 request; nothing is cached. The verb API is eight POST routes —
-/api/file, /api/claim, /api/take, /api/requeue, /api/hold,
-/api/answer, /api/done, /api/comment — each taking the verb's
+/api/file, /api/assign, /api/status, /api/hold, /api/answer,
+/api/done, /api/cancel, /api/comment — each taking the verb's
 arguments as a small JSON body ({\"flight\": …} with an optional
-\"message\", and file's {\"subject\": …}), appending to the log, and
-answering the verb's own data envelope; hold answers 200, its exit-3
-outcome being the CLI's channel, and done requires the flight named.
+\"message\", file's {\"subject\": …}, assign's {\"assignee\": …},
+status's {\"status\": …}), appending to the log, and answering the
+verb's own data envelope; hold answers 200, its exit-3 outcome being
+the CLI's channel, and done requires the flight named.
 A refusal is the same one-line error envelope: 400 for a reference
 or body that does not parse, 404 for a reference that names nothing,
 409 when the board's standing state refuses the write, 503 when the

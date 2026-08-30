@@ -34,10 +34,17 @@ fn file(repo: &Path, subject: &str) {
     Store::open(repo)
         .expect("open")
         .append(vec![Kind::Filed {
-            procedure: "open".to_string(),
+            procedure: None,
             subject: subject.to_string(),
             body: String::new(),
-            part: None,
+            status: "triage".to_string(),
+            assignee: None,
+            priority: "none".to_string(),
+            labels: Vec::new(),
+            skill: None,
+            bay: None,
+            done: "asserted".to_string(),
+            branch: None,
         }])
         .expect("append");
 }

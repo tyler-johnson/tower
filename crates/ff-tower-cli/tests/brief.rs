@@ -2,11 +2,12 @@
 //! read, the standing and beat rows — one flight's slice of `next`'s
 //! walk — the JSON round-trip, the lazy probes, and the refusals.
 //!
-//! The pool fixtures share `next.rs`'s grammar: the crew gate makes bare
-//! `open` filings unclaimable, so they file under the two-part
-//! `pipeline` procedure whose `pass` part is agent-crewed. Each filing
-//! mints six event seqs and three flight numbers, so the agent parts are
-//! `pi.2` (#2) and `pi.8` (#5).
+//! The pool fixtures share `next.rs`'s grammar: the pool is Ready
+//! flights in the agent lane, so bare filings — born Triage — are never
+//! candidates, and the pullable ones file under the two-flight
+//! `pipeline` procedure whose `pass` is agent-assigned and born Ready.
+//! Each filing mints six event seqs and three flight numbers, so the
+//! agent flights are `pi.2` (#2) and `pi.8` (#5).
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -80,24 +81,24 @@ fn repo() -> Repo {
     repo
 }
 
-/// The minimal claimable shape principle 12 admits: an agent-crewed part
-/// with a you-crewed end.
+/// The minimal pullable shape principle 12 admits: an agent-assigned
+/// flight with a me-assigned end.
 fn install_pipeline(repo: &Repo) {
     repo.write(
         ".tower/procedures/pipeline.toml",
         concat!(
             "name = \"pipeline\"\n\n",
-            "[[part]]\nid   = \"pass\"\ncrew = \"agent\"\n\n",
-            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
         ),
     );
 }
 
 fn file_pipeline(repo: &Repo, subject: &str) {
-    stdout(&ff_tower(repo.path(), &["file", subject, "-p", "pipeline"]));
+    stdout(&ff_tower(repo.path(), &["file", "pipeline", subject]));
 }
 
-/// Two agent parts on branches that edit the same file — the walk admits
+/// Two agent flights on branches that edit the same file — the walk admits
 /// #2 and passes #5 naming it.
 fn colliding(repo: &Repo) {
     file_pipeline(repo, "left work");
@@ -177,37 +178,32 @@ fn brief_renders_the_full_record_both_link_directions() {
 }
 
 #[test]
-fn a_part_stamp_gets_its_own_line_under_the_head() {
+fn the_stored_fields_get_their_own_line_under_the_head() {
     let repo = repo();
     stdout(&ff_tower(
         repo.path(),
-        &["file", "the retry test", "-p", "review"],
+        &["file", "review", "the retry test"],
     ));
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "2"]));
     assert!(text.contains("#2  the retry test · pass\n"), "{text}");
     assert!(
-        text.contains(
-            "    part pass · agent · skill review · branch the retry test · done asserted\n"
-        ),
+        text.contains("    assignee agent · skill review · under review\n"),
         "{text}"
     );
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "3"]));
     assert!(
-        text.contains("    part smoke · you · bay warm · branch the retry test · done asserted\n"),
+        text.contains("    assignee me · bay warm · under review\n"),
         "{text}"
     );
 
-    // The parent is no part, so it gets no line — the note's "no part
-    // stamp" phrase is the standing, not a part line.
-    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
-    assert!(!text.contains("    part "), "{text}");
-
     let envelope = envelope(&ff_tower(repo.path(), &["brief", "2", "--json"]));
-    assert_eq!(envelope["data"]["part"]["crew"], serde_json::json!("agent"));
+    assert_eq!(envelope["data"]["assignee"], serde_json::json!("agent"));
+    assert_eq!(envelope["data"]["skill"], serde_json::json!("review"));
+    assert_eq!(envelope["data"]["status"], serde_json::json!("ready"));
     assert!(
-        envelope["data"]["part"]["bay"].is_null(),
+        envelope["data"]["bay"].is_null(),
         "absent facts are null: {envelope}"
     );
 }
@@ -234,10 +230,11 @@ fn json_round_trips_the_brief() {
         data["depends_on"][0]["subject"],
         serde_json::json!("the dependency")
     );
-    assert_eq!(data["depends_on"][0]["done"], serde_json::json!(false));
+    assert_eq!(data["depends_on"][0]["closed"], serde_json::json!(false));
+    assert_eq!(data["status"], serde_json::json!("triage"));
     // Absent facts are null, never missing keys.
     assert!(data["branch"].is_null(), "{data}");
-    assert!(data["done_by"].is_null(), "{data}");
+    assert!(data["status_by"].is_null(), "{data}");
     assert!(data["question"].is_null(), "{data}");
 }
 
@@ -281,7 +278,7 @@ fn a_held_flight_renders_its_question() {
 }
 
 #[test]
-fn a_done_flight_still_briefs_with_its_mark() {
+fn a_closed_flight_still_briefs_with_its_move() {
     let repo = repo();
     stdout(&ff_tower(
         repo.path(),
@@ -290,17 +287,18 @@ fn a_done_flight_still_briefs_with_its_mark() {
     stdout(&ff_tower(repo.path(), &["done", "1"]));
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
-    assert!(text.contains("done by tests@tower.invalid"), "{text}");
+    assert!(text.contains("done — tests@tower.invalid"), "{text}");
     assert!(text.contains("what it was about"), "{text}");
 
     let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
     let data = &envelope(&out)["data"];
-    assert_eq!(data["done_by"], serde_json::json!("tests@tower.invalid"));
-    assert!(data["done_at"].is_i64(), "{data}");
+    assert_eq!(data["status"], serde_json::json!("done"));
+    assert_eq!(data["status_by"], serde_json::json!("tests@tower.invalid"));
+    assert!(data["status_at"].is_i64(), "{data}");
 }
 
 #[test]
-fn a_done_dependency_marks_its_link_row() {
+fn a_closed_dependency_marks_its_link_row() {
     let repo = repo_with_a_record();
     stdout(&ff_tower(repo.path(), &["done", "2"]));
 
@@ -309,7 +307,8 @@ fn a_done_dependency_marks_its_link_row() {
 
     let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
     let data = &envelope(&out)["data"];
-    assert_eq!(data["depends_on"][0]["done"], serde_json::json!(true));
+    assert_eq!(data["depends_on"][0]["closed"], serde_json::json!(true));
+    assert_eq!(data["depends_on"][0]["status"], serde_json::json!("done"));
 }
 
 #[test]
@@ -320,7 +319,7 @@ fn the_history_lists_every_gesture_in_log_order() {
         &["file", "the work", "-m", "the body of the work"],
     ));
     stdout(&ff_tower(repo.path(), &["comment", "1", "-m", "a note"]));
-    stdout(&ff_tower(repo.path(), &["claim", "1"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "in_progress"]));
     let held = ff_tower(repo.path(), &["hold", "1", "-m", "which way?"]);
     assert_eq!(held.status.code(), Some(3));
     stdout(&ff_tower(repo.path(), &["answer", "1", "-m", "that way"]));
@@ -359,7 +358,7 @@ fn the_history_lists_every_gesture_in_log_order() {
         [
             "filed",
             "commented",
-            "claimed",
+            "status",
             "held",
             "answered",
             "edited",
@@ -467,7 +466,7 @@ fn a_ready_flight_briefs_ready_and_what_it_beat() {
 }
 
 #[test]
-fn a_claimed_flights_beat_is_what_its_branch_blocks() {
+fn a_pulled_flights_beat_is_what_its_branch_blocks() {
     let repo = repo();
     colliding(&repo);
     stdout(&ff_tower(repo.path(), &["next"]));
@@ -475,32 +474,37 @@ fn a_claimed_flights_beat_is_what_its_branch_blocks() {
     let out = ff_tower(repo.path(), &["brief", "2"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("claimed by"), "{text}");
+    assert!(text.contains("in progress — tests@tower.invalid"), "{text}");
     assert!(text.contains("beat #5 · collides on shared.txt"), "{text}");
 }
 
 #[test]
 fn a_bare_filing_briefs_as_yours() {
-    // Bare `file` lands under `open`, whose single part is you-crewed —
-    // the stamp is what keeps it out of the pool, and the brief says so.
+    // Bare `file` lands in Triage with no lane — the stored fields are
+    // what keep it out of the pool, and the brief says so.
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "needs a look"]));
 
     let out = ff_tower(repo.path(), &["brief", "1"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("yours — crewed you"), "{text}");
+    assert!(text.contains("triage"), "{text}");
+    assert!(text.contains("yours — unassigned"), "{text}");
 }
 
 #[test]
-fn a_stampless_parent_briefs_as_yours_with_no_stamp() {
+fn a_me_laned_ready_flight_briefs_as_yours_with_its_lane() {
     let repo = repo();
-    file_pipeline(&repo, "a broad task");
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "needs a look", "--assignee", "me"],
+    ));
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
 
     let out = ff_tower(repo.path(), &["brief", "1"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("yours — no part stamp"), "{text}");
+    assert!(text.contains("yours — assigned me"), "{text}");
 }
 
 #[test]
@@ -527,10 +531,13 @@ fn the_json_pins_the_merged_envelope() {
     assert_eq!(data["subject"], serde_json::json!("right work · pass"));
     let data = data.as_object().expect("data is an object");
     for key in [
-        "routed_by",
-        "routed_at",
-        "because",
-        "part",
+        "status",
+        "status_by",
+        "assignee",
+        "priority",
+        "labels",
+        "skill",
+        "bay",
         "body",
         "comments",
     ] {
@@ -549,8 +556,8 @@ fn the_json_pins_the_merged_envelope() {
 }
 
 #[test]
-fn a_done_flights_standing_carries_no_duplicate_payload() {
-    // The slimmed variants flatten to the tag alone: `done_by` appears
+fn a_closed_flights_standing_carries_no_duplicate_payload() {
+    // The slimmed variants flatten to the tag alone: `status_by` appears
     // once, from the brief's own field — serde flatten would otherwise
     // emit the key twice and the envelope would stop being an object a
     // strict parser accepts.
@@ -560,11 +567,11 @@ fn a_done_flights_standing_carries_no_duplicate_payload() {
 
     let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
     let raw = stdout(&out);
-    assert_eq!(raw.matches("\"done_by\"").count(), 1, "{raw}");
+    assert_eq!(raw.matches("\"status_by\"").count(), 1, "{raw}");
     let envelope = serde_json::from_str::<serde_json::Value>(&raw).expect("an envelope");
     let data = &envelope["data"];
     assert_eq!(data["standing"], serde_json::json!("done"));
-    assert_eq!(data["done_by"], serde_json::json!("tests@tower.invalid"));
+    assert_eq!(data["status_by"], serde_json::json!("tests@tower.invalid"));
     let data = data.as_object().expect("data is an object");
     for key in ["with", "paths", "on"] {
         assert!(
@@ -575,7 +582,7 @@ fn a_done_flights_standing_carries_no_duplicate_payload() {
 }
 
 #[test]
-fn a_live_on_branch_flight_probes_and_a_done_one_does_not() {
+fn a_live_on_branch_flight_probes_and_a_closed_one_does_not() {
     // The laziness seam, end to end: `wants_verdicts` decides whether
     // the render spawns `ff collide` at all. Two live branches collide,
     // so a live candidate's brief must probe — and a done flight on the
@@ -599,7 +606,7 @@ fn a_live_on_branch_flight_probes_and_a_done_one_does_not() {
     let lazy = logging_ff();
     let out = ff_tower_via(repo.path(), &["brief", "7"], Some(lazy.path()));
     let text = stdout(&out);
-    assert!(text.contains("done by"), "{text}");
+    assert!(text.contains("done — tests@tower.invalid"), "{text}");
     assert!(
         !calls(&lazy).lines().any(|line| line.contains("collide")),
         "a done flight briefs with zero probes: {}",

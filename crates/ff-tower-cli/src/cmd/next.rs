@@ -1,6 +1,6 @@
-//! `ff tower next [-n <k>] [--peek]` — claim the next ready flight, or a
-//! set of `k` that collide with neither each other nor anything already
-//! flying, and hand each one a tree to fly in.
+//! `ff tower next [-n <k>] [--peek]` — pull the next Ready flight from
+//! the agent lane, or a set of `k` that collide with neither each other
+//! nor anything already flying, and hand each one a tree to fly in.
 //!
 //! The one verb whose success code varies: 0 when anything was picked; on
 //! an empty pick, 3 when the crew gate is what emptied it — work exists
@@ -10,28 +10,29 @@
 //! the code says it, so `while ff tower next` terminates on the code
 //! alone. The pipeline is
 //! the board's — store, fold, gather, probe — with `pick` in place of
-//! `enrich`, and unless `--peek` the picked set becomes one `claimed`
-//! event per flight in a single atomic append.
+//! `enrich`, and unless `--peek` the picked set becomes one In Progress
+//! `status` event per flight in a single atomic append — the append is
+//! the exclusivity, the byline the pilot.
 //!
 //! # The bay, and the branch
 //!
 //! A pick with nothing but an id and a subject makes the agent find its
-//! own tree, so the claim is only half the hand-off. [`board::assign`]
+//! own tree, so the pull is only half the hand-off. [`board::assign`]
 //! joins each pick to a free bay out of the fold `pick` already ran over,
-//! and this verb spends that: a part stamped `bay = "warm"` with nothing
+//! and this verb spends that: a flight stored `bay = "warm"` with nothing
 //! free mints a slot, and then the flight is bound to a branch in the bay
 //! with a session-tagged `ff start` or `ff switch` — the op row every
-//! later flight-to-branch derivation reads. The target is the part's own
-//! stamped branch, else the branch the flight is already derived onto,
+//! later flight-to-branch derivation reads. The target is the flight's
+//! own stored branch, else the branch the flight is already derived onto,
 //! else a minted `flight/<wire id>`, unique by construction because the
 //! session tag is.
 //!
-//! Claims append *before* any fufu write, and a warm or bind refusal
+//! The pulls append *before* any fufu write, and a warm or bind refusal
 //! lands on that pick's row rather than ending the walk — `probe` and
-//! `gather`'s idiom. A bind that fails therefore leaves a claimed,
-//! unbound flight, which is exactly the state `requeue` hands back.
-//! `--peek` writes nothing: it reports the bay it would take and the
-//! branch it would bind, and warms and binds neither.
+//! `gather`'s idiom. A bind that fails therefore leaves an In Progress,
+//! unbound flight, which is exactly the state `status <flight> ready`
+//! hands back. `--peek` writes nothing: it reports the bay it would take
+//! and the branch it would bind, and warms and binds neither.
 
 use serde::Serialize;
 
@@ -41,19 +42,19 @@ use ff_tower_core::board::{self, Berth, Fold, Passed, Pick, Skip};
 use ff_tower_core::ff::{self, Ff};
 use ff_tower_core::log::{Kind, Store};
 
-/// One shape either way: `claimed` is `false` under `--peek`, so the
+/// One shape either way: `pulled` is `false` under `--peek`, so the
 /// envelope never lies about whether the write happened.
 #[derive(Serialize)]
 struct Data<'a> {
     picked: &'a [Row],
-    claimed: bool,
+    pulled: bool,
     passed: &'a [Passed],
-    /// Live and unclaimed, kept out of the pool by the crew stamp alone —
-    /// the count behind exit 3.
+    /// Ready, kept out of the pool by the lane alone — the count behind
+    /// exit 3.
     yours: usize,
 }
 
-/// One claimed flight and where it flies. The pick's own `branch` is the
+/// One pulled flight and where it flies. The pick's own `branch` is the
 /// stale one — what the log said before this run — so it does not ride
 /// out under that name: `branch` here is effective, the branch the flight
 /// was bound to when a bind happened and the derived one otherwise.
@@ -69,12 +70,12 @@ struct Row {
     bay_id: Option<String>,
     /// True when this run minted the bay.
     warmed: bool,
-    /// The skill the flight's part is flown with, for the harness to
-    /// resolve through `ff tower skills <name>`. Absent, not null, when
-    /// the part names none.
+    /// The skill the flight is flown with, for the harness to resolve
+    /// through `ff tower skills <name>`. Absent, not null, when the
+    /// flight names none.
     #[serde(skip_serializing_if = "Option::is_none")]
     skill: Option<String>,
-    /// A warm or bind refusal, in fufu's words or tower's. The claim
+    /// A warm or bind refusal, in fufu's words or tower's. The pull
     /// stands regardless.
     refused: Option<String>,
 }
@@ -97,14 +98,16 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     let picks = board::pick(&fold, &reads, &verdicts, count);
     let berths = board::assign(&fold, &reads, &picks.picked);
 
-    let claimed = !peek && !picks.picked.is_empty();
-    if claimed {
+    let pulled = !peek && !picks.picked.is_empty();
+    if pulled {
         store.append(
             picks
                 .picked
                 .iter()
-                .map(|pick| Kind::Claimed {
+                .map(|pick| Kind::Status {
                     flight: pick.flight.parse().expect("the fold's ids parse"),
+                    status: "in_progress".to_string(),
+                    reason: None,
                 })
                 .collect(),
         )?;
@@ -122,7 +125,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
                 "next",
                 &Data {
                     picked: &rows,
-                    claimed,
+                    pulled,
                     passed: &picks.passed,
                     yours: picks.yours,
                 }
@@ -130,7 +133,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         );
     } else {
         let colored = render::colored();
-        let verb = if peek { "ready" } else { "claimed" };
+        let verb = if peek { "ready" } else { "in progress" };
         for row in &rows {
             let mut line = format!(
                 "{verb} {}: {}",
@@ -151,7 +154,6 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
                     (super::count(picks.yours), "flights", "need")
                 };
                 println!("nothing ready — {count} {noun} {verb} you");
-                println!("{}", render::paint_dim("triage: ff tower triage", colored));
             } else {
                 println!("nothing ready");
             }
@@ -189,10 +191,10 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     })
 }
 
-/// Spend one berth: warm what the stamp asked for, bind the flight to a
-/// branch in the bay, and say what happened. Under `--peek` nothing is
-/// written and the row reports the bay that would be taken and the branch
-/// that would be bound.
+/// Spend one berth: warm what the stored bay asked for, bind the flight
+/// to a branch in the bay, and say what happened. Under `--peek` nothing
+/// is written and the row reports the bay that would be taken and the
+/// branch that would be bound.
 ///
 /// Tolerance is per row and deliberate. A refusal fufu shaped — a branch
 /// checked out elsewhere, a pool root that is not there — is this pick's
@@ -206,13 +208,12 @@ fn berth_row(
     berth: &Berth,
     peek: bool,
 ) -> Result<Row, CliError> {
-    let part = fold
+    let flight = fold
         .flights
         .iter()
-        .find(|flight| flight.id.to_string() == pick.flight)
-        .and_then(|flight| flight.part.as_ref());
-    let stamped = part.and_then(|part| part.branch.clone());
-    let skill = part.and_then(|part| part.skill.clone());
+        .find(|flight| flight.id.to_string() == pick.flight);
+    let stamped = flight.and_then(|flight| flight.branch_stamp.clone());
+    let skill = flight.and_then(|flight| flight.skill.clone());
 
     let mut bay = berth.bay.as_ref().map(|view| Slot {
         id: view.id.clone(),
@@ -301,9 +302,9 @@ fn warm(ff: &Ff) -> Result<ff_tower_core::ff::WorktreeAdded, String> {
     ff.worktree_add(&path, None).map_err(|err| err.to_string())
 }
 
-/// The indented line under a claim: where the flight flies, and what went
-/// wrong if something did. A full pool with no stamp asking for a slot is
-/// not a failure — it is a claim with no tree, and the way out of it is
+/// The indented line under a pull: where the flight flies, and what went
+/// wrong if something did. A full pool with nothing asking for a slot is
+/// not a failure — it is a pull with no tree, and the way out of it is
 /// one command, so the line says the command.
 fn berth_line(row: &Row) -> String {
     let mut phrases = Vec::new();

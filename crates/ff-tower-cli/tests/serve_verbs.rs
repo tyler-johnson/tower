@@ -35,10 +35,17 @@ fn file(repo: &Path, subject: &str) {
     Store::open(repo)
         .expect("open")
         .append(vec![Kind::Filed {
-            procedure: "open".to_string(),
+            procedure: None,
             subject: subject.to_string(),
             body: String::new(),
-            part: None,
+            status: "triage".to_string(),
+            assignee: None,
+            priority: "none".to_string(),
+            labels: Vec::new(),
+            skill: None,
+            bay: None,
+            done: "asserted".to_string(),
+            branch: None,
         }])
         .expect("append");
 }
@@ -104,41 +111,56 @@ fn error_parity(
 }
 
 #[test]
-fn claim_appends_and_answers_the_verbs_envelope() {
+fn assign_appends_and_answers_the_verbs_envelope() {
     let (repo, server) = served();
-    let (status, head, body) = post(&server.addr, "/api/claim", r#"{"flight":"1"}"#);
-    let event = appended(repo.path(), |kind| matches!(kind, Kind::Claimed { .. }));
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/assign",
+        r#"{"flight":"1","assignee":"agent"}"#,
+    );
+    let event = appended(repo.path(), |kind| matches!(kind, Kind::Assigned { .. }));
     ok(
-        "/api/claim",
+        "/api/assign",
         status,
         &head,
         &body,
-        machine::emit("claim", &verb::Claimed { claimed: event }),
+        machine::emit("assign", &verb::Assigned { assigned: event }),
     );
     read_after_write(&server, repo.path());
 }
 
 #[test]
-fn take_and_requeue_round_trip_over_http() {
+fn status_moves_round_trip_over_http() {
     let (repo, server) = served();
-    let (status, head, body) = post(&server.addr, "/api/take", r#"{"flight":"1"}"#);
-    let event = appended(repo.path(), |kind| matches!(kind, Kind::Taken { .. }));
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/status",
+        r#"{"flight":"1","status":"ready"}"#,
+    );
+    let event = appended(repo.path(), |kind| matches!(kind, Kind::Status { .. }));
     ok(
-        "/api/take",
+        "/api/status",
         status,
         &head,
         &body,
-        machine::emit("take", &verb::Taken { taken: event }),
+        machine::emit("status", &verb::Moved { status: event }),
     );
 
-    let (status, head, body) = post(&server.addr, "/api/requeue", r#"{"flight":"1"}"#);
-    let event = appended(repo.path(), |kind| matches!(kind, Kind::Requeued { .. }));
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/status",
+        r#"{"flight":"1","status":"in_progress"}"#,
+    );
+    let event = appended(
+        repo.path(),
+        |kind| matches!(kind, Kind::Status { status, .. } if status == "in_progress"),
+    );
     ok(
-        "/api/requeue",
+        "/api/status",
         status,
         &head,
         &body,
-        machine::emit("requeue", &verb::Requeued { requeued: event }),
+        machine::emit("status", &verb::Moved { status: event }),
     );
     read_after_write(&server, repo.path());
 }
@@ -179,8 +201,9 @@ fn hold_answers_two_hundred_with_the_data_envelope() {
 }
 
 #[test]
-fn comment_and_done_land_on_the_record() {
+fn comment_done_and_cancel_land_on_the_record() {
     let (repo, server) = served();
+    file(repo.path(), "a second flight");
     let (status, head, body) = post(
         &server.addr,
         "/api/comment",
@@ -196,13 +219,33 @@ fn comment_and_done_land_on_the_record() {
     );
 
     let (status, head, body) = post(&server.addr, "/api/done", r#"{"flight":"1"}"#);
-    let event = appended(repo.path(), |kind| matches!(kind, Kind::Done { .. }));
+    let event = appended(
+        repo.path(),
+        |kind| matches!(kind, Kind::Status { status, .. } if status == "done"),
+    );
     ok(
         "/api/done",
         status,
         &head,
         &body,
-        machine::emit("done", &verb::Finished { done: event }),
+        machine::emit("done", &verb::Moved { status: event }),
+    );
+
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/cancel",
+        r#"{"flight":"2","message":"superseded"}"#,
+    );
+    let event = appended(
+        repo.path(),
+        |kind| matches!(kind, Kind::Status { status, .. } if status == "canceled"),
+    );
+    ok(
+        "/api/cancel",
+        status,
+        &head,
+        &body,
+        machine::emit("cancel", &verb::Moved { status: event }),
     );
     read_after_write(&server, repo.path());
 }
@@ -216,10 +259,10 @@ fn file_appends_the_whole_batch_and_answers_it() {
         r#"{"subject":"the retry test","message":"body text","procedure":"review"}"#,
     );
     // The batch rides the chain in mint order behind the seeded filing:
-    // the parent, `review`'s three parts, then its five edges.
+    // the parent, `review`'s three flights, then its five edges.
     let chain = chain(repo.path());
     let batch = &chain[1..];
-    assert_eq!(batch.len(), 9, "the parent, three parts, five edges");
+    assert_eq!(batch.len(), 9, "the parent, three flights, five edges");
     let (filed, rest) = batch.split_first().expect("the parent");
     let (parts, linked) = rest.split_at(3);
     ok(
@@ -239,49 +282,30 @@ fn file_appends_the_whole_batch_and_answers_it() {
     read_after_write(&server, repo.path());
 }
 
-/// The route: the third writing surface gaining a verb the other two
-/// already have. `review` is a three-part built-in, so the batch is the
-/// routed head, its parts, and the edges that hang them off the flight —
-/// the same shape `file` appends, minus the parent it does not mint.
+/// The field flags ride the body: a filing can carry every stored field,
+/// and the board reads them back on the next GET.
 #[test]
-fn triage_routes_over_http_and_the_board_reads_the_stamp_back() {
+fn file_carries_the_field_flags_over_http() {
     let (repo, server) = served();
-    let (status, head, body) = post(
+    let (status, _, _) = post(
         &server.addr,
-        "/api/triage",
-        r#"{"flight":"1","procedure":"review","message":"it is a review"}"#,
+        "/api/file",
+        r#"{"subject":"laned work","priority":"high","labels":["chore"],"assignee":"agent","skill":"review"}"#,
     );
-    let chain = chain(repo.path());
-    let batch = &chain[1..];
-    assert_eq!(batch.len(), 9, "the routed head, three parts, five edges");
-    let (routed, rest) = batch.split_first().expect("the routed head");
-    let (parts, linked) = rest.split_at(3);
-    ok(
-        "/api/triage",
-        status,
-        &head,
-        &body,
-        machine::emit(
-            "triage",
-            &verb::Routed {
-                routed: routed.clone(),
-                parts: parts.to_vec(),
-                linked: linked.to_vec(),
-            },
-        ),
-    );
-
-    // The stamp is on the board the next GET folds: the flight left the
-    // open pile for `review`.
+    assert_eq!(status, 200);
     let (status, _, board) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{board}");
     let board: serde_json::Value = serde_json::from_str(&board).expect("the board envelope");
     let flights = board["data"]["open"].as_array().expect("open");
-    let parent = flights
+    let filed = flights
         .iter()
-        .find(|view| view["subject"] == json!("write the doctor verb"))
-        .expect("the routed flight is still open — a route is not a claim");
-    assert_eq!(parent["procedure"], json!("review"));
+        .find(|view| view["subject"] == json!("laned work"))
+        .expect("the filing is on the board");
+    assert_eq!(filed["status"], json!("triage"));
+    assert_eq!(filed["priority"], json!("high"));
+    assert_eq!(filed["labels"], json!(["chore"]));
+    assert_eq!(filed["assignee"], json!("agent"));
+    assert_eq!(filed["skill"], json!("review"));
     read_after_write(&server, repo.path());
 }
 
@@ -289,17 +313,7 @@ fn triage_routes_over_http_and_the_board_reads_the_stamp_back() {
 fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
     let (repo, server) = served();
 
-    // Nothing claimed yet: a requeue has nothing to hand back.
-    error_parity(
-        &server,
-        repo.path(),
-        "/api/requeue",
-        r#"{"flight":"1"}"#,
-        409,
-        &["requeue", "1", "--json"],
-        "requeue/unclaimed",
-    );
-    // And an answer has no question to release.
+    // No question standing: an answer has nothing to release.
     error_parity(
         &server,
         repo.path(),
@@ -308,30 +322,6 @@ fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
         409,
         &["answer", "1", "-m", "to what?", "--json"],
         "answer/not-held",
-    );
-
-    let (status, _, _) = post(&server.addr, "/api/claim", r#"{"flight":"1"}"#);
-    assert_eq!(status, 200);
-    error_parity(
-        &server,
-        repo.path(),
-        "/api/claim",
-        r#"{"flight":"1"}"#,
-        409,
-        &["claim", "1", "--json"],
-        "claim/taken",
-    );
-
-    let (status, _, _) = post(&server.addr, "/api/take", r#"{"flight":"1"}"#);
-    assert_eq!(status, 200);
-    error_parity(
-        &server,
-        repo.path(),
-        "/api/take",
-        r#"{"flight":"1"}"#,
-        409,
-        &["take", "1", "--json"],
-        "take/taken",
     );
 
     let (status, _, _) = post(
@@ -349,6 +339,16 @@ fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
         &["hold", "1", "-m", "another?", "--json"],
         "hold/exists",
     );
+    // An open question blocks every move short of closing the flight.
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/status",
+        r#"{"flight":"1","status":"ready"}"#,
+        409,
+        &["status", "1", "ready", "--json"],
+        "status/held",
+    );
 
     let (status, _, _) = post(&server.addr, "/api/done", r#"{"flight":"1"}"#);
     assert_eq!(status, 200);
@@ -364,10 +364,10 @@ fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
     error_parity(
         &server,
         repo.path(),
-        "/api/claim",
-        r#"{"flight":"1"}"#,
+        "/api/assign",
+        r#"{"flight":"1","assignee":"agent"}"#,
         409,
-        &["claim", "1", "--json"],
+        &["assign", "1", "agent", "--json"],
         "flight/done",
     );
 }
@@ -404,6 +404,26 @@ fn the_usage_refusals_are_four_hundreds_with_the_clis_envelope() {
         &["comment", "banana", "-m", "x", "--json"],
         "usage/bad-flight",
     );
+    // The closed vocabularies refuse at the verb, one wording on both
+    // surfaces.
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/status",
+        r#"{"flight":"1","status":"claimed"}"#,
+        400,
+        &["status", "1", "claimed", "--json"],
+        "usage/bad-status",
+    );
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/assign",
+        r#"{"flight":"1","assignee":"you"}"#,
+        400,
+        &["assign", "1", "you", "--json"],
+        "usage/bad-assignee",
+    );
 }
 
 #[test]
@@ -424,16 +444,7 @@ fn a_reference_naming_nothing_is_a_four_oh_four() {
         "/api/file",
         r#"{"subject":"a subject","procedure":"ghost"}"#,
         404,
-        &["file", "a subject", "-p", "ghost", "--json"],
-        "procedure/not-found",
-    );
-    error_parity(
-        &server,
-        repo.path(),
-        "/api/triage",
-        r#"{"flight":"1","procedure":"ghost"}"#,
-        404,
-        &["triage", "1", "-p", "ghost", "--json"],
+        &["file", "ghost", "a subject", "--json"],
         "procedure/not-found",
     );
 }
@@ -447,18 +458,15 @@ fn a_reference_naming_nothing_is_a_four_oh_four() {
 fn a_body_that_is_not_the_verbs_json_is_bad_body() {
     let (repo, server) = served();
     for (path, body) in [
-        ("/api/claim", "not json"),
-        ("/api/claim", r#"{}"#),
-        ("/api/claim", r#"{"flight":"1","extra":true}"#),
+        ("/api/assign", "not json"),
+        ("/api/assign", r#"{"flight":"1"}"#),
+        ("/api/status", r#"{"flight":"1"}"#),
+        (
+            "/api/status",
+            r#"{"flight":"1","status":"ready","extra":true}"#,
+        ),
         ("/api/done", r#"{}"#),
         ("/api/file", r#"{"flight":"1"}"#),
-        // `procedure` is required here where `-p` is optional on the
-        // CLI: a missing field is the body's refusal, not the verb's.
-        ("/api/triage", r#"{"flight":"1"}"#),
-        (
-            "/api/triage",
-            r#"{"flight":"1","procedure":"review","extra":true}"#,
-        ),
     ] {
         let (status, _, answered) = post(&server.addr, path, body);
         assert_eq!(status, 400, "{path} {body}: {answered}");
@@ -481,6 +489,6 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
 #[test]
 fn a_read_method_on_a_write_route_is_405() {
     let (_repo, server) = served();
-    assert_eq!(request(&server.addr, "GET", "/api/claim").0, 405);
-    assert_eq!(request(&server.addr, "GET", "/api/triage").0, 405);
+    assert_eq!(request(&server.addr, "GET", "/api/assign").0, 405);
+    assert_eq!(request(&server.addr, "GET", "/api/status").0, 405);
 }

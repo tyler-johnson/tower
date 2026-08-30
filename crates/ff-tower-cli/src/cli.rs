@@ -94,18 +94,36 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
     },
-    /// File a flight onto the board.
+    /// File a flight onto the board — bare into Triage, or under a
+    /// procedure.
     #[command(long_about = help::FILE, after_long_help = help::FILE_EXAMPLES)]
     File {
-        /// What the flight is about.
+        /// A procedure then a subject, or a subject alone — two words
+        /// name a procedure filing, one is a bare one; the split lives
+        /// in the verb, so a missing subject is a coded refusal.
+        #[arg(value_name = "procedure|subject")]
+        first: Option<String>,
+        /// The subject, when the first argument named a procedure.
         #[arg(value_name = "subject")]
-        subject: String,
+        second: Option<String>,
         /// The body — detail beyond the subject.
         #[arg(short = 'm', value_name = "msg")]
         message: Option<String>,
-        /// The procedure to file under; `open` is the unclassified default.
-        #[arg(short = 'p', long = "procedure", value_name = "name")]
-        procedure: Option<String>,
+        /// The priority the flight is born with.
+        #[arg(short = 'p', long = "priority", value_name = "priority")]
+        priority: Option<String>,
+        /// A label; repeat the flag for more than one.
+        #[arg(long = "label", value_name = "label")]
+        labels: Vec<String>,
+        /// The skill the flight is flown with.
+        #[arg(long = "skill", value_name = "name")]
+        skill: Option<String>,
+        /// The lane — me or agent.
+        #[arg(long = "assignee", value_name = "lane")]
+        assignee: Option<String>,
+        /// `warm` builds a tree ahead of whoever flies it.
+        #[arg(long = "bay", value_name = "bay")]
+        bay: Option<String>,
     },
     /// A note on a flight's record.
     #[command(long_about = help::COMMENT, after_long_help = help::COMMENT_EXAMPLES)]
@@ -131,6 +149,19 @@ pub enum Command {
         /// The new body — or the comment's new text.
         #[arg(short = 'm', value_name = "msg")]
         message: Option<String>,
+        /// The new priority; flights only.
+        #[arg(short = 'p', long = "priority", value_name = "priority")]
+        priority: Option<String>,
+        /// The new label set, wholesale; repeat the flag for more than
+        /// one.
+        #[arg(long = "label", value_name = "label")]
+        labels: Vec<String>,
+        /// The new skill; flights only.
+        #[arg(long = "skill", value_name = "name")]
+        skill: Option<String>,
+        /// The new bay ask; flights only.
+        #[arg(long = "bay", value_name = "bay")]
+        bay: Option<String>,
     },
     /// Declare a dependency: `a` depends on `b`.
     #[command(long_about = help::LINK, after_long_help = help::LINK_EXAMPLES)]
@@ -142,15 +173,15 @@ pub enum Command {
         #[arg(value_name = "b")]
         b: String,
     },
-    /// Split a flight into parts: each part files as a flight, and the
-    /// parent waits on all of them.
+    /// Split a flight into sub-flights: by hand with one subject per
+    /// argument, or under a procedure whose definition mints them.
     #[command(long_about = help::DECOMPOSE, after_long_help = help::DECOMPOSE_EXAMPLES)]
     Decompose {
         /// The flight to split — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
-        /// The parts, one subject each.
-        #[arg(value_name = "part")]
+        /// One installed procedure's name, or the sub-flights' subjects.
+        #[arg(value_name = "procedure|part")]
         parts: Vec<String>,
     },
     /// What procedures are installed, and where to fork one.
@@ -167,40 +198,36 @@ pub enum Command {
         #[arg(value_name = "name")]
         name: Option<String>,
     },
-    /// The unclassified pile, or route one flight to a procedure.
-    #[command(long_about = help::TRIAGE, after_long_help = help::TRIAGE_EXAMPLES)]
-    Triage {
-        /// The flight to route — a number, `writer#n`, or the event id;
-        /// the pile when unsaid.
+    /// Set a flight's lane: me, agent, or none to clear it.
+    #[command(long_about = help::ASSIGN, after_long_help = help::ASSIGN_EXAMPLES)]
+    Assign {
+        /// The flight — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
-        flight: Option<String>,
-        /// The procedure it routes to.
-        #[arg(short = 'p', long = "procedure", value_name = "name")]
-        procedure: Option<String>,
-        /// Why it routed there.
+        flight: String,
+        /// The lane: me, agent, or none.
+        #[arg(value_name = "lane")]
+        lane: String,
+    },
+    /// Move a flight to a status.
+    #[command(long_about = help::STATUS, after_long_help = help::STATUS_EXAMPLES)]
+    Status {
+        /// The flight — a number, `writer#n`, or the event id.
+        #[arg(value_name = "flight")]
+        flight: String,
+        /// Where it moves: triage, waiting, ready, in_progress, held,
+        /// done, or canceled.
+        #[arg(value_name = "status")]
+        status: String,
+    },
+    /// Cancel a flight — off the board without the finish.
+    #[command(long_about = help::CANCEL, after_long_help = help::CANCEL_EXAMPLES)]
+    Cancel {
+        /// The flight to cancel.
+        #[arg(value_name = "flight")]
+        flight: String,
+        /// Why — stored on the move.
         #[arg(short = 'm', value_name = "msg")]
         message: Option<String>,
-    },
-    /// Claim one specific flight, out of order.
-    #[command(long_about = help::CLAIM, after_long_help = help::CLAIM_EXAMPLES)]
-    Claim {
-        /// The flight to claim — a number, `writer#n`, or the event id.
-        #[arg(value_name = "flight")]
-        flight: String,
-    },
-    /// Take the controls: crew one flight to you, agent off.
-    #[command(long_about = help::TAKE, after_long_help = help::TAKE_EXAMPLES)]
-    Take {
-        /// The flight to take — a number, `writer#n`, or the event id.
-        #[arg(value_name = "flight")]
-        flight: String,
-    },
-    /// Hand a flight back to the pool — take's reverse.
-    #[command(long_about = help::REQUEUE, after_long_help = help::REQUEUE_EXAMPLES)]
-    Requeue {
-        /// The flight to hand back — a number, `writer#n`, or the event id.
-        #[arg(value_name = "flight")]
-        flight: String,
     },
     /// Stop a flight with a question attached — bay warm, exit 3.
     #[command(long_about = help::HOLD, after_long_help = help::HOLD_EXAMPLES)]
@@ -350,10 +377,9 @@ impl Command {
             | Command::Decompose { .. }
             | Command::Procedures { .. }
             | Command::Skills { .. }
-            | Command::Triage { .. }
-            | Command::Claim { .. }
-            | Command::Take { .. }
-            | Command::Requeue { .. }
+            | Command::Assign { .. }
+            | Command::Status { .. }
+            | Command::Cancel { .. }
             | Command::Hold { .. }
             | Command::Answer { .. }
             | Command::Done { .. }

@@ -1,14 +1,17 @@
 //! `ff tower next` against real repositories: the greedy admission, the
-//! peek, the crew gate, and the exits — 1 drained, 3 needs-you.
+//! peek, the lane gate, and the exits — 1 drained, 3 needs-you.
 //!
-//! The crew gate makes bare `open` filings unclaimable — their stamp says
-//! `you` — so every claimable fixture files under a two-part repo-layer
-//! procedure whose `pass` part is agent-crewed; the flight `next` hands
-//! out is that part, and the parent and `verdict` sit in your lane.
+//! The pool is Ready flights in the agent lane, so bare filings — born
+//! Triage — are never handed out, and every pullable fixture files under
+//! a two-flight repo-layer procedure whose `pass` is agent-assigned and
+//! born Ready; the flight `next` hands out is that one, and the parent
+//! and `verdict` are born Waiting. There is no automatic Waiting → Ready
+//! advance yet, so a drained pool with Waiting rows is exit 1 — exit 3
+//! needs a Ready flight off the agent lane.
 //!
 //! The assignment half rides the same fixtures. Main is a bay and it is
 //! first in survey order, so the solo norm's single pick binds *there*;
-//! a warmed slot is what the second pick takes. Every claim ends with a
+//! a warmed slot is what the second pick takes. Every pull ends with a
 //! branch and an op row tagged with the flight, and a warm or bind that
 //! fufu refuses lands on the row rather than ending the walk.
 
@@ -59,64 +62,76 @@ fn repo() -> Repo {
     repo
 }
 
-/// The minimal claimable shape principle 12 admits: an agent-crewed part
-/// with a you-crewed end. Filing under it mints a parent and two parts —
-/// three flights and three edges, so each filing consumes six event seqs
-/// and three flight numbers.
+/// The minimal pullable shape principle 12 admits: an agent-assigned
+/// flight with a me-assigned end. Filing under it mints a parent and two
+/// flights — three flights and three edges, so each filing consumes six
+/// event seqs and three flight numbers, and only `pass` is born Ready.
 fn install_pipeline(repo: &Repo) {
     repo.write(
         ".tower/procedures/pipeline.toml",
         concat!(
             "name = \"pipeline\"\n\n",
-            "[[part]]\nid   = \"pass\"\ncrew = \"agent\"\n\n",
-            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
         ),
     );
 }
 
 fn file_pipeline(repo: &Repo, subject: &str) {
-    stdout(&ff_tower(repo.path(), &["file", subject, "-p", "pipeline"]));
+    stdout(&ff_tower(repo.path(), &["file", "pipeline", subject]));
 }
 
 #[test]
-fn next_claims_the_agent_part_and_the_second_ask_is_the_exit_3_needs_you() {
+fn next_pulls_the_agent_flight_and_sets_in_progress() {
     let repo = repo();
     file_pipeline(&repo, "the one flight");
 
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("claimed #2: the one flight · pass"), "{text}");
-    assert!(text.contains("board: ff tower"), "{text}");
-
-    // A bound flight renders its branch, not a bare `claimed` — the
-    // claim is no longer the only motion the flight has.
-    let board = stdout(&ff_tower(repo.path(), &[]));
-    assert!(board.contains("in the air"), "{board}");
-    assert!(board.contains("on flight/pi.2"), "{board}");
-
-    // The pool is empty but the parent and `verdict` are yours — work
-    // exists and it needs you, which is 3, not fufu's 1.
-    let out = ff_tower(repo.path(), &["next"]);
-    assert_eq!(out.status.code(), Some(3));
-    let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("nothing ready — two flights need you"),
+        text.contains("in progress #2: the one flight · pass"),
         "{text}"
     );
-    assert!(text.contains("ff tower triage"), "{text}");
+    assert!(text.contains("board: ff tower"), "{text}");
+
+    // The pull is a stored status move: the board shows the flight in
+    // the air with the pilot's byline, on the branch it was bound to.
+    let board = stdout(&ff_tower(repo.path(), &[]));
+    assert!(board.contains("in the air"), "{board}");
+    assert!(
+        board.contains("in progress — tests@tower.invalid"),
+        "{board}"
+    );
+    assert!(board.contains("on flight/pi.2"), "{board}");
+    let json = envelope(&ff_tower(repo.path(), &["--json"]));
+    let air = json["data"]["in_the_air"].as_array().expect("in_the_air");
+    let pulled = air
+        .iter()
+        .find(|view| view["id"] == serde_json::json!("pi.2"))
+        .expect("pi.2 is in the air");
+    assert_eq!(pulled["status"], serde_json::json!("in_progress"));
+
+    // The pool is empty and the parent and `verdict` are born Waiting —
+    // no Ready work off the lane, so the drained code is 1, not 3.
+    let out = ff_tower(repo.path(), &["next"]);
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("nothing ready\n"), "{text}");
 }
 
 #[test]
-fn the_needs_you_count_rides_the_envelope() {
+fn a_ready_flight_off_the_agent_lane_is_the_exit_3_needs_you() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "needs a look"]));
+    // Born Triage — cleared by hand, but never assigned to the lane.
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
 
     let out = ff_tower(repo.path(), &["next", "--json"]);
     assert_eq!(out.status.code(), Some(3));
     let envelope = envelope(&out);
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
-    assert_eq!(envelope["data"]["claimed"], serde_json::json!(false));
+    assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
 
     let out = ff_tower(repo.path(), &["next"]);
@@ -129,27 +144,54 @@ fn the_needs_you_count_rides_the_envelope() {
 }
 
 #[test]
-fn the_parent_is_never_picked_and_exit_1_needs_a_truly_drained_board() {
+fn a_triage_filing_is_never_pulled_and_the_board_drains_to_1() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "unclassified work"]));
+    // Even in the agent lane: Triage is not Ready, and nothing leaves
+    // Triage but a person's gesture.
+    stdout(&ff_tower(repo.path(), &["assign", "1", "agent"]));
+
+    let out = ff_tower(repo.path(), &["next"]);
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("nothing ready\n"), "{text}");
+    assert!(
+        !text.contains("need you"),
+        "Triage is not yours-Ready: {text}"
+    );
+
+    // The person's gesture is what clears it.
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+    let text = stdout(&ff_tower(repo.path(), &["next"]));
+    assert!(text.contains("in progress #1: unclassified work"), "{text}");
+}
+
+#[test]
+fn the_parent_is_never_pulled_and_waiting_needs_a_hand_until_the_advance_exists() {
     let repo = repo();
     file_pipeline(&repo, "a broad task");
 
     let text = stdout(&ff_tower(repo.path(), &["next"]));
-    assert!(text.contains("claimed #2: a broad task · pass"), "{text}");
+    assert!(
+        text.contains("in progress #2: a broad task · pass"),
+        "{text}"
+    );
     stdout(&ff_tower(repo.path(), &["done", "2"]));
 
-    // `verdict` is ready now, but you-crewed: never picked, counted.
+    // `verdict` was born Waiting and nothing advances it yet: the pool
+    // is drained even though its dependency closed.
     let out = ff_tower(repo.path(), &["next"]);
-    assert_eq!(out.status.code(), Some(3));
-    stdout(&ff_tower(repo.path(), &["done", "3"]));
+    assert_eq!(out.status.code(), Some(1));
 
-    // Every part done leaves the parent live and permanently un-nextable
-    // — principle 12 at the flight level. Only `done` ends it.
+    // Cleared by hand it is Ready off the lane — exit 3, yours.
+    stdout(&ff_tower(repo.path(), &["status", "3", "ready"]));
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(3));
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
-    stdout(&ff_tower(repo.path(), &["done", "1"]));
+    stdout(&ff_tower(repo.path(), &["done", "3"]));
 
+    stdout(&ff_tower(repo.path(), &["done", "1"]));
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(1), "drained at last");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -158,7 +200,7 @@ fn the_parent_is_never_picked_and_exit_1_needs_a_truly_drained_board() {
 }
 
 #[test]
-fn peek_reads_without_claiming() {
+fn peek_reads_without_pulling() {
     let repo = repo();
     file_pipeline(&repo, "the one flight");
 
@@ -166,7 +208,7 @@ fn peek_reads_without_claiming() {
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
     assert!(text.contains("ready #2: the one flight · pass"), "{text}");
-    assert!(!text.contains("claimed"), "{text}");
+    assert!(!text.contains("in progress"), "{text}");
 
     let board = stdout(&ff_tower(repo.path(), &[]));
     assert!(board.contains("open"), "{board}");
@@ -178,7 +220,7 @@ fn peek_reads_without_claiming() {
     let out = ff_tower(repo.path(), &["next", "--peek", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
-    assert_eq!(envelope["data"]["claimed"], serde_json::json!(false));
+    assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     assert_eq!(
         envelope["data"]["picked"][0]["flight"],
         serde_json::json!("pi.2")
@@ -186,17 +228,20 @@ fn peek_reads_without_claiming() {
 }
 
 #[test]
-fn an_undone_dependency_is_passed_as_waiting_and_the_dependency_is_claimed() {
+fn an_unclosed_dependency_is_passed_as_waiting_and_the_dependency_is_pulled() {
     let repo = repo();
     file_pipeline(&repo, "the dependent");
     file_pipeline(&repo, "the dependency");
-    // The agent parts: the first filing's is #2, the second's is #5.
+    // The agent flights: the first filing's is #2, the second's is #5.
     stdout(&ff_tower(repo.path(), &["link", "2", "5"]));
 
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("claimed #5: the dependency · pass"), "{text}");
+    assert!(
+        text.contains("in progress #5: the dependency · pass"),
+        "{text}"
+    );
     assert!(text.contains("passed #2 · waiting on #5"), "{text}");
 
     let out = ff_tower(repo.path(), &["next", "--peek", "--json"]);
@@ -208,13 +253,14 @@ fn an_undone_dependency_is_passed_as_waiting_and_the_dependency_is_claimed() {
 }
 
 #[test]
-fn deconfliction_passes_the_collider_claims_the_clear_one_and_pins_the_json() {
+fn deconfliction_passes_the_collider_pulls_the_clear_one_and_pins_the_json() {
     let repo = repo();
     file_pipeline(&repo, "left work");
     file_pipeline(&repo, "right work");
     file_pipeline(&repo, "third work");
-    // Claim the first filing's agent part and put its work on a branch.
-    stdout(&ff_tower(repo.path(), &["claim", "2"]));
+    // Pull the first filing's agent flight by hand and put its work on a
+    // branch.
+    stdout(&ff_tower(repo.path(), &["status", "2", "in_progress"]));
 
     repo.ff(&["start", "-b", "left"]);
     repo.write("shared.txt", "left side\n");
@@ -233,12 +279,12 @@ fn deconfliction_passes_the_collider_claims_the_clear_one_and_pins_the_json() {
         .expect("status");
     repo.ff(&["commit", "-m", "right: touch shared"]);
 
-    // The peek first, so the JSON pins the same pick the claiming run
-    // takes a line below — after the claim the pool would be different.
+    // The peek first, so the JSON pins the same pick the pulling run
+    // takes a line below — after the pull the pool would be different.
     let out = ff_tower(repo.path(), &["next", "-n", "2", "--peek", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
-    assert_eq!(envelope["data"]["claimed"], serde_json::json!(false));
+    assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     let picked = envelope["data"]["picked"].as_array().expect("picked");
     assert_eq!(picked.len(), 1);
     assert_eq!(picked[0]["flight"], serde_json::json!("pi.14"));
@@ -251,7 +297,7 @@ fn deconfliction_passes_the_collider_claims_the_clear_one_and_pins_the_json() {
     let out = ff_tower(repo.path(), &["next", "-n", "2"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("claimed #8: third work · pass"), "{text}");
+    assert!(text.contains("in progress #8: third work · pass"), "{text}");
     assert!(
         text.contains("passed #5 · collides with #2 on shared.txt"),
         "{text}"
@@ -264,7 +310,8 @@ fn deconfliction_passes_the_collider_claims_the_clear_one_and_pins_the_json() {
         .iter()
         .find(|view| view["id"] == serde_json::json!("pi.14"))
         .expect("pi.14 is in the air");
-    assert!(picked["claimed_by"].is_string(), "{picked}");
+    assert_eq!(picked["status"], serde_json::json!("in_progress"));
+    assert!(picked["status_by"].is_string(), "{picked}");
 }
 
 #[test]
@@ -288,7 +335,7 @@ fn an_empty_pick_under_json_is_a_data_envelope_not_an_error() {
     assert_eq!(envelope["tower"], serde_json::json!(1));
     assert_eq!(envelope["cmd"], serde_json::json!("next"));
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
-    assert_eq!(envelope["data"]["claimed"], serde_json::json!(false));
+    assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(0));
     assert!(
         envelope.get("error").is_none(),
@@ -303,20 +350,20 @@ fn install_branchy(repo: &Repo) {
         ".tower/procedures/branchy.toml",
         concat!(
             "name = \"branchy\"\nsubject = \"branch\"\n\n",
-            "[[part]]\nid   = \"pass\"\ncrew = \"agent\"\n\n",
-            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
         ),
     );
 }
 
-/// `pipeline`, with the agent part asking the pool for a tree.
+/// `pipeline`, with the agent flight asking the pool for a tree.
 fn install_warmly(repo: &Repo) {
     repo.write(
         ".tower/procedures/warmly.toml",
         concat!(
             "name = \"warmly\"\n\n",
-            "[[part]]\nid   = \"pass\"\ncrew = \"agent\"\nbay = \"warm\"\n\n",
-            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nbay      = \"warm\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
         ),
     );
 }
@@ -343,7 +390,7 @@ fn ff_at(dir: &Path, args: &[&str]) -> String {
 }
 
 #[test]
-fn a_claim_binds_the_flight_to_a_branch_in_a_bay_and_tags_the_op_row() {
+fn a_pull_binds_the_flight_to_a_branch_in_a_bay_and_tags_the_op_row() {
     let repo = repo();
     file_pipeline(&repo, "the one flight");
 
@@ -365,7 +412,7 @@ fn a_claim_binds_the_flight_to_a_branch_in_a_bay_and_tags_the_op_row() {
     assert!(ops.contains("flight/pi.2"), "{ops}");
 
     let out = ff_tower(repo.path(), &["next", "--peek"]);
-    assert_eq!(out.status.code(), Some(3), "the flight is claimed");
+    assert_eq!(out.status.code(), Some(1), "the flight is pulled");
 }
 
 #[test]
@@ -393,7 +440,7 @@ fn the_second_pick_takes_the_warm_bay_and_the_two_never_share_a_tree() {
     assert!(ops.contains("flight/pi.8"), "{ops}");
     assert!(ff_at(&slot, &["branch", "list"]).contains("flight/pi.8"));
 
-    // And the human render puts the tree under the claim.
+    // And the human render puts the tree under the pull.
     let text = stdout(&ff_tower(repo.path(), &["bay"]));
     assert!(
         text.contains("flight/pi.2") && text.contains("flight/pi.8"),
@@ -409,10 +456,7 @@ fn a_subject_that_is_a_branch_switches_rather_than_minting_one() {
     repo.write("feature.txt", "work\n");
     repo.ff(&["commit", "-m", "feature: a file"]);
     repo.ff(&["switch", "main"]);
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", "feature", "-p", "branchy"],
-    ));
+    stdout(&ff_tower(repo.path(), &["file", "branchy", "feature"]));
 
     let out = ff_tower(repo.path(), &["next", "--json"]);
     assert_eq!(out.status.code(), Some(0));
@@ -424,7 +468,7 @@ fn a_subject_that_is_a_branch_switches_rather_than_minting_one() {
     let branches = ff_at(repo.path(), &["branch", "list"]);
     assert!(!branches.contains("flight/pi."), "{branches}");
     let out = ff_tower(repo.path(), &["next", "--peek"]);
-    assert_eq!(out.status.code(), Some(3), "the flight is claimed");
+    assert_eq!(out.status.code(), Some(1), "the flight is pulled");
 }
 
 #[test]
@@ -451,23 +495,23 @@ fn peek_reports_the_bay_and_the_branch_and_binds_neither() {
 }
 
 #[test]
-fn a_full_pool_with_no_stamp_claims_anyway_and_says_where_the_next_bay_comes_from() {
+fn a_full_pool_with_no_stamp_pulls_anyway_and_says_where_the_next_bay_comes_from() {
     let repo = repo();
     file_pipeline(&repo, "the first");
     file_pipeline(&repo, "the second");
     stdout(&ff_tower(repo.path(), &["next"]));
 
     // Main is the only bay and the first flight is live in it, so the
-    // second claim gets no tree — which is a hint, not a refusal.
+    // second pull gets no tree — which is a hint, not a refusal.
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("claimed #5: the second · pass"), "{text}");
+    assert!(text.contains("in progress #5: the second · pass"), "{text}");
     assert!(text.contains("no free bay · ff tower bay warm"), "{text}");
 
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
     let row = &envelope["data"]["picked"][0];
-    assert!(row.is_null(), "both flights are claimed now");
+    assert!(row.is_null(), "both flights are pulled now");
 }
 
 #[test]
@@ -476,14 +520,8 @@ fn a_warm_stamp_with_a_pool_root_mints_the_slot_it_needs() {
     install_warmly(&repo);
     let root = repo.bay_path("bays");
     repo.git(&["config", "tower.bays", root.to_str().expect("utf8")]);
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", "the first", "-p", "warmly"],
-    ));
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", "the second", "-p", "warmly"],
-    ));
+    stdout(&ff_tower(repo.path(), &["file", "warmly", "the first"]));
+    stdout(&ff_tower(repo.path(), &["file", "warmly", "the second"]));
 
     let out = ff_tower(repo.path(), &["next", "-n", "2", "--json"]);
     assert_eq!(out.status.code(), Some(0));
@@ -500,14 +538,8 @@ fn a_warm_stamp_with_a_pool_root_mints_the_slot_it_needs() {
 fn a_warm_stamp_with_no_pool_root_lands_the_refusal_on_the_row_and_still_exits_zero() {
     let repo = repo();
     install_warmly(&repo);
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", "the first", "-p", "warmly"],
-    ));
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", "the second", "-p", "warmly"],
-    ));
+    stdout(&ff_tower(repo.path(), &["file", "warmly", "the first"]));
+    stdout(&ff_tower(repo.path(), &["file", "warmly", "the second"]));
 
     let out = ff_tower(repo.path(), &["next", "-n", "2"]);
     assert_eq!(
@@ -516,7 +548,7 @@ fn a_warm_stamp_with_no_pool_root_lands_the_refusal_on_the_row_and_still_exits_z
         "a refusal on a row is not fatal"
     );
     let text = stdout(&out);
-    assert!(text.contains("claimed #5: the second · pass"), "{text}");
+    assert!(text.contains("in progress #5: the second · pass"), "{text}");
     assert!(text.contains("needs a pool root"), "{text}");
 
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
@@ -524,20 +556,20 @@ fn a_warm_stamp_with_no_pool_root_lands_the_refusal_on_the_row_and_still_exits_z
 }
 
 #[test]
-fn a_picked_part_hands_out_its_skill() {
+fn a_picked_flight_hands_out_its_skill() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     repo.write(
         ".tower/procedures/skilled.toml",
         concat!(
             "name = \"skilled\"\n\n",
-            "[[part]]\nid    = \"pass\"\ncrew  = \"agent\"\nskill = \"review\"\n\n",
-            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nskill    = \"review\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
         ),
     );
     stdout(&ff_tower(
         repo.path(),
-        &["file", "look this over", "-p", "skilled"],
+        &["file", "skilled", "look this over"],
     ));
 
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--peek", "--json"]));
@@ -549,13 +581,13 @@ fn a_picked_part_hands_out_its_skill() {
     // The human render says it on the picked line, where the loop reads.
     let text = stdout(&ff_tower(repo.path(), &["next"]));
     assert!(
-        text.contains("claimed #2: look this over · pass · skill review"),
+        text.contains("in progress #2: look this over · pass · skill review"),
         "{text}"
     );
 }
 
 #[test]
-fn a_part_naming_no_skill_omits_the_field() {
+fn a_flight_naming_no_skill_omits_the_field() {
     let repo = repo();
     file_pipeline(&repo, "plain work");
 
@@ -564,7 +596,7 @@ fn a_part_naming_no_skill_omits_the_field() {
     assert_eq!(row["flight"], serde_json::json!("pi.2"));
     assert!(
         row.get("skill").is_none(),
-        "absent, not null, when the part names none: {row}"
+        "absent, not null, when the flight names none: {row}"
     );
 
     let text = stdout(&ff_tower(repo.path(), &["next"]));

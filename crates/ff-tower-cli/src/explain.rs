@@ -103,10 +103,10 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "usage/needs-edit",
         summary: "`edit` has nothing to change",
-        detail: "`edit` rewords through its flags — `-s` the subject, `-m` the body, or a \
-                 comment's text when the target is a comment's event id — and neither was \
-                 given, so there is no overlay to write. Either flag alone is a complete edit; \
-                 the other field stands unchanged.",
+        detail: "`edit` rewords through its flags — `-s` the subject, `-m` the body or a \
+                 comment's text, `--priority`, `--label`, `--skill`, `--bay` the fields — and \
+                 none was given, so there is no overlay to write. Any flag alone is a \
+                 complete edit; every other field stands unchanged.",
         exits: &[
             "ff tower edit <target> -s <subject>",
             "ff tower edit <target> -m <msg>",
@@ -114,10 +114,11 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         id: "usage/subject-on-comment",
-        summary: "a comment has no subject",
-        detail: "The target resolved to a comment, and `-s` names a field only flights carry. \
-                 A comment is one text, and `-m` is how it rewords; the flight the comment \
-                 sits on has the subject, and editing that is a different target.",
+        summary: "a comment carries no fields",
+        detail: "The target resolved to a comment, and `-s`, `--priority`, `--label`, \
+                 `--skill`, and `--bay` name fields only flights carry. A comment is one text, \
+                 and `-m` is how it rewords; the flight the comment sits on has the fields, \
+                 and editing those is a different target.",
         exits: &["ff tower edit <target> -m <msg>"],
     },
     Entry {
@@ -140,34 +141,37 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         id: "usage/empty-procedure",
-        summary: "`-p` names an empty procedure",
-        detail: "The flag was passed with a name that trims to nothing. Leave `-p` off entirely \
-                 to file under `open`, the unclassified default, or name one of the installed \
-                 procedures.",
+        summary: "the procedure name is empty",
+        detail: "A procedure argument was given but trims to nothing. File bare — one argument, \
+                 straight into Triage — or name one of the installed procedures.",
         exits: &["ff tower procedures"],
     },
     Entry {
         id: "usage/no-parts",
-        summary: "there are no parts to split into",
-        detail: "`decompose` takes the parts as arguments, one subject each, and none were \
-                 given. A decompose with no parts would append nothing and change nothing, so \
-                 it refuses rather than pretending to have worked.",
+        summary: "there is nothing to split into",
+        detail: "`decompose` takes an installed procedure's name, or the sub-flights as \
+                 arguments, one subject each — and nothing was given. A decompose with nothing \
+                 to mint would append nothing and change nothing, so it refuses rather than \
+                 pretending to have worked.",
         exits: &[],
     },
     Entry {
-        id: "usage/no-procedure",
-        summary: "a flight but no procedure to route it to",
-        detail: "`triage <flight>` routes one flight, and `-p <name>` is the half that says \
-                 where. Without it there is no routing to write. Bare `triage` — no flight at \
-                 all — is the other, valid shape: it lists the unclassified pile.",
-        exits: &["ff tower procedures"],
+        id: "usage/bad-status",
+        summary: "that is not a status",
+        detail: "The statuses are a closed vocabulary — triage, waiting, ready, in_progress, \
+                 held, done, canceled — and the word given is not among them. The refusal lives \
+                 at the verb so the log never has to guess: the wire itself stays a free \
+                 string, and a newer tower's value folds through untouched.",
+        exits: &[],
     },
     Entry {
-        id: "usage/no-flight",
-        summary: "a procedure but no flight to route to it",
-        detail: "`-p` names a destination, but no flight was given to send there. `triage` \
-                 shows the unclassified pile, which is where the flight to route comes from.",
-        exits: &["ff tower triage"],
+        id: "usage/bad-assignee",
+        summary: "that is not a lane",
+        detail: "The lane is deliberately coarse — `me` or `agent`, plus `none` to clear it — \
+                 because whose queue this is in is all the field carries. Which agent actually \
+                 flies a flight needs no field: every event carries the byline of whoever \
+                 wrote it.",
+        exits: &[],
     },
     Entry {
         id: "usage/self-link",
@@ -225,12 +229,13 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         id: "flight/done",
-        summary: "the flight is already done",
-        detail: "The lifecycle verbs stop at the done mark: claiming, holding, answering, or \
-                 finishing a finished flight would write motion onto a closed record. The log \
-                 keeps the record — `brief` still reads it whole — and `comment`, `link`, and \
-                 `edit` stay permissive on purpose: a note on the record is fine, and a wrong \
-                 word in a closed record is exactly what `edit` is for.",
+        summary: "the flight is already closed",
+        detail: "The lifecycle verbs stop at a closed status — done or canceled: moving, \
+                 assigning, holding, or answering a closed flight would write motion onto a \
+                 closed record. The log keeps the record — `brief` still reads it whole — and \
+                 `comment`, `link`, and `edit` stay permissive on purpose: a note on the \
+                 record is fine, and a wrong word in a closed record is exactly what `edit` is \
+                 for.",
         exits: &["ff tower brief <flight>"],
     },
     Entry {
@@ -258,32 +263,14 @@ pub static ENTRIES: &[Entry] = &[
         exits: &["ff tower"],
     },
     Entry {
-        id: "claim/taken",
-        summary: "someone already flies that flight",
-        detail: "A standing claim is what keeps two agents off one flight, so claiming over it \
-                 is refused rather than reassigned — reassignment would be a silent handoff \
-                 nobody agreed to. The refusal names who holds it; `next` hands out flights \
-                 that are actually free.",
-        exits: &["ff tower", "ff tower next"],
-    },
-    Entry {
-        id: "take/taken",
-        summary: "the flight is already yours",
-        detail: "`take` crews a flight to you and closes the agent lane, and one already \
-                 stands on this flight. Taking it twice would append a gesture that changed \
-                 nothing — the same reason a second `claim` is refused. `requeue` is the way \
-                 back out: it clears the take and the claim together, and the flight returns to \
-                 the pool with its filed stamp untouched.",
-        exits: &["ff tower requeue <flight>", "ff tower brief <flight>"],
-    },
-    Entry {
-        id: "requeue/unclaimed",
-        summary: "nothing to hand back",
-        detail: "`requeue` releases a standing claim or take, and this flight has neither — it \
-                 is already in the pool, or its own crew stamp is what keeps it out of one. A \
-                 requeue that appended nothing would read as a release that happened. An open \
-                 question is not a claim: `answer` is what clears that.",
-        exits: &["ff tower", "ff tower next"],
+        id: "status/held",
+        summary: "an open question blocks the move",
+        detail: "The flight is held on a question, and a status move short of closing it \
+                 would bury the question unanswered. `answer` is the release — it clears the \
+                 question and sets the flight Ready — while `done` and `cancel` override the \
+                 hold, because abandoning the question is deliberate when the flight itself \
+                 is over.",
+        exits: &["ff tower answer <flight> -m <answer>"],
     },
     Entry {
         id: "bay/pool-root",
@@ -316,49 +303,51 @@ pub static ENTRIES: &[Entry] = &[
         id: "procedure/invalid",
         summary: "the definition would not parse",
         detail: "TOML that does not parse, a key nothing declares, or a directory that cannot \
-                 be read. The message carries the path and toml's own words, which point at the \
-                 line. Definitions are validated whole at load so a broken file fails here, \
-                 not halfway through a filing.",
+                 be read. The message carries the path and toml's own words, which point at \
+                 the line — an old-grammar `[[part]]` file lands here too, loudly, rather than \
+                 loading as half a definition. Definitions are validated whole at load so a \
+                 broken file fails here, not halfway through a filing.",
         exits: &["ff tower procedures"],
     },
     Entry {
         id: "procedure/no-parts",
-        summary: "the procedure declares no parts",
-        detail: "A procedure is its parts — a definition with none has nothing to file and \
-                 nothing to hand out. Declare at least one `[[part]]`, and remember the last \
-                 one must be crewed to you: every procedure ends with a human.",
+        summary: "the procedure declares no flights",
+        detail: "A procedure is the flights it stamps out — a definition with none has \
+                 nothing to file and nothing to hand out. Declare at least one `[[flight]]`, \
+                 and remember the last one must be assigned to `me`: every procedure ends \
+                 with a human.",
         exits: &["ff tower procedures"],
     },
     Entry {
         id: "procedure/duplicate-part",
-        summary: "two parts wear one id",
-        detail: "Part ids name edges: `after` says which part precedes which, and a duplicated \
-                 id makes that reference ambiguous. Rename one of the two; ids only need to be \
-                 unique within their own procedure.",
+        summary: "two flights wear one id",
+        detail: "Flight ids name edges: `after` says which flight precedes which, and a \
+                 duplicated id makes that reference ambiguous. Rename one of the two; ids \
+                 only need to be unique within their own procedure.",
         exits: &["ff tower procedures"],
     },
     Entry {
         id: "procedure/unknown-after",
-        summary: "`after` names a part that does not exist",
-        detail: "An edge points at a part id the definition never declares — a typo, every \
-                 time. The message names the part carrying the edge and the id it reached for; \
-                 the fix is almost always spelling.",
+        summary: "`after` names a flight that does not exist",
+        detail: "An edge points at a flight id the definition never declares — a typo, every \
+                 time. The message names the flight carrying the edge and the id it reached \
+                 for; the fix is almost always spelling.",
         exits: &["ff tower procedures"],
     },
     Entry {
         id: "procedure/cyclic",
         summary: "`after` closes a cycle",
-        detail: "The part order came back around to itself, so no part in the cycle could ever \
-                 start — each is waiting on the others. The message names a part on the cycle; \
-                 removing or redirecting one edge breaks it.",
+        detail: "The flight order came back around to itself, so no flight in the cycle could \
+                 ever start — each is waiting on the others. The message names a flight on \
+                 the cycle; removing or redirecting one edge breaks it.",
         exits: &["ff tower procedures"],
     },
     Entry {
         id: "procedure/no-human-end",
-        summary: "the procedure ends on an agent part",
-        detail: "Every procedure ends with you — the final part must be you-crewed, so that \
-                 finished work always crosses a human's desk before it counts as done. Add a \
-                 closing part crewed to `you`, or re-crew the last one.",
+        summary: "the procedure ends on an agent flight",
+        detail: "Every procedure ends with you — the final flight must be assigned to `me`, \
+                 so that finished work always crosses a human's desk before it counts as \
+                 done. Add a closing flight assigned to `me`, or re-assign the last one.",
         exits: &["ff tower procedures"],
     },
     Entry {

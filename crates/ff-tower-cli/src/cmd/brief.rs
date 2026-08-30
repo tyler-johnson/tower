@@ -6,15 +6,14 @@
 //! subject, and the brief is what an agent reads next. Fold plus gather,
 //! and the collide probes only where `wants_verdicts` says they can
 //! change the answer — the laziness lives here because the fold stays
-//! spawn-free, and a done or branchless flight briefs with zero probes,
-//! byte-identical to the probed run. Not `ensure_active`: a done flight
-//! briefs, the log keeps the record, and the render carries the done
-//! mark alongside everything else.
+//! spawn-free, and a closed or branchless flight briefs with zero
+//! probes, byte-identical to the probed run. Not `ensure_active`: a
+//! closed flight briefs, the log keeps the record, and the render
+//! carries the closing move alongside everything else.
 
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, Brief, Fold, Skip, Standing, Verdicts};
-use ff_tower_core::log::PartStamp;
 
 pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     super::parse_ref(flight)?;
@@ -58,22 +57,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         brief.subject
     ));
     out.push_str(&format!("    {}\n", note(fold, brief, now, colored)));
-    if let Some(part) = brief.part.as_ref() {
-        out.push_str(&format!("    {}\n", part_line(part, colored)));
-    }
-    // The routing, explained — the stored stamp beside who wrote it and
-    // why, so a bad call is correctable in a glance.
-    if let (Some(by), Some(at)) = (brief.routed_by.as_deref(), brief.routed_at) {
-        let mut phrase = format!(
-            "routed {} · by {by} · {}",
-            brief.procedure,
-            render::age(now, at)
-        );
-        if let Some(because) = brief.because.as_deref() {
-            phrase.push_str(&format!(" · {because}"));
-        }
-        out.push_str(&format!("    {}\n", render::paint_dim(&phrase, colored)));
-    }
+    out.push_str(&format!("    {}\n", fields_line(brief, colored)));
     // The last edit, comment rewords included — the record has been
     // touched, and the mark says by whom.
     if let (Some(by), Some(at)) = (brief.edited_by.as_deref(), brief.edited_at) {
@@ -121,8 +105,11 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
                 render::paint_id(&show(fold, &link.flight), colored),
                 link.subject
             ));
-            if link.done {
-                out.push_str(&format!("  {}", render::paint_dim("done", colored)));
+            if link.closed {
+                out.push_str(&format!(
+                    "  {}",
+                    render::paint_dim(&link.status.replace('_', " "), colored)
+                ));
             }
             out.push('\n');
         }
@@ -183,38 +170,50 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     out
 }
 
-/// What part of its procedure this flight is, as the filing stamped it.
-/// Its own line rather than a phrase in the note: the note is urgency
-/// ordered, and crew is not urgency — it is what a reader needs to know
-/// before picking the flight up, which is what a brief is for.
-fn part_line(part: &PartStamp, colored: bool) -> String {
-    let mut phrases = vec![format!("part {}", part.id), part.crew.clone()];
-    if let Some(skill) = part.skill.as_deref() {
+/// The stored fields, one line: lane, priority, labels, skill, bay, and
+/// the procedure the filing was minted under. Its own line rather than
+/// phrases in the note: the note is urgency ordered, and a field is not
+/// urgency — it is what a reader needs to know before picking the
+/// flight up, which is what a brief is for.
+fn fields_line(brief: &Brief, colored: bool) -> String {
+    let mut phrases = vec![match brief.assignee.as_deref() {
+        Some(lane) => format!("assignee {lane}"),
+        None => "unassigned".to_string(),
+    }];
+    if brief.priority != "none" {
+        phrases.push(format!("priority {}", brief.priority));
+    }
+    if !brief.labels.is_empty() {
+        phrases.push(brief.labels.join(", "));
+    }
+    if let Some(skill) = brief.skill.as_deref() {
         phrases.push(format!("skill {skill}"));
     }
-    if let Some(bay) = part.bay.as_deref() {
+    if let Some(bay) = brief.bay.as_deref() {
         phrases.push(format!("bay {bay}"));
     }
-    if let Some(branch) = part.branch.as_deref() {
-        phrases.push(format!("branch {branch}"));
+    if let Some(procedure) = brief.procedure.as_deref() {
+        phrases.push(format!("under {procedure}"));
     }
-    phrases.push(format!("done {}", part.done));
     render::paint_dim(&phrases.join(" · "), colored)
 }
 
-/// The note line, in the board's phrase order with the done mark ahead of
-/// everything — a reader must know first that the flight is over. The
-/// standing joins as one phrase before the branch: precedence makes it
-/// exclusive with the mark phrases — a walk standing only exists with no
-/// done, question, hold, or claim — so the line never says a thing twice.
+/// The note line, in the board's phrase order with the status ahead of
+/// everything — a reader must know first where the flight stands, and
+/// who put it there when someone did. The standing joins as one phrase
+/// before the branch: precedence makes it exclusive with the mark
+/// phrases — a walk standing only exists with no closing move, question,
+/// hold, or pull — so the line never says a thing twice.
 fn note(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
-    if let (Some(by), Some(at)) = (brief.done_by.as_deref(), brief.done_at) {
-        phrases.push(render::paint_dim(
-            &format!("done by {by} {}", render::age(now, at)),
-            colored,
-        ));
-    }
+    let status = brief.status.replace('_', " ");
+    phrases.push(render::paint_dim(
+        &match (brief.status_by.as_deref(), brief.status_at) {
+            (Some(by), Some(at)) => format!("{status} — {by} {}", render::age(now, at)),
+            _ => status,
+        },
+        colored,
+    ));
     if let Some(question) = brief.question.as_deref() {
         phrases.push(render::paint_warn(question, colored));
     }
@@ -224,23 +223,13 @@ fn note(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     if brief.resolving {
         phrases.push(render::paint_warn("resolving", colored));
     }
-    if let Some(by) = brief.claimed_by.as_deref() {
-        // A take is a claim with a provenance: same owner, different
-        // gesture, and the word is what says the agent lane is closed.
-        let how = if brief.taken_by.is_some() {
-            "taken"
-        } else {
-            "claimed"
-        };
-        phrases.push(render::paint_dim(&format!("{how} by {by}"), colored));
-    }
     match &brief.standing {
         // Said above, from the brief's own flat facts.
-        Standing::Done | Standing::Question | Standing::Held | Standing::Claimed => {}
+        Standing::Done | Standing::Question | Standing::Held | Standing::InProgress => {}
         Standing::Yours => phrases.push(render::paint_dim(
-            &match brief.part.as_ref().map(|part| part.crew.as_str()) {
-                Some(crew) => format!("yours — crewed {crew}"),
-                None => "yours — no part stamp".to_string(),
+            &match brief.assignee.as_deref() {
+                Some(lane) => format!("yours — assigned {lane}"),
+                None => "yours — unassigned".to_string(),
             },
             colored,
         )),

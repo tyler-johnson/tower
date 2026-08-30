@@ -49,25 +49,25 @@ fn repo() -> Repo {
 }
 
 #[test]
-fn the_listing_is_the_shipped_set_with_parts_and_crews() {
+fn the_listing_is_the_shipped_set_with_flights_and_lanes() {
     let repo = repo();
     let out = stdout(&ff_tower(repo.path(), &["procedures"]));
     assert_eq!(
         out,
         "open    built-in\n\
-         · work  you\n\
+         · work  me\n\
          \n\
          review  built-in\n\
          · pass     agent\n\
-         · smoke    you\n\
-         · verdict  you\n\
+         · smoke    me\n\
+         · verdict  me\n\
          \n\
          2 procedures · ff tower procedures <name> for one\n"
     );
 }
 
 #[test]
-fn the_detail_carries_the_parts_the_inert_rule_and_where_to_fork() {
+fn the_detail_carries_the_flights_the_inert_rule_and_where_to_fork() {
     let repo = repo();
     let out = stdout(&ff_tower(repo.path(), &["procedures", "review"]));
     assert!(out.starts_with("review  built-in\n"), "{out}");
@@ -84,11 +84,11 @@ fn the_detail_carries_the_parts_the_inert_rule_and_where_to_fork() {
         "{out}"
     );
     assert!(
-        out.contains("· smoke    you · bay warm · done asserted\n"),
+        out.contains("· smoke    me · bay warm · done asserted\n"),
         "{out}"
     );
     assert!(
-        out.contains("· verdict  you · after pass, smoke · done asserted\n"),
+        out.contains("· verdict  me · after pass, smoke · done asserted\n"),
         "{out}"
     );
     assert!(
@@ -125,20 +125,22 @@ fn the_json_form_is_the_registry_as_data() {
         review["matches"],
         serde_json::json!([{"source": "github", "event": "review_requested"}])
     );
-    let parts = review["parts"].as_array().expect("parts");
-    assert_eq!(parts.len(), 3);
+    let flights = review["flights"].as_array().expect("flights");
+    assert_eq!(flights.len(), 3);
     assert_eq!(
-        parts[0],
+        flights[0],
         serde_json::json!({
             "id": "pass",
-            "crew": "agent",
+            "assignee": "agent",
             "skill": "review",
             "after": [],
             "done": "asserted",
             "bay": null,
+            "priority": null,
+            "labels": [],
         })
     );
-    assert_eq!(parts[2]["after"], serde_json::json!(["pass", "smoke"]));
+    assert_eq!(flights[2]["after"], serde_json::json!(["pass", "smoke"]));
 }
 
 #[test]
@@ -146,12 +148,12 @@ fn a_repo_definition_overrides_the_built_in_and_says_so() {
     let repo = repo();
     repo.write(
         ".tower/procedures/review.toml",
-        "name = \"review\"\n\n[[part]]\nid   = \"read it\"\ncrew = \"you\"\n",
+        "name = \"review\"\n\n[[flight]]\nid       = \"read it\"\nassignee = \"me\"\n",
     );
 
     let out = stdout(&ff_tower(repo.path(), &["procedures"]));
     assert!(out.contains("review  repo\n"), "the layer is named: {out}");
-    assert!(out.contains("· read it  you\n"), "{out}");
+    assert!(out.contains("· read it  me\n"), "{out}");
     assert!(
         !out.contains("verdict"),
         "the built-in is gone whole: {out}"

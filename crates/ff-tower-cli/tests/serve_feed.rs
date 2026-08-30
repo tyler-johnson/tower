@@ -115,21 +115,21 @@ fn a_post_verb_rides_the_same_loop() {
 }
 
 #[test]
-fn a_route_posted_over_http_arrives_as_a_fresh_frame() {
+fn a_status_move_posted_over_http_arrives_as_a_fresh_frame() {
     let (_repo, server) = served();
     let mut feed = sse(&server.addr, "/api/feed");
     let _initial = feed.next_data();
 
-    // The routed stamp is a board change like any other, and the handler
-    // publishes none of it: the frame carrying `review`'s parts got
+    // The move is a board change like any other, and the handler
+    // publishes none of it: the frame carrying the In Progress row got
     // there through the watcher.
     let (status, _, body) = post(
         &server.addr,
-        "/api/triage",
-        r#"{"flight":"1","procedure":"review"}"#,
+        "/api/status",
+        r#"{"flight":"1","status":"in_progress"}"#,
     );
     assert_eq!(status, 200, "{body}");
-    await_subject(&mut feed, "write the doctor verb · verdict");
+    await_subject(&mut feed, "\"status\":\"in_progress\"");
 }
 
 #[test]

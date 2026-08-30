@@ -153,7 +153,7 @@ fn a_done_flight_still_edits() {
     ));
     let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
     assert!(text.contains("#1  finished right"), "{text}");
-    assert!(text.contains("done by"), "{text}");
+    assert!(text.contains("done — tests@tower.invalid"), "{text}");
 }
 
 #[test]

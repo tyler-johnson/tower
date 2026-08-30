@@ -1,27 +1,41 @@
-//! `ff tower file <subject> [-m <body>] [-p <procedure>]` — mint a flight
-//! under a procedure.
+//! `ff tower file [<procedure>] <subject> [flags]` — put work on the
+//! board.
 //!
-//! The verb's body lives in core's `verb::file`, where the server mounts
-//! it too; this file is the human echo — the filing line, and one row
-//! per part when the definition had two or more. The part rows read off
-//! the payload's own events, so the echo shows what the log holds, and
-//! the re-fold here is for their display numbers alone — the machine
-//! path never folds.
+//! Two positionals, resolved here: both given name a procedure and a
+//! subject; one alone is a bare filing — never guessed as a procedure
+//! name — and none is a coded refusal. The verb's body lives in core's
+//! `verb::file`, where the server mounts it too; this file is the human
+//! echo — the filing line, and one row per minted flight when the
+//! definition had two or more. The rows read off the payload's own
+//! events, so the echo shows what the log holds, and the re-fold here is
+//! for their display numbers alone — the machine path never folds.
 
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board;
 use ff_tower_core::log::Kind;
-use ff_tower_core::verb;
+use ff_tower_core::verb::{self, Fields};
 
 pub fn run(
     json: bool,
-    subject: &str,
-    message: Option<String>,
-    procedure: Option<String>,
+    first: Option<&str>,
+    second: Option<&str>,
+    fields: Fields,
 ) -> Result<(), CliError> {
+    let (procedure, subject) = match (first, second) {
+        (Some(procedure), Some(subject)) => (Some(procedure), subject),
+        (Some(subject), None) => (None, subject),
+        (None, _) => {
+            return Err(CliError::coded(
+                "usage/empty-subject",
+                "the subject is empty",
+                Vec::new(),
+            ));
+        }
+    };
+
     let store = super::store()?;
-    let outcome = verb::file(&store, subject, message, procedure)?;
+    let outcome = verb::file(&store, subject, fields, procedure)?;
 
     if json {
         println!("{}", machine::emit("file", &outcome.payload));
@@ -31,15 +45,20 @@ pub fn run(
         let fold = board::fold(&store.read_all()?);
         let colored = render::colored();
         let Kind::Filed {
-            procedure: name,
+            procedure,
             subject,
+            status,
             ..
         } = &outcome.payload.filed.kind
         else {
             unreachable!("`file` files");
         };
+        let landed = match procedure.as_deref() {
+            Some(name) => format!("under {name}"),
+            None => format!("in {}", status.replace('_', " ")),
+        };
         println!(
-            "filed {} under {name}: {subject}",
+            "filed {} {landed}: {subject}",
             render::paint_id(&super::display(&fold, &outcome.parent), colored)
         );
         let refs: Vec<String> = outcome
@@ -47,29 +66,34 @@ pub fn run(
             .iter()
             .map(|id| super::display(&fold, id))
             .collect();
-        let rows: Vec<(&str, &str)> = outcome
+        let rows: Vec<(&str, String)> = outcome
             .payload
             .parts
             .iter()
             .map(|event| {
                 let Kind::Filed {
                     subject,
-                    part: Some(stamp),
+                    status,
+                    assignee,
                     ..
                 } = &event.kind
                 else {
-                    unreachable!("a part row is a stamped filing")
+                    unreachable!("a minted row is a filing")
                 };
-                (subject.as_str(), stamp.crew.as_str())
+                let mut note = status.replace('_', " ");
+                if let Some(lane) = assignee.as_deref() {
+                    note.push_str(&format!(" · {lane}"));
+                }
+                (subject.as_str(), note)
             })
             .collect();
         let id_width = width(refs.iter().map(String::as_str));
         let subject_width = width(rows.iter().map(|(subject, _)| *subject));
-        for (reference, (text, crew)) in refs.iter().zip(&rows) {
+        for (reference, (text, note)) in refs.iter().zip(&rows) {
             println!(
                 "· {}  {text:<subject_width$}  {}",
                 render::paint_id(&format!("{reference:<id_width$}"), colored),
-                render::paint_dim(crew, colored),
+                render::paint_dim(note, colored),
             );
         }
         println!("{}", super::tail(colored));

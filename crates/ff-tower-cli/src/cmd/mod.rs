@@ -3,17 +3,18 @@
 //!
 //! A write verb is a read plus a local write. `Ff::here()` resolves the
 //! repository — constructing the handle spawns nothing — and the store
-//! opens on it. The eight lifecycle verbs live in core's `verb` module
-//! now, where the server mounts them too; their files here are argument
-//! handling and the human render around one core call. What stays in
-//! this module is the CLI's own half: the repository handles, `edit`'s
-//! target resolution, and the echo tail.
+//! opens on it. The lifecycle verbs live in core's `verb` module, where
+//! the server mounts them too; their files here are argument handling
+//! and the human render around one core call. What stays in this module
+//! is the CLI's own half: the repository handles, `edit`'s target
+//! resolution, and the echo tail.
 
 pub mod answer;
+pub mod assign;
 pub mod bay;
 pub mod board;
 pub mod brief;
-pub mod claim;
+pub mod cancel;
 pub mod comment;
 pub mod config;
 pub mod decompose;
@@ -26,11 +27,9 @@ pub mod hold;
 pub mod link;
 pub mod next;
 pub mod procedures;
-pub mod requeue;
 pub mod serve;
 pub mod skills;
-pub mod take;
-pub mod triage;
+pub mod status;
 pub mod update;
 pub mod version;
 

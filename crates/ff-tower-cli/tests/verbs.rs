@@ -64,17 +64,17 @@ fn repo() -> Repo {
     repo
 }
 
-/// A single-part procedure in the repository layer, so a test can file one
-/// flight under a name that is not the default.
+/// A single-flight procedure in the repository layer, so a test can file
+/// one flight under a name that is not built in.
 fn install_chore(repo: &Repo) {
     repo.write(
         ".tower/procedures/chore.toml",
-        "name = \"chore\"\n\n[[part]]\nid   = \"do\"\ncrew = \"you\"\n",
+        "name = \"chore\"\n\n[[flight]]\nid       = \"do\"\nassignee = \"me\"\n",
     );
 }
 
 #[test]
-fn file_echoes_the_filing_and_the_tail() {
+fn a_bare_file_echoes_the_triage_filing_and_the_tail() {
     let repo = repo();
     let out = stdout(&ff_tower(
         repo.path(),
@@ -82,7 +82,7 @@ fn file_echoes_the_filing_and_the_tail() {
     ));
     assert_eq!(
         out,
-        "filed #1 under open: fix the flaky retry test\nboard: ff tower\n"
+        "filed #1 in triage: fix the flaky retry test\nboard: ff tower\n"
     );
 }
 
@@ -94,11 +94,10 @@ fn file_json_round_trips_body_and_procedure() {
         repo.path(),
         &[
             "file",
+            "chore",
             "try the verbs",
             "-m",
             "body text",
-            "-p",
-            "chore",
             "--json",
         ],
     );
@@ -112,27 +111,33 @@ fn file_json_round_trips_body_and_procedure() {
     assert_eq!(filed["body"]["subject"], serde_json::json!("try the verbs"));
     assert_eq!(filed["body"]["body"], serde_json::json!("body text"));
     assert_eq!(filed["body"]["procedure"], serde_json::json!("chore"));
-    // One part collapses onto the flight, so there is nothing beside it.
+    // One flight collapses onto the filing, born Ready with the
+    // definition's fields.
+    assert_eq!(filed["body"]["status"], serde_json::json!("ready"));
+    assert_eq!(filed["body"]["assignee"], serde_json::json!("me"));
     assert_eq!(envelope["data"]["parts"], serde_json::json!([]));
     assert_eq!(envelope["data"]["linked"], serde_json::json!([]));
 }
 
 #[test]
-fn a_plain_file_is_still_one_flight_and_one_event() {
-    // `open` is a real procedure now, and its single part collapses onto
-    // the flight: the echo, the count, and the chain are what they were.
+fn a_bare_file_is_one_triage_flight_and_one_event() {
     let repo = repo();
     let out = ff_tower(repo.path(), &["file", "a plain one", "--json"]);
     let filing = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
     assert_eq!(filing["data"]["filed"]["id"], serde_json::json!("pi.1"));
-    assert_eq!(
-        filing["data"]["filed"]["body"]["procedure"],
-        serde_json::json!("open")
+    assert!(
+        filing["data"]["filed"]["body"]["procedure"].is_null(),
+        "a bare filing carries no procedure"
     );
     assert_eq!(
-        filing["data"]["filed"]["body"]["part"],
-        serde_json::json!({"id": "work", "crew": "you", "done": "asserted"})
+        filing["data"]["filed"]["body"]["status"],
+        serde_json::json!("triage")
+    );
+    assert!(filing["data"]["filed"]["body"]["assignee"].is_null());
+    assert_eq!(
+        filing["data"]["filed"]["body"]["priority"],
+        serde_json::json!("none")
     );
     assert_eq!(filing["data"]["parts"], serde_json::json!([]));
     assert_eq!(filing["data"]["linked"], serde_json::json!([]));
@@ -142,34 +147,85 @@ fn a_plain_file_is_still_one_flight_and_one_event() {
 }
 
 #[test]
-fn file_under_review_echoes_the_parent_and_its_parts() {
+fn the_field_flags_ride_the_filing_and_the_board_reads_them_back() {
+    let repo = repo();
+    stdout(&ff_tower(
+        repo.path(),
+        &[
+            "file",
+            "laned work",
+            "-p",
+            "high",
+            "--label",
+            "chore",
+            "--label",
+            "web",
+            "--skill",
+            "review",
+            "--assignee",
+            "agent",
+            "--bay",
+            "warm",
+        ],
+    ));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let view = &board["data"]["open"][0];
+    assert_eq!(view["status"], serde_json::json!("triage"));
+    assert_eq!(view["priority"], serde_json::json!("high"));
+    assert_eq!(view["labels"], serde_json::json!(["chore", "web"]));
+    assert_eq!(view["skill"], serde_json::json!("review"));
+    assert_eq!(view["assignee"], serde_json::json!("agent"));
+
+    let brief = envelope(&ff_tower(repo.path(), &["brief", "1", "--json"]));
+    assert_eq!(brief["data"]["bay"], serde_json::json!("warm"));
+}
+
+#[test]
+fn a_bad_lane_at_filing_is_a_usage_refusal() {
+    let repo = repo();
+    let out = ff_tower(
+        repo.path(),
+        &["file", "laned work", "--assignee", "pair", "--json"],
+    );
+    let envelope = refusal(&out, 2, "usage/bad-assignee");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`pair` is not a lane — me, agent, or none")
+    );
+
+    // Nothing was filed: the refusal lands before the append.
+    let board = self::envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["open"], serde_json::json!([]));
+}
+
+#[test]
+fn file_under_review_echoes_the_parent_and_its_flights() {
     let repo = repo();
     let out = stdout(&ff_tower(
         repo.path(),
-        &["file", "the retry test", "-p", "review"],
+        &["file", "review", "the retry test"],
     ));
     assert_eq!(
         out,
         "filed #1 under review: the retry test\n\
-         · #2  the retry test · pass     agent\n\
-         · #3  the retry test · smoke    you\n\
-         · #4  the retry test · verdict  you\n\
+         · #2  the retry test · pass     ready · agent\n\
+         · #3  the retry test · smoke    ready · me\n\
+         · #4  the retry test · verdict  waiting · me\n\
          board: ff tower\n"
     );
 }
 
 #[test]
-fn file_under_review_json_carries_the_parent_three_parts_and_five_edges() {
+fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
     let repo = repo();
     let out = ff_tower(
         repo.path(),
         &[
             "file",
+            "review",
             "the retry test",
             "-m",
             "body text",
-            "-p",
-            "review",
             "--json",
         ],
     );
@@ -178,7 +234,8 @@ fn file_under_review_json_carries_the_parent_three_parts_and_five_edges() {
     assert_eq!(filing["cmd"], serde_json::json!("file"));
     let data = &filing["data"];
 
-    // The parent keeps the procedure stamp and the body, and is no part.
+    // The parent keeps the procedure stamp and the body, and is born
+    // Waiting on its children.
     let filed = &data["filed"];
     assert_eq!(filed["id"], serde_json::json!("pi.1"));
     assert_eq!(filed["body"]["procedure"], serde_json::json!("review"));
@@ -187,7 +244,7 @@ fn file_under_review_json_carries_the_parent_three_parts_and_five_edges() {
         serde_json::json!("the retry test")
     );
     assert_eq!(filed["body"]["body"], serde_json::json!("body text"));
-    assert!(filed["body"]["part"].is_null());
+    assert_eq!(filed["body"]["status"], serde_json::json!("waiting"));
 
     let parts = data["parts"].as_array().expect("parts");
     assert_eq!(parts.len(), 3);
@@ -197,41 +254,48 @@ fn file_under_review_json_carries_the_parent_three_parts_and_five_edges() {
         .collect();
     assert_eq!(ids, ["pi.2", "pi.3", "pi.4"]);
     // Every row stands alone: `next` hands one to an agent with no parent
-    // context attached.
+    // context attached — and the born statuses fall out of the edges.
     assert_eq!(
-        parts[0]["body"]["subject"],
-        serde_json::json!("the retry test · pass")
-    );
-    assert_eq!(parts[0]["body"]["body"], serde_json::json!(""));
-    assert_eq!(
-        parts[0]["body"]["part"],
+        parts[0]["body"],
         serde_json::json!({
-            "id": "pass",
-            "crew": "agent",
+            "procedure": "review",
+            "subject": "the retry test · pass",
+            "body": "",
+            "status": "ready",
+            "assignee": "agent",
+            "priority": "none",
             "skill": "review",
             "done": "asserted",
             // `review` resolves its subject against a branch, so file
-            // time stamps the branch each part flies on.
+            // time stamps the branch each flight flies on.
             "branch": "the retry test",
         })
     );
     assert_eq!(
-        parts[1]["body"]["part"],
+        parts[1]["body"],
         serde_json::json!({
-            "id": "smoke",
-            "crew": "you",
-            "done": "asserted",
+            "procedure": "review",
+            "subject": "the retry test · smoke",
+            "body": "",
+            "status": "ready",
+            "assignee": "me",
+            "priority": "none",
             "bay": "warm",
-            "branch": "the retry test"
+            "done": "asserted",
+            "branch": "the retry test",
         })
     );
     assert_eq!(
-        parts[2]["body"]["part"],
+        parts[2]["body"],
         serde_json::json!({
-            "id": "verdict",
-            "crew": "you",
+            "procedure": "review",
+            "subject": "the retry test · verdict",
+            "body": "",
+            "status": "waiting",
+            "assignee": "me",
+            "priority": "none",
             "done": "asserted",
-            "branch": "the retry test"
+            "branch": "the retry test",
         })
     );
 
@@ -274,13 +338,32 @@ fn file_under_review_json_carries_the_parent_three_parts_and_five_edges() {
         by_id("pi.4")["depends_on"],
         serde_json::json!(["pi.2", "pi.3"])
     );
-    assert_eq!(by_id("pi.2")["part"]["crew"], serde_json::json!("agent"));
+    assert_eq!(by_id("pi.2")["assignee"], serde_json::json!("agent"));
+    assert_eq!(by_id("pi.2")["status"], serde_json::json!("ready"));
+}
+
+#[test]
+fn caller_flags_win_on_a_collapsed_filing() {
+    let repo = repo();
+    install_chore(&repo);
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "chore", "swap the lane", "--assignee", "agent"],
+    ));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let view = &board["data"]["open"][0];
+    assert_eq!(view["status"], serde_json::json!("ready"));
+    assert_eq!(
+        view["assignee"],
+        serde_json::json!("agent"),
+        "the caller's lane beats the definition's `me`"
+    );
 }
 
 #[test]
 fn a_procedure_that_is_not_installed_is_refused() {
     let repo = repo();
-    let out = ff_tower(repo.path(), &["file", "a subject", "-p", "ghost", "--json"]);
+    let out = ff_tower(repo.path(), &["file", "ghost", "a subject", "--json"]);
     let refused = refusal(&out, 1, "procedure/not-found");
     assert_eq!(
         refused["error"]["message"],
@@ -291,7 +374,9 @@ fn a_procedure_that_is_not_installed_is_refused() {
         serde_json::json!(["ff tower procedures"])
     );
 
-    // Nothing was filed: the refusal lands before the append.
+    // Nothing was filed: the refusal lands before the append. One word
+    // is never guessed as a procedure name, so the subject spelling of
+    // the same word files fine.
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(board["data"]["open"], serde_json::json!([]));
 }
@@ -313,12 +398,15 @@ fn an_empty_subject_is_a_usage_refusal() {
     let repo = repo();
     let out = ff_tower(repo.path(), &["file", "   ", "--json"]);
     refusal(&out, 2, "usage/empty-subject");
+    // No argument at all is the same refusal — clap holds no `required`.
+    let out = ff_tower(repo.path(), &["file", "--json"]);
+    refusal(&out, 2, "usage/empty-subject");
 }
 
 #[test]
 fn an_empty_procedure_is_a_usage_refusal() {
     let repo = repo();
-    let out = ff_tower(repo.path(), &["file", "a subject", "-p", "", "--json"]);
+    let out = ff_tower(repo.path(), &["file", "", "a subject", "--json"]);
     refusal(&out, 2, "usage/empty-procedure");
 }
 
@@ -494,208 +582,135 @@ fn a_bare_seq_links_and_the_wire_stays_full() {
 }
 
 #[test]
-fn claim_puts_the_flight_in_the_air_on_the_claim_alone() {
+fn a_status_move_puts_the_flight_in_the_air_with_the_pilots_byline() {
     let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "take a claim"]));
-    let out = stdout(&ff_tower(repo.path(), &["claim", "1"]));
-    assert_eq!(out, "claimed #1: take a claim\nboard: ff tower\n");
+    stdout(&ff_tower(repo.path(), &["file", "take a pull"]));
+    let out = stdout(&ff_tower(repo.path(), &["status", "1", "in_progress"]));
+    assert_eq!(
+        out,
+        "moved #1 to in progress: take a pull\nboard: ff tower\n"
+    );
 
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     let flown = &board["data"]["in_the_air"][0];
     assert_eq!(flown["id"], serde_json::json!("pi.1"));
-    assert_eq!(
-        flown["claimed_by"],
-        serde_json::json!("tests@tower.invalid")
-    );
+    assert_eq!(flown["status"], serde_json::json!("in_progress"));
+    assert_eq!(flown["status_by"], serde_json::json!("tests@tower.invalid"));
     assert!(flown["branch"].is_null());
 
-    // No branch yet, so the note line carries the dim `claimed` phrase.
+    // The note line carries the pilot phrase.
     let rendered = stdout(&ff_tower(repo.path(), &[]));
     assert!(rendered.contains("in the air"), "got {rendered}");
-    assert!(rendered.contains("claimed"), "got {rendered}");
+    assert!(
+        rendered.contains("in progress — tests@tower.invalid"),
+        "got {rendered}"
+    );
 }
 
 #[test]
-fn a_second_claim_is_refused_naming_the_claimant() {
+fn status_json_carries_the_appended_move() {
     let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "claimed once"]));
-    stdout(&ff_tower(repo.path(), &["claim", "1"]));
-    let out = ff_tower(repo.path(), &["claim", "1", "--json"]);
-    let envelope = refusal(&out, 1, "claim/taken");
+    stdout(&ff_tower(repo.path(), &["file", "moved work"]));
+    let out = ff_tower(repo.path(), &["status", "1", "ready", "--json"]);
+    let envelope = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    assert_eq!(envelope["cmd"], serde_json::json!("status"));
+    let moved = &envelope["data"]["status"];
+    assert_eq!(moved["id"], serde_json::json!("pi.2"));
+    assert_eq!(moved["kind"], serde_json::json!("status"));
+    assert_eq!(moved["body"]["flight"], serde_json::json!("pi.1"));
+    assert_eq!(moved["body"]["status"], serde_json::json!("ready"));
+    assert!(moved["body"].get("reason").is_none());
+}
+
+#[test]
+fn a_word_outside_the_status_vocabulary_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "standing work"]));
+    let out = ff_tower(repo.path(), &["status", "1", "claimed", "--json"]);
+    let envelope = refusal(&out, 2, "usage/bad-status");
     assert_eq!(
         envelope["error"]["message"],
-        serde_json::json!("`#1` is already claimed by tests@tower.invalid")
+        serde_json::json!(
+            "`claimed` is not a status — triage, waiting, ready, in_progress, held, done, or canceled"
+        )
     );
-    // The raise site says nothing, so the exits are the registry's.
+}
+
+#[test]
+fn assign_moves_the_lane_and_none_clears_it() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "laned work"]));
+    let out = stdout(&ff_tower(repo.path(), &["assign", "1", "agent"]));
+    assert_eq!(out, "assigned #1 to agent: laned work\nboard: ff tower\n");
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(
-        envelope["error"]["exits"],
-        serde_json::json!(["ff tower", "ff tower next"])
+        board["data"]["open"][0]["assignee"],
+        serde_json::json!("agent")
+    );
+
+    let out = stdout(&ff_tower(repo.path(), &["assign", "1", "none"]));
+    assert_eq!(out, "cleared the lane on #1: laned work\nboard: ff tower\n");
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert!(board["data"]["open"][0]["assignee"].is_null());
+}
+
+#[test]
+fn assign_json_carries_the_appended_event() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "laned work"]));
+    let out = ff_tower(repo.path(), &["assign", "1", "me", "--json"]);
+    let envelope = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    assert_eq!(envelope["cmd"], serde_json::json!("assign"));
+    let assigned = &envelope["data"]["assigned"];
+    assert_eq!(assigned["kind"], serde_json::json!("assigned"));
+    assert_eq!(assigned["body"]["flight"], serde_json::json!("pi.1"));
+    assert_eq!(assigned["body"]["assignee"], serde_json::json!("me"));
+}
+
+#[test]
+fn a_word_outside_the_lanes_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "laned work"]));
+    let out = ff_tower(repo.path(), &["assign", "1", "you", "--json"]);
+    let envelope = refusal(&out, 2, "usage/bad-assignee");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`you` is not a lane — me, agent, or none")
     );
 }
 
-/// The minimal claimable shape principle 12 admits: an agent-crewed part
-/// with a you-crewed end. Filing under it mints a parent and two parts, so
-/// `#2` is the flight the pool is about.
-fn install_pipeline(repo: &Repo) {
-    repo.write(
-        ".tower/procedures/pipeline.toml",
-        concat!(
-            "name = \"pipeline\"\n\n",
-            "[[part]]\nid   = \"pass\"\ncrew = \"agent\"\n\n",
-            "[[part]]\nid    = \"verdict\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
-        ),
-    );
-}
-
-/// One pipeline filing: the parent `#1`, the agent part `#2`, and the
-/// you-crewed `#3`.
-fn file_pipeline(repo: &Repo, subject: &str) {
-    stdout(&ff_tower(repo.path(), &["file", subject, "-p", "pipeline"]));
-}
-
-/// The wire ids `next` would hand out right now, written by nothing — the
-/// membership both new verbs exist to move.
-fn peeked(repo: &Repo) -> Vec<String> {
+#[test]
+fn a_release_back_to_ready_rejoins_the_pool() {
+    let repo = repo();
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "the recovery", "--assignee", "agent"],
+    ));
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--peek", "--json"]));
-    envelope["data"]["picked"]
-        .as_array()
-        .expect("a picked list")
-        .iter()
-        .map(|pick| pick["flight"].as_str().expect("a wire id").to_string())
-        .collect()
-}
-
-#[test]
-fn requeue_hands_a_claimed_flight_back_and_next_picks_it_again() {
-    let repo = repo();
-    install_pipeline(&repo);
-    file_pipeline(&repo, "the recovery");
-    stdout(&ff_tower(repo.path(), &["claim", "2"]));
-    assert!(
-        peeked(&repo).is_empty(),
-        "the claim holds it out of the pool"
-    );
-
-    let out = stdout(&ff_tower(repo.path(), &["requeue", "2"]));
-    assert_eq!(out, "requeued #2: the recovery · pass\nboard: ff tower\n");
-
-    // The recovery path end to end: the claim is gone and the pool has
-    // the flight back, with no second edit anywhere.
-    let board = envelope(&ff_tower(repo.path(), &["--json"]));
-    assert_eq!(board["data"]["in_the_air"], serde_json::json!([]));
-    let requeued = board["data"]["open"]
-        .as_array()
-        .expect("the open section")
-        .iter()
-        .find(|view| view["id"] == serde_json::json!("pi.2"))
-        .expect("pi.2 back in open");
-    assert!(requeued["claimed_by"].is_null());
-    assert_eq!(requeued["taken"], serde_json::json!(false));
-    assert!(requeued["requeued_at"].is_number());
-    // The filed stamp is untouched — the requeue restored nothing
-    // because nothing was destroyed.
-    assert_eq!(requeued["part"]["crew"], serde_json::json!("agent"));
-    assert_eq!(peeked(&repo), ["pi.2"]);
-}
-
-#[test]
-fn a_requeue_with_nothing_claimed_is_refused() {
-    let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "never claimed"]));
-    let out = ff_tower(repo.path(), &["requeue", "1", "--json"]);
-    let envelope = refusal(&out, 1, "requeue/unclaimed");
     assert_eq!(
-        envelope["error"]["message"],
-        serde_json::json!("`#1` is not claimed — nothing to hand back")
+        envelope["data"]["picked"][0]["flight"],
+        serde_json::json!("pi.1")
     );
-    // The raise site says nothing, so the exits are the registry's.
+
+    stdout(&ff_tower(repo.path(), &["status", "1", "in_progress"]));
+    let peeked = self::envelope(&ff_tower(repo.path(), &["next", "--peek", "--json"]));
     assert_eq!(
-        envelope["error"]["exits"],
-        serde_json::json!(["ff tower", "ff tower next"])
+        peeked["data"]["picked"],
+        serde_json::json!([]),
+        "the pull holds it out of the pool"
     );
-}
 
-#[test]
-fn take_over_a_claim_names_where_it_came_from_and_closes_the_pool() {
-    let repo = repo();
-    install_pipeline(&repo);
-    file_pipeline(&repo, "the override");
-    stdout(&ff_tower(repo.path(), &["claim", "2"]));
-
-    let out = stdout(&ff_tower(repo.path(), &["take", "2"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+    let peeked = self::envelope(&ff_tower(repo.path(), &["next", "--peek", "--json"]));
     assert_eq!(
-        out,
-        "took #2 from tests@tower.invalid: the override · pass\nboard: ff tower\n"
+        peeked["data"]["picked"][0]["flight"],
+        serde_json::json!("pi.1"),
+        "the release is the recovery path"
     );
-
-    let board = envelope(&ff_tower(repo.path(), &["--json"]));
-    let flown = &board["data"]["in_the_air"][0];
-    assert_eq!(flown["id"], serde_json::json!("pi.2"));
-    assert_eq!(flown["taken"], serde_json::json!(true));
-    assert_eq!(
-        flown["claimed_by"],
-        serde_json::json!("tests@tower.invalid")
-    );
-    // The stamp still says `agent`; the take is an overlay, not an edit.
-    assert_eq!(flown["part"]["crew"], serde_json::json!("agent"));
-    assert!(peeked(&repo).is_empty(), "agent off");
-
-    let brief = envelope(&ff_tower(repo.path(), &["brief", "2", "--json"]));
-    assert_eq!(
-        brief["data"]["taken_by"],
-        serde_json::json!("tests@tower.invalid")
-    );
-    assert!(brief["data"]["taken_at"].is_number());
-    assert_eq!(brief["data"]["standing"], serde_json::json!("claimed"));
-    let rendered = stdout(&ff_tower(repo.path(), &["brief", "2"]));
-    assert!(
-        rendered.contains("taken by tests@tower.invalid"),
-        "{rendered}"
-    );
-}
-
-#[test]
-fn a_take_with_no_claim_standing_names_nobody() {
-    let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "unclaimed"]));
-    let out = stdout(&ff_tower(repo.path(), &["take", "1"]));
-    assert_eq!(out, "took #1: unclaimed\nboard: ff tower\n");
-}
-
-#[test]
-fn a_second_take_is_refused() {
-    let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "taken once"]));
-    stdout(&ff_tower(repo.path(), &["take", "1"]));
-    let out = ff_tower(repo.path(), &["take", "1", "--json"]);
-    let envelope = refusal(&out, 1, "take/taken");
-    assert_eq!(
-        envelope["error"]["message"],
-        serde_json::json!("`#1` is already yours")
-    );
-    assert_eq!(
-        envelope["error"]["exits"],
-        serde_json::json!(["ff tower requeue <flight>", "ff tower brief <flight>"])
-    );
-}
-
-#[test]
-fn the_note_line_carries_taken_and_then_requeued() {
-    let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "the ownership phrase"]));
-    stdout(&ff_tower(repo.path(), &["take", "1"]));
-    let rendered = stdout(&ff_tower(repo.path(), &[]));
-    assert!(rendered.contains("in the air"), "{rendered}");
-    assert!(rendered.contains("taken"), "{rendered}");
-    assert!(
-        !rendered.contains("claimed"),
-        "one phrase, not two: {rendered}"
-    );
-
-    stdout(&ff_tower(repo.path(), &["requeue", "1"]));
-    let rendered = stdout(&ff_tower(repo.path(), &[]));
-    assert!(rendered.contains("requeued"), "{rendered}");
-    assert!(!rendered.contains("taken"), "{rendered}");
 }
 
 #[test]
@@ -766,7 +781,7 @@ fn a_second_hold_is_refused_quoting_the_open_question() {
 }
 
 #[test]
-fn a_held_flight_renders_under_waiting_on_you() {
+fn a_held_flight_renders_under_waiting_on_you_with_the_held_status() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "stuck"]));
     ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
@@ -775,13 +790,41 @@ fn a_held_flight_renders_under_waiting_on_you() {
     assert!(out.contains("? "), "the waiting glyph: {out}");
     assert!(out.contains("which retry path?"), "got {out}");
     assert!(out.contains("asked "), "got {out}");
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        board["data"]["waiting_on_you"][0]["status"],
+        serde_json::json!("held"),
+        "the hold is a status move too"
+    );
 }
 
 #[test]
-fn answer_releases_the_hold_with_the_answer_as_motion() {
+fn an_open_question_refuses_a_move_short_of_closing() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "stuck"]));
-    stdout(&ff_tower(repo.path(), &["claim", "1"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
+
+    let out = ff_tower(repo.path(), &["status", "1", "ready", "--json"]);
+    let envelope = refusal(&out, 1, "status/held");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is held on a question: which retry path?")
+    );
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower answer <flight> -m <answer>"])
+    );
+
+    // The two exceptions: closing the flight abandons the question
+    // deliberately.
+    stdout(&ff_tower(repo.path(), &["done", "1"]));
+}
+
+#[test]
+fn answer_releases_the_hold_to_ready_with_the_answer_as_motion() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
     ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
     let out = stdout(&ff_tower(
         repo.path(),
@@ -791,10 +834,15 @@ fn answer_releases_the_hold_with_the_answer_as_motion() {
 
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(board["data"]["waiting_on_you"], serde_json::json!([]));
-    let flown = &board["data"]["in_the_air"][0];
-    assert_eq!(flown["id"], serde_json::json!("pi.1"));
-    assert!(flown["question"].is_null());
-    assert!(flown["last_motion"].is_number());
+    let released = &board["data"]["open"][0];
+    assert_eq!(released["id"], serde_json::json!("pi.1"));
+    assert_eq!(
+        released["status"],
+        serde_json::json!("ready"),
+        "the answer releases to Ready"
+    );
+    assert!(released["question"].is_null());
+    assert!(released["last_motion"].is_number());
 }
 
 #[test]
@@ -836,6 +884,60 @@ fn done_takes_the_flight_off_the_board_and_out_of_the_count() {
 }
 
 #[test]
+fn done_json_lands_under_its_own_cmd_name() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "finished"]));
+    let out = ff_tower(repo.path(), &["done", "1", "--json"]);
+    let envelope = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    assert_eq!(envelope["cmd"], serde_json::json!("done"));
+    let moved = &envelope["data"]["status"];
+    assert_eq!(moved["kind"], serde_json::json!("status"));
+    assert_eq!(moved["body"]["status"], serde_json::json!("done"));
+}
+
+#[test]
+fn cancel_closes_with_the_reason_on_the_move() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "abandoned"]));
+    let out = stdout(&ff_tower(
+        repo.path(),
+        &["cancel", "1", "-m", "superseded by #2"],
+    ));
+    assert_eq!(out, "canceled #1: abandoned\nboard: ff tower\n");
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["open"], serde_json::json!([]));
+
+    let brief = envelope(&ff_tower(repo.path(), &["brief", "1", "--json"]));
+    assert_eq!(brief["data"]["status"], serde_json::json!("canceled"));
+    assert_eq!(brief["data"]["standing"], serde_json::json!("done"));
+
+    let out = ff_tower(repo.path(), &["cancel", "1", "--json"]);
+    let envelope = refusal(&out, 1, "flight/done");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is done — the log keeps its record")
+    );
+}
+
+#[test]
+fn cancel_json_lands_under_its_own_cmd_name_with_the_reason() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "abandoned"]));
+    let out = ff_tower(
+        repo.path(),
+        &["cancel", "1", "-m", "not worth it", "--json"],
+    );
+    let envelope = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    assert_eq!(envelope["cmd"], serde_json::json!("cancel"));
+    let moved = &envelope["data"]["status"];
+    assert_eq!(moved["body"]["status"], serde_json::json!("canceled"));
+    assert_eq!(moved["body"]["reason"], serde_json::json!("not worth it"));
+}
+
+#[test]
 fn done_twice_is_refused_as_already_done() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "finished"]));
@@ -850,12 +952,14 @@ fn done_twice_is_refused_as_already_done() {
 }
 
 #[test]
-fn the_lifecycle_verbs_refuse_a_done_flight_but_a_comment_lands() {
+fn the_lifecycle_verbs_refuse_a_closed_flight_but_a_comment_lands() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "finished"]));
     stdout(&ff_tower(repo.path(), &["done", "1"]));
 
-    let out = ff_tower(repo.path(), &["claim", "1", "--json"]);
+    let out = ff_tower(repo.path(), &["status", "1", "ready", "--json"]);
+    refusal(&out, 1, "flight/done");
+    let out = ff_tower(repo.path(), &["assign", "1", "agent", "--json"]);
     refusal(&out, 1, "flight/done");
     let out = ff_tower(repo.path(), &["hold", "1", "-m", "q?", "--json"]);
     refusal(&out, 1, "flight/done");
@@ -870,7 +974,7 @@ fn the_lifecycle_verbs_refuse_a_done_flight_but_a_comment_lands() {
 }
 
 #[test]
-fn decompose_files_the_parts_and_echoes_them() {
+fn decompose_files_the_sub_flights_and_echoes_them() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
     let out = stdout(&ff_tower(
@@ -884,21 +988,18 @@ fn decompose_files_the_parts_and_echoes_them() {
     ));
     assert_eq!(
         out,
-        "decomposed #1 into two parts\n\
-         · #2  the fold: parent-child edges\n\
-         · #3  the cli: decompose verb\n\
+        "decomposed #1 into two sub-flights\n\
+         · #2  the fold: parent-child edges  triage\n\
+         · #3  the cli: decompose verb  triage\n\
          board: ff tower\n"
     );
 }
 
 #[test]
-fn decompose_json_carries_the_parent_the_parts_and_the_edges() {
+fn decompose_json_carries_the_parent_the_children_and_the_edges() {
     let repo = repo();
     install_chore(&repo);
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", "a broad task", "-p", "chore"],
-    ));
+    stdout(&ff_tower(repo.path(), &["file", "chore", "a broad task"]));
     let out = ff_tower(
         repo.path(),
         &["decompose", "1", "part one", "part two", "--json"],
@@ -915,24 +1016,24 @@ fn decompose_json_carries_the_parent_the_parts_and_the_edges() {
         assert_eq!(event["kind"], serde_json::json!("filed"));
         assert_eq!(event["body"]["subject"], serde_json::json!(subject));
         assert_eq!(event["body"]["body"], serde_json::json!(""));
-        // The parts inherit the parent's procedure stamp, and carry no
-        // part stamp of their own — a part named on the command line is
-        // not a part of a definition.
+        // The children inherit the parent's procedure as provenance, and
+        // are otherwise bare filings — Triage, no lane.
         assert_eq!(event["body"]["procedure"], serde_json::json!("chore"));
-        assert!(event["body"]["part"].is_null());
+        assert_eq!(event["body"]["status"], serde_json::json!("triage"));
+        assert!(event["body"]["assignee"].is_null());
     }
     assert_eq!(filed[0]["id"], serde_json::json!("pi.2"));
     assert_eq!(filed[1]["id"], serde_json::json!("pi.3"));
 
     let linked = data["linked"].as_array().expect("linked");
     assert_eq!(linked.len(), 2);
-    for (event, part) in linked.iter().zip(["pi.2", "pi.3"]) {
+    for (event, child) in linked.iter().zip(["pi.2", "pi.3"]) {
         assert_eq!(event["kind"], serde_json::json!("linked"));
         assert_eq!(event["body"]["from"], serde_json::json!("pi.1"));
-        assert_eq!(event["body"]["to"], serde_json::json!(part));
+        assert_eq!(event["body"]["to"], serde_json::json!(child));
     }
 
-    // The parent depends on both parts; each part blocks the parent.
+    // The parent depends on both children; each child blocks the parent.
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     let open = board["data"]["open"].as_array().expect("open");
     let by_id = |id: &str| {
@@ -949,7 +1050,42 @@ fn decompose_json_carries_the_parent_the_parts_and_the_edges() {
 }
 
 #[test]
-fn decompose_with_no_parts_is_a_usage_refusal() {
+fn decompose_under_a_procedure_mints_the_definitions_flights() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "look this over"]));
+    let out = stdout(&ff_tower(repo.path(), &["decompose", "1", "review"]));
+    assert!(
+        out.contains("decomposed #1 into three sub-flights"),
+        "{out}"
+    );
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let open = board["data"]["open"].as_array().expect("open");
+    let by_id = |id: &str| {
+        open.iter()
+            .find(|view| view["id"] == serde_json::json!(id))
+            .unwrap_or_else(|| panic!("no {id} in open"))
+    };
+    // The children keep the parent's subject in theirs, ride the same
+    // edges, and are born by their own `after` — Ready or Waiting.
+    assert_eq!(
+        by_id("pi.1")["depends_on"],
+        serde_json::json!(["pi.2", "pi.3", "pi.4"])
+    );
+    assert_eq!(
+        by_id("pi.2")["subject"],
+        serde_json::json!("look this over · pass")
+    );
+    assert_eq!(by_id("pi.2")["status"], serde_json::json!("ready"));
+    assert_eq!(by_id("pi.2")["assignee"], serde_json::json!("agent"));
+    assert_eq!(by_id("pi.4")["status"], serde_json::json!("waiting"));
+    // The parent's own fields are untouched — the mint adds children,
+    // never re-stamps.
+    assert_eq!(by_id("pi.1")["status"], serde_json::json!("triage"));
+}
+
+#[test]
+fn decompose_with_nothing_to_split_into_is_a_usage_refusal() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
     let out = ff_tower(repo.path(), &["decompose", "1", "--json"]);
@@ -957,7 +1093,7 @@ fn decompose_with_no_parts_is_a_usage_refusal() {
 }
 
 #[test]
-fn a_part_trimmed_to_nothing_is_a_usage_refusal() {
+fn a_sub_flight_trimmed_to_nothing_is_a_usage_refusal() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
     let out = ff_tower(repo.path(), &["decompose", "1", "part one", "  ", "--json"]);
@@ -969,7 +1105,7 @@ fn a_part_trimmed_to_nothing_is_a_usage_refusal() {
 }
 
 #[test]
-fn decomposing_a_done_flight_is_refused() {
+fn decomposing_a_closed_flight_is_refused() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "finished"]));
     stdout(&ff_tower(repo.path(), &["done", "1"]));

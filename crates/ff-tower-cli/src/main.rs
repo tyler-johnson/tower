@@ -130,10 +130,9 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Decompose { .. }) => "decompose",
         Some(Command::Procedures { .. }) => "procedures",
         Some(Command::Skills { .. }) => "skills",
-        Some(Command::Triage { .. }) => "triage",
-        Some(Command::Claim { .. }) => "claim",
-        Some(Command::Take { .. }) => "take",
-        Some(Command::Requeue { .. }) => "requeue",
+        Some(Command::Assign { .. }) => "assign",
+        Some(Command::Status { .. }) => "status",
+        Some(Command::Cancel { .. }) => "cancel",
         Some(Command::Hold { .. }) => "hold",
         Some(Command::Answer { .. }) => "answer",
         Some(Command::Done { .. }) => "done",
@@ -165,10 +164,27 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         }
         Some(Command::Brief { flight }) => cmd::brief::run(cli.json, flight)?,
         Some(Command::File {
-            subject,
+            first,
+            second,
             message,
-            procedure,
-        }) => cmd::file::run(cli.json, subject, message.clone(), procedure.clone())?,
+            priority,
+            labels,
+            skill,
+            assignee,
+            bay,
+        }) => cmd::file::run(
+            cli.json,
+            first.as_deref(),
+            second.as_deref(),
+            ff_tower_core::verb::Fields {
+                message: message.clone(),
+                priority: priority.clone(),
+                labels: labels.clone(),
+                skill: skill.clone(),
+                assignee: assignee.clone(),
+                bay: bay.clone(),
+            },
+        )?,
         Some(Command::Comment { flight, message }) => {
             cmd::comment::run(cli.json, flight, message.clone())?
         }
@@ -176,24 +192,31 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             target,
             subject,
             message,
-        }) => cmd::edit::run(cli.json, target, subject.clone(), message.clone())?,
+            priority,
+            labels,
+            skill,
+            bay,
+        }) => cmd::edit::run(
+            cli.json,
+            target,
+            cmd::edit::Overlay {
+                subject: subject.clone(),
+                message: message.clone(),
+                priority: priority.clone(),
+                labels: labels.clone(),
+                skill: skill.clone(),
+                bay: bay.clone(),
+            },
+        )?,
         Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b)?,
         Some(Command::Decompose { flight, parts }) => cmd::decompose::run(cli.json, flight, parts)?,
         Some(Command::Procedures { name }) => cmd::procedures::run(cli.json, name.as_deref())?,
         Some(Command::Skills { name }) => cmd::skills::run(cli.json, name.as_deref())?,
-        Some(Command::Triage {
-            flight,
-            procedure,
-            message,
-        }) => cmd::triage::run(
-            cli.json,
-            flight.as_deref(),
-            procedure.clone(),
-            message.clone(),
-        )?,
-        Some(Command::Claim { flight }) => cmd::claim::run(cli.json, flight)?,
-        Some(Command::Take { flight }) => cmd::take::run(cli.json, flight)?,
-        Some(Command::Requeue { flight }) => cmd::requeue::run(cli.json, flight)?,
+        Some(Command::Assign { flight, lane }) => cmd::assign::run(cli.json, flight, lane)?,
+        Some(Command::Status { flight, status }) => cmd::status::run(cli.json, flight, status)?,
+        Some(Command::Cancel { flight, message }) => {
+            cmd::cancel::run(cli.json, flight, message.clone())?
+        }
         Some(Command::Hold { flight, message }) => {
             cmd::hold::run(cli.json, flight, message.clone())?;
             return Ok(3);

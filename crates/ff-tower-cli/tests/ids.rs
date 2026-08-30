@@ -78,7 +78,7 @@ fn the_flight_number_is_dense_while_the_event_seq_is_not() {
     let out = stdout(&ff_tower(repo.path(), &["file", "the second flight"]));
     assert_eq!(
         out,
-        "filed #2 under open: the second flight\nboard: ff tower\n"
+        "filed #2 in triage: the second flight\nboard: ff tower\n"
     );
 
     let rendered = stdout(&ff_tower(repo.path(), &[]));

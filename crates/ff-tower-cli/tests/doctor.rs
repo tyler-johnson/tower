@@ -215,8 +215,8 @@ fn a_procedure_naming_a_ghost_skill_is_a_finding() {
         ".tower/procedures/spooky.toml",
         concat!(
             "name = \"spooky\"\n\n",
-            "[[part]]\nid    = \"pass\"\ncrew  = \"agent\"\nskill = \"ghost\"\n\n",
-            "[[part]]\nid    = \"end\"\ncrew  = \"you\"\nafter = [\"pass\"]\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nskill    = \"ghost\"\n\n",
+            "[[flight]]\nid       = \"end\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
         ),
     );
 

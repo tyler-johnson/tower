@@ -2,11 +2,12 @@
 //! it.
 //!
 //! Read-only, and the only surface that reads a definition outside of
-//! `file`. Bare is the list: every name, the layer it came from, and its
-//! parts with their crews. Named is the detail page: the match rules —
-//! marked inert, because they only ever fire on adapter signals and there
-//! are no adapters — every part with crew, skill, `after`, and `done`, and
-//! the path a fork of it belongs at.
+//! `file`. Bare is the list: every name, the layer it came from, and
+//! the flights it stamps out with their lanes. Named is the detail
+//! page: the match rules — marked inert, because they only ever fire on
+//! adapter signals and there are no adapters — every flight with
+//! assignee, skill, `after`, and `done`, and the path a fork of it
+//! belongs at.
 //!
 //! No fufu spawn, like `file`: the repository layer resolves through
 //! `Store::main_worktree`.
@@ -58,7 +59,7 @@ pub fn run(json: bool, name: Option<&str>) -> Result<(), CliError> {
     Ok(())
 }
 
-/// The list: a head line per procedure, its parts under it, and the
+/// The list: a head line per procedure, its flights under it, and the
 /// footer's count in the board's grammar.
 fn list(installed: &Registry, colored: bool) -> String {
     let names: Vec<String> = installed
@@ -75,15 +76,15 @@ fn list(installed: &Registry, colored: bool) -> String {
             render::paint_dim(definition.source.layer(), colored),
         ));
         let ids: Vec<String> = definition
-            .parts
+            .flights
             .iter()
-            .map(|part| part.id.clone())
+            .map(|flight| flight.id.clone())
             .collect();
         let id_width = width(&ids);
-        for (id, part) in ids.iter().zip(&definition.parts) {
+        for (id, flight) in ids.iter().zip(&definition.flights) {
             out.push_str(&format!(
                 "· {id:<id_width$}  {}\n",
-                render::paint_dim(part.crew.name(), colored)
+                render::paint_dim(flight.assignee.name(), colored)
             ));
         }
         out.push('\n');
@@ -135,25 +136,31 @@ fn detail(definition: &Definition, repo_root: Option<&std::path::Path>, colored:
     }
 
     out.push('\n');
-    out.push_str("parts\n");
+    out.push_str("flights\n");
     let ids: Vec<String> = definition
-        .parts
+        .flights
         .iter()
-        .map(|part| part.id.clone())
+        .map(|flight| flight.id.clone())
         .collect();
     let id_width = width(&ids);
-    for (id, part) in ids.iter().zip(&definition.parts) {
-        let mut phrases = vec![part.crew.name().to_string()];
-        if let Some(skill) = part.skill.as_deref() {
+    for (id, flight) in ids.iter().zip(&definition.flights) {
+        let mut phrases = vec![flight.assignee.name().to_string()];
+        if let Some(skill) = flight.skill.as_deref() {
             phrases.push(format!("skill {skill}"));
         }
-        if let Some(bay) = part.bay {
+        if let Some(priority) = flight.priority.as_deref() {
+            phrases.push(format!("priority {priority}"));
+        }
+        if !flight.labels.is_empty() {
+            phrases.push(flight.labels.join(", "));
+        }
+        if let Some(bay) = flight.bay {
             phrases.push(format!("bay {}", bay.name()));
         }
-        if !part.after.is_empty() {
-            phrases.push(format!("after {}", part.after.join(", ")));
+        if !flight.after.is_empty() {
+            phrases.push(format!("after {}", flight.after.join(", ")));
         }
-        phrases.push(format!("done {}", part.done.name()));
+        phrases.push(format!("done {}", flight.done.name()));
         out.push_str(&format!(
             "· {id:<id_width$}  {}\n",
             render::paint_dim(&phrases.join(" · "), colored)

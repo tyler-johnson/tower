@@ -2,10 +2,10 @@
 //! an indented dim note joining phrases with ` · ` in urgency order —
 //! the open question first, then held/resolving, then a `collides` warn
 //! per conflicting neighbor and a `no verdict` dim per unanswered one,
-//! then the ownership phrase — `taken`, `claimed`, or `requeued` — then
-//! `on <branch>`, then the comment count, then age. No
-//! affirmative "lands clean" phrase: absence of a warn is the verdict,
-//! and board noise is the enemy.
+//! then the pilot phrase — `in progress — <by>` — then `on <branch>`,
+//! then the comment count, then age. No affirmative "lands clean"
+//! phrase: absence of a warn is the verdict, and board noise is the
+//! enemy.
 //!
 //! Glyphs carry the meaning independent of color: `?` waiting on you, `▸`
 //! in the air, `‖` holding, `·` open. A local vocabulary, not fufu's —
@@ -154,19 +154,16 @@ fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool
             colored,
         )),
     }
-    // Ownership, ahead of the branch. `taken` prints whether or not a
-    // branch exists, because it changes who may fly the flight. A bare
-    // `claimed` needs no branch — there the claim itself is the flight's
-    // motion. `requeued` stands where neither does: an abandoned tree
-    // would otherwise render identically to one an agent is flying.
-    if view.taken {
-        phrases.push(paint_dim("taken", colored));
-    } else if view.claimed_by.is_some() {
-        if view.branch.is_none() {
-            phrases.push(paint_dim("claimed", colored));
-        }
-    } else if view.requeued_at.is_some() {
-        phrases.push(paint_dim("requeued", colored));
+    // The pilot, ahead of the branch: the stored In Progress and who set
+    // it — the byline is the pilot, the field is the chip.
+    if view.status == "in_progress" {
+        phrases.push(paint_dim(
+            &match view.status_by.as_deref() {
+                Some(by) => format!("in progress — {by}"),
+                None => "in progress".to_string(),
+            },
+            colored,
+        ));
     }
     if let Some(branch) = view.branch.as_deref()
         && branch != "@detached"
