@@ -302,7 +302,8 @@ A procedure is a graph of flights, saved. Its definition lists the flights it st
 name    = "review"
 subject = "branch"            # may resolve to a PR later
 
-[[match]]                     # only ever runs on adapter signals
+[[match]]                     # adapter-keyed, so inert until an adapter can fire it
+name   = "github-reviews"
 source = "github"
 event  = "review_requested"
 

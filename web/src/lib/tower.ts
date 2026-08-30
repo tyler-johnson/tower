@@ -299,11 +299,17 @@ export interface Definition {
 	source: Source;
 }
 
-/// One intake rule: an adapter's name, and the event it sent. Named
-/// ProcedureMatch to avoid the DOM's Match.
+/// One intake rule: a name — what the routing event records as having
+/// fired — and the predicates, which all AND; an absent predicate is
+/// null. Named ProcedureMatch to avoid the DOM's Match.
 export interface ProcedureMatch {
-	source: string;
-	event: string;
+	name: string;
+	source: string | null;
+	event: string | null;
+	label: string | null;
+	priority: string | null;
+	skill: string | null;
+	assignee: string | null;
 }
 
 /// One part of a definition. `done` stays a free string for the reason

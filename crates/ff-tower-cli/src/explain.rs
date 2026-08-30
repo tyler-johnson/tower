@@ -319,6 +319,23 @@ pub static ENTRIES: &[Entry] = &[
         exits: &["ff tower procedures"],
     },
     Entry {
+        id: "procedure/empty-rule",
+        summary: "a match rule declares no predicates",
+        detail: "A `[[match]]` rule is its predicates — source and event for an adapter's \
+                 signal, label, priority, skill, or assignee for what a person files — and \
+                 this one declares none, so it could never say what it matches. Give it at \
+                 least one predicate, or delete it.",
+        exits: &["ff tower procedures"],
+    },
+    Entry {
+        id: "procedure/duplicate-rule",
+        summary: "two match rules wear one name",
+        detail: "The routing event records which rule fired by name, and two rules under one \
+                 name would make that record ambiguous. Rename one of the two; rule names \
+                 only need to be unique within their own procedure.",
+        exits: &["ff tower procedures"],
+    },
+    Entry {
         id: "procedure/duplicate-part",
         summary: "two flights wear one id",
         detail: "Flight ids name edges: `after` says which flight precedes which, and a \

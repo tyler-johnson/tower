@@ -72,13 +72,17 @@ fn the_detail_carries_the_flights_the_inert_rule_and_where_to_fork() {
     let out = stdout(&ff_tower(repo.path(), &["procedures", "review"]));
     assert!(out.starts_with("review  built-in\n"), "{out}");
     assert!(out.contains("    subject branch\n"), "{out}");
-    // The rule parses and cannot fire — a rule that looks live and never
-    // runs is an hour of debugging.
+    // The rule prints by name with its predicates, and an adapter-keyed
+    // one says outright that it cannot fire — a rule that looks live and
+    // never runs is an hour of debugging.
+    assert!(out.contains("match\n"), "{out}");
     assert!(
-        out.contains("match  inert until an adapter can fire it\n"),
+        out.contains(
+            "· github-reviews  source github · event review_requested · \
+             inert until an adapter can fire it\n"
+        ),
         "{out}"
     );
-    assert!(out.contains("· github · review_requested\n"), "{out}");
     assert!(
         out.contains("· pass     agent · skill review · done asserted\n"),
         "{out}"
@@ -123,7 +127,15 @@ fn the_json_form_is_the_registry_as_data() {
     assert_eq!(review["subject"], serde_json::json!("branch"));
     assert_eq!(
         review["matches"],
-        serde_json::json!([{"source": "github", "event": "review_requested"}])
+        serde_json::json!([{
+            "name": "github-reviews",
+            "source": "github",
+            "event": "review_requested",
+            "label": null,
+            "priority": null,
+            "skill": null,
+            "assignee": null,
+        }])
     );
     let flights = review["flights"].as_array().expect("flights");
     assert_eq!(flights.len(), 3);

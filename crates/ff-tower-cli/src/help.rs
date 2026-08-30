@@ -218,9 +218,11 @@ Examples:
 pub const PROCEDURES: &str = "\
 What is installed: every procedure's name, the layer it came from,
 and the flights it stamps out with their lanes. A name is the detail
-page — the match rules, marked inert because no adapter exists to
-fire them; every flight with assignee, skill, after, and done; and
-the path a fork of it belongs at.
+page — the match rules by name with their predicates, which route
+what sits in Triage the next time anything runs (adapter-keyed ones
+stay inert until an adapter exists to fire them); every flight with
+assignee, skill, after, and done; and the path a fork of it belongs
+at.
 
 Read-only, and it spawns no fufu. Filing under one is
 `ff tower file <name> <subject>`, and the definition is copied into

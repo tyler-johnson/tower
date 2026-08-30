@@ -148,10 +148,35 @@ pub enum Kind {
     Held { flight: EventId, question: String },
     /// Answers the open question and releases the flight to ready.
     Answered { flight: EventId, answer: String },
+    /// The lazy pass routing a Triage flight under a procedure — the one
+    /// automated stamp besides the Waiting → Ready advance. Self-contained
+    /// on `Filed`'s discipline: the definition is read at pass time and
+    /// the resolved overlay copied in, so the fold never reads config.
+    /// `status` moves the flight (`ready` on a collapsed single-flight
+    /// definition, `waiting` on a multi-flight parent); the field options
+    /// overlay where `Some` and leave the standing value where `None`.
+    Routed {
+        flight: EventId,
+        procedure: String,
+        /// Which rule fired; `""` on events written before rules had
+        /// names.
+        rule: String,
+        /// Render-ready — "matched label chore"; `""` historic.
+        because: String,
+        status: Option<String>,
+        assignee: Option<String>,
+        priority: Option<String>,
+        labels: Option<Vec<String>>,
+        skill: Option<String>,
+        bay: Option<String>,
+        done: Option<String>,
+        /// A definition's `subject = "branch"`, resolved at pass time.
+        branch: Option<String>,
+    },
     /// A kind from a newer tower, preserved verbatim so the fold can carry
     /// it even though this binary cannot read it. Old logs land here too:
-    /// the retired `claimed`/`taken`/`requeued`/`routed`/`done` kinds
-    /// deserialize as unknown rather than as anything at all.
+    /// the retired `claimed`/`taken`/`requeued`/`done` kinds deserialize
+    /// as unknown rather than as anything at all.
     Unknown { kind: String, body: Box<RawValue> },
 }
 
@@ -167,6 +192,7 @@ impl Kind {
             Kind::Linked { .. } => "linked",
             Kind::Held { .. } => "held",
             Kind::Answered { .. } => "answered",
+            Kind::Routed { .. } => "routed",
             Kind::Unknown { kind, .. } => kind,
         }
     }
@@ -296,6 +322,38 @@ struct AnsweredBody {
     answer: String,
 }
 
+/// Only `flight` and `procedure` are required, and everything else
+/// defaults: the live dogfood chain carries pre-stored-model `routed`
+/// events shaped `{flight, procedure, because, part}`, and a known kind
+/// with a broken body is an error by design — so the old shape must
+/// parse, its `part` stamp simply not read. An all-default routed folds
+/// as a procedure stamp and nothing else.
+#[derive(Serialize, Deserialize)]
+struct RoutedBody {
+    flight: EventId,
+    procedure: String,
+    #[serde(default)]
+    rule: String,
+    #[serde(default)]
+    because: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assignee: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    priority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    labels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bay: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    done: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+}
+
 impl Serialize for Event {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let body = match &self.kind {
@@ -369,6 +427,33 @@ impl Serialize for Event {
             Kind::Answered { flight, answer } => serde_json::value::to_raw_value(&AnsweredBody {
                 flight: flight.clone(),
                 answer: answer.clone(),
+            }),
+            Kind::Routed {
+                flight,
+                procedure,
+                rule,
+                because,
+                status,
+                assignee,
+                priority,
+                labels,
+                skill,
+                bay,
+                done,
+                branch,
+            } => serde_json::value::to_raw_value(&RoutedBody {
+                flight: flight.clone(),
+                procedure: procedure.clone(),
+                rule: rule.clone(),
+                because: because.clone(),
+                status: status.clone(),
+                assignee: assignee.clone(),
+                priority: priority.clone(),
+                labels: labels.clone(),
+                skill: skill.clone(),
+                bay: bay.clone(),
+                done: done.clone(),
+                branch: branch.clone(),
             }),
             Kind::Unknown { body, .. } => Ok(body.clone()),
         }
@@ -475,6 +560,35 @@ impl<'de> Deserialize<'de> for Event {
             let AnsweredBody { flight, answer } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Answered { flight, answer }
+        } else if kind == "routed" {
+            let RoutedBody {
+                flight,
+                procedure,
+                rule,
+                because,
+                status,
+                assignee,
+                priority,
+                labels,
+                skill,
+                bay,
+                done,
+                branch,
+            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Routed {
+                flight,
+                procedure,
+                rule,
+                because,
+                status,
+                assignee,
+                priority,
+                labels,
+                skill,
+                bay,
+                done,
+                branch,
+            }
         } else {
             Kind::Unknown { kind, body }
         };
@@ -591,7 +705,7 @@ mod tests {
     fn a_retired_lifecycle_kind_folds_as_unknown() {
         // `claimed` and its siblings left the vocabulary at the stored
         // model; an old log's events survive as unknown, byte-intact.
-        for kind in ["claimed", "taken", "requeued", "done", "routed"] {
+        for kind in ["claimed", "taken", "requeued", "done"] {
             let old = format!(
                 r#"{{"id":"pi.2","author":"a@b.c","writer":"pi","time":8,"kind":"{kind}","body":{{"flight":"pi.1"}}}}"#
             );
@@ -602,6 +716,96 @@ mod tests {
             assert_eq!(name, kind);
             assert_eq!(body.get(), r#"{"flight":"pi.1"}"#);
         }
+    }
+
+    #[test]
+    fn a_routing_round_trips_and_omits_the_fields_it_does_not_overlay() {
+        let event = Event {
+            id: "pi.9".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::Routed {
+                flight: "pi.1".parse().expect("id"),
+                procedure: "review".to_string(),
+                rule: "github-reviews".to_string(),
+                because: "matched label chore".to_string(),
+                status: Some("ready".to_string()),
+                assignee: Some("agent".to_string()),
+                priority: None,
+                labels: None,
+                skill: Some("review".to_string()),
+                bay: None,
+                done: None,
+                branch: Some("feather".to_string()),
+            },
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""kind":"routed""#), "got {json}");
+        assert!(json.contains(r#""rule":"github-reviews""#), "got {json}");
+        assert!(json.contains(r#""status":"ready""#), "got {json}");
+        assert!(
+            !json.contains(r#""priority""#),
+            "an unchanged field leaves no key: {json}"
+        );
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        let Kind::Routed {
+            procedure,
+            because,
+            assignee,
+            skill,
+            branch,
+            labels,
+            ..
+        } = back.kind
+        else {
+            panic!("a routing parses as a routing");
+        };
+        assert_eq!(procedure, "review");
+        assert_eq!(because, "matched label chore");
+        assert_eq!(assignee.as_deref(), Some("agent"));
+        assert_eq!(skill.as_deref(), Some("review"));
+        assert_eq!(branch.as_deref(), Some("feather"));
+        assert!(labels.is_none());
+    }
+
+    #[test]
+    fn a_pre_stored_model_routing_still_parses_with_defaults() {
+        // The live dogfood chain's shape: `{flight, procedure, because,
+        // part}`. It parses as a routing that stamps the procedure and
+        // moves nothing, and the `part` stamp is simply not read.
+        let old = r#"{"id":"pi.9","author":"a@b.c","writer":"pi","time":7,"kind":"routed","body":{"flight":"pi.1","procedure":"review","because":"matched","part":{"id":"pass","crew":"agent"}}}"#;
+        let event: Event = serde_json::from_str(old).expect("parse");
+        let Kind::Routed {
+            procedure,
+            rule,
+            because,
+            status,
+            assignee,
+            priority,
+            labels,
+            skill,
+            bay,
+            done,
+            branch,
+            ..
+        } = event.kind
+        else {
+            panic!("an old routing parses as a routing");
+        };
+        assert_eq!(procedure, "review");
+        assert_eq!(rule, "", "no rule name before rules had names");
+        assert_eq!(because, "matched");
+        assert!(status.is_none(), "an all-default routing moves nothing");
+        assert!(
+            assignee.is_none()
+                && priority.is_none()
+                && labels.is_none()
+                && skill.is_none()
+                && bay.is_none()
+                && done.is_none()
+                && branch.is_none()
+        );
     }
 
     #[test]

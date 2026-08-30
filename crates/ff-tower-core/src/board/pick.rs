@@ -62,9 +62,12 @@ pub struct Passed {
 #[derive(Debug, Serialize)]
 #[serde(tag = "reason", rename_all = "kebab-case")]
 pub enum Skip {
-    /// Declared dependencies not yet closed — all of them. The belt
-    /// under the stored Waiting status, until the advance automation
-    /// exists.
+    /// Declared dependencies not yet done — all of them. The belt under
+    /// the stored Waiting status: the pass's advance normally moves a
+    /// satisfied waiter to Ready first, and this stays as the backstop
+    /// under hand-moves and `answered`'s unconditional ready. A canceled
+    /// dependency does not satisfy it — an abandoned part is a reason to
+    /// reconsider the dependent, not a green light.
     Waiting { on: Vec<String> },
     /// A collide against a flying flight or an already-picked candidate;
     /// the first hit wins.
@@ -119,9 +122,11 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
         if picked.len() == want {
             break;
         }
-        // Readiness first: every declared dependency must be closed. Dep
-        // ids always resolve — the fold routes unresolvable links to
-        // `unrouted` — so a missing lookup is simply not-closed.
+        // Readiness first: every declared dependency must be done —
+        // done exactly, because a canceled dependency does not satisfy
+        // its waiters. Dep ids always resolve — the fold routes
+        // unresolvable links to `unrouted` — so a missing lookup is
+        // simply not-done.
         let waiting: Vec<String> = flight
             .depends_on
             .iter()
@@ -129,7 +134,7 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
                 fold.flights
                     .iter()
                     .find(|other| &other.id == *dep)
-                    .is_none_or(|other| !other.closed())
+                    .is_none_or(|other| other.status != "done")
             })
             .map(ToString::to_string)
             .collect();
@@ -363,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn a_closed_dependency_admits_the_dependent() {
+    fn a_done_dependency_admits_the_dependent() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -377,8 +382,13 @@ mod tests {
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
         assert!(picks.passed.is_empty());
+    }
 
-        // A canceled dependency releases too: closed is closed.
+    #[test]
+    fn a_canceled_dependency_does_not_satisfy_its_waiter() {
+        // DESIGN.md's rule: an abandoned part is a reason to reconsider
+        // the dependent, not a green light — the flight stays waiting,
+        // naming the canceled dependency.
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -390,7 +400,11 @@ mod tests {
             &Verdicts::default(),
             1,
         );
-        assert_eq!(picks.picked[0].flight, "pi.1");
+        assert!(picks.picked.is_empty());
+        match reasons(&picks).as_slice() {
+            [("pi.1", Skip::Waiting { on })] => assert_eq!(on, &["pi.2"]),
+            other => panic!("expected one waiting row, got {other:?}"),
+        }
     }
 
     #[test]

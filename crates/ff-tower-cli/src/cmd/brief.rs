@@ -141,9 +141,9 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
 
     // What happened, in the comments' grammar and their reading order.
     // One dim line per moment and nothing more: the words behind a
-    // gesture — the question, the comment's text, the route's `because`
-    // — are already printed above, and repeating them here would make
-    // the section a second, staler copy of the page.
+    // gesture — the question, the comment's text — are already printed
+    // above, and repeating them here would make the section a second,
+    // staler copy of the page.
     if !brief.history.is_empty() {
         out.push('\n');
         out.push_str("history\n");

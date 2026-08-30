@@ -29,8 +29,8 @@ pub struct Flight {
     /// never stored; the log is append-only and per-writer seqs are
     /// monotonic, so a new filing can never renumber an earlier one.
     pub number: u64,
-    /// Provenance only: the procedure the filing was minted under, when
-    /// there was one. Nothing derives from it.
+    /// Provenance only: the procedure the filing was minted under — or
+    /// the pass later routed it under. Nothing derives from it.
     pub procedure: Option<String>,
     pub subject: String,
     pub body: String,
@@ -204,14 +204,52 @@ pub fn fold(events: &[Event]) -> Fold {
         }
     }
 
-    let mut edits: Vec<&Event> = Vec::new();
+    // The overlay stream: edits, and the Edited-shaped half of each
+    // routing, in union order — so a later edit beats an earlier
+    // routing's fields and the other way around.
+    let mut overlays: Vec<&Event> = Vec::new();
     for event in events {
         match &event.kind {
             Kind::Filed { .. } => {}
             // Held for pass 3: pass 2 attaches comments in union order,
             // so clock skew could sort an edit before the comment it
             // names — the same skew pass 1 absorbs for flights.
-            Kind::Edited { .. } => edits.push(event),
+            Kind::Edited { .. } => overlays.push(event),
+            // A routing straddles the discipline: the status half
+            // applies here, beside Status and Assigned in union order,
+            // and the field overlay joins the pass-3 stream.
+            Kind::Routed {
+                flight: on,
+                procedure,
+                status,
+                assignee,
+                done,
+                branch,
+                ..
+            } => match by_id.get(on) {
+                Some(&at) => {
+                    let flight = &mut flights[at];
+                    flight.procedure = Some(procedure.clone());
+                    if let Some(status) = status {
+                        flight.status = status.clone();
+                        flight.status_mark = Some(Mark {
+                            by: event.author.clone(),
+                            at: event.time,
+                        });
+                    }
+                    if let Some(assignee) = assignee {
+                        flight.assignee = Some(assignee.clone());
+                    }
+                    if let Some(done) = done {
+                        flight.done_kind = done.clone();
+                    }
+                    if let Some(branch) = branch {
+                        flight.branch_stamp = Some(branch.clone());
+                    }
+                    overlays.push(event);
+                }
+                None => unrouted.push(event.clone()),
+            },
             Kind::Status { flight, status, .. } => match by_id.get(flight) {
                 Some(&at) => {
                     let flight = &mut flights[at];
@@ -287,14 +325,42 @@ pub fn fold(events: &[Event]) -> Fold {
         }
     }
 
-    // Pass 3: edits, in union order — last-wins is preserved, and every
-    // comment already exists. Per-field overlay: concurrent partial edits
-    // from two writers both land, and an absent field keeps the last
-    // value standing. Labels replace wholesale — the set is one value. A
-    // child's derived subject (`"{subject} · {id}"`, composed at file
-    // time) never changes when a parent is reworded — each child is its
-    // own flight.
-    for event in edits {
+    // Pass 3: the overlay stream, in union order — last-wins is
+    // preserved, and every comment already exists. Per-field overlay:
+    // concurrent partial edits from two writers both land, and an absent
+    // field keeps the last value standing. Labels replace wholesale —
+    // the set is one value. A child's derived subject (`"{subject} ·
+    // {id}"`, composed at file time) never changes when a parent is
+    // reworded — each child is its own flight. A routing's fields ride
+    // the same stream but never set `edited`: routing is not a reword.
+    for event in overlays {
+        if let Kind::Routed {
+            flight: on,
+            priority,
+            labels,
+            skill,
+            bay,
+            ..
+        } = &event.kind
+        {
+            let &at = by_id
+                .get(on)
+                .expect("pass 2 queued only routings it attached");
+            let flight = &mut flights[at];
+            if let Some(priority) = priority {
+                flight.priority = priority.clone();
+            }
+            if let Some(labels) = labels {
+                flight.labels = labels.clone();
+            }
+            if let Some(skill) = skill {
+                flight.skill = Some(skill.clone());
+            }
+            if let Some(bay) = bay {
+                flight.bay = Some(bay.clone());
+            }
+            continue;
+        }
         let Kind::Edited {
             target,
             subject,
@@ -305,7 +371,7 @@ pub fn fold(events: &[Event]) -> Fold {
             bay,
         } = &event.kind
         else {
-            unreachable!("pass 2 collected only edits");
+            unreachable!("pass 2 collected only edits and routings");
         };
         let mark = Mark {
             by: event.author.clone(),
@@ -864,6 +930,136 @@ mod tests {
         let mark = fold.flights[0].edited.as_ref().expect("edited");
         assert_eq!(mark.by, "editor@b.c");
         assert_eq!(mark.at, 40);
+    }
+
+    /// A routing as the pass writes it for a collapsed single-flight
+    /// definition: status Ready and the definition's overlay.
+    fn routed(id: &str, time: i64, flight: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Routed {
+                flight: flight.parse().expect("id"),
+                procedure: "review".to_string(),
+                rule: "chores".to_string(),
+                because: "matched label chore".to_string(),
+                status: Some("ready".to_string()),
+                assignee: Some("agent".to_string()),
+                priority: Some("high".to_string()),
+                labels: None,
+                skill: Some("review".to_string()),
+                bay: None,
+                done: Some("asserted".to_string()),
+                branch: Some("s".to_string()),
+            },
+        )
+    }
+
+    #[test]
+    fn a_routing_applies_its_status_procedure_and_overlay() {
+        let fold = fold(&[filed("pi.1", 10, "s"), routed("pi.2", 20, "pi.1")]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.procedure.as_deref(), Some("review"));
+        assert_eq!(flight.status, "ready");
+        assert_eq!(flight.status_mark.as_ref().expect("moved").at, 20);
+        assert_eq!(flight.assignee.as_deref(), Some("agent"));
+        assert_eq!(flight.priority, "high");
+        assert_eq!(flight.skill.as_deref(), Some("review"));
+        assert_eq!(flight.branch_stamp.as_deref(), Some("s"));
+        assert!(flight.labels.is_empty(), "an absent overlay field stands");
+        assert!(flight.edited.is_none(), "routing is not a reword");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_later_edit_beats_an_earlier_routings_fields_and_the_reverse() {
+        // Union order both ways: the overlay stream carries edits and
+        // routings interleaved.
+        let after = fold(&[
+            filed("pi.1", 10, "s"),
+            routed("pi.2", 20, "pi.1"),
+            event(
+                "pi.3",
+                30,
+                Kind::Edited {
+                    target: "pi.1".parse().expect("id"),
+                    subject: None,
+                    body: None,
+                    priority: Some("low".to_string()),
+                    labels: None,
+                    skill: None,
+                    bay: None,
+                },
+            ),
+        ]);
+        assert_eq!(after.flights[0].priority, "low");
+
+        let before = fold(&[
+            filed("pi.1", 10, "s"),
+            event(
+                "pi.2",
+                20,
+                Kind::Edited {
+                    target: "pi.1".parse().expect("id"),
+                    subject: None,
+                    body: None,
+                    priority: Some("low".to_string()),
+                    labels: None,
+                    skill: None,
+                    bay: None,
+                },
+            ),
+            routed("pi.3", 30, "pi.1"),
+        ]);
+        assert_eq!(before.flights[0].priority, "high");
+    }
+
+    #[test]
+    fn a_later_status_beats_an_earlier_routings_status() {
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            routed("pi.2", 20, "pi.1"),
+            status("pi.3", 30, "pi.1", "in_progress"),
+        ]);
+        assert_eq!(fold.flights[0].status, "in_progress");
+        assert_eq!(fold.flights[0].status_mark.as_ref().expect("mark").at, 30);
+    }
+
+    #[test]
+    fn a_routing_for_a_flight_never_filed_is_unrouted() {
+        let fold = fold(&[routed("pi.1", 10, "zz.9")]);
+        assert!(fold.flights.is_empty());
+        assert_eq!(fold.unrouted.len(), 1);
+    }
+
+    #[test]
+    fn a_historic_all_default_routing_is_a_procedure_stamp_and_nothing_else() {
+        let historic = event(
+            "pi.2",
+            20,
+            Kind::Routed {
+                flight: "pi.1".parse().expect("id"),
+                procedure: "review".to_string(),
+                rule: String::new(),
+                because: String::new(),
+                status: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                skill: None,
+                bay: None,
+                done: None,
+                branch: None,
+            },
+        );
+        let fold = fold(&[filed("pi.1", 10, "s"), historic]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.procedure.as_deref(), Some("review"));
+        assert_eq!(flight.status, "triage", "nothing moved");
+        assert!(flight.status_mark.is_none());
+        assert!(flight.assignee.is_none());
+        assert_eq!(flight.priority, "none");
+        assert!(fold.unrouted.is_empty());
     }
 
     #[test]

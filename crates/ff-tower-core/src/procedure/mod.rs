@@ -44,20 +44,50 @@ pub struct Definition {
     /// What the flight's subject resolves against later; `branch` on
     /// `review`. Nothing derives from it yet.
     pub subject: Option<String>,
-    /// Intake rules. They only ever fire on adapter signals, and there
-    /// are no adapters, so today they parse and sit inert.
+    /// Intake rules, run by the lazy pass over what sits in Triage;
+    /// first match wins, and the routing event stores which rule fired.
     pub matches: Vec<Match>,
     /// Declaration order — the order `file` mints the flights in.
     pub flights: Vec<FlightDef>,
     pub source: Source,
 }
 
-/// One intake rule: an adapter's name, and the event it sent.
+/// One intake rule: a name — what the routing event records as having
+/// fired — and the predicates, which all AND. `source`/`event` are
+/// adapter provenance, which no folded flight carries, so a rule keyed
+/// on them stays honestly inert until adapters exist; the field
+/// predicates match what a person files with fields already on it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Match {
-    pub source: String,
-    pub event: String,
+    pub name: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub event: Option<String>,
+    /// Membership in the flight's label set.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Equality on the stored field, and the same for the two below.
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub skill: Option<String>,
+    #[serde(default)]
+    pub assignee: Option<String>,
+}
+
+impl Match {
+    /// Whether any predicate is declared — a rule without one would be
+    /// meaningless, and the validator refuses it.
+    pub fn has_predicates(&self) -> bool {
+        self.source.is_some()
+            || self.event.is_some()
+            || self.label.is_some()
+            || self.priority.is_some()
+            || self.skill.is_some()
+            || self.assignee.is_some()
+    }
 }
 
 /// One flight a procedure stamps out — the same fields any flight
@@ -217,8 +247,9 @@ impl Registry {
 
     /// Layered in: the same name replaces wholesale, never field by
     /// field. Half a definition from one layer and half from another
-    /// would be a shape nobody wrote down.
-    fn insert(&mut self, definition: Definition) {
+    /// would be a shape nobody wrote down. `pub(crate)` for the pass's
+    /// unit tests, which need a registry over hand-loaded definitions.
+    pub(crate) fn insert(&mut self, definition: Definition) {
         self.by_name.insert(definition.name.clone(), definition);
     }
 }
@@ -371,15 +402,33 @@ struct Wire {
     flights: Vec<FlightDef>,
 }
 
-/// Five refusals, in the order it is cheapest to be sure of them: no
-/// flights, a duplicate id, an `after` naming nothing, a cycle, and
-/// principle 12.
+/// Seven refusals, in the order it is cheapest to be sure of them: no
+/// flights, a rule with no predicates, two rules under one name, a
+/// duplicate id, an `after` naming nothing, a cycle, and principle 12.
 fn validate(definition: &Definition, at: &str) -> Result<()> {
     let name = definition.name.clone();
     let at = at.to_string();
 
     if definition.flights.is_empty() {
         return Err(Error::NoParts { name, at });
+    }
+
+    let mut rules: HashSet<&str> = HashSet::new();
+    for rule in &definition.matches {
+        if !rule.has_predicates() {
+            return Err(Error::EmptyRule {
+                name,
+                at,
+                rule: rule.name.clone(),
+            });
+        }
+        if !rules.insert(rule.name.as_str()) {
+            return Err(Error::DuplicateRule {
+                name,
+                at,
+                rule: rule.name.clone(),
+            });
+        }
     }
 
     let mut seen: HashSet<&str> = HashSet::new();
@@ -514,6 +563,23 @@ pub enum Error {
     #[error("procedure `{name}` ({at}) declares no flights")]
     NoParts { name: String, at: String },
 
+    /// A rule with no predicates could never say what it matches.
+    #[error("procedure `{name}` ({at}): rule `{rule}` declares no predicates")]
+    EmptyRule {
+        name: String,
+        at: String,
+        rule: String,
+    },
+
+    /// Two rules under one name: the routing event could not say which
+    /// fired.
+    #[error("procedure `{name}` ({at}) declares rule `{rule}` twice")]
+    DuplicateRule {
+        name: String,
+        at: String,
+        rule: String,
+    },
+
     /// Two flights under one id: `after` could not say which it meant.
     #[error("procedure `{name}` ({at}) declares flight `{part}` twice")]
     DuplicatePart {
@@ -563,6 +629,8 @@ impl Error {
         match self {
             Error::Invalid { .. } => "procedure/invalid",
             Error::NoParts { .. } => "procedure/no-parts",
+            Error::EmptyRule { .. } => "procedure/empty-rule",
+            Error::DuplicateRule { .. } => "procedure/duplicate-rule",
             Error::DuplicatePart { .. } => "procedure/duplicate-part",
             Error::UnknownAfter { .. } => "procedure/unknown-after",
             Error::Cyclic { .. } => "procedure/cyclic",
@@ -642,6 +710,90 @@ done     = "landed"
         .expect("loads");
         assert_eq!(definition.flights[0].done, Done::Asserted);
         assert_eq!(definition.flights[1].done, Done::Landed);
+    }
+
+    #[test]
+    fn a_rule_parses_with_field_predicates_and_a_bare_one_refuses() {
+        let definition = load(
+            r#"
+name = "chores"
+[[match]]
+name  = "chore-label"
+label = "chore"
+[[match]]
+name     = "handoffs"
+priority = "high"
+assignee = "agent"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+            Source::BuiltIn,
+        )
+        .expect("loads");
+        assert_eq!(definition.matches.len(), 2);
+        assert_eq!(definition.matches[0].name, "chore-label");
+        assert_eq!(definition.matches[0].label.as_deref(), Some("chore"));
+        assert!(definition.matches[0].source.is_none());
+        assert_eq!(definition.matches[1].priority.as_deref(), Some("high"));
+        assert_eq!(definition.matches[1].assignee.as_deref(), Some("agent"));
+
+        // A nameless rule refuses through serde — the `[[part]]`
+        // precedent: the loader is where an old grammar fails loudly.
+        let err = load(
+            r#"
+name = "old"
+[[match]]
+source = "github"
+event  = "review_requested"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+            Source::BuiltIn,
+        )
+        .expect_err("a nameless rule refuses");
+        assert_eq!(err.id(), "procedure/invalid");
+
+        let err = load(
+            r#"
+name = "vacuous"
+[[match]]
+name = "everything"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+            Source::BuiltIn,
+        )
+        .expect_err("a rule with no predicates refuses");
+        assert_eq!(err.id(), "procedure/empty-rule");
+        assert_eq!(
+            err.to_string(),
+            "procedure `vacuous` (built-in): rule `everything` declares no predicates"
+        );
+
+        let err = load(
+            r#"
+name = "twice"
+[[match]]
+name  = "same"
+label = "chore"
+[[match]]
+name  = "same"
+label = "ops"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+            Source::BuiltIn,
+        )
+        .expect_err("two rules under one name refuse");
+        assert_eq!(err.id(), "procedure/duplicate-rule");
+        assert_eq!(
+            err.to_string(),
+            "procedure `twice` (built-in) declares rule `same` twice"
+        );
     }
 
     #[test]

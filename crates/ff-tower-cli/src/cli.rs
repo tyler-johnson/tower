@@ -331,41 +331,62 @@ pub enum Command {
 }
 
 /// The ambient lanes: what rides an invocation besides the verb itself.
-/// tower has two — fufu carries capture and trim as well, but tower has
-/// neither, so the table is the passive update check and its voice.
+/// tower has three — fufu carries capture and trim as well, but tower
+/// has none of those, so the table is the passive update check, its
+/// voice, and the lazy pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Lanes {
     /// Refresh the update cache in the background, and let an auto-install fire.
     pub update: bool,
     /// Print the "vX.Y.Z available" line on stderr when one is pending.
     pub notice: bool,
+    /// Run the lazy pass before the verb, so its own fold sees the
+    /// conclusions — `next` pulls a freshly advanced flight.
+    pub pass: bool,
 }
 
 impl Command {
     /// One exhaustive table, fufu's discipline: a verb added without
     /// deciding its lanes is a compile error rather than a verb that
-    /// silently never learns about releases.
+    /// silently never learns about releases or runs the pass.
     pub fn lanes(&self) -> Lanes {
         match self {
             // The detached child must not recurse into another check.
             Command::Update { .. } => Lanes {
                 update: false,
                 notice: false,
+                pass: false,
             },
             // A process that runs for hours is the wrong place for a
             // lane that fires once per invocation: nothing should spawn
-            // update children at startup, and a notice printed at
-            // shutdown would report a release that landed hours ago.
+            // update children at startup, a notice printed at shutdown
+            // would report a release that landed hours ago, and serve
+            // runs the pass in its own refold pipeline instead.
             Command::Serve { .. } => Lanes {
                 update: false,
                 notice: false,
+                pass: false,
             },
             // The quiet verbs ride the check but suppress the generic
             // notice — each has its own voice: doctor's `tower/update`
-            // row, version's dim "available" line.
+            // row, version's dim "available" line. Neither runs the
+            // pass: doctor observes and never writes, and version reads
+            // no board.
             Command::Doctor | Command::Version => Lanes {
                 update: true,
                 notice: false,
+                pass: false,
+            },
+            // Off the board entirely — nothing these answer changes
+            // with the pass, and `procedures` must keep refusing a
+            // broken rule file on its own path, loudly.
+            Command::Explain { .. }
+            | Command::Config { .. }
+            | Command::Procedures { .. }
+            | Command::Skills { .. } => Lanes {
+                update: true,
+                notice: true,
+                pass: false,
             },
             Command::Board
             | Command::Next { .. }
@@ -375,19 +396,16 @@ impl Command {
             | Command::Edit { .. }
             | Command::Link { .. }
             | Command::Decompose { .. }
-            | Command::Procedures { .. }
-            | Command::Skills { .. }
             | Command::Assign { .. }
             | Command::Status { .. }
             | Command::Cancel { .. }
             | Command::Hold { .. }
             | Command::Answer { .. }
             | Command::Done { .. }
-            | Command::Explain { .. }
-            | Command::Config { .. }
             | Command::Bay { .. } => Lanes {
                 update: true,
                 notice: true,
+                pass: true,
             },
         }
     }

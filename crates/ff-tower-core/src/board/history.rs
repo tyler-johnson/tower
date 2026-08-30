@@ -7,10 +7,9 @@
 //! this flight, in log order.
 //!
 //! Deliberately thin. A moment says who did what, when, and nothing else:
-//! the comment's text, the open question, the route's `because` already
-//! sit flat on the [`Brief`](super::Brief), and a history that repeated
-//! them would be a second copy of the record to keep in step with the
-//! first.
+//! the comment's text and the open question already sit flat on the
+//! [`Brief`](super::Brief), and a history that repeated them would be a
+//! second copy of the record to keep in step with the first.
 
 use serde::{Deserialize, Serialize};
 
@@ -65,7 +64,8 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
             | Kind::Assigned { flight: on, .. }
             | Kind::Commented { flight: on, .. }
             | Kind::Held { flight: on, .. }
-            | Kind::Answered { flight: on, .. } => on == flight,
+            | Kind::Answered { flight: on, .. }
+            | Kind::Routed { flight: on, .. } => on == flight,
             Kind::Edited { target, .. } => target == flight || comments.contains(&target),
             Kind::Linked { from, to } => from == flight || to == flight,
             Kind::Unknown { body, .. } => {

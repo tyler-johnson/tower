@@ -18,7 +18,8 @@ const REVIEW: &str = r#"
 name    = "review"
 subject = "branch"            # may resolve to a PR later
 
-[[match]]                     # only ever runs on adapter signals
+[[match]]                     # adapter-keyed, so inert until an adapter can fire it
+name   = "github-reviews"
 source = "github"
 event  = "review_requested"
 
@@ -50,8 +51,12 @@ fn designs_review_block_loads_to_its_flights_and_edges() {
     assert_eq!(definition.subject.as_deref(), Some("branch"));
 
     assert_eq!(definition.matches.len(), 1);
-    assert_eq!(definition.matches[0].source, "github");
-    assert_eq!(definition.matches[0].event, "review_requested");
+    assert_eq!(definition.matches[0].name, "github-reviews");
+    assert_eq!(definition.matches[0].source.as_deref(), Some("github"));
+    assert_eq!(
+        definition.matches[0].event.as_deref(),
+        Some("review_requested")
+    );
 
     let ids: Vec<&str> = definition
         .flights

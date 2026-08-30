@@ -169,9 +169,23 @@ fn reply(status: StatusCode, line: String) -> Reply {
 /// The board's envelope, folded fresh. Shared verbatim between the
 /// `/api/board` handler and the feed's refold loop, so a pushed board
 /// and a pulled one can only ever be the same bytes.
+///
+/// The lazy pass runs first, before the read, so a GET serves a settled
+/// board — and so the feed's byte-equality holds: the pass's own append
+/// re-trips the watcher, the next refold concludes nothing, and the loop
+/// publishes identical bytes and stops. Best-effort: a pass that cannot
+/// run is one stderr line, and the board still folds; a lost race
+/// (`log/contended`) is another pass having concluded the same things.
 pub(crate) fn board_envelope(repo: &Path) -> Result<String, ApiError> {
     let ff = Ff::at(repo).env_program();
     let store = Store::open(repo)?;
+    match procedure::registry(store.main_worktree().as_deref()) {
+        Ok(installed) => match verb::pass(&store, &installed) {
+            Ok(_) | Err(log::Error::Contended { .. }) => {}
+            Err(err) => eprintln!("ff-tower-serve: the pass did not run: {err}"),
+        },
+        Err(err) => eprintln!("ff-tower-serve: the pass did not run: {err}"),
+    }
     let events = store.read_all()?;
     let board = board::assemble(&ff, &events)?;
     Ok(machine::emit("board", &board))

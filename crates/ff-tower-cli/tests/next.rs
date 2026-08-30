@@ -5,9 +5,10 @@
 //! Triage — are never handed out, and every pullable fixture files under
 //! a two-flight repo-layer procedure whose `pass` is agent-assigned and
 //! born Ready; the flight `next` hands out is that one, and the parent
-//! and `verdict` are born Waiting. There is no automatic Waiting → Ready
-//! advance yet, so a drained pool with Waiting rows is exit 1 — exit 3
-//! needs a Ready flight off the agent lane.
+//! and `verdict` are born Waiting. The lazy pass rides every `next`, so
+//! a Waiting flight whose dependencies close advances to Ready on the
+//! following invocation — exit 3 when the advanced flight is off the
+//! agent lane, which in this shape it always is.
 //!
 //! The assignment half rides the same fixtures. Main is a bay and it is
 //! first in survey order, so the solo norm's single pick binds *there*;
@@ -167,7 +168,7 @@ fn a_triage_filing_is_never_pulled_and_the_board_drains_to_1() {
 }
 
 #[test]
-fn the_parent_is_never_pulled_and_waiting_needs_a_hand_until_the_advance_exists() {
+fn the_parent_is_never_pulled_and_the_pass_advances_a_satisfied_waiter() {
     let repo = repo();
     file_pipeline(&repo, "a broad task");
 
@@ -178,18 +179,22 @@ fn the_parent_is_never_pulled_and_waiting_needs_a_hand_until_the_advance_exists(
     );
     stdout(&ff_tower(repo.path(), &["done", "2"]));
 
-    // `verdict` was born Waiting and nothing advances it yet: the pool
-    // is drained even though its dependency closed.
-    let out = ff_tower(repo.path(), &["next"]);
-    assert_eq!(out.status.code(), Some(1));
-
-    // Cleared by hand it is Ready off the lane — exit 3, yours.
-    stdout(&ff_tower(repo.path(), &["status", "3", "ready"]));
+    // `verdict` was born Waiting on `pass`; this invocation's pass
+    // advances it — Ready off the agent lane, so exit 3, yours.
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(3));
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
     stdout(&ff_tower(repo.path(), &["done", "3"]));
+
+    // Every child closed advances the parent the same way — Ready, not
+    // finished: whether the broad task is over stays a judgment.
+    let out = ff_tower(repo.path(), &["next"]);
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "the parent is yours, never pulled"
+    );
 
     stdout(&ff_tower(repo.path(), &["done", "1"]));
     let out = ff_tower(repo.path(), &["next"]);

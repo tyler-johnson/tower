@@ -21,6 +21,7 @@ mod comment;
 mod error;
 mod file;
 mod hold;
+mod pass;
 mod status;
 
 pub use answer::{Answer, Answered, answer};
@@ -30,6 +31,7 @@ pub use comment::{Comment, Commented, comment};
 pub use error::Error;
 pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
+pub use pass::{Conclusion, conclusions, pass};
 pub use status::{Move, Moved, cancel, done, status};
 
 use crate::board::{Flight, Fold, display};

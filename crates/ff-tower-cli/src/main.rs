@@ -90,6 +90,14 @@ fn main() {
         selfupdate::notify::maybe_spawn_check(repo);
     }
 
+    // The lazy pass, ahead of the verb so the verb's own fold sees the
+    // conclusions — `next` pulls a freshly advanced flight. Best-effort
+    // like the update lane: a lane must never change what a command
+    // does, so a pass that cannot run costs at most one stderr line.
+    if lanes.pass {
+        preflight_pass();
+    }
+
     match run(&cli) {
         // Safe to exit: stdout is line-buffered and every verb ends its
         // output with a newline, so nothing is left unflushed.
@@ -111,6 +119,38 @@ fn main() {
             }
         }
         Err(err) => report(cli.json, verb(&cli.command, cli.version), &err),
+    }
+}
+
+/// The lazy pass: fold the board, and append what the rules cover —
+/// routing out of Triage, and the Waiting → Ready advance. No repository
+/// is no pass; a lost race (`log/contended`) is another pass having
+/// concluded the same things and stays silent; anything else is one
+/// stderr line — safe under `--json`, which owns stdout alone — and the
+/// invocation proceeds. A broken rule file lands here as that one line,
+/// while `file` and `procedures` still refuse it loudly on their own
+/// paths.
+fn preflight_pass() {
+    use ff_tower_core::{log, procedure, verb};
+
+    let Ok(ff) = Ff::here() else {
+        return;
+    };
+    let Ok(store) = log::Store::open(ff.repo()) else {
+        // The verb's own open names the reason; the pass never speaks
+        // over it.
+        return;
+    };
+    let installed = match procedure::registry(store.main_worktree().as_deref()) {
+        Ok(installed) => installed,
+        Err(err) => {
+            eprintln!("ff-tower: the pass did not run: {err}");
+            return;
+        }
+    };
+    match verb::pass(&store, &installed) {
+        Ok(_) | Err(log::Error::Contended { .. }) => {}
+        Err(err) => eprintln!("ff-tower: the pass did not run: {err}"),
     }
 }
 

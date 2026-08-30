@@ -36,7 +36,8 @@ pub struct FlightView {
     /// The dense per-writer flight number — the human name's numeric
     /// half, beside the wire id.
     pub number: u64,
-    /// Provenance only: the procedure the filing was minted under.
+    /// Provenance only: the procedure the filing was minted under, or
+    /// the pass routed it under.
     pub procedure: Option<String>,
     pub subject: String,
     pub filed_by: String,
