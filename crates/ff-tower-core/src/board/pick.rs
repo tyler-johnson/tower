@@ -4,17 +4,14 @@
 //! walk runs over a [`Fold`], a [`Reads`], and a [`Verdicts`] the caller
 //! already fetched, so admission is unit-testable with hand-built rows.
 //!
-//! The pool is any unclaimed live flight whose own log stamp says an
-//! agent flies it: a standing claim, an open question, or a fufu hold
-//! takes a flight out, and an op row alone does not. The crew gate is
-//! `Flight::agent_crewed`, the one the brief reads too: it asks
-//! `flight.part` — the stamp the filing copied into the log — never the
-//! registry again (principle 11), and unknown never rounds down, so a
-//! missing stamp, `you`, or a crew this binary has never heard of are all
-//! out. A `take` closes that gate without touching the stamp. What the
-//! crew clause alone excludes is counted in `yours`, the number behind
-//! `next`'s exit 3; the flights themselves are silent here because the
-//! pile is triage's surface, not this one's.
+//! The pool is every Ready flight in the agent lane: the stored status
+//! and assignee, read off the fold — never the registry (principle 11).
+//! The gate is `Flight::pullable`, the one the brief reads too: exact
+//! string compares, so an unknown status or lane never rounds down into
+//! the pool. An open question or a fufu hold takes a flight out on top
+//! of it. Ready flights *not* in the agent lane are counted in `yours`,
+//! the number behind `next`'s exit 3; the flights themselves are silent
+//! here because the board is their surface, not this one's.
 //!
 //! Every live flight *not* in the pool keeps its branch on the gate —
 //! waiting and holding flights included, because a warm bay holds real
@@ -37,8 +34,8 @@ use super::reads::{Reads, Verdicts};
 pub struct Picks {
     pub picked: Vec<Pick>,
     pub passed: Vec<Passed>,
-    /// Live, unclaimed, unquestioned, not fufu-held — excluded from the
-    /// pool by the crew clause alone. Work that exists and needs you.
+    /// Ready, unquestioned, not fufu-held — excluded from the pool by
+    /// the lane alone. Work that exists and needs you.
     pub yours: usize,
 }
 
@@ -65,7 +62,9 @@ pub struct Passed {
 #[derive(Debug, Serialize)]
 #[serde(tag = "reason", rename_all = "kebab-case")]
 pub enum Skip {
-    /// Declared dependencies not yet done — all of them.
+    /// Declared dependencies not yet closed — all of them. The belt
+    /// under the stored Waiting status, until the advance automation
+    /// exists.
     Waiting { on: Vec<String> },
     /// A collide against a flying flight or an already-picked candidate;
     /// the first hit wins.
@@ -80,15 +79,15 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
     let index = reads.branch_index();
 
     // Per live flight: its branch (non-`@detached`, from the freshest op
-    // row) and whether it is in the pool — no claim, no open question,
-    // and its branch row not held or resolving. A branch of `None`,
-    // `@detached`, or a name absent from the index cannot be held, the
-    // existing idiom.
+    // row) and whether it is in the pool — Ready, agent lane, no open
+    // question, and its branch row not held or resolving. A branch of
+    // `None`, `@detached`, or a name absent from the index cannot be
+    // held, the existing idiom.
     let mut candidates = Vec::new();
     let mut gate: Vec<(String, String)> = Vec::new();
     let mut yours = 0;
     for flight in &fold.flights {
-        if flight.done.is_some() {
+        if flight.closed() {
             continue;
         }
         let id = flight.id.to_string();
@@ -101,11 +100,11 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
             .as_deref()
             .and_then(|name| index.get(name))
             .is_some_and(|row| row.held || row.resolving);
-        let unclaimed = flight.claim.is_none() && flight.question.is_none() && !fufu_held;
-        if unclaimed && flight.agent_crewed() {
+        let unheld = flight.question.is_none() && !fufu_held;
+        if unheld && flight.pullable() {
             candidates.push((flight, id, branch));
         } else {
-            if unclaimed {
+            if unheld && flight.status == "ready" {
                 yours += 1;
             }
             if let Some(branch) = branch {
@@ -120,9 +119,9 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
         if picked.len() == want {
             break;
         }
-        // Readiness first: every declared dependency must be done. Dep
+        // Readiness first: every declared dependency must be closed. Dep
         // ids always resolve — the fold routes unresolvable links to
-        // `unrouted` — so a missing lookup is simply not-done.
+        // `unrouted` — so a missing lookup is simply not-closed.
         let waiting: Vec<String> = flight
             .depends_on
             .iter()
@@ -130,7 +129,7 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
                 fold.flights
                     .iter()
                     .find(|other| &other.id == *dep)
-                    .is_none_or(|other| other.done.is_none())
+                    .is_none_or(|other| !other.closed())
             })
             .map(ToString::to_string)
             .collect();
@@ -192,11 +191,11 @@ mod tests {
     use super::super::reads::BranchPairing;
     use super::*;
     use crate::ff::{BranchInfo, BranchList, OpEntry, UnknownReason};
-    use crate::log::{Event, EventId, Kind, PartStamp};
+    use crate::log::{Event, EventId, Kind};
 
-    /// A filing with the given crew stamped, `None` for the stampless
-    /// shape — a parent, or a pre-procedure filing.
-    fn crewed(id: &str, time: i64, crew: Option<&str>) -> Event {
+    /// A filing with the given status and lane stored — the shape the
+    /// pool gate is about.
+    fn stored(id: &str, time: i64, status: &str, assignee: Option<&str>) -> Event {
         let id: EventId = id.parse().expect("id");
         Event {
             writer: id.writer.clone(),
@@ -204,24 +203,24 @@ mod tests {
             time,
             id,
             kind: Kind::Filed {
-                procedure: "review".to_string(),
+                procedure: Some("review".to_string()),
                 subject: format!("subject of {time}"),
                 body: String::new(),
-                part: crew.map(|crew| PartStamp {
-                    id: "pass".to_string(),
-                    crew: crew.to_string(),
-                    skill: None,
-                    done: "asserted".to_string(),
-                    bay: None,
-                    branch: None,
-                }),
+                status: status.to_string(),
+                assignee: assignee.map(str::to_string),
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             },
         }
     }
 
-    /// The pool's norm once the crew gate stands: an agent-stamped part.
+    /// The pool's norm: Ready, agent lane.
     fn filed(id: &str, time: i64) -> Event {
-        crewed(id, time, Some("agent"))
+        stored(id, time, "ready", Some("agent"))
     }
 
     fn lifecycle(id: &str, time: i64, kind: Kind) -> Event {
@@ -235,32 +234,25 @@ mod tests {
         }
     }
 
-    fn claimed(id: &str, time: i64, flight: &str) -> Event {
+    fn moved(id: &str, time: i64, flight: &str, to: &str) -> Event {
         lifecycle(
             id,
             time,
-            Kind::Claimed {
+            Kind::Status {
                 flight: flight.parse().expect("id"),
+                status: to.to_string(),
+                reason: None,
             },
         )
     }
 
-    fn taken(id: &str, time: i64, flight: &str) -> Event {
+    fn assigned(id: &str, time: i64, flight: &str, lane: Option<&str>) -> Event {
         lifecycle(
             id,
             time,
-            Kind::Taken {
+            Kind::Assigned {
                 flight: flight.parse().expect("id"),
-            },
-        )
-    }
-
-    fn requeued(id: &str, time: i64, flight: &str) -> Event {
-        lifecycle(
-            id,
-            time,
-            Kind::Requeued {
-                flight: flight.parse().expect("id"),
+                assignee: lane.map(str::to_string),
             },
         )
     }
@@ -288,13 +280,7 @@ mod tests {
     }
 
     fn done(id: &str, time: i64, flight: &str) -> Event {
-        lifecycle(
-            id,
-            time,
-            Kind::Done {
-                flight: flight.parse().expect("id"),
-            },
-        )
+        moved(id, time, flight, "done")
     }
 
     fn op(session: &str, branch: Option<&str>, time: i64) -> OpEntry {
@@ -356,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn an_undone_dependency_passes_with_waiting_naming_it() {
+    fn an_unclosed_dependency_passes_with_waiting_naming_it() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -377,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn a_done_dependency_admits_the_dependent() {
+    fn a_closed_dependency_admits_the_dependent() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -391,16 +377,30 @@ mod tests {
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
         assert!(picks.passed.is_empty());
+
+        // A canceled dependency releases too: closed is closed.
+        let picks = pick(
+            &fold(&[
+                filed("pi.1", 10),
+                filed("pi.2", 20),
+                linked("pi.3", 30, "pi.1", "pi.2"),
+                moved("pi.4", 40, "pi.2", "canceled"),
+            ]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            1,
+        );
+        assert_eq!(picks.picked[0].flight, "pi.1");
     }
 
     #[test]
-    fn claimed_questioned_and_fufu_held_flights_are_neither_picked_nor_passed() {
+    fn pulled_questioned_and_fufu_held_flights_are_neither_picked_nor_passed() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
                 filed("pi.2", 20),
                 filed("pi.3", 30),
-                claimed("pi.4", 40, "pi.1"),
+                moved("pi.4", 40, "pi.1", "in_progress"),
                 held("pi.5", 50, "pi.2", "which?"),
             ]),
             &reads(
@@ -415,12 +415,12 @@ mod tests {
     }
 
     #[test]
-    fn a_collide_against_a_flying_claim_passes_naming_it_and_its_paths() {
+    fn a_collide_against_a_flying_flight_passes_naming_it_and_its_paths() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
                 filed("pi.2", 20),
-                claimed("pi.3", 30, "pi.1"),
+                moved("pi.3", 30, "pi.1", "in_progress"),
             ]),
             &reads(
                 vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
@@ -447,7 +447,7 @@ mod tests {
             &fold(&[
                 filed("pi.1", 10),
                 filed("pi.2", 20),
-                claimed("pi.3", 30, "pi.1"),
+                moved("pi.3", 30, "pi.1", "in_progress"),
             ]),
             &reads(
                 vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
@@ -511,7 +511,7 @@ mod tests {
             &fold(&[
                 filed("pi.1", 10),
                 filed("pi.2", 20),
-                claimed("pi.3", 30, "pi.1"),
+                moved("pi.3", 30, "pi.1", "in_progress"),
             ]),
             &reads(
                 vec![op("pi.1", Some("work"), 40), op("pi.2", Some("work"), 50)],
@@ -542,28 +542,48 @@ mod tests {
     }
 
     #[test]
-    fn only_agent_stamped_flights_enter_the_pool_and_the_rest_are_yours() {
+    fn only_ready_agent_flights_enter_the_pool_and_ready_rest_are_yours() {
         let picks = pick(
             &fold(&[
-                crewed("pi.1", 10, None),
-                crewed("pi.2", 20, Some("you")),
-                crewed("pi.3", 30, Some("pair")),
-                crewed("pi.4", 40, Some("agent")),
+                stored("pi.1", 10, "ready", None),
+                stored("pi.2", 20, "ready", Some("me")),
+                stored("pi.3", 30, "ready", Some("pair")),
+                stored("pi.4", 40, "ready", Some("agent")),
+                stored("pi.5", 50, "triage", Some("agent")),
+                stored("pi.6", 60, "waiting", Some("agent")),
             ]),
             &reads(Vec::new(), Vec::new()),
             &Verdicts::default(),
-            4,
+            6,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.4");
         assert!(picks.passed.is_empty(), "excluded silently, never passed");
-        assert_eq!(picks.yours, 3, "unknown never rounds down");
+        assert_eq!(
+            picks.yours, 3,
+            "Ready off the agent lane counts; Triage and Waiting do not"
+        );
     }
 
     #[test]
-    fn a_you_crewed_flights_branch_still_collides_an_agent_candidate_off() {
+    fn an_unknown_status_or_lane_never_rounds_into_the_pool() {
         let picks = pick(
-            &fold(&[crewed("pi.1", 10, Some("you")), filed("pi.2", 20)]),
+            &fold(&[
+                stored("pi.1", 10, "parked", Some("agent")),
+                stored("pi.2", 20, "ready", Some("pair")),
+            ]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            2,
+        );
+        assert!(picks.picked.is_empty());
+        assert_eq!(picks.yours, 1, "the unknown lane's Ready flight is yours");
+    }
+
+    #[test]
+    fn a_me_laned_flights_branch_still_collides_an_agent_candidate_off() {
+        let picks = pick(
+            &fold(&[stored("pi.1", 10, "ready", Some("me")), filed("pi.2", 20)]),
             &reads(
                 vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
                 vec![branch("left", false, false), branch("right", false, false)],
@@ -582,12 +602,12 @@ mod tests {
     }
 
     #[test]
-    fn claimed_and_held_flights_are_not_yours() {
+    fn questioned_and_pulled_flights_are_not_yours() {
         let picks = pick(
             &fold(&[
-                crewed("pi.1", 10, Some("you")),
-                crewed("pi.2", 20, None),
-                claimed("pi.3", 30, "pi.1"),
+                stored("pi.1", 10, "ready", Some("me")),
+                stored("pi.2", 20, "ready", None),
+                moved("pi.3", 30, "pi.1", "in_progress"),
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             &reads(Vec::new(), Vec::new()),
@@ -595,42 +615,42 @@ mod tests {
             2,
         );
         assert!(picks.picked.is_empty());
-        assert_eq!(picks.yours, 0, "a claim or a question already has an owner");
+        assert_eq!(picks.yours, 0, "a pull or a question already has an owner");
     }
 
     #[test]
-    fn a_taken_flight_leaves_the_pool_though_its_stamp_says_agent() {
-        let picks = pick(
-            &fold(&[filed("pi.1", 10), taken("pi.2", 20, "pi.1")]),
-            &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
-            1,
-        );
-        assert!(picks.picked.is_empty());
-        assert!(picks.passed.is_empty(), "excluded silently, never passed");
-        assert_eq!(picks.yours, 0, "a take already has an owner");
-    }
-
-    #[test]
-    fn a_requeued_flight_is_back_in_the_pool() {
-        // Both halves of the recovery path: a claim released, and a take
-        // undone. Neither needs a second edit — `unclaimed` already reads
-        // `claim.is_none()`, and the crew gate reads the untouched stamp.
+    fn a_reassignment_moves_a_flight_across_the_gate() {
+        // Both directions: the agent lane opened by hand, and closed by
+        // hand — the stored field is the whole gate.
         let picks = pick(
             &fold(&[
-                filed("pi.1", 10),
-                claimed("pi.2", 20, "pi.1"),
-                requeued("pi.3", 30, "pi.1"),
-                filed("pi.4", 40),
-                taken("pi.5", 50, "pi.4"),
-                requeued("pi.6", 60, "pi.4"),
+                stored("pi.1", 10, "ready", Some("me")),
+                assigned("pi.2", 20, "pi.1", Some("agent")),
+                filed("pi.3", 30),
+                assigned("pi.4", 40, "pi.3", Some("me")),
             ]),
             &reads(Vec::new(), Vec::new()),
             &Verdicts::default(),
             2,
         );
         let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
-        assert_eq!(ids, ["pi.1", "pi.4"]);
+        assert_eq!(ids, ["pi.1"]);
+        assert_eq!(picks.yours, 1);
+    }
+
+    #[test]
+    fn a_release_back_to_ready_rejoins_the_pool() {
+        let picks = pick(
+            &fold(&[
+                filed("pi.1", 10),
+                moved("pi.2", 20, "pi.1", "in_progress"),
+                moved("pi.3", 30, "pi.1", "ready"),
+            ]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            1,
+        );
+        assert_eq!(picks.picked[0].flight, "pi.1");
     }
 
     #[test]

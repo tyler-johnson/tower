@@ -121,7 +121,7 @@ pub fn doctor(fold: &Fold, reads: &Reads, seam: &SeamHealth, gone: &[(String, St
     let flying: HashSet<&str> = fold
         .flights
         .iter()
-        .filter(|flight| flight.done.is_none())
+        .filter(|flight| !flight.closed())
         .filter_map(|flight| {
             freshest
                 .get(flight.id.to_string().as_str())?
@@ -184,10 +184,17 @@ mod tests {
             time,
             id,
             kind: Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: None,
                 subject: format!("subject of {time}"),
                 body: String::new(),
-                part: None,
+                status: "triage".to_string(),
+                assignee: None,
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             },
         }
     }
@@ -199,8 +206,10 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             id,
-            kind: Kind::Done {
+            kind: Kind::Status {
                 flight: flight.parse().expect("id"),
+                status: "done".to_string(),
+                reason: None,
             },
         }
     }

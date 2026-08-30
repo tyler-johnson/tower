@@ -4,9 +4,9 @@
 //! Pure like `pick.rs` — no `crate::ff` spawns, no `std::process`; the
 //! fold runs over a [`Fold`] and a [`Reads`] the caller already fetched.
 //! Occupancy joins each worktree row's branch against the live flights'
-//! derived branches, exactly `enrich`'s derivation: live is `done`
-//! unset, the branch is the freshest session op's, `@detached` excluded.
-//! A done flight frees its bay by derivation, not bookkeeping.
+//! derived branches, exactly `enrich`'s derivation: live is not closed,
+//! the branch is the freshest session op's, `@detached` excluded. A
+//! closed flight frees its bay by derivation, not bookkeeping.
 
 use serde::Serialize;
 
@@ -53,7 +53,7 @@ pub fn bays(fold: &Fold, reads: &Reads) -> Vec<BayView> {
     let assignments: Vec<(&Flight, String)> = fold
         .flights
         .iter()
-        .filter(|flight| flight.done.is_none())
+        .filter(|flight| !flight.closed())
         .filter_map(|flight| {
             let branch = freshest
                 .get(flight.id.to_string().as_str())?
@@ -96,7 +96,7 @@ pub struct Berth {
     pub flight: String,
     /// The bay the flight takes; `None` when the pool was full.
     pub bay: Option<BayView>,
-    /// Its part stamped `bay = "warm"` and nothing was free — the one
+    /// Its own stored `bay = "warm"` and nothing was free — the one
     /// case that earns a new slot. False whenever a bay was taken.
     pub wants_warm: bool,
 }
@@ -136,8 +136,7 @@ pub fn assign(fold: &Fold, reads: &Reads, picked: &[Pick]) -> Vec<Berth> {
                     .flights
                     .iter()
                     .find(|flight| flight.id.to_string() == pick.flight)
-                    .and_then(|flight| flight.part.as_ref())
-                    .and_then(|part| part.bay.as_deref())
+                    .and_then(|flight| flight.bay.as_deref())
                     == Some("warm");
             Berth {
                 flight: pick.flight.clone(),
@@ -163,10 +162,17 @@ mod tests {
             time,
             id,
             kind: Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: None,
                 subject: format!("subject of {time}"),
                 body: String::new(),
-                part: None,
+                status: "triage".to_string(),
+                assignee: None,
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             },
         }
     }
@@ -178,8 +184,10 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             id,
-            kind: Kind::Done {
+            kind: Kind::Status {
                 flight: flight.parse().expect("id"),
+                status: "done".to_string(),
+                reason: None,
             },
         }
     }
@@ -235,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn a_done_flights_bay_is_free() {
+    fn a_closed_flights_bay_is_free() {
         let views = bays(
             &fold(&[filed("pi.1", 10), done("pi.2", 60, "pi.1")]),
             &reads(
@@ -299,21 +307,14 @@ mod tests {
         assert_eq!(views[0].flight.as_deref(), Some("pi.1"));
     }
 
-    /// A filing whose part carries the given `bay` stamp — the only
-    /// thing `assign` reads off the fold beyond the occupancy join.
-    fn stamped(id: &str, time: i64, bay: Option<&str>) -> Event {
+    /// A filing carrying the given stored `bay` — the only thing
+    /// `assign` reads off the fold beyond the occupancy join.
+    fn stamped(id: &str, time: i64, wants: Option<&str>) -> Event {
         let mut event = filed(id, time);
-        let Kind::Filed { part, .. } = &mut event.kind else {
+        let Kind::Filed { bay, .. } = &mut event.kind else {
             unreachable!("filed");
         };
-        *part = Some(crate::log::PartStamp {
-            id: "pass".to_string(),
-            crew: "agent".to_string(),
-            skill: None,
-            done: "asserted".to_string(),
-            bay: bay.map(str::to_string),
-            branch: None,
-        });
+        *bay = wants.map(str::to_string);
         event
     }
 
@@ -376,8 +377,8 @@ mod tests {
             vec![worktree("main", Some("/repo"), Some("main"), true)],
         );
 
-        // One bay for two picks: the stamped flight asks for a slot, the
-        // unstamped one claims anyway with no bay.
+        // One bay for two picks: the warm-stamped flight asks for a
+        // slot, the unstamped one goes without a bay.
         let berths = assign(&fold, &reads, &[want("pi.2", None), want("pi.1", None)]);
         assert!(berths[0].bay.is_some() && !berths[0].wants_warm);
         assert!(berths[1].bay.is_none() && berths[1].wants_warm);

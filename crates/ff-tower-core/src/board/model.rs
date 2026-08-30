@@ -3,21 +3,23 @@
 //!
 //! `enrich` is pure again — it runs over a [`Reads`] the caller already
 //! gathered, so section classification is unit-testable with hand-built
-//! rows and no repository.
+//! rows and no repository. The partition is a mechanical adaptation of
+//! the four sections to the stored model; the status-grouped board and
+//! its drift lines are a later rework's.
 
 use serde::Serialize;
 
 use crate::ff::Pairing;
-use crate::log::{Event, PartStamp};
+use crate::log::Event;
 
 use super::flight::{Flight, Fold};
 use super::reads::{Reads, Verdicts};
 
 /// The inbox's four sections, plus what the fold could not route.
 ///
-/// A done flight appears in none of them — sections and JSON both; the
-/// log keeps its record, and a `--json` consumer deliberately has no
-/// "done" list to read.
+/// A closed flight — done or canceled — appears in none of them —
+/// sections and JSON both; the log keeps its record, and a `--json`
+/// consumer deliberately has no "done" list to read.
 #[derive(Debug, Serialize)]
 pub struct Board {
     pub waiting_on_you: Vec<FlightView>,
@@ -34,12 +36,8 @@ pub struct FlightView {
     /// The dense per-writer flight number — the human name's numeric
     /// half, beside the wire id.
     pub number: u64,
-    pub procedure: String,
-    /// The procedure part this flight is, as the filing stamped it —
-    /// `null` on a parent and on a plain filing. Carried for `--json`;
-    /// the board's note line is urgency-ordered phrases, and crew is not
-    /// urgency.
-    pub part: Option<PartStamp>,
+    /// Provenance only: the procedure the filing was minted under.
+    pub procedure: Option<String>,
     pub subject: String,
     pub filed_by: String,
     /// Raw epoch; relative age is the render's concern.
@@ -47,6 +45,16 @@ pub struct FlightView {
     pub comments: usize,
     pub depends_on: Vec<String>,
     pub blocks: Vec<String>,
+    /// The stored status, verbatim.
+    pub status: String,
+    /// Who last moved the status, and when — `null` while the flight
+    /// still stands where it was filed.
+    pub status_by: Option<String>,
+    pub status_at: Option<i64>,
+    pub assignee: Option<String>,
+    pub priority: String,
+    pub labels: Vec<String>,
+    pub skill: Option<String>,
     /// `@detached` is a real literal value here, carried as fufu emitted
     /// it; a render decides how to print it.
     pub branch: Option<String>,
@@ -57,15 +65,6 @@ pub struct FlightView {
     pub resolving: bool,
     /// The branch is the one this render's own worktree sits on.
     pub current: bool,
-    /// The standing claim's author, when one stands.
-    pub claimed_by: Option<String>,
-    /// A `take` stands over the claim — the human override, which is
-    /// also what closes the crew gate. The claim's author is `claimed_by`
-    /// either way; this says where the claim came from.
-    pub taken: bool,
-    /// The freshest requeue, which outlives the claim it released — a
-    /// render needs it to tell an abandoned tree from a flown one.
-    pub requeued_at: Option<i64>,
     /// The open question tower's own `hold` attached — distinct from
     /// `held`/`resolving`, which stay fufu's branch verdicts.
     pub question: Option<String>,
@@ -88,16 +87,16 @@ pub struct CollideView {
 
 /// Partition the fold's flights using already-fetched reads.
 ///
-/// Per flight, in order: done drops it before any section; an unanswered
-/// question is *waiting on you*; a branch fufu holds (`held` or
-/// `resolving`) is *holding*; an op row or a standing claim is *in the
-/// air*; the rest is *open*. Enrichment runs before routing, so a waiting
-/// flight keeps its branch and tip — a warm bay is the point of holding.
-/// A branch of `None`, `@detached`, or a name absent from the index
-/// (deleted, or landed) cannot be held by definition: the flight stays in
-/// the air. `last_motion` is the max of the freshest op row's time, the
-/// claim, the take, the question, the freshest answer, the freshest
-/// requeue, and the last edit.
+/// Per flight, in order: closed drops it before any section; an
+/// unanswered question is *waiting on you*; a branch fufu holds (`held`
+/// or `resolving`) is *holding*; an In Progress status or an op row is
+/// *in the air*; the rest is *open*. Enrichment runs before routing, so
+/// a waiting flight keeps its branch and tip — a warm bay is the point
+/// of holding. A branch of `None`, `@detached`, or a name absent from
+/// the index (deleted, or landed) cannot be held by definition: the
+/// flight stays in the air. `last_motion` is the max of the freshest op
+/// row's time, the status move, the question, the freshest answer, and
+/// the last edit.
 ///
 /// Verdicts land on every live flight against every other live flight on
 /// a distinct branch — waiting and holding rows keep their conflicts,
@@ -114,7 +113,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
     let assignments: Vec<(String, String)> = fold
         .flights
         .iter()
-        .filter(|flight| flight.done.is_none())
+        .filter(|flight| !flight.closed())
         .filter_map(|flight| {
             let id = flight.id.to_string();
             let branch = freshest.get(id.as_str())?.branch.as_deref()?;
@@ -130,7 +129,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
     let mut holding = Vec::new();
     let mut open = Vec::new();
     for flight in fold.flights {
-        if flight.done.is_some() {
+        if flight.closed() {
             continue;
         }
         let op = freshest.get(flight.id.to_string().as_str()).copied();
@@ -142,17 +141,15 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
         });
         let last_motion = [
             op.map(|op| op.time),
-            flight.claim.as_ref().map(|claim| claim.at),
-            flight.taken.as_ref().map(|mark| mark.at),
+            flight.status_mark.as_ref().map(|mark| mark.at),
             flight.question.as_ref().map(|question| question.at),
             flight.answered_at,
-            flight.requeued_at,
             flight.edited.as_ref().map(|mark| mark.at),
         ]
         .into_iter()
         .flatten()
         .max();
-        let claimed = flight.claim.is_some();
+        let in_progress = flight.status == "in_progress";
         let mut collides = Vec::new();
         let mut unanswered = Vec::new();
         if let Some(branch) = op.and_then(|op| op.branch.as_deref()) {
@@ -186,7 +183,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
             waiting_on_you.push(view);
         } else if view.held || view.resolving {
             holding.push(view);
-        } else if op.is_some() || claimed {
+        } else if op.is_some() || in_progress {
             in_the_air.push(view);
         } else {
             open.push(view);
@@ -196,8 +193,8 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
     // Waiting sorts oldest-asked first — the longest-blocked agent gets
     // the top row. The rest are this slice's placeholders: motion
     // freshest-first in the air and holding, filed oldest-first in open.
-    // DESIGN's "priority then readiness then age" waits on data that does
-    // not exist yet.
+    // DESIGN's status-then-priority-then-age grouping is a later
+    // rework's.
     waiting_on_you.sort_by_key(|view| view.asked_at);
     in_the_air.sort_by_key(|view| std::cmp::Reverse(view.last_motion));
     holding.sort_by_key(|view| std::cmp::Reverse(view.last_motion));
@@ -233,22 +230,25 @@ fn view(
         id: flight.id.to_string(),
         number: flight.number,
         procedure: flight.procedure,
-        part: flight.part,
         subject: flight.subject,
         filed_by: flight.filed_by,
         filed_at: flight.filed_at,
         comments: flight.comments.len(),
         depends_on: flight.depends_on.iter().map(ToString::to_string).collect(),
         blocks: flight.blocks.iter().map(ToString::to_string).collect(),
+        status: flight.status,
+        status_by: flight.status_mark.as_ref().map(|mark| mark.by.clone()),
+        status_at: flight.status_mark.as_ref().map(|mark| mark.at),
+        assignee: flight.assignee,
+        priority: flight.priority,
+        labels: flight.labels,
+        skill: flight.skill,
         branch,
         tip,
         last_motion,
         held,
         resolving,
         current,
-        taken: flight.taken.is_some(),
-        requeued_at: flight.requeued_at,
-        claimed_by: flight.claim.map(|claim| claim.by),
         question,
         asked_at,
         collides: Vec::new(),
@@ -272,10 +272,17 @@ mod tests {
             time,
             id,
             kind: Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: None,
                 subject: format!("subject of {time}"),
                 body: String::new(),
-                part: None,
+                status: "triage".to_string(),
+                assignee: None,
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             },
         }
     }
@@ -291,12 +298,14 @@ mod tests {
         }
     }
 
-    fn claimed(id: &str, time: i64, flight: &str) -> Event {
+    fn moved(id: &str, time: i64, flight: &str, to: &str) -> Event {
         lifecycle(
             id,
             time,
-            Kind::Claimed {
+            Kind::Status {
                 flight: flight.parse().expect("id"),
+                status: to.to_string(),
+                reason: None,
             },
         )
     }
@@ -324,13 +333,7 @@ mod tests {
     }
 
     fn done(id: &str, time: i64, flight: &str) -> Event {
-        lifecycle(
-            id,
-            time,
-            Kind::Done {
-                flight: flight.parse().expect("id"),
-            },
-        )
+        moved(id, time, flight, "done")
     }
 
     fn op(session: &str, branch: Option<&str>, time: i64) -> OpEntry {
@@ -386,6 +389,22 @@ mod tests {
     }
 
     #[test]
+    fn an_in_progress_status_alone_is_in_the_air() {
+        let board = enrich(
+            fold(&[filed("pi.1", 10), moved("pi.2", 40, "pi.1", "in_progress")]),
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+        );
+        assert_eq!(board.in_the_air.len(), 1);
+        let view = &board.in_the_air[0];
+        assert_eq!(view.status, "in_progress");
+        assert_eq!(view.status_by.as_deref(), Some("a@b.c"));
+        assert_eq!(view.status_at, Some(40));
+        assert!(view.branch.is_none());
+        assert_eq!(view.last_motion, Some(40));
+    }
+
+    #[test]
     fn a_held_branch_puts_its_flight_in_holding() {
         let board = enrich(
             fold(&[filed("pi.1", 10)]),
@@ -418,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn an_untagged_flight_is_open() {
+    fn an_untouched_flight_is_open_with_its_stored_fields() {
         let board = enrich(
             fold(&[filed("pi.1", 10)]),
             &reads(Vec::new(), Vec::new(), Some("main")),
@@ -428,6 +447,13 @@ mod tests {
         let view = &board.open[0];
         assert!(view.branch.is_none() && view.tip.is_none() && view.last_motion.is_none());
         assert!(!view.held && !view.resolving && !view.current);
+        assert_eq!(view.status, "triage");
+        assert!(view.status_by.is_none() && view.status_at.is_none());
+        assert!(view.assignee.is_none());
+        assert_eq!(view.priority, "none");
+        assert!(view.labels.is_empty());
+        assert!(view.skill.is_none());
+        assert!(view.procedure.is_none());
     }
 
     #[test]
@@ -518,15 +544,21 @@ mod tests {
         let view = &board.waiting_on_you[0];
         assert_eq!(view.question.as_deref(), Some("which?"));
         assert_eq!(view.asked_at, Some(60));
+        assert_eq!(view.status, "held", "the hold is a status move too");
         assert_eq!(view.branch.as_deref(), Some("work"));
         assert!(view.tip.is_some());
         assert!(view.held);
     }
 
     #[test]
-    fn a_done_flight_appears_nowhere() {
+    fn a_closed_flight_appears_nowhere() {
         let board = enrich(
-            fold(&[filed("pi.1", 10), done("pi.2", 60, "pi.1")]),
+            fold(&[
+                filed("pi.1", 10),
+                filed("pi.2", 20),
+                done("pi.3", 60, "pi.1"),
+                moved("pi.4", 70, "pi.2", "canceled"),
+            ]),
             &reads(
                 vec![op("pi.1", Some("work"), 50)],
                 vec![branch("work", false, false)],
@@ -541,23 +573,9 @@ mod tests {
     }
 
     #[test]
-    fn a_claim_with_no_op_row_is_in_the_air_on_the_claim_alone() {
+    fn a_status_move_and_an_op_row_take_the_freshest_time_as_motion() {
         let board = enrich(
-            fold(&[filed("pi.1", 10), claimed("pi.2", 40, "pi.1")]),
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
-        );
-        assert_eq!(board.in_the_air.len(), 1);
-        let view = &board.in_the_air[0];
-        assert_eq!(view.claimed_by.as_deref(), Some("a@b.c"));
-        assert!(view.branch.is_none());
-        assert_eq!(view.last_motion, Some(40));
-    }
-
-    #[test]
-    fn a_claim_and_an_op_row_take_the_freshest_time_as_motion() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), claimed("pi.2", 40, "pi.1")]),
+            fold(&[filed("pi.1", 10), moved("pi.2", 40, "pi.1", "in_progress")]),
             &reads(
                 vec![op("pi.1", Some("work"), 70)],
                 vec![branch("work", false, false)],
@@ -587,6 +605,7 @@ mod tests {
         assert_eq!(board.in_the_air.len(), 1);
         let view = &board.in_the_air[0];
         assert!(view.question.is_none());
+        assert_eq!(view.status, "ready", "the answer releases to Ready");
         assert_eq!(view.last_motion, Some(80));
     }
 
@@ -602,6 +621,10 @@ mod tests {
                         target: "pi.1".parse().expect("id"),
                         subject: Some("reworded".to_string()),
                         body: None,
+                        priority: None,
+                        labels: None,
+                        skill: None,
+                        bay: None,
                     },
                 ),
             ]),

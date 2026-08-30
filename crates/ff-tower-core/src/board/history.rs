@@ -61,14 +61,11 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
         let names = match &event.kind {
             // A filing mints the flight: the event's own id is the name.
             Kind::Filed { .. } => &event.id == flight,
-            Kind::Routed { flight: on, .. }
+            Kind::Status { flight: on, .. }
+            | Kind::Assigned { flight: on, .. }
             | Kind::Commented { flight: on, .. }
-            | Kind::Claimed { flight: on }
-            | Kind::Taken { flight: on }
-            | Kind::Requeued { flight: on }
             | Kind::Held { flight: on, .. }
-            | Kind::Answered { flight: on, .. }
-            | Kind::Done { flight: on } => on == flight,
+            | Kind::Answered { flight: on, .. } => on == flight,
             Kind::Edited { target, .. } => target == flight || comments.contains(&target),
             Kind::Linked { from, to } => from == flight || to == flight,
             Kind::Unknown { body, .. } => {

@@ -8,20 +8,20 @@ subject = "branch"            # may resolve to a PR later
 source = "github"
 event  = "review_requested"
 
-[[part]]
-id    = "pass"
-crew  = "agent"
-skill = "review"
-done  = "asserted"
+[[flight]]
+id       = "pass"
+assignee = "agent"
+skill    = "review"
+done     = "asserted"
 
-[[part]]
-id   = "smoke"
-crew = "you"
-bay  = "warm"                 # build the tree ahead of me
-done = "asserted"
+[[flight]]
+id       = "smoke"
+assignee = "me"
+bay      = "warm"             # build the tree ahead of me
+done     = "asserted"
 
-[[part]]
-id    = "verdict"
-crew  = "you"
-after = ["pass", "smoke"]
-done  = "asserted"
+[[flight]]
+id       = "verdict"
+assignee = "me"
+after    = ["pass", "smoke"]
+done     = "asserted"

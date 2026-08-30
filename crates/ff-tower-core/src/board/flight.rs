@@ -6,10 +6,15 @@
 //! principle 11 checkable rather than aspirational. Everything a flight
 //! needs from the repository arrives later, in `enrich`, over data the
 //! caller already fetched.
+//!
+//! The fold stores the wire's free strings — status, assignee, priority
+//! — and never rounds them into enums: the closed vocabularies live at
+//! the verb and loader boundaries, so a value this binary has never
+//! heard of survives the fold intact and simply matches nothing.
 
 use std::collections::HashMap;
 
-use crate::log::{Event, EventId, Kind, PartStamp};
+use crate::log::{Event, EventId, Kind};
 
 /// One flight, assembled from its `filed` event and everything that named
 /// it since.
@@ -24,11 +29,9 @@ pub struct Flight {
     /// never stored; the log is append-only and per-writer seqs are
     /// monotonic, so a new filing can never renumber an earlier one.
     pub number: u64,
-    pub procedure: String,
-    /// The procedure part this flight is, as the filing stamped it.
-    /// Carried, never derived from: nothing in the fold keys on crew this
-    /// slice, and the definition it came from is not read again.
-    pub part: Option<PartStamp>,
+    /// Provenance only: the procedure the filing was minted under, when
+    /// there was one. Nothing derives from it.
+    pub procedure: Option<String>,
     pub subject: String,
     pub body: String,
     pub filed_by: String,
@@ -41,18 +44,26 @@ pub struct Flight {
     /// The reverse edge, folded in here so a render never has to scan
     /// every other flight to answer "what waits on this one".
     pub blocks: Vec<EventId>,
-    /// The last claim, when one stands — last wins, a reassignment.
-    pub claim: Option<Mark>,
-    /// The last take, when one stands — the human override's overlay on
-    /// the crew gate. The filed `part` stamp is never mutated, so a
-    /// `requeued` can hand the flight back exactly as it was filed.
-    pub taken: Option<Mark>,
-    /// The last route, when one stands — last wins, the claim precedent.
-    pub route: Option<Route>,
+    /// The stored status, last-wins: the filing seeds it, `status`
+    /// events overwrite it, `held` and `answered` move it too.
+    pub status: String,
+    /// Who last moved the status, and when — `None` while the flight
+    /// still stands where it was filed.
+    pub status_mark: Option<Mark>,
+    /// The stored lane, last-wins; `assigned` overwrites it, absent
+    /// clears it.
+    pub assignee: Option<String>,
+    pub priority: String,
+    pub labels: Vec<String>,
+    pub skill: Option<String>,
+    pub bay: Option<String>,
+    /// What finishing means, as the filing stamped it.
+    pub done_kind: String,
+    /// The branch the filing resolved for this flight, when a
+    /// definition's `subject = "branch"` said so.
+    pub branch_stamp: Option<String>,
     /// The open question, when the flight is held. Cleared by `answered`.
     pub question: Option<Question>,
-    /// Set once `done` lands; the partition drops the flight on it.
-    pub done: Option<Mark>,
     /// The last edit touching this flight's record — its own fields or a
     /// comment's text, either target type. A reword is a gesture on the
     /// flight, so it counts as motion.
@@ -60,22 +71,21 @@ pub struct Flight {
     /// The freshest answer's time — an answer counts as motion even
     /// though its text lives only in the log.
     pub answered_at: Option<i64>,
-    /// The freshest requeue's time, for `answered_at`'s reason: a
-    /// requeue clears the claim, so without it the flight's freshest
-    /// motion would silently roll backward.
-    pub requeued_at: Option<i64>,
 }
 
 impl Flight {
-    /// Whether the pool's crew gate admits this flight: the filing's own
-    /// stamp says an agent flies it, and no `take` stands over it. Exact
-    /// string compare on the stored stamp — `part: None` (a parent, or a
-    /// pre-procedure filing) and every other crew, `"you"` and a future
-    /// `"pair"` alike, are out; unknown never rounds down. One method
-    /// because `pick` and `brief` must agree on it, and two copies of a
-    /// gate is where drift starts.
-    pub fn agent_crewed(&self) -> bool {
-        self.taken.is_none() && self.part.as_ref().is_some_and(|part| part.crew == "agent")
+    /// Off the board: done or canceled. Exact compares — an unknown
+    /// status never rounds into closed.
+    pub fn closed(&self) -> bool {
+        self.status == "done" || self.status == "canceled"
+    }
+
+    /// Whether the pool admits this flight: Ready, in the agent lane.
+    /// Exact string compares on the stored fields — unknown never rounds
+    /// down. One method because `pick` and `brief` must agree on it, and
+    /// two copies of a gate is where drift starts.
+    pub fn pullable(&self) -> bool {
+        self.status == "ready" && self.assignee.as_deref() == Some("agent")
     }
 }
 
@@ -84,15 +94,6 @@ impl Flight {
 pub struct Mark {
     pub by: String,
     pub at: i64,
-}
-
-/// The last route, when one stands: who re-stamped the flight, when, and
-/// why. The stamp itself lands on `procedure` and `part`.
-#[derive(Debug, Clone)]
-pub struct Route {
-    pub by: String,
-    pub at: i64,
-    pub because: String,
 }
 
 /// The question a held flight is waiting on.
@@ -144,7 +145,14 @@ pub fn fold(events: &[Event]) -> Fold {
             procedure,
             subject,
             body,
-            part,
+            status,
+            assignee,
+            priority,
+            labels,
+            skill,
+            bay,
+            done,
+            branch,
         } = &event.kind
         {
             // A duplicate filed id is unreachable by construction — ids
@@ -159,7 +167,6 @@ pub fn fold(events: &[Event]) -> Fold {
                 id: event.id.clone(),
                 number: 0,
                 procedure: procedure.clone(),
-                part: part.clone(),
                 subject: subject.clone(),
                 body: body.clone(),
                 filed_by: event.author.clone(),
@@ -167,14 +174,18 @@ pub fn fold(events: &[Event]) -> Fold {
                 comments: Vec::new(),
                 depends_on: Vec::new(),
                 blocks: Vec::new(),
-                claim: None,
-                taken: None,
-                route: None,
+                status: status.clone(),
+                status_mark: None,
+                assignee: assignee.clone(),
+                priority: priority.clone(),
+                labels: labels.clone(),
+                skill: skill.clone(),
+                bay: bay.clone(),
+                done_kind: done.clone(),
+                branch_stamp: branch.clone(),
                 question: None,
-                done: None,
                 edited: None,
                 answered_at: None,
-                requeued_at: None,
             });
         }
     }
@@ -201,26 +212,19 @@ pub fn fold(events: &[Event]) -> Fold {
             // so clock skew could sort an edit before the comment it
             // names — the same skew pass 1 absorbs for flights.
             Kind::Edited { .. } => edits.push(event),
-            Kind::Routed {
-                flight,
-                procedure,
-                part,
-                because,
-            } => match by_id.get(flight) {
+            Kind::Status { flight, status, .. } => match by_id.get(flight) {
                 Some(&at) => {
                     let flight = &mut flights[at];
-                    // Wholesale, both slices: a multi-part route
-                    // carries no stamp and must still clear the one an
-                    // earlier route wrote, so `part` is overwritten even
-                    // to `None`.
-                    flight.procedure = procedure.clone();
-                    flight.part = part.clone();
-                    flight.route = Some(Route {
+                    flight.status = status.clone();
+                    flight.status_mark = Some(Mark {
                         by: event.author.clone(),
                         at: event.time,
-                        because: because.clone(),
                     });
                 }
+                None => unrouted.push(event.clone()),
+            },
+            Kind::Assigned { flight, assignee } => match by_id.get(flight) {
+                Some(&at) => flights[at].assignee = assignee.clone(),
                 None => unrouted.push(event.clone()),
             },
             Kind::Commented { flight, text } => match by_id.get(flight) {
@@ -239,55 +243,22 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 _ => unrouted.push(event.clone()),
             },
-            Kind::Claimed { flight } => match by_id.get(flight) {
-                Some(&at) => {
-                    flights[at].claim = Some(Mark {
-                        by: event.author.clone(),
-                        at: event.time,
-                    })
-                }
-                None => unrouted.push(event.clone()),
-            },
-            // The take sets the claim as well as its own mark: one
-            // flight has one owner, and every reader that already asks
-            // `claim` keeps working. The filed `part` stamp is left
-            // exactly as it was — a destructive edit would leave
-            // `requeued` nothing to restore.
-            Kind::Taken { flight } => match by_id.get(flight) {
-                Some(&at) => {
-                    let mark = Mark {
-                        by: event.author.clone(),
-                        at: event.time,
-                    };
-                    flights[at].claim = Some(mark.clone());
-                    flights[at].taken = Some(mark);
-                }
-                None => unrouted.push(event.clone()),
-            },
-            // Both, which is what makes the pair exact inverses: a
-            // flight you took and changed your mind about goes back to
-            // the agent pool, and one an agent merely claimed goes back
-            // untouched.
-            Kind::Requeued { flight } => match by_id.get(flight) {
-                Some(&at) => {
-                    let flight = &mut flights[at];
-                    flight.claim = None;
-                    flight.taken = None;
-                    flight.requeued_at = Some(
-                        flight
-                            .requeued_at
-                            .map_or(event.time, |at| at.max(event.time)),
-                    );
-                }
-                None => unrouted.push(event.clone()),
-            },
+            // The hold is a status move as well as a question: the flight
+            // reads `held` wherever status is read, and the question is
+            // what the release answers.
             Kind::Held { flight, question } => match by_id.get(flight) {
                 Some(&at) => {
-                    flights[at].question = Some(Question {
+                    let flight = &mut flights[at];
+                    flight.question = Some(Question {
                         by: event.author.clone(),
                         at: event.time,
                         text: question.clone(),
-                    })
+                    });
+                    flight.status = "held".to_string();
+                    flight.status_mark = Some(Mark {
+                        by: event.author.clone(),
+                        at: event.time,
+                    });
                 }
                 None => unrouted.push(event.clone()),
             },
@@ -299,6 +270,11 @@ pub fn fold(events: &[Event]) -> Fold {
                 Some(&at) => {
                     let flight = &mut flights[at];
                     flight.question = None;
+                    flight.status = "ready".to_string();
+                    flight.status_mark = Some(Mark {
+                        by: event.author.clone(),
+                        at: event.time,
+                    });
                     flight.answered_at = Some(
                         flight
                             .answered_at
@@ -307,30 +283,26 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 None => unrouted.push(event.clone()),
             },
-            Kind::Done { flight } => match by_id.get(flight) {
-                Some(&at) => {
-                    flights[at].done = Some(Mark {
-                        by: event.author.clone(),
-                        at: event.time,
-                    })
-                }
-                None => unrouted.push(event.clone()),
-            },
             Kind::Unknown { .. } => unrouted.push(event.clone()),
         }
     }
 
     // Pass 3: edits, in union order — last-wins is preserved, and every
-    // comment already exists. Per-field overlay, the contrast with the
-    // route's wholesale re-stamp: concurrent subject and body edits from
-    // two writers both land. A part's derived subject (`"{subject} ·
-    // {part.id}"`, composed at file/triage time) never changes when a
-    // parent is reworded — each part is its own flight.
+    // comment already exists. Per-field overlay: concurrent partial edits
+    // from two writers both land, and an absent field keeps the last
+    // value standing. Labels replace wholesale — the set is one value. A
+    // child's derived subject (`"{subject} · {id}"`, composed at file
+    // time) never changes when a parent is reworded — each child is its
+    // own flight.
     for event in edits {
         let Kind::Edited {
             target,
             subject,
             body,
+            priority,
+            labels,
+            skill,
+            bay,
         } = &event.kind
         else {
             unreachable!("pass 2 collected only edits");
@@ -346,6 +318,18 @@ pub fn fold(events: &[Event]) -> Fold {
             }
             if let Some(body) = body {
                 flight.body = body.clone();
+            }
+            if let Some(priority) = priority {
+                flight.priority = priority.clone();
+            }
+            if let Some(labels) = labels {
+                flight.labels = labels.clone();
+            }
+            if let Some(skill) = skill {
+                flight.skill = Some(skill.clone());
+            }
+            if let Some(bay) = bay {
+                flight.bay = Some(bay.clone());
             }
             flight.edited = Some(mark);
         } else if let Some(at) = flights
@@ -376,7 +360,6 @@ pub fn fold(events: &[Event]) -> Fold {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log::PartStamp;
 
     fn event(id: &str, time: i64, kind: Kind) -> Event {
         let id: EventId = id.parse().expect("id");
@@ -389,35 +372,67 @@ mod tests {
         }
     }
 
+    /// A bare filing — Triage, no lane, default fields.
     fn filed(id: &str, time: i64, subject: &str) -> Event {
         event(
             id,
             time,
             Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: None,
                 subject: subject.to_string(),
                 body: String::new(),
-                part: None,
+                status: "triage".to_string(),
+                assignee: None,
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             },
         )
     }
 
-    fn routed(id: &str, time: i64, flight: &str, procedure: &str) -> Event {
+    /// A filing born pullable — Ready, agent lane, the pool's norm.
+    fn filed_agent(id: &str, time: i64, subject: &str) -> Event {
         event(
             id,
             time,
-            Kind::Routed {
+            Kind::Filed {
+                procedure: Some("review".to_string()),
+                subject: subject.to_string(),
+                body: String::new(),
+                status: "ready".to_string(),
+                assignee: Some("agent".to_string()),
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: Some("review".to_string()),
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
+            },
+        )
+    }
+
+    fn status(id: &str, time: i64, flight: &str, to: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Status {
                 flight: flight.parse().expect("id"),
-                procedure: procedure.to_string(),
-                part: Some(PartStamp {
-                    id: "do".to_string(),
-                    crew: "you".to_string(),
-                    skill: None,
-                    done: "asserted".to_string(),
-                    bay: None,
-                    branch: None,
-                }),
-                because: format!("because {procedure}"),
+                status: to.to_string(),
+                reason: None,
+            },
+        )
+    }
+
+    fn assigned(id: &str, time: i64, flight: &str, lane: Option<&str>) -> Event {
+        event(
+            id,
+            time,
+            Kind::Assigned {
+                flight: flight.parse().expect("id"),
+                assignee: lane.map(str::to_string),
             },
         )
     }
@@ -440,60 +455,6 @@ mod tests {
             Kind::Linked {
                 from: from.parse().expect("id"),
                 to: to.parse().expect("id"),
-            },
-        )
-    }
-
-    fn claimed(id: &str, time: i64, flight: &str) -> Event {
-        event(
-            id,
-            time,
-            Kind::Claimed {
-                flight: flight.parse().expect("id"),
-            },
-        )
-    }
-
-    fn taken(id: &str, time: i64, flight: &str, by: &str) -> Event {
-        let mut event = event(
-            id,
-            time,
-            Kind::Taken {
-                flight: flight.parse().expect("id"),
-            },
-        );
-        event.author = by.to_string();
-        event
-    }
-
-    fn requeued(id: &str, time: i64, flight: &str) -> Event {
-        event(
-            id,
-            time,
-            Kind::Requeued {
-                flight: flight.parse().expect("id"),
-            },
-        )
-    }
-
-    /// A filing carrying an agent-crewed stamp — the shape the crew gate
-    /// and both new verbs are about.
-    fn filed_agent(id: &str, time: i64, subject: &str) -> Event {
-        event(
-            id,
-            time,
-            Kind::Filed {
-                procedure: "review".to_string(),
-                subject: subject.to_string(),
-                body: String::new(),
-                part: Some(PartStamp {
-                    id: "pass".to_string(),
-                    crew: "agent".to_string(),
-                    skill: None,
-                    done: "asserted".to_string(),
-                    bay: None,
-                    branch: None,
-                }),
             },
         )
     }
@@ -521,13 +482,7 @@ mod tests {
     }
 
     fn done(id: &str, time: i64, flight: &str) -> Event {
-        event(
-            id,
-            time,
-            Kind::Done {
-                flight: flight.parse().expect("id"),
-            },
-        )
+        status(id, time, flight, "done")
     }
 
     fn edited(
@@ -544,8 +499,28 @@ mod tests {
                 target: target.parse().expect("id"),
                 subject: subject.map(str::to_string),
                 body: body.map(str::to_string),
+                priority: None,
+                labels: None,
+                skill: None,
+                bay: None,
             },
         )
+    }
+
+    #[test]
+    fn a_filing_seeds_every_stored_field() {
+        let fold = fold(&[filed_agent("pi.1", 10, "s")]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.procedure.as_deref(), Some("review"));
+        assert_eq!(flight.status, "ready");
+        assert!(flight.status_mark.is_none(), "unmoved since filing");
+        assert_eq!(flight.assignee.as_deref(), Some("agent"));
+        assert_eq!(flight.priority, "none");
+        assert!(flight.labels.is_empty());
+        assert_eq!(flight.skill.as_deref(), Some("review"));
+        assert_eq!(flight.done_kind, "asserted");
+        assert!(flight.pullable());
+        assert!(!flight.closed());
     }
 
     #[test]
@@ -640,100 +615,74 @@ mod tests {
     }
 
     #[test]
-    fn a_route_re_stamps_the_flight_and_records_who_when_and_why() {
-        let fold = fold(&[filed("pi.1", 10, "s"), routed("pi.2", 20, "pi.1", "chore")]);
+    fn a_status_move_overwrites_last_wins_with_its_mark() {
+        let mut late = status("qi.1", 30, "pi.1", "ready");
+        late.author = "mover@b.c".to_string();
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            status("pi.2", 20, "pi.1", "in_progress"),
+            late,
+        ]);
         let flight = &fold.flights[0];
-        assert_eq!(flight.procedure, "chore");
-        assert_eq!(flight.part.as_ref().expect("stamped").id, "do");
-        let route = flight.route.as_ref().expect("routed");
-        assert_eq!(route.by, "a@b.c");
-        assert_eq!(route.at, 20);
-        assert_eq!(route.because, "because chore");
+        assert_eq!(flight.status, "ready");
+        let mark = flight.status_mark.as_ref().expect("moved");
+        assert_eq!(mark.by, "mover@b.c");
+        assert_eq!(mark.at, 30);
         assert!(fold.unrouted.is_empty());
     }
 
     #[test]
-    fn the_last_route_wins_wholesale() {
+    fn an_unknown_status_is_stored_and_never_rounds_down() {
         let fold = fold(&[
-            filed("pi.1", 10, "s"),
-            routed("pi.2", 20, "pi.1", "chore"),
-            // A parent-shaped route: no stamp — it must clear the one
-            // the first route wrote.
-            event(
-                "qi.1",
-                30,
-                Kind::Routed {
-                    flight: "pi.1".parse().expect("id"),
-                    procedure: "review".to_string(),
-                    part: None,
-                    because: String::new(),
-                },
-            ),
+            filed_agent("pi.1", 10, "s"),
+            status("pi.2", 20, "pi.1", "parked"),
         ]);
         let flight = &fold.flights[0];
-        assert_eq!(flight.procedure, "review");
-        assert!(flight.part.is_none(), "the old stamp must not survive");
-        assert_eq!(flight.route.as_ref().expect("routed").at, 30);
+        assert_eq!(flight.status, "parked");
+        assert!(!flight.pullable(), "unknown is not ready");
+        assert!(!flight.closed(), "unknown is not closed either");
     }
 
     #[test]
-    fn a_route_delivered_ahead_of_its_filing_still_attaches() {
-        let fold = fold(&[routed("fast.1", 5, "pi.1", "chore"), filed("pi.1", 10, "s")]);
-        assert_eq!(fold.flights[0].procedure, "chore");
-        assert!(fold.unrouted.is_empty());
-    }
-
-    #[test]
-    fn a_route_for_a_flight_never_filed_is_unrouted() {
-        let fold = fold(&[routed("pi.1", 10, "zz.9", "chore")]);
-        assert!(fold.flights.is_empty());
-        assert_eq!(fold.unrouted.len(), 1);
-    }
-
-    #[test]
-    fn a_route_back_to_open_is_the_undo() {
-        let fold = fold(&[
-            filed("pi.1", 10, "s"),
-            routed("pi.2", 20, "pi.1", "chore"),
-            routed("pi.3", 30, "pi.1", "open"),
+    fn an_assignment_overwrites_and_absent_clears() {
+        let laned = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            assigned("pi.2", 20, "pi.1", Some("me")),
         ]);
-        assert_eq!(fold.flights[0].procedure, "open");
-    }
+        assert_eq!(laned.flights[0].assignee.as_deref(), Some("me"));
+        assert!(!laned.flights[0].pullable(), "the lane left the pool");
 
-    #[test]
-    fn a_claim_records_its_author_and_time_and_the_last_claim_wins() {
-        let once = fold(&[filed("pi.1", 10, "s"), claimed("pi.2", 20, "pi.1")]);
-        let claim = once.flights[0].claim.as_ref().expect("claimed");
-        assert_eq!(claim.by, "a@b.c");
-        assert_eq!(claim.at, 20);
-
-        let twice = fold(&[
-            filed("pi.1", 10, "s"),
-            claimed("pi.2", 20, "pi.1"),
-            claimed("qi.1", 30, "pi.1"),
+        let cleared = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            assigned("pi.2", 20, "pi.1", None),
         ]);
-        assert_eq!(twice.flights[0].claim.as_ref().expect("claimed").at, 30);
+        assert!(cleared.flights[0].assignee.is_none());
     }
 
     #[test]
-    fn a_hold_sets_the_question() {
+    fn a_hold_sets_the_question_and_the_status() {
         let fold = fold(&[filed("pi.1", 10, "s"), held("pi.2", 20, "pi.1", "which?")]);
-        let question = fold.flights[0].question.as_ref().expect("held");
+        let flight = &fold.flights[0];
+        let question = flight.question.as_ref().expect("held");
         assert_eq!(question.text, "which?");
         assert_eq!(question.by, "a@b.c");
         assert_eq!(question.at, 20);
+        assert_eq!(flight.status, "held");
+        assert_eq!(flight.status_mark.as_ref().expect("moved").at, 20);
     }
 
     #[test]
-    fn an_answer_clears_the_question_and_is_not_a_comment() {
+    fn an_answer_clears_the_question_and_releases_to_ready() {
         let fold = fold(&[
             filed("pi.1", 10, "s"),
             held("pi.2", 20, "pi.1", "which?"),
             answered("pi.3", 30, "pi.1"),
         ]);
-        assert!(fold.flights[0].question.is_none());
-        assert_eq!(fold.flights[0].answered_at, Some(30));
-        assert!(fold.flights[0].comments.is_empty());
+        let flight = &fold.flights[0];
+        assert!(flight.question.is_none());
+        assert_eq!(flight.status, "ready");
+        assert_eq!(flight.answered_at, Some(30));
+        assert!(flight.comments.is_empty());
     }
 
     #[test]
@@ -756,15 +705,16 @@ mod tests {
             held("pi.2", 20, "pi.1", "which?"),
         ]);
         assert!(fold.flights[0].question.is_some());
+        assert_eq!(fold.flights[0].status, "held");
     }
 
     #[test]
     fn a_lifecycle_event_for_a_flight_never_filed_is_unrouted() {
         let fold = fold(&[
-            claimed("pi.1", 10, "zz.9"),
-            held("pi.2", 20, "zz.9", "q"),
-            answered("pi.3", 30, "zz.9"),
-            done("pi.4", 40, "zz.9"),
+            status("pi.1", 10, "zz.9", "ready"),
+            assigned("pi.2", 15, "zz.9", Some("agent")),
+            held("pi.3", 20, "zz.9", "q"),
+            answered("pi.4", 30, "zz.9"),
         ]);
         assert!(fold.flights.is_empty());
         assert_eq!(fold.unrouted.len(), 4);
@@ -787,10 +737,46 @@ mod tests {
     }
 
     #[test]
+    fn a_field_edit_overlays_and_labels_replace_wholesale() {
+        let fields = event(
+            "pi.2",
+            20,
+            Kind::Edited {
+                target: "pi.1".parse().expect("id"),
+                subject: None,
+                body: None,
+                priority: Some("high".to_string()),
+                labels: Some(vec!["chore".to_string(), "web".to_string()]),
+                skill: Some("review".to_string()),
+                bay: Some("warm".to_string()),
+            },
+        );
+        let relabel = event(
+            "pi.3",
+            30,
+            Kind::Edited {
+                target: "pi.1".parse().expect("id"),
+                subject: None,
+                body: None,
+                priority: None,
+                labels: Some(vec!["ops".to_string()]),
+                skill: None,
+                bay: None,
+            },
+        );
+        let fold = fold(&[filed("pi.1", 10, "s"), fields, relabel]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.priority, "high", "an absent field stands");
+        assert_eq!(flight.labels, ["ops"], "labels replace wholesale");
+        assert_eq!(flight.skill.as_deref(), Some("review"));
+        assert_eq!(flight.bay.as_deref(), Some("warm"));
+        assert_eq!(flight.edited.as_ref().expect("marked").at, 30);
+    }
+
+    #[test]
     fn a_subject_edit_and_a_body_edit_from_two_writers_both_land() {
-        // The contrast with `the_last_route_wins_wholesale`: the overlay
-        // is per field, so concurrent partial edits do not clobber each
-        // other.
+        // The overlay is per field, so concurrent partial edits do not
+        // clobber each other.
         let fold = fold(&[
             filed("pi.1", 10, "s"),
             edited("pi.2", 20, "pi.1", Some("new subject"), None),
@@ -884,7 +870,7 @@ mod tests {
     fn numbers_count_filings_alone_and_stay_dense() {
         let fold = fold(&[
             filed("pi.1", 10, "first"),
-            claimed("pi.2", 20, "pi.1"),
+            status("pi.2", 20, "pi.1", "in_progress"),
             commented("pi.3", 30, "pi.1"),
             filed("pi.4", 40, "second"),
         ]);
@@ -921,83 +907,48 @@ mod tests {
     }
 
     #[test]
-    fn a_done_flight_keeps_its_number_and_the_next_filing_counts_on() {
+    fn a_closed_flight_keeps_its_number_and_the_next_filing_counts_on() {
         let fold = fold(&[
             filed("pi.1", 10, "finished"),
             done("pi.2", 20, "pi.1"),
             filed("pi.3", 30, "next"),
         ]);
         assert_eq!(fold.flights[0].number, 1);
-        assert!(fold.flights[0].done.is_some());
+        assert!(fold.flights[0].closed());
         assert_eq!(fold.flights[1].number, 2);
     }
 
     #[test]
-    fn a_requeue_clears_the_claim_and_leaves_the_stamp_alone() {
+    fn done_and_canceled_both_close_and_carry_the_mover() {
         let fold = fold(&[
+            filed("pi.1", 10, "a"),
+            filed("pi.2", 20, "b"),
+            done("pi.3", 30, "pi.1"),
+            status("pi.4", 40, "pi.2", "canceled"),
+        ]);
+        assert!(fold.flights[0].closed());
+        assert_eq!(fold.flights[0].status, "done");
+        assert_eq!(fold.flights[0].status_mark.as_ref().expect("mark").at, 30);
+        assert!(fold.flights[1].closed());
+        assert_eq!(fold.flights[1].status, "canceled");
+    }
+
+    #[test]
+    fn a_pull_and_a_release_round_trip_through_status_moves() {
+        // What `next` writes and what a hand move undoes: in_progress
+        // takes the flight out of the pool, ready puts it back.
+        let pulled = fold(&[
             filed_agent("pi.1", 10, "s"),
-            claimed("pi.2", 20, "pi.1"),
-            requeued("pi.3", 30, "pi.1"),
+            status("pi.2", 20, "pi.1", "in_progress"),
         ]);
-        let flight = &fold.flights[0];
-        assert!(flight.claim.is_none(), "the claim is released");
-        assert_eq!(flight.requeued_at, Some(30));
-        // The filed stamp is carried, never derived from — a requeue that
-        // rewrote it would have nothing to hand back.
-        assert_eq!(flight.part.as_ref().expect("stamped").crew, "agent");
-        assert!(flight.agent_crewed());
-        assert!(fold.unrouted.is_empty());
-    }
+        assert!(!pulled.flights[0].pullable());
+        assert_eq!(pulled.flights[0].status, "in_progress");
 
-    #[test]
-    fn a_take_claims_for_its_author_and_leaves_the_stamp_alone() {
-        let fold = fold(&[
+        let released = fold(&[
             filed_agent("pi.1", 10, "s"),
-            claimed("pi.2", 20, "pi.1"),
-            taken("pi.3", 30, "pi.1", "tyler@b.c"),
+            status("pi.2", 20, "pi.1", "in_progress"),
+            status("pi.3", 30, "pi.1", "ready"),
         ]);
-        let flight = &fold.flights[0];
-        let mark = flight.taken.as_ref().expect("taken");
-        assert_eq!(mark.by, "tyler@b.c");
-        assert_eq!(mark.at, 30);
-        // One flight, one owner: the claim follows the take, so every
-        // reader that already asks `claim` keeps working.
-        let claim = flight.claim.as_ref().expect("claimed");
-        assert_eq!(claim.by, "tyler@b.c");
-        assert_eq!(claim.at, 30);
-        assert_eq!(flight.part.as_ref().expect("stamped").crew, "agent");
-        assert!(!flight.agent_crewed(), "the take closes the gate");
-    }
-
-    #[test]
-    fn a_requeue_after_a_take_clears_both_and_the_flight_is_agent_crewed_again() {
-        let fold = fold(&[
-            filed_agent("pi.1", 10, "s"),
-            taken("pi.2", 20, "pi.1", "tyler@b.c"),
-            requeued("pi.3", 30, "pi.1"),
-        ]);
-        let flight = &fold.flights[0];
-        assert!(flight.claim.is_none());
-        assert!(flight.taken.is_none());
-        assert_eq!(flight.requeued_at, Some(30));
-        assert!(flight.agent_crewed());
-    }
-
-    #[test]
-    fn a_take_or_a_requeue_for_a_flight_never_filed_is_unrouted() {
-        let fold = fold(&[
-            taken("pi.1", 10, "zz.9", "a@b.c"),
-            requeued("pi.2", 20, "zz.9"),
-        ]);
-        assert!(fold.flights.is_empty());
-        assert_eq!(fold.unrouted.len(), 2);
-    }
-
-    #[test]
-    fn done_records_its_author_and_time() {
-        let fold = fold(&[filed("pi.1", 10, "s"), done("pi.2", 20, "pi.1")]);
-        let mark = fold.flights[0].done.as_ref().expect("done");
-        assert_eq!(mark.by, "a@b.c");
-        assert_eq!(mark.at, 20);
+        assert!(released.flights[0].pullable());
     }
 }

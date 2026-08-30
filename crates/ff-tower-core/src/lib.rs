@@ -41,6 +41,7 @@ pub mod config;
 pub mod ff;
 pub mod log;
 pub mod machine;
+pub mod model;
 pub mod procedure;
 pub mod skill;
 pub mod verb;

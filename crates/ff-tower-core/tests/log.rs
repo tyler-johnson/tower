@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use ff_tower_core::board;
-use ff_tower_core::log::{Error, EventId, Kind, PartStamp, Store};
+use ff_tower_core::log::{Error, EventId, Kind, Store};
 use ff_tower_testsupport::Repo;
 
 /// The fixture's author (set by `Repo::new`), and the chain the pinned
@@ -18,42 +18,53 @@ const REF: &str = "refs/tower/log/tests@tower.invalid/pi";
 
 fn filed(subject: &str) -> Kind {
     Kind::Filed {
-        procedure: "open".to_string(),
+        procedure: None,
         subject: subject.to_string(),
         body: String::new(),
-        part: None,
+        status: "triage".to_string(),
+        assignee: None,
+        priority: "none".to_string(),
+        labels: Vec::new(),
+        skill: None,
+        bay: None,
+        done: "asserted".to_string(),
+        branch: None,
     }
 }
 
 #[test]
-fn a_part_stamp_rides_the_store_onto_the_folds_flight() {
+fn the_stored_fields_ride_the_store_onto_the_folds_flight() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     let store = Store::open(repo.path()).expect("open");
 
     store
         .append(vec![Kind::Filed {
-            procedure: "review".to_string(),
+            procedure: Some("review".to_string()),
             subject: "the retry test · smoke".to_string(),
             body: String::new(),
-            part: Some(PartStamp {
-                id: "smoke".to_string(),
-                crew: "you".to_string(),
-                skill: None,
-                done: "asserted".to_string(),
-                bay: Some("warm".to_string()),
-                branch: None,
-            }),
+            status: "ready".to_string(),
+            assignee: Some("me".to_string()),
+            priority: "high".to_string(),
+            labels: vec!["chore".to_string()],
+            skill: None,
+            bay: Some("warm".to_string()),
+            done: "asserted".to_string(),
+            branch: Some("feather".to_string()),
         }])
         .expect("append");
 
     let events = store.read().expect("read");
     let fold = board::fold(&events);
-    let part = fold.flights[0].part.as_ref().expect("the stamp lands");
-    assert_eq!(part.id, "smoke");
-    assert_eq!(part.crew, "you");
-    assert_eq!(part.bay.as_deref(), Some("warm"));
-    assert!(part.skill.is_none());
+    let flight = &fold.flights[0];
+    assert_eq!(flight.procedure.as_deref(), Some("review"));
+    assert_eq!(flight.status, "ready");
+    assert_eq!(flight.assignee.as_deref(), Some("me"));
+    assert_eq!(flight.priority, "high");
+    assert_eq!(flight.labels, ["chore"]);
+    assert_eq!(flight.bay.as_deref(), Some("warm"));
+    assert_eq!(flight.branch_stamp.as_deref(), Some("feather"));
+    assert!(flight.skill.is_none());
 }
 
 #[test]

@@ -157,7 +157,7 @@ pub fn branch_pairs(fold: &Fold, reads: &Reads) -> Vec<(String, String)> {
 
     let mut branches: Vec<&str> = Vec::new();
     for flight in &fold.flights {
-        if flight.done.is_some() {
+        if flight.closed() {
             continue;
         }
         let Some(op) = freshest.get(flight.id.to_string().as_str()) else {
@@ -217,10 +217,17 @@ mod tests {
             time,
             id,
             kind: Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: None,
                 subject: format!("subject of {time}"),
                 body: String::new(),
-                part: None,
+                status: "triage".to_string(),
+                assignee: None,
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             },
         }
     }
@@ -232,8 +239,10 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             id,
-            kind: Kind::Done {
+            kind: Kind::Status {
                 flight: flight.parse().expect("id"),
+                status: "done".to_string(),
+                reason: None,
             },
         }
     }

@@ -38,7 +38,7 @@ mod resolve;
 pub use bay::{BayView, Berth, Pool, assign, bays};
 pub use brief::{Brief, CommentView, LinkView, Standing, brief, wants_verdicts};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
-pub use flight::{Comment, Flight, Fold, Mark, Question, Route, fold};
+pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use history::{Moment, history};
 pub use model::{Board, CollideView, FlightView, enrich};
 pub use pick::{Passed, Pick, Picks, Skip, pick};

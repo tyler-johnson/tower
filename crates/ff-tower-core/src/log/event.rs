@@ -7,7 +7,7 @@
 //!
 //! ```json
 //! {"id":"pi.17","author":"tyler@example.com","writer":"pi","time":1787638881,
-//!  "kind":"filed","body":{"procedure":"open","subject":"…","body":"…"}}
+//!  "kind":"filed","body":{"subject":"…","body":"…","status":"triage",…}}
 //! ```
 //!
 //! `body` survives one pass unparsed (`Box<RawValue>`) and is matched into
@@ -16,6 +16,13 @@
 //! with its payload byte-for-byte intact. That is not defensive habit: a
 //! union merge can put a newer tower's events in front of an older tower's
 //! fold, and dropping them would silently lose authored intent.
+//!
+//! Statuses, assignees, and done conditions are free strings on this wire
+//! while the verbs and the procedure loader hold closed enums — the crew
+//! precedent, kept. A known kind with a body that does not parse is an
+//! error by design, so a closed enum here would mean one future value
+//! taking the whole board down rather than one flight. The refusal
+//! belongs at the boundary where a person is typing.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
@@ -73,68 +80,53 @@ impl<'de> Deserialize<'de> for EventId {
     }
 }
 
-/// One part of a procedure, copied into the log at file time.
-///
-/// The definition is read once and never again, so this is the whole of
-/// what a flight knows about the shape it was filed under. Editing the
-/// definition afterwards cannot reach it.
-///
-/// `crew` and `done` are free strings here while the loader's are closed
-/// enums, and that asymmetry is deliberate. A known kind with a body that
-/// does not parse is an error by design, so a closed enum on the wire
-/// would mean a newer tower's `crew = "pair"` fails an older tower's parse
-/// — one future value taking the whole board down rather than one flight.
-/// The refusal belongs at load time, which is where "four values cannot
-/// grow into an expression language" actually bites.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PartStamp {
-    pub id: String,
-    pub crew: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skill: Option<String>,
-    pub done: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bay: Option<String>,
-    /// The branch this part flies on, resolved at file time from the
-    /// definition's `subject = "branch"`. The definition is read once, so
-    /// a later `next` reads this rather than the registry (principle 11).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
-}
-
-/// One authored gesture. Minting, referencing, pairing, and the six
-/// lifecycle marks — enough vocabulary for a flight to be filed, claimed,
-/// taken, handed back, held on a question, answered, and finished.
-/// `promote` lands with its verb.
+/// One authored gesture. Minting, referencing, pairing, the stored
+/// fields' moves, and the question pair — enough vocabulary for a flight
+/// to be filed, assigned, moved, held on a question, answered, and
+/// closed.
 #[derive(Debug, Clone)]
 pub enum Kind {
-    /// Mints a flight; the flight's id is this event's id.
+    /// Mints a flight; the flight's id is this event's id. Every stored
+    /// field is seeded here — status included, so a filing says outright
+    /// where the flight was born.
     Filed {
-        procedure: String,
+        /// Provenance only: the procedure this filing was minted under,
+        /// when there was one. Nothing derives from it after the mint.
+        procedure: Option<String>,
         subject: String,
         body: String,
-        /// The procedure part this flight is, when its procedure has
-        /// parts to give. `None` on a parent, and on any filing written
-        /// before procedures had definitions behind them.
-        part: Option<PartStamp>,
+        status: String,
+        assignee: Option<String>,
+        priority: String,
+        labels: Vec<String>,
+        skill: Option<String>,
+        bay: Option<String>,
+        done: String,
+        /// The branch this flight flies on, resolved at file time from a
+        /// definition's `subject = "branch"`. The definition is read
+        /// once, so a later `next` reads this rather than the registry.
+        branch: Option<String>,
     },
-    /// Re-stamps an existing flight's classification — triage's verb.
-    /// The collapse rule rides here as it does on `Filed`: a single-part
-    /// procedure puts its stamp in `part`; a multi-part one leaves `part`
-    /// empty and the same batch files the parts.
-    Routed {
+    /// Moves a flight: status overwritten last-wins, the byline the
+    /// mover. Done and Canceled ride here like every other move, and
+    /// `next`'s pull appends one per pick in a single batch — the append
+    /// is the exclusivity, the byline the pilot.
+    Status {
         flight: EventId,
-        procedure: String,
-        part: Option<PartStamp>,
-        /// Why it routed there — empty when unsaid, `Filed`'s body
-        /// convention.
-        because: String,
+        status: String,
+        /// Why it moved — absent when unsaid.
+        reason: Option<String>,
+    },
+    /// Re-lanes a flight: the assignee overwritten last-wins; absent
+    /// clears it.
+    Assigned {
+        flight: EventId,
+        assignee: Option<String>,
     },
     /// A note on the record, local.
     Commented { flight: EventId, text: String },
-    /// Rewords a flight's subject/body, or a comment's text — an overlay
-    /// the fold applies last-wins per field; the log keeps every prior
-    /// word.
+    /// Rewords a flight's fields, or a comment's text — an overlay the
+    /// fold applies last-wins per field; the log keeps every prior word.
     Edited {
         /// A flight's id, or a comment's event id.
         target: EventId,
@@ -143,28 +135,23 @@ pub enum Kind {
         /// The new body — or, on a comment target, the new text. `None`
         /// when unchanged.
         body: Option<String>,
+        priority: Option<String>,
+        /// Wholesale replacement — the label set is one value.
+        labels: Option<Vec<String>>,
+        skill: Option<String>,
+        bay: Option<String>,
     },
     /// `from` depends on `to` — a declared dependency, stored intent.
     Linked { from: EventId, to: EventId },
-    /// Puts the flight in the air at assignment; the claimant is the
-    /// event's author.
-    Claimed { flight: EventId },
-    /// Takes the controls: the claim becomes the event's author and the
-    /// agent lane closes. Allowed over someone else's standing claim —
-    /// the human authoring it is the consent `claim` refuses to assume on
-    /// an agent's behalf.
-    Taken { flight: EventId },
-    /// Hands the flight back to the pool — `Taken`'s exact reverse, and
-    /// the recovery path for a claim whose holder never released it.
-    Requeued { flight: EventId },
-    /// Stops the flight with a question — waiting on you until answered.
+    /// Stops the flight with a question — status held, waiting on you
+    /// until answered.
     Held { flight: EventId, question: String },
-    /// Answers the open question and releases the hold.
+    /// Answers the open question and releases the flight to ready.
     Answered { flight: EventId, answer: String },
-    /// Takes the flight off the board; the log keeps its record.
-    Done { flight: EventId },
     /// A kind from a newer tower, preserved verbatim so the fold can carry
-    /// it even though this binary cannot read it.
+    /// it even though this binary cannot read it. Old logs land here too:
+    /// the retired `claimed`/`taken`/`requeued`/`routed`/`done` kinds
+    /// deserialize as unknown rather than as anything at all.
     Unknown { kind: String, body: Box<RawValue> },
 }
 
@@ -173,16 +160,13 @@ impl Kind {
     pub fn name(&self) -> &str {
         match self {
             Kind::Filed { .. } => "filed",
-            Kind::Routed { .. } => "routed",
+            Kind::Status { .. } => "status",
+            Kind::Assigned { .. } => "assigned",
             Kind::Commented { .. } => "commented",
             Kind::Edited { .. } => "edited",
             Kind::Linked { .. } => "linked",
-            Kind::Claimed { .. } => "claimed",
-            Kind::Taken { .. } => "taken",
-            Kind::Requeued { .. } => "requeued",
             Kind::Held { .. } => "held",
             Kind::Answered { .. } => "answered",
-            Kind::Done { .. } => "done",
             Kind::Unknown { kind, .. } => kind,
         }
     }
@@ -211,26 +195,62 @@ struct Wire {
     body: Box<RawValue>,
 }
 
-/// `part` is `default` and skipped when absent, so a plain filing's wire
-/// bytes are exactly what they were before parts existed.
-#[derive(Serialize, Deserialize)]
-struct FiledBody {
-    procedure: String,
-    subject: String,
-    body: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    part: Option<PartStamp>,
+fn default_status() -> String {
+    "triage".to_string()
 }
 
-/// `part` follows `FiledBody`'s discipline — `default`, skipped when
-/// absent — so a multi-part route's wire bytes carry no `part` key.
+fn default_priority() -> String {
+    "none".to_string()
+}
+
+fn default_done() -> String {
+    "asserted".to_string()
+}
+
+/// The stored fields ride the filing with serde defaults, so a body
+/// written before the stored model — `procedure` and `part`, no status —
+/// still parses: it folds as a Triage flight with default fields, and
+/// its `part` key is simply not read. Tolerant on purpose: no
+/// `deny_unknown_fields` on any event body.
 #[derive(Serialize, Deserialize)]
-struct RoutedBody {
-    flight: EventId,
-    procedure: String,
-    because: String,
+struct FiledBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    part: Option<PartStamp>,
+    procedure: Option<String>,
+    subject: String,
+    body: String,
+    #[serde(default = "default_status")]
+    status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assignee: Option<String>,
+    #[serde(default = "default_priority")]
+    priority: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    labels: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bay: Option<String>,
+    #[serde(default = "default_done")]
+    done: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StatusBody {
+    flight: EventId,
+    status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// `assignee` skipped when absent — absent on the wire is the cleared
+/// lane, not a lane called null.
+#[derive(Serialize, Deserialize)]
+struct AssignedBody {
+    flight: EventId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assignee: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -239,8 +259,8 @@ struct CommentedBody {
     text: String,
 }
 
-/// Both options follow `part`'s discipline — `default`, skipped when
-/// absent — so an unchanged field leaves no key on the wire.
+/// Every option follows one discipline — `default`, skipped when absent
+/// — so an unchanged field leaves no key on the wire.
 #[derive(Serialize, Deserialize)]
 struct EditedBody {
     target: EventId,
@@ -248,27 +268,20 @@ struct EditedBody {
     subject: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    priority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    labels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bay: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct LinkedBody {
     from: EventId,
     to: EventId,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ClaimedBody {
-    flight: EventId,
-}
-
-#[derive(Serialize, Deserialize)]
-struct TakenBody {
-    flight: EventId,
-}
-
-#[derive(Serialize, Deserialize)]
-struct RequeuedBody {
-    flight: EventId,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -283,11 +296,6 @@ struct AnsweredBody {
     answer: String,
 }
 
-#[derive(Serialize, Deserialize)]
-struct DoneBody {
-    flight: EventId,
-}
-
 impl Serialize for Event {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let body = match &self.kind {
@@ -295,23 +303,39 @@ impl Serialize for Event {
                 procedure,
                 subject,
                 body,
-                part,
+                status,
+                assignee,
+                priority,
+                labels,
+                skill,
+                bay,
+                done,
+                branch,
             } => serde_json::value::to_raw_value(&FiledBody {
                 procedure: procedure.clone(),
                 subject: subject.clone(),
                 body: body.clone(),
-                part: part.clone(),
+                status: status.clone(),
+                assignee: assignee.clone(),
+                priority: priority.clone(),
+                labels: labels.clone(),
+                skill: skill.clone(),
+                bay: bay.clone(),
+                done: done.clone(),
+                branch: branch.clone(),
             }),
-            Kind::Routed {
+            Kind::Status {
                 flight,
-                procedure,
-                part,
-                because,
-            } => serde_json::value::to_raw_value(&RoutedBody {
+                status,
+                reason,
+            } => serde_json::value::to_raw_value(&StatusBody {
                 flight: flight.clone(),
-                procedure: procedure.clone(),
-                because: because.clone(),
-                part: part.clone(),
+                status: status.clone(),
+                reason: reason.clone(),
+            }),
+            Kind::Assigned { flight, assignee } => serde_json::value::to_raw_value(&AssignedBody {
+                flight: flight.clone(),
+                assignee: assignee.clone(),
             }),
             Kind::Commented { flight, text } => serde_json::value::to_raw_value(&CommentedBody {
                 flight: flight.clone(),
@@ -321,23 +345,22 @@ impl Serialize for Event {
                 target,
                 subject,
                 body,
+                priority,
+                labels,
+                skill,
+                bay,
             } => serde_json::value::to_raw_value(&EditedBody {
                 target: target.clone(),
                 subject: subject.clone(),
                 body: body.clone(),
+                priority: priority.clone(),
+                labels: labels.clone(),
+                skill: skill.clone(),
+                bay: bay.clone(),
             }),
             Kind::Linked { from, to } => serde_json::value::to_raw_value(&LinkedBody {
                 from: from.clone(),
                 to: to.clone(),
-            }),
-            Kind::Claimed { flight } => serde_json::value::to_raw_value(&ClaimedBody {
-                flight: flight.clone(),
-            }),
-            Kind::Taken { flight } => serde_json::value::to_raw_value(&TakenBody {
-                flight: flight.clone(),
-            }),
-            Kind::Requeued { flight } => serde_json::value::to_raw_value(&RequeuedBody {
-                flight: flight.clone(),
             }),
             Kind::Held { flight, question } => serde_json::value::to_raw_value(&HeldBody {
                 flight: flight.clone(),
@@ -346,9 +369,6 @@ impl Serialize for Event {
             Kind::Answered { flight, answer } => serde_json::value::to_raw_value(&AnsweredBody {
                 flight: flight.clone(),
                 answer: answer.clone(),
-            }),
-            Kind::Done { flight } => serde_json::value::to_raw_value(&DoneBody {
-                flight: flight.clone(),
             }),
             Kind::Unknown { body, .. } => Ok(body.clone()),
         }
@@ -383,27 +403,43 @@ impl<'de> Deserialize<'de> for Event {
                 procedure,
                 subject,
                 body,
-                part,
+                status,
+                assignee,
+                priority,
+                labels,
+                skill,
+                bay,
+                done,
+                branch,
             } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Filed {
                 procedure,
                 subject,
                 body,
-                part,
+                status,
+                assignee,
+                priority,
+                labels,
+                skill,
+                bay,
+                done,
+                branch,
             }
-        } else if kind == "routed" {
-            let RoutedBody {
+        } else if kind == "status" {
+            let StatusBody {
                 flight,
-                procedure,
-                because,
-                part,
+                status,
+                reason,
             } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Routed {
+            Kind::Status {
                 flight,
-                procedure,
-                part,
-                because,
+                status,
+                reason,
             }
+        } else if kind == "assigned" {
+            let AssignedBody { flight, assignee } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Assigned { flight, assignee }
         } else if kind == "commented" {
             let CommentedBody { flight, text } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
@@ -413,28 +449,24 @@ impl<'de> Deserialize<'de> for Event {
                 target,
                 subject,
                 body,
+                priority,
+                labels,
+                skill,
+                bay,
             } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Edited {
                 target,
                 subject,
                 body,
+                priority,
+                labels,
+                skill,
+                bay,
             }
         } else if kind == "linked" {
             let LinkedBody { from, to } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Linked { from, to }
-        } else if kind == "claimed" {
-            let ClaimedBody { flight } =
-                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Claimed { flight }
-        } else if kind == "taken" {
-            let TakenBody { flight } =
-                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Taken { flight }
-        } else if kind == "requeued" {
-            let RequeuedBody { flight } =
-                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Requeued { flight }
         } else if kind == "held" {
             let HeldBody { flight, question } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
@@ -443,10 +475,6 @@ impl<'de> Deserialize<'de> for Event {
             let AnsweredBody { flight, answer } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Answered { flight, answer }
-        } else if kind == "done" {
-            let DoneBody { flight } =
-                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Done { flight }
         } else {
             Kind::Unknown { kind, body }
         };
@@ -464,6 +492,23 @@ impl<'de> Deserialize<'de> for Event {
 mod tests {
     use super::*;
 
+    /// A bare filing's kind — the shape `ff tower file "x"` writes.
+    fn plain_filed(subject: &str, body: &str) -> Kind {
+        Kind::Filed {
+            procedure: None,
+            subject: subject.to_string(),
+            body: body.to_string(),
+            status: "triage".to_string(),
+            assignee: None,
+            priority: "none".to_string(),
+            labels: Vec::new(),
+            skill: None,
+            bay: None,
+            done: "asserted".to_string(),
+            branch: None,
+        }
+    }
+
     #[test]
     fn an_id_round_trips_through_text() {
         let id: EventId = "pi.17".parse().expect("parse");
@@ -477,7 +522,7 @@ mod tests {
 
     #[test]
     fn a_known_kind_parses_and_an_unknown_kind_is_kept() {
-        let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"procedure":"open","subject":"s","body":"b"}}"#;
+        let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"ready"}}"#;
         let event: Event = serde_json::from_str(filed).expect("parse");
         assert!(matches!(event.kind, Kind::Filed { .. }));
 
@@ -495,78 +540,139 @@ mod tests {
 
     #[test]
     fn a_plain_filing_serializes_exactly_as_it_did_before_parts() {
+        // The pinned byte shape: absent options leave no key, empty
+        // labels leave no key, and the three defaulted strings are
+        // written out — a filing says outright where the flight was born.
         let event = Event {
             id: "pi.1".parse().expect("id"),
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
-            kind: Kind::Filed {
-                procedure: "open".to_string(),
-                subject: "s".to_string(),
-                body: "b".to_string(),
-                part: None,
-            },
+            kind: plain_filed("s", "b"),
         };
         assert_eq!(
             serde_json::to_string(&event).expect("serialize"),
-            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"procedure":"open","subject":"s","body":"b"}}"#
+            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"triage","priority":"none","done":"asserted"}}"#
         );
     }
 
     #[test]
-    fn a_part_stamp_round_trips_and_omits_what_it_does_not_carry() {
+    fn an_old_shape_filing_still_parses_with_defaulted_fields() {
+        // A body written before the stored model: `procedure` a bare
+        // string, a `part` stamp, no status. It folds as a Triage flight
+        // with default fields, and the stamp is simply not read.
+        let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"procedure":"review","subject":"the retry test · pass","body":"","part":{"id":"pass","crew":"agent","skill":"review","done":"asserted"}}}"#;
+        let event: Event = serde_json::from_str(filed).expect("parse");
+        let Kind::Filed {
+            procedure,
+            subject,
+            status,
+            assignee,
+            priority,
+            labels,
+            skill,
+            done,
+            ..
+        } = event.kind
+        else {
+            panic!("a filing parses as a filing");
+        };
+        assert_eq!(procedure.as_deref(), Some("review"));
+        assert_eq!(subject, "the retry test · pass");
+        assert_eq!(status, "triage");
+        assert!(assignee.is_none(), "the old stamp's crew is not read");
+        assert_eq!(priority, "none");
+        assert!(labels.is_empty());
+        assert!(skill.is_none());
+        assert_eq!(done, "asserted");
+    }
+
+    #[test]
+    fn a_retired_lifecycle_kind_folds_as_unknown() {
+        // `claimed` and its siblings left the vocabulary at the stored
+        // model; an old log's events survive as unknown, byte-intact.
+        for kind in ["claimed", "taken", "requeued", "done", "routed"] {
+            let old = format!(
+                r#"{{"id":"pi.2","author":"a@b.c","writer":"pi","time":8,"kind":"{kind}","body":{{"flight":"pi.1"}}}}"#
+            );
+            let event: Event = serde_json::from_str(&old).expect("parse");
+            let Kind::Unknown { kind: name, body } = &event.kind else {
+                panic!("a retired kind is unknown, not refused: {kind}");
+            };
+            assert_eq!(name, kind);
+            assert_eq!(body.get(), r#"{"flight":"pi.1"}"#);
+        }
+    }
+
+    #[test]
+    fn a_stored_field_filing_round_trips_and_omits_what_it_does_not_carry() {
         let event = Event {
             id: "pi.2".parse().expect("id"),
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
             kind: Kind::Filed {
-                procedure: "review".to_string(),
+                procedure: Some("review".to_string()),
                 subject: "the retry test · pass".to_string(),
                 body: String::new(),
-                part: Some(PartStamp {
-                    id: "pass".to_string(),
-                    crew: "agent".to_string(),
-                    skill: Some("review".to_string()),
-                    done: "asserted".to_string(),
-                    bay: None,
-                    branch: None,
-                }),
+                status: "ready".to_string(),
+                assignee: Some("agent".to_string()),
+                priority: "high".to_string(),
+                labels: vec!["chore".to_string()],
+                skill: Some("review".to_string()),
+                bay: None,
+                done: "asserted".to_string(),
+                branch: Some("feather".to_string()),
             },
         };
         let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""status":"ready""#), "got {json}");
+        assert!(json.contains(r#""assignee":"agent""#), "got {json}");
+        assert!(json.contains(r#""labels":["chore"]"#), "got {json}");
+        assert!(json.contains(r#""branch":"feather""#), "got {json}");
         assert!(
-            json.contains(
-                r#""part":{"id":"pass","crew":"agent","skill":"review","done":"asserted"}"#
-            ),
-            "got {json}"
+            !json.contains(r#""bay""#),
+            "an absent bay leaves no key: {json}"
         );
 
         let back: Event = serde_json::from_str(&json).expect("parse");
-        let Kind::Filed { part, .. } = back.kind else {
+        let Kind::Filed {
+            status,
+            assignee,
+            priority,
+            labels,
+            skill,
+            bay,
+            branch,
+            ..
+        } = back.kind
+        else {
             panic!("a filing parses as a filing");
         };
-        let part = part.expect("the stamp survives");
-        assert_eq!(part.id, "pass");
-        assert_eq!(part.crew, "agent");
-        assert_eq!(part.skill.as_deref(), Some("review"));
-        assert_eq!(part.done, "asserted");
-        assert!(part.bay.is_none());
+        assert_eq!(status, "ready");
+        assert_eq!(assignee.as_deref(), Some("agent"));
+        assert_eq!(priority, "high");
+        assert_eq!(labels, ["chore"]);
+        assert_eq!(skill.as_deref(), Some("review"));
+        assert!(bay.is_none());
+        assert_eq!(branch.as_deref(), Some("feather"));
     }
 
     #[test]
-    fn a_crew_this_binary_has_never_heard_of_still_parses() {
-        // The tolerance rule: the enum is closed in the loader and open
+    fn a_status_this_binary_has_never_heard_of_still_parses() {
+        // The tolerance rule: the enum is closed at the verbs and open
         // here, so a newer tower's value costs one flight's fidelity
         // rather than the whole board.
-        let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"procedure":"pairing","subject":"s","body":"","part":{"id":"drive","crew":"pair","done":"reviewed"}}}"#;
+        let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"","status":"parked","assignee":"pair"}}"#;
         let event: Event = serde_json::from_str(filed).expect("parse");
-        let Kind::Filed { part, .. } = event.kind else {
+        let Kind::Filed {
+            status, assignee, ..
+        } = event.kind
+        else {
             panic!("a filing parses as a filing");
         };
-        let part = part.expect("the stamp survives");
-        assert_eq!(part.crew, "pair");
-        assert_eq!(part.done, "reviewed");
+        assert_eq!(status, "parked");
+        assert_eq!(assignee.as_deref(), Some("pair"));
     }
 
     #[test]
@@ -577,68 +683,86 @@ mod tests {
         // question is malformed, not a kind from the future.
         let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"held","body":{"flight":"pi.1"}}"#;
         assert!(serde_json::from_str::<Event>(broken).is_err());
+        // So is a `status` that names no status.
+        let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"status","body":{"flight":"pi.1"}}"#;
+        assert!(serde_json::from_str::<Event>(broken).is_err());
     }
 
     #[test]
-    fn a_route_round_trips_with_and_without_its_stamp() {
-        let collapsed = Event {
+    fn a_status_move_round_trips_and_omits_an_unsaid_reason() {
+        let unsaid = Event {
             id: "pi.5".parse().expect("id"),
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
-            kind: Kind::Routed {
+            kind: Kind::Status {
                 flight: "pi.1".parse().expect("id"),
-                procedure: "chore".to_string(),
-                part: Some(PartStamp {
-                    id: "do".to_string(),
-                    crew: "you".to_string(),
-                    skill: None,
-                    done: "asserted".to_string(),
-                    bay: None,
-                    branch: None,
-                }),
-                because: "it is a chore".to_string(),
+                status: "in_progress".to_string(),
+                reason: None,
             },
         };
-        let json = serde_json::to_string(&collapsed).expect("serialize");
-        assert!(json.contains(r#""kind":"routed""#), "got {json}");
+        let json = serde_json::to_string(&unsaid).expect("serialize");
+        assert!(json.contains(r#""kind":"status""#), "got {json}");
         assert!(
-            json.contains(r#""part":{"id":"do","crew":"you","done":"asserted"}"#),
-            "got {json}"
+            json.contains(r#""body":{"flight":"pi.1","status":"in_progress"}"#),
+            "an unsaid reason leaves no key: {json}"
         );
-        let back: Event = serde_json::from_str(&json).expect("parse");
-        let Kind::Routed { part, because, .. } = back.kind else {
-            panic!("a route parses as a route");
-        };
-        assert_eq!(part.expect("the stamp survives").id, "do");
-        assert_eq!(because, "it is a chore");
 
-        // The parent shape: no stamp, and the wire bytes omit the key.
-        let parent = Event {
+        let said = Event {
             id: "pi.6".parse().expect("id"),
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 8,
-            kind: Kind::Routed {
+            kind: Kind::Status {
                 flight: "pi.1".parse().expect("id"),
-                procedure: "review".to_string(),
-                part: None,
-                because: String::new(),
+                status: "canceled".to_string(),
+                reason: Some("superseded by #9".to_string()),
             },
         };
-        let json = serde_json::to_string(&parent).expect("serialize");
-        assert!(!json.contains(r#""part""#), "got {json}");
+        let json = serde_json::to_string(&said).expect("serialize");
         let back: Event = serde_json::from_str(&json).expect("parse");
-        let Kind::Routed { part, .. } = back.kind else {
-            panic!("a route parses as a route");
+        let Kind::Status { status, reason, .. } = back.kind else {
+            panic!("a status parses as a status");
         };
-        assert!(part.is_none());
+        assert_eq!(status, "canceled");
+        assert_eq!(reason.as_deref(), Some("superseded by #9"));
     }
 
     #[test]
-    fn a_route_with_a_broken_body_is_an_error() {
-        let broken = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"routed","body":{"flight":"pi.1"}}"#;
-        assert!(serde_json::from_str::<Event>(broken).is_err());
+    fn an_assignment_round_trips_and_absent_is_the_cleared_lane() {
+        let cleared = Event {
+            id: "pi.5".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::Assigned {
+                flight: "pi.1".parse().expect("id"),
+                assignee: None,
+            },
+        };
+        let json = serde_json::to_string(&cleared).expect("serialize");
+        assert!(
+            json.contains(r#""body":{"flight":"pi.1"}"#),
+            "the cleared lane leaves no key: {json}"
+        );
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        let Kind::Assigned { assignee, .. } = back.kind else {
+            panic!("an assignment parses as one");
+        };
+        assert!(assignee.is_none());
+
+        let laned = Event {
+            id: "pi.6".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 8,
+            kind: Kind::Assigned {
+                flight: "pi.1".parse().expect("id"),
+                assignee: Some("agent".to_string()),
+            },
+        };
+        let json = serde_json::to_string(&laned).expect("serialize");
+        assert!(json.contains(r#""assignee":"agent""#), "got {json}");
     }
 
     #[test]
@@ -652,6 +776,10 @@ mod tests {
                 target: "pi.1".parse().expect("id"),
                 subject: subject.map(str::to_string),
                 body: body.map(str::to_string),
+                priority: None,
+                labels: None,
+                skill: None,
+                bay: None,
             },
         };
 
@@ -679,6 +807,7 @@ mod tests {
             target,
             subject,
             body,
+            ..
         } = both.kind
         else {
             panic!("an edit parses as an edit");
@@ -686,6 +815,46 @@ mod tests {
         assert_eq!(target.to_string(), "pi.1");
         assert_eq!(subject.as_deref(), Some("s"));
         assert_eq!(body.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_field_edit_round_trips_with_labels_wholesale() {
+        let event = Event {
+            id: "pi.9".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::Edited {
+                target: "pi.1".parse().expect("id"),
+                subject: None,
+                body: None,
+                priority: Some("high".to_string()),
+                labels: Some(vec!["chore".to_string(), "web".to_string()]),
+                skill: Some("review".to_string()),
+                bay: Some("warm".to_string()),
+            },
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""priority":"high""#), "got {json}");
+        assert!(json.contains(r#""labels":["chore","web"]"#), "got {json}");
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        let Kind::Edited {
+            priority,
+            labels,
+            skill,
+            bay,
+            ..
+        } = back.kind
+        else {
+            panic!("an edit parses as an edit");
+        };
+        assert_eq!(priority.as_deref(), Some("high"));
+        assert_eq!(
+            labels.as_deref(),
+            Some(&["chore".to_string(), "web".to_string()][..])
+        );
+        assert_eq!(skill.as_deref(), Some("review"));
+        assert_eq!(bay.as_deref(), Some("warm"));
     }
 
     #[test]
@@ -700,24 +869,23 @@ mod tests {
     fn the_lifecycle_kinds_round_trip() {
         let flight: EventId = "pi.1".parse().expect("id");
         let kinds = [
-            Kind::Claimed {
+            Kind::Status {
                 flight: flight.clone(),
+                status: "ready".to_string(),
+                reason: None,
             },
-            Kind::Taken {
+            Kind::Assigned {
                 flight: flight.clone(),
-            },
-            Kind::Requeued {
-                flight: flight.clone(),
+                assignee: Some("agent".to_string()),
             },
             Kind::Held {
                 flight: flight.clone(),
                 question: "which retry path?".to_string(),
             },
             Kind::Answered {
-                flight: flight.clone(),
+                flight,
                 answer: "the outer one".to_string(),
             },
-            Kind::Done { flight },
         ];
         for (seq, kind) in kinds.into_iter().enumerate() {
             let event = Event {

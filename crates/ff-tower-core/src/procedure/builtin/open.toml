@@ -1,9 +1,9 @@
-# The unclassified default: one part, yours. A single-part procedure
+# The unclassified default: one flight, yours. A single-flight procedure
 # collapses onto the flight, so filing under `open` mints one flight
-# carrying this stamp rather than a parent and a lone child.
+# carrying these fields rather than a parent and a lone child.
 name = "open"
 
-[[part]]
-id   = "work"
-crew = "you"
-done = "asserted"
+[[flight]]
+id       = "work"
+assignee = "me"
+done     = "asserted"

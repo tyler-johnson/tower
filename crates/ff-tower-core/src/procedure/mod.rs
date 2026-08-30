@@ -1,32 +1,36 @@
 //! A procedure: the named recipe for one shape of work, as data.
 //!
 //! DESIGN.md's *Procedures*, loaded. A definition is a name, optional
-//! match rules, and a list of parts carrying crew, skill, edges, and a
-//! done condition — no conditions and no loops, because principle 13 puts
-//! every conditional in the skill an agent-crewed part points at. What is
-//! here is a parser, a validator, and three layers to read them from.
+//! match rules, and the flights it stamps out — each with the same
+//! fields any flight carries, pre-filled — no conditions and no loops,
+//! because principle 13 puts every conditional in the skill an
+//! agent-assigned flight points at. What is here is a parser, a
+//! validator, and three layers to read them from.
 //!
 //! **The definition is read once, at file time.** Nothing in this module
 //! is consulted by the fold or by a render: `file` reads a definition,
-//! copies each part's stamp into the log, and everything downstream works
-//! off the log alone. Editing a definition therefore never disturbs a
-//! flight already in the air, which is the property that makes forking one
-//! mid-week safe.
+//! copies each flight's fields into the log, and everything downstream
+//! works off the log alone. Editing a definition therefore never disturbs
+//! a flight already in the air, which is the property that makes forking
+//! one mid-week safe.
 //!
-//! Two closures are deliberate. `deny_unknown_fields` on every wire struct
-//! means a typo'd key is a refusal rather than a silently ignored line —
-//! the discipline that keeps a config format from drifting into a
-//! language. And `crew`/`done` are closed enums *here* while staying free
-//! strings in the log's part stamp: a known kind whose body does not parse
-//! is an error by design (`log/event.rs`), so one closed enum on the wire
-//! would let a newer tower's `crew = "pair"` take an older tower's whole
-//! board down rather than one flight. The refusal belongs where a person
-//! is editing a file.
+//! Two closures are deliberate. `deny_unknown_fields` on every wire
+//! struct means a typo'd key is a refusal rather than a silently ignored
+//! line — the discipline that keeps a config format from drifting into a
+//! language; an old `[[part]]` file refuses loudly by path for the same
+//! reason. And `assignee`/`done` are closed enums *here* while staying
+//! free strings in the log: a known kind whose body does not parse is an
+//! error by design (`log/event.rs`), so one closed enum on the wire
+//! would let a newer tower's value take an older tower's whole board
+//! down rather than one flight. The refusal belongs where a person is
+//! editing a file.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
+
+pub use crate::model::Assignee;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -43,8 +47,8 @@ pub struct Definition {
     /// Intake rules. They only ever fire on adapter signals, and there
     /// are no adapters, so today they parse and sit inert.
     pub matches: Vec<Match>,
-    /// Declaration order — the order `file` mints the parts in.
-    pub parts: Vec<Part>,
+    /// Declaration order — the order `file` mints the flights in.
+    pub flights: Vec<FlightDef>,
     pub source: Source,
 }
 
@@ -56,18 +60,18 @@ pub struct Match {
     pub event: String,
 }
 
-/// One part of a procedure: a stretch of work that ends where the crew
-/// changes or a gate stands.
+/// One flight a procedure stamps out — the same fields any flight
+/// carries, pre-filled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Part {
+pub struct FlightDef {
     pub id: String,
-    pub crew: Crew,
-    /// The skill an agent-crewed part is flown with — the seam that keeps
-    /// structure in data and judgment in prose.
+    pub assignee: Assignee,
+    /// The skill an agent-assigned flight is flown with — the seam that
+    /// keeps structure in data and judgment in prose.
     #[serde(default)]
     pub skill: Option<String>,
-    /// The parts this one waits on, by id. The DAG is these edges, and
+    /// The flights this one waits on, by id. The DAG is these edges, and
     /// concurrency is the absence of a declaration.
     #[serde(default)]
     pub after: Vec<String>,
@@ -76,14 +80,12 @@ pub struct Part {
     /// Whether filing should build a tree ahead of whoever flies this.
     #[serde(default)]
     pub bay: Option<Bay>,
-}
-
-/// Who flies a part. Closed, and it is the whole of principle 12's check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Crew {
-    You,
-    Agent,
+    /// The priority the flight is born with; the field's default when
+    /// unsaid. Free here because it is free on the flight.
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 /// What finishing a part means. Closed on purpose: four values cannot
@@ -104,15 +106,6 @@ pub enum Done {
 #[serde(rename_all = "lowercase")]
 pub enum Bay {
     Warm,
-}
-
-impl Crew {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Crew::You => "you",
-            Crew::Agent => "agent",
-        }
-    }
 }
 
 impl Done {
@@ -357,15 +350,15 @@ pub fn load(text: &str, source: Source) -> Result<Definition> {
         name: wire.name,
         subject: wire.subject,
         matches: wire.matches,
-        parts: wire.parts,
+        flights: wire.flights,
         source,
     };
     validate(&definition, &at)?;
     Ok(definition)
 }
 
-/// The TOML file's shape, exactly. `[[match]]` and `[[part]]` are TOML's
-/// array-of-tables spelling of the two plural fields.
+/// The TOML file's shape, exactly. `[[match]]` and `[[flight]]` are
+/// TOML's array-of-tables spelling of the two plural fields.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Wire {
@@ -374,62 +367,62 @@ struct Wire {
     subject: Option<String>,
     #[serde(default, rename = "match")]
     matches: Vec<Match>,
-    #[serde(default, rename = "part")]
-    parts: Vec<Part>,
+    #[serde(default, rename = "flight")]
+    flights: Vec<FlightDef>,
 }
 
 /// Five refusals, in the order it is cheapest to be sure of them: no
-/// parts, a duplicate id, an `after` naming nothing, a cycle, and
+/// flights, a duplicate id, an `after` naming nothing, a cycle, and
 /// principle 12.
 fn validate(definition: &Definition, at: &str) -> Result<()> {
     let name = definition.name.clone();
     let at = at.to_string();
 
-    if definition.parts.is_empty() {
+    if definition.flights.is_empty() {
         return Err(Error::NoParts { name, at });
     }
 
     let mut seen: HashSet<&str> = HashSet::new();
-    for part in &definition.parts {
-        if !seen.insert(part.id.as_str()) {
+    for flight in &definition.flights {
+        if !seen.insert(flight.id.as_str()) {
             return Err(Error::DuplicatePart {
                 name,
                 at,
-                part: part.id.clone(),
+                part: flight.id.clone(),
             });
         }
     }
 
-    for part in &definition.parts {
-        for after in &part.after {
+    for flight in &definition.flights {
+        for after in &flight.after {
             if !seen.contains(after.as_str()) {
                 return Err(Error::UnknownAfter {
                     name,
                     at,
-                    part: part.id.clone(),
+                    part: flight.id.clone(),
                     after: after.clone(),
                 });
             }
         }
     }
 
-    if let Some(part) = cycle(&definition.parts) {
+    if let Some(part) = cycle(&definition.flights) {
         return Err(Error::Cyclic { name, at, part });
     }
 
     // Terminal: nothing else waits on it. Every one of them is yours, or
     // the procedure ends on an agent and is a script.
     let waited_on: HashSet<&str> = definition
-        .parts
+        .flights
         .iter()
-        .flat_map(|part| part.after.iter().map(String::as_str))
+        .flat_map(|flight| flight.after.iter().map(String::as_str))
         .collect();
-    for part in &definition.parts {
-        if !waited_on.contains(part.id.as_str()) && part.crew != Crew::You {
+    for flight in &definition.flights {
+        if !waited_on.contains(flight.id.as_str()) && flight.assignee != Assignee::Me {
             return Err(Error::NoHumanEnd {
                 name,
                 at,
-                part: part.id.clone(),
+                part: flight.id.clone(),
             });
         }
     }
@@ -437,10 +430,11 @@ fn validate(definition: &Definition, at: &str) -> Result<()> {
     Ok(())
 }
 
-/// The id of a part a back edge closes on, if `after` is not a DAG.
-/// Depth-first with the classic three colors; parts are few, and the walk
-/// runs in declaration order so the part it names is deterministic.
-fn cycle(parts: &[Part]) -> Option<String> {
+/// The id of a flight a back edge closes on, if `after` is not a DAG.
+/// Depth-first with the classic three colors; the flights are few, and
+/// the walk runs in declaration order so the id it names is
+/// deterministic.
+fn cycle(parts: &[FlightDef]) -> Option<String> {
     #[derive(Clone, Copy, PartialEq)]
     enum Color {
         White,
@@ -516,20 +510,20 @@ pub enum Error {
     #[error("{at}: {detail}")]
     Invalid { at: String, detail: String },
 
-    /// A procedure with no parts has nothing to file.
-    #[error("procedure `{name}` ({at}) declares no parts")]
+    /// A procedure with no flights has nothing to file.
+    #[error("procedure `{name}` ({at}) declares no flights")]
     NoParts { name: String, at: String },
 
-    /// Two parts under one id: `after` could not say which it meant.
-    #[error("procedure `{name}` ({at}) declares part `{part}` twice")]
+    /// Two flights under one id: `after` could not say which it meant.
+    #[error("procedure `{name}` ({at}) declares flight `{part}` twice")]
     DuplicatePart {
         name: String,
         at: String,
         part: String,
     },
 
-    /// An edge to a part that does not exist — a typo, every time.
-    #[error("procedure `{name}` ({at}): part `{part}` waits on `{after}`, which is not a part")]
+    /// An edge to a flight that does not exist — a typo, every time.
+    #[error("procedure `{name}` ({at}): flight `{part}` waits on `{after}`, which is not a flight")]
     UnknownAfter {
         name: String,
         at: String,
@@ -537,18 +531,18 @@ pub enum Error {
         after: String,
     },
 
-    /// `after` closed on itself, so no part could ever start.
-    #[error("procedure `{name}` ({at}): `after` closes a cycle through part `{part}`")]
+    /// `after` closed on itself, so no flight could ever start.
+    #[error("procedure `{name}` ({at}): `after` closes a cycle through flight `{part}`")]
     Cyclic {
         name: String,
         at: String,
         part: String,
     },
 
-    /// Principle 12, refused at load: the procedure ends on a part that
-    /// is not yours.
+    /// Principle 12, refused at load: the procedure ends on a flight
+    /// that is not yours.
     #[error(
-        "procedure `{name}` ({at}) ends on part `{part}`, crewed to an agent — every procedure ends with you"
+        "procedure `{name}` ({at}) ends on flight `{part}`, assigned to an agent — every procedure ends with you"
     )]
     NoHumanEnd {
         name: String,
@@ -605,14 +599,14 @@ mod tests {
         assert_eq!(installed.names(), ["open", "review"]);
 
         let open = installed.get("open").expect("open");
-        assert_eq!(open.parts.len(), 1);
-        assert_eq!(open.parts[0].crew, Crew::You);
-        assert_eq!(open.parts[0].done, Done::Asserted);
+        assert_eq!(open.flights.len(), 1);
+        assert_eq!(open.flights[0].assignee, Assignee::Me);
+        assert_eq!(open.flights[0].done, Done::Asserted);
 
         let review = installed.get("review").expect("review");
         assert_eq!(review.subject.as_deref(), Some("branch"));
         assert_eq!(review.matches.len(), 1);
-        assert_eq!(review.parts.len(), 3);
+        assert_eq!(review.flights.len(), 3);
     }
 
     #[test]
@@ -634,20 +628,20 @@ mod tests {
         let definition = load(
             r#"
 name = "shapes"
-[[part]]
-id   = "first"
-crew = "agent"
-[[part]]
-id    = "last"
-crew  = "you"
-after = ["first"]
-done  = "landed"
+[[flight]]
+id       = "first"
+assignee = "agent"
+[[flight]]
+id       = "last"
+assignee = "me"
+after    = ["first"]
+done     = "landed"
 "#,
             Source::BuiltIn,
         )
         .expect("loads");
-        assert_eq!(definition.parts[0].done, Done::Asserted);
-        assert_eq!(definition.parts[1].done, Done::Landed);
+        assert_eq!(definition.flights[0].done, Done::Asserted);
+        assert_eq!(definition.flights[1].done, Done::Landed);
     }
 
     #[test]
@@ -655,15 +649,33 @@ done  = "landed"
         let err = load(
             r#"
 name = "typo"
-[[part]]
-id    = "only"
-crew  = "you"
-skil  = "review"
+[[flight]]
+id       = "only"
+assignee = "me"
+skil     = "review"
 "#,
             Source::BuiltIn,
         )
         .expect_err("a typo'd key is a refusal");
         assert_eq!(err.id(), "procedure/invalid");
         assert!(!err.to_string().contains('\n'), "one line: {err}");
+    }
+
+    #[test]
+    fn an_old_part_grammar_file_refuses_loudly() {
+        // The pre-stored-model grammar: `[[part]]` with `crew`. The
+        // `deny_unknown_fields` closure is what makes the refusal loud
+        // rather than a definition silently missing its flights.
+        let err = load(
+            r#"
+name = "old"
+[[part]]
+id   = "work"
+crew = "you"
+"#,
+            Source::BuiltIn,
+        )
+        .expect_err("the old grammar refuses");
+        assert_eq!(err.id(), "procedure/invalid");
     }
 }

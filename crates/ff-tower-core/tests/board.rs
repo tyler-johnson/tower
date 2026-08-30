@@ -14,10 +14,17 @@ use ff_tower_testsupport::Repo;
 
 fn filed(subject: &str) -> Kind {
     Kind::Filed {
-        procedure: "open".to_string(),
+        procedure: None,
         subject: subject.to_string(),
         body: String::new(),
-        part: None,
+        status: "triage".to_string(),
+        assignee: None,
+        priority: "none".to_string(),
+        labels: Vec::new(),
+        skill: None,
+        bay: None,
+        done: "asserted".to_string(),
+        branch: None,
     }
 }
 
@@ -107,8 +114,10 @@ fn a_held_flight_assembles_into_waiting_on_you() {
     let flight = ids[0].clone();
     store
         .append(vec![
-            Kind::Claimed {
+            Kind::Status {
                 flight: flight.clone(),
+                status: "in_progress".to_string(),
+                reason: None,
             },
             Kind::Held {
                 flight,
@@ -125,7 +134,7 @@ fn a_held_flight_assembles_into_waiting_on_you() {
     assert_eq!(view.id, "pi.1");
     assert_eq!(view.question.as_deref(), Some("which retry path?"));
     assert!(view.asked_at.is_some());
-    assert!(view.claimed_by.is_some());
+    assert_eq!(view.status, "held", "the hold is a status move too");
     assert!(board.in_the_air.is_empty() && board.holding.is_empty() && board.open.is_empty());
 }
 

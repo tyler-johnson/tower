@@ -8,7 +8,7 @@
 //! field is the fold's, and both call sites hold the slice already. Laziness belongs to the
 //! caller: [`wants_verdicts`] says when probes can change the answer, and
 //! when it says no, [`Verdicts::default()`] briefs byte-identically to
-//! the probed run. A done flight briefs like any other — the log keeps
+//! the probed run. A closed flight briefs like any other — the log keeps
 //! the record, and reading it is never a lifecycle move.
 //!
 //! The standing is the walk narrowed to one flight. The walk here is
@@ -20,19 +20,18 @@
 //! the first hit, so `beat` is under-inclusive by design — `next`'s
 //! surface, not a full conflict matrix — and same-branch flights are one
 //! tree, so a flight can take a beat row its branchmate would otherwise
-//! have taken. The crew gate runs before readiness, so a you-crewed
-//! flight with undone dependencies is `yours`, never `waiting`.
+//! have taken. The lane gate runs before readiness, so a me-laned
+//! flight with unclosed dependencies is `yours`, never `waiting`.
 //!
 //! Standing precedence is `enrich`'s partition, not pick's one boolean:
-//! done, then the open question, then fufu's branch hold, then the claim
-//! — a take rides in as a claim, which is what it is — then the crew
-//! stamp, and only a pool candidate takes the walk's outcome. A brief
-//! that said "claimed" where the board shows *holding* would fail the
-//! one-glance test.
+//! closed, then the open question, then fufu's branch hold, then In
+//! Progress, then the lane — `!pullable()` is *yours* — and only a pool
+//! candidate takes the walk's outcome. A brief that said "in progress"
+//! where the board shows *holding* would fail the one-glance test.
 
 use serde::Serialize;
 
-use crate::log::{Event, EventId, PartStamp};
+use crate::log::{Event, EventId};
 
 use super::flight::{Flight, Fold};
 use super::history::{Moment, history};
@@ -50,41 +49,31 @@ pub struct Brief {
     /// The dense per-writer flight number — the human name's numeric
     /// half, beside the wire id.
     pub number: u64,
-    pub procedure: String,
-    /// The procedure part this flight is, as the filing stamped it. The
-    /// brief is the read surface for one flight, so this is where crew
-    /// and skill are meant to be read.
-    pub part: Option<PartStamp>,
+    /// Provenance only: the procedure the filing was minted under.
+    pub procedure: Option<String>,
     pub subject: String,
     pub body: String,
     pub filed_by: String,
     pub filed_at: i64,
-    pub claimed_by: Option<String>,
-    pub claimed_at: Option<i64>,
-    /// The standing take, flat like the claim. A take sets the claim to
-    /// its own author, so these repeat `claimed_by`/`claimed_at` while
-    /// one stands — the second pair is what says the claim came from the
-    /// human override rather than from `claim` or `next`.
-    pub taken_by: Option<String>,
-    pub taken_at: Option<i64>,
-    /// The freshest requeue, flat like the claim. It outlives the claim
-    /// it released, which is the point: the release is the flight's
-    /// motion.
-    pub requeued_at: Option<i64>,
-    /// The last route, flat like the claim. `because` carries the stored
-    /// explanation, `None` when the route said nothing.
-    pub routed_by: Option<String>,
-    pub routed_at: Option<i64>,
-    pub because: Option<String>,
+    /// The stored status, verbatim — the brief is the read surface for
+    /// one flight, so this is where the fields are meant to be read.
+    pub status: String,
+    /// Who last moved it, and when — `None` while the flight still
+    /// stands where it was filed.
+    pub status_by: Option<String>,
+    pub status_at: Option<i64>,
+    pub assignee: Option<String>,
+    pub priority: String,
+    pub labels: Vec<String>,
+    pub skill: Option<String>,
+    pub bay: Option<String>,
     /// The last edit touching the record — the flight's own fields or a
-    /// comment's text — flat like the claim.
+    /// comment's text — flat like the status mark.
     pub edited_by: Option<String>,
     pub edited_at: Option<i64>,
     pub question: Option<String>,
     pub asked_by: Option<String>,
     pub asked_at: Option<i64>,
-    pub done_by: Option<String>,
-    pub done_at: Option<i64>,
     /// `@detached` is a real literal value here, carried as fufu emitted
     /// it; a render decides how to print it.
     pub branch: Option<String>,
@@ -92,8 +81,7 @@ pub struct Brief {
     pub held: bool,
     pub resolving: bool,
     pub current: bool,
-    /// The board's formula — done deliberately excluded, `done_at` is its
-    /// own field.
+    /// The board's formula.
     pub last_motion: Option<i64>,
     pub depends_on: Vec<LinkView>,
     pub blocks: Vec<LinkView>,
@@ -116,31 +104,30 @@ pub struct Brief {
 }
 
 /// Where one flight stands, in `enrich`'s precedence, flattened onto the
-/// brief. The mark variants are units — their facts (`done_by`, the
-/// question fields, `held`/`resolving`, `claimed_by`, `part`) already sit
-/// flat on [`Brief`], and a payload here would emit the same keys twice.
-/// Only the walk variants carry what the brief has no other field for,
+/// brief. The mark variants are units — their facts (the status fields,
+/// the question fields, `held`/`resolving`, `assignee`) already sit flat
+/// on [`Brief`], and a payload here would emit the same keys twice. Only
+/// the walk variants carry what the brief has no other field for,
 /// mirroring [`Skip`] flat — the walk's outcome, owned because `pick()`
 /// hands its rows over whole.
 #[derive(Debug, Serialize)]
 #[serde(tag = "standing", rename_all = "kebab-case")]
 pub enum Standing {
-    /// Off the board; the log keeps the record.
+    /// Off the board — done or canceled; the log keeps the record.
     Done,
     /// Held on tower's own question — waiting on you.
     Question,
     /// fufu's branch verdict — derived, not authored.
     Held,
-    /// A standing claim — someone already flies it. A take reads as one
-    /// too: `taken_by` beside `claimed_by` is what distinguishes them.
-    Claimed,
-    /// Unclaimed, and the crew stamp is what keeps it out of the pool:
-    /// no stamp at all — a parent, or a plain filing — or a crew that is
-    /// not `agent`, `you` included. Unknown never rounds down.
+    /// The stored In Progress — someone already flies it; the status
+    /// mark beside it says who.
+    InProgress,
+    /// Not in the pool by the stored fields alone: not Ready, or not in
+    /// the agent lane. Unknown never rounds down.
     Yours,
     /// In the pool and admitted by the full walk.
     Ready,
-    /// Declared dependencies not yet done — all of them.
+    /// Declared dependencies not yet closed — all of them.
     Waiting { on: Vec<String> },
     /// A collide against a flying flight or an earlier-admitted
     /// candidate; the first hit wins.
@@ -155,7 +142,8 @@ pub enum Standing {
 pub struct LinkView {
     pub flight: String,
     pub subject: String,
-    pub done: bool,
+    pub status: String,
+    pub closed: bool,
 }
 
 /// A note on the record, as the brief carries it.
@@ -198,11 +186,9 @@ pub fn brief(
     });
     let last_motion = [
         op.map(|op| op.time),
-        flight.claim.as_ref().map(|claim| claim.at),
-        flight.taken.as_ref().map(|mark| mark.at),
+        flight.status_mark.as_ref().map(|mark| mark.at),
         flight.question.as_ref().map(|question| question.at),
         flight.answered_at,
-        flight.requeued_at,
         flight.edited.as_ref().map(|mark| mark.at),
     ]
     .into_iter()
@@ -219,30 +205,23 @@ pub fn brief(
         id: flight.id.to_string(),
         number: flight.number,
         procedure: flight.procedure.clone(),
-        part: flight.part.clone(),
         subject: flight.subject.clone(),
         body: flight.body.clone(),
         filed_by: flight.filed_by.clone(),
         filed_at: flight.filed_at,
-        claimed_by: flight.claim.as_ref().map(|claim| claim.by.clone()),
-        claimed_at: flight.claim.as_ref().map(|claim| claim.at),
-        taken_by: flight.taken.as_ref().map(|mark| mark.by.clone()),
-        taken_at: flight.taken.as_ref().map(|mark| mark.at),
-        requeued_at: flight.requeued_at,
-        routed_by: flight.route.as_ref().map(|route| route.by.clone()),
-        routed_at: flight.route.as_ref().map(|route| route.at),
-        because: flight
-            .route
-            .as_ref()
-            .map(|route| route.because.clone())
-            .filter(|because| !because.is_empty()),
+        status: flight.status.clone(),
+        status_by: flight.status_mark.as_ref().map(|mark| mark.by.clone()),
+        status_at: flight.status_mark.as_ref().map(|mark| mark.at),
+        assignee: flight.assignee.clone(),
+        priority: flight.priority.clone(),
+        labels: flight.labels.clone(),
+        skill: flight.skill.clone(),
+        bay: flight.bay.clone(),
         edited_by: flight.edited.as_ref().map(|mark| mark.by.clone()),
         edited_at: flight.edited.as_ref().map(|mark| mark.at),
         question: flight.question.as_ref().map(|q| q.text.clone()),
         asked_by: flight.question.as_ref().map(|q| q.by.clone()),
         asked_at: flight.question.as_ref().map(|q| q.at),
-        done_by: flight.done.as_ref().map(|mark| mark.by.clone()),
-        done_at: flight.done.as_ref().map(|mark| mark.at),
         branch,
         tip: row.and_then(|row| row.tip.clone()),
         held: row.is_some_and(|row| row.held),
@@ -272,7 +251,7 @@ pub fn brief(
 /// Probe iff the flight is live, its freshest-op branch resolves in the
 /// branch index, and the board has a branch pair to ask about. When this
 /// says no, `brief` with [`Verdicts::default()`] is byte-identical to the
-/// probed run: a done flight is not in the walk at all, so its beat is
+/// probed run: a closed flight is not in the walk at all, so its beat is
 /// empty by construction; a branchless or index-absent branch cannot be
 /// gated and is never named by a passed row, because `branch_pairs`
 /// excludes it from every pair; and with no pairs the probe itself is a
@@ -284,7 +263,7 @@ pub fn wants_verdicts(fold: &Fold, reads: &Reads, id: &EventId) -> bool {
     let Some(flight) = fold.flights.iter().find(|flight| &flight.id == id) else {
         return false;
     };
-    if flight.done.is_some() {
+    if flight.closed() {
         return false;
     }
     let index = reads.branch_index();
@@ -297,8 +276,8 @@ pub fn wants_verdicts(fold: &Fold, reads: &Reads, id: &EventId) -> bool {
 }
 
 /// The full walk, once — the flight's own outcome when it is a pool
-/// candidate, and the beat rows either way. A done flight is not in the
-/// walk at all, so its beat is empty by construction.
+/// candidate, and the beat rows either way. A closed flight is not in
+/// the walk at all, so its beat is empty by construction.
 fn standing_and_beat(
     fold: &Fold,
     reads: &Reads,
@@ -327,15 +306,15 @@ fn standing_and_beat(
         .filter(|name| *name != "@detached")
         .and_then(|name| branches.get(name).copied());
 
-    let standing = if flight.done.is_some() {
+    let standing = if flight.closed() {
         Standing::Done
     } else if flight.question.is_some() {
         Standing::Question
     } else if row.is_some_and(|row| row.held || row.resolving) {
         Standing::Held
-    } else if flight.claim.is_some() {
-        Standing::Claimed
-    } else if !flight.agent_crewed() {
+    } else if flight.status == "in_progress" {
+        Standing::InProgress
+    } else if !flight.pullable() {
         Standing::Yours
     } else if picks.picked.iter().any(|pick| pick.flight == id) {
         Standing::Ready
@@ -374,7 +353,8 @@ fn links(fold: &Fold, ids: &[EventId]) -> Vec<LinkView> {
             LinkView {
                 flight: other.id.to_string(),
                 subject: other.subject.clone(),
-                done: other.done.is_some(),
+                status: other.status.clone(),
+                closed: other.closed(),
             }
         })
         .collect()
@@ -386,8 +366,34 @@ mod tests {
     use super::super::reads::BranchPairing;
     use super::*;
     use crate::ff::{BranchInfo, BranchList, OpEntry, Pairing, UnknownReason};
-    use crate::log::{Event, EventId, Kind, PartStamp};
+    use crate::log::{Event, EventId, Kind};
 
+    /// A filing with the given status and lane stored — the pool gate's
+    /// two fields, everything else defaulted.
+    fn stored(id: &str, time: i64, status: &str, assignee: Option<&str>) -> Event {
+        let id: EventId = id.parse().expect("id");
+        Event {
+            writer: id.writer.clone(),
+            author: "filer@b.c".to_string(),
+            time,
+            id,
+            kind: Kind::Filed {
+                procedure: Some("review".to_string()),
+                subject: format!("subject of {time}"),
+                body: String::new(),
+                status: status.to_string(),
+                assignee: assignee.map(str::to_string),
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
+            },
+        }
+    }
+
+    /// A bare filing with subject and body.
     fn filed(id: &str, time: i64, subject: &str, body: &str) -> Event {
         let id: EventId = id.parse().expect("id");
         Event {
@@ -396,42 +402,24 @@ mod tests {
             time,
             id,
             kind: Kind::Filed {
-                procedure: "open".to_string(),
+                procedure: None,
                 subject: subject.to_string(),
                 body: body.to_string(),
-                part: None,
+                status: "triage".to_string(),
+                assignee: None,
+                priority: "none".to_string(),
+                labels: Vec::new(),
+                skill: None,
+                bay: None,
+                done: "asserted".to_string(),
+                branch: None,
             },
         }
     }
 
-    /// A filing with the given crew stamped, `None` for the stampless
-    /// shape — a parent, or a pre-procedure filing.
-    fn crewed(id: &str, time: i64, crew: Option<&str>) -> Event {
-        let id: EventId = id.parse().expect("id");
-        Event {
-            writer: id.writer.clone(),
-            author: "filer@b.c".to_string(),
-            time,
-            id,
-            kind: Kind::Filed {
-                procedure: "review".to_string(),
-                subject: format!("subject of {time}"),
-                body: String::new(),
-                part: crew.map(|crew| PartStamp {
-                    id: "pass".to_string(),
-                    crew: crew.to_string(),
-                    skill: None,
-                    done: "asserted".to_string(),
-                    bay: None,
-                    branch: None,
-                }),
-            },
-        }
-    }
-
-    /// The pool's norm once the crew gate stands: an agent-stamped part.
+    /// The pool's norm: Ready, agent lane.
     fn agent(id: &str, time: i64) -> Event {
-        crewed(id, time, Some("agent"))
+        stored(id, time, "ready", Some("agent"))
     }
 
     fn lifecycle(id: &str, author: &str, time: i64, kind: Kind) -> Event {
@@ -473,6 +461,10 @@ mod tests {
                 target: target.parse().expect("id"),
                 subject: subject.map(str::to_string),
                 body: body.map(str::to_string),
+                priority: None,
+                labels: None,
+                skill: None,
+                bay: None,
             },
         )
     }
@@ -489,13 +481,15 @@ mod tests {
         )
     }
 
-    fn claimed(id: &str, author: &str, time: i64, flight: &str) -> Event {
+    fn moved(id: &str, author: &str, time: i64, flight: &str, to: &str) -> Event {
         lifecycle(
             id,
             author,
             time,
-            Kind::Claimed {
+            Kind::Status {
                 flight: flight.parse().expect("id"),
+                status: to.to_string(),
+                reason: None,
             },
         )
     }
@@ -525,14 +519,7 @@ mod tests {
     }
 
     fn done(id: &str, author: &str, time: i64, flight: &str) -> Event {
-        lifecycle(
-            id,
-            author,
-            time,
-            Kind::Done {
-                flight: flight.parse().expect("id"),
-            },
-        )
+        moved(id, author, time, flight, "done")
     }
 
     fn op(session: &str, branch: Option<&str>, time: i64) -> OpEntry {
@@ -611,31 +598,40 @@ mod tests {
         .expect("filed");
         assert_eq!(brief.id, "pi.1");
         assert_eq!(brief.number, 1);
-        assert_eq!(brief.procedure, "open");
+        assert!(brief.procedure.is_none(), "a bare filing has no procedure");
         assert_eq!(brief.subject, "the subject");
         assert_eq!(brief.body, "the body\ntwo lines");
         assert_eq!(brief.filed_by, "filer@b.c");
         assert_eq!(brief.filed_at, 10);
-        assert!(brief.part.is_none(), "a plain filing is no part");
+        assert_eq!(brief.status, "triage");
+        assert!(brief.status_by.is_none() && brief.status_at.is_none());
+        assert!(brief.assignee.is_none());
+        assert_eq!(brief.priority, "none");
+        assert!(brief.labels.is_empty());
+        assert!(brief.skill.is_none());
     }
 
     #[test]
-    fn a_part_stamp_reaches_the_brief() {
+    fn the_stored_fields_reach_the_brief() {
         // The brief is the read surface for one flight, so this is where
-        // crew and skill are meant to be read — the board's note line is
-        // urgency-ordered, and crew is not urgency.
+        // the fields are meant to be read.
         let mut event = filed("pi.1", 10, "the retry test · pass", "");
-        let Kind::Filed { part, .. } = &mut event.kind else {
+        let Kind::Filed {
+            status,
+            assignee,
+            priority,
+            labels,
+            skill,
+            ..
+        } = &mut event.kind
+        else {
             unreachable!("filed");
         };
-        *part = Some(PartStamp {
-            id: "pass".to_string(),
-            crew: "agent".to_string(),
-            skill: Some("review".to_string()),
-            done: "asserted".to_string(),
-            bay: None,
-            branch: None,
-        });
+        *status = "ready".to_string();
+        *assignee = Some("agent".to_string());
+        *priority = "high".to_string();
+        *labels = vec!["chore".to_string()];
+        *skill = Some("review".to_string());
 
         let brief = brief_of(
             &[event],
@@ -644,11 +640,11 @@ mod tests {
             &id("pi.1"),
         )
         .expect("filed");
-        let part = brief.part.expect("the stamp reaches the brief");
-        assert_eq!(part.id, "pass");
-        assert_eq!(part.crew, "agent");
-        assert_eq!(part.skill.as_deref(), Some("review"));
-        assert_eq!(part.done, "asserted");
+        assert_eq!(brief.status, "ready");
+        assert_eq!(brief.assignee.as_deref(), Some("agent"));
+        assert_eq!(brief.priority, "high");
+        assert_eq!(brief.labels, ["chore"]);
+        assert_eq!(brief.skill.as_deref(), Some("review"));
     }
 
     #[test]
@@ -702,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn links_carry_both_directions_with_subjects_and_done_flags() {
+    fn links_carry_both_directions_with_subjects_and_statuses() {
         let events = [
             filed("pi.1", 10, "the dependent", ""),
             filed("pi.2", 20, "the dependency", ""),
@@ -715,14 +711,16 @@ mod tests {
         assert_eq!(one.depends_on.len(), 1);
         assert_eq!(one.depends_on[0].flight, "pi.2");
         assert_eq!(one.depends_on[0].subject, "the dependency");
-        assert!(one.depends_on[0].done);
+        assert_eq!(one.depends_on[0].status, "done");
+        assert!(one.depends_on[0].closed);
         assert!(one.blocks.is_empty());
 
         let two = brief_of(&events, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
         assert_eq!(two.blocks.len(), 1);
         assert_eq!(two.blocks[0].flight, "pi.1");
         assert_eq!(two.blocks[0].subject, "the dependent");
-        assert!(!two.blocks[0].done);
+        assert_eq!(two.blocks[0].status, "triage");
+        assert!(!two.blocks[0].closed);
         assert!(two.depends_on.is_empty());
     }
 
@@ -782,70 +780,30 @@ mod tests {
         assert_eq!(brief.question.as_deref(), Some("which?"));
         assert_eq!(brief.asked_by.as_deref(), Some("asker@b.c"));
         assert_eq!(brief.asked_at, Some(60));
+        assert_eq!(brief.status, "held");
         assert!(matches!(brief.standing, Standing::Question));
     }
 
     #[test]
-    fn the_claim_carries_who_and_when() {
+    fn a_status_move_carries_who_and_when() {
         let brief = brief_of(
             &[
-                filed("pi.1", 10, "s", ""),
-                claimed("pi.2", "crew@b.c", 40, "pi.1"),
+                agent("pi.1", 10),
+                moved("pi.2", "crew@b.c", 40, "pi.1", "in_progress"),
             ],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
-        assert_eq!(brief.claimed_by.as_deref(), Some("crew@b.c"));
-        assert_eq!(brief.claimed_at, Some(40));
-        assert!(matches!(brief.standing, Standing::Claimed));
+        assert_eq!(brief.status, "in_progress");
+        assert_eq!(brief.status_by.as_deref(), Some("crew@b.c"));
+        assert_eq!(brief.status_at, Some(40));
+        assert!(matches!(brief.standing, Standing::InProgress));
     }
 
     #[test]
-    fn a_route_carries_who_when_and_why() {
-        let route = |id: &str, time, because: &str| {
-            lifecycle(
-                id,
-                "router@b.c",
-                time,
-                Kind::Routed {
-                    flight: "pi.1".parse().expect("id"),
-                    procedure: "chore".to_string(),
-                    part: None,
-                    because: because.to_string(),
-                },
-            )
-        };
-        let explained = brief_of(
-            &[
-                filed("pi.1", 10, "s", ""),
-                route("pi.2", 20, "it is a chore"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
-            &id("pi.1"),
-        )
-        .expect("filed");
-        assert_eq!(explained.procedure, "chore");
-        assert_eq!(explained.routed_by.as_deref(), Some("router@b.c"));
-        assert_eq!(explained.routed_at, Some(20));
-        assert_eq!(explained.because.as_deref(), Some("it is a chore"));
-
-        // An unsaid `-m` stores an empty string; the brief carries `None`,
-        // the absent-facts rule.
-        let unsaid = brief_of(
-            &[filed("pi.1", 10, "s", ""), route("pi.2", 20, "")],
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
-            &id("pi.1"),
-        )
-        .expect("filed");
-        assert!(unsaid.because.is_none());
-    }
-
-    #[test]
-    fn a_done_flight_briefs_with_its_mark() {
+    fn a_closed_flight_briefs_with_its_mark() {
         let brief = brief_of(
             &[
                 filed("pi.1", 10, "s", "the body"),
@@ -856,21 +814,20 @@ mod tests {
             &id("pi.1"),
         )
         .expect("filed");
-        assert_eq!(brief.done_by.as_deref(), Some("closer@b.c"));
-        assert_eq!(brief.done_at, Some(90));
+        assert_eq!(brief.status, "done");
+        assert_eq!(brief.status_by.as_deref(), Some("closer@b.c"));
+        assert_eq!(brief.status_at, Some(90));
         assert_eq!(brief.body, "the body");
-        // Done is not motion — `done_at` is its own field.
-        assert!(brief.last_motion.is_none());
         assert!(matches!(brief.standing, Standing::Done));
         assert!(brief.beat.is_empty(), "not in the walk at all");
     }
 
     #[test]
-    fn last_motion_is_the_max_of_op_claim_question_and_answer() {
+    fn last_motion_is_the_max_of_op_status_question_and_answer() {
         let brief = brief_of(
             &[
                 filed("pi.1", 10, "s", ""),
-                claimed("pi.2", "a@b.c", 40, "pi.1"),
+                moved("pi.2", "a@b.c", 40, "pi.1", "in_progress"),
                 held("pi.3", "a@b.c", 60, "pi.1", "which?"),
                 answered("pi.4", 80, "pi.1"),
             ],
@@ -896,12 +853,12 @@ mod tests {
     }
 
     #[test]
-    fn question_outranks_held_outranks_claimed() {
+    fn question_outranks_held_outranks_in_progress() {
         // One flight carrying all three: the question wins.
         let all = brief_of(
             &[
                 agent("pi.1", 10),
-                claimed("pi.2", "a@b.c", 20, "pi.1"),
+                moved("pi.2", "a@b.c", 20, "pi.1", "in_progress"),
                 held("pi.3", "a@b.c", 30, "pi.1", "which?"),
             ],
             &reads(
@@ -915,9 +872,13 @@ mod tests {
         .expect("filed");
         assert!(matches!(all.standing, Standing::Question));
 
-        // Held and claimed, no question: enrich's order says held.
+        // fufu-held and in progress, no question: enrich's order says
+        // held.
         let fufu_held = brief_of(
-            &[agent("pi.1", 10), claimed("pi.2", "a@b.c", 20, "pi.1")],
+            &[
+                agent("pi.1", 10),
+                moved("pi.2", "a@b.c", 20, "pi.1", "in_progress"),
+            ],
             &reads(
                 vec![op("pi.1", Some("work"), 40)],
                 vec![branch("work", false, true)],
@@ -932,12 +893,12 @@ mod tests {
     }
 
     #[test]
-    fn a_you_crewed_flight_is_yours_never_waiting() {
-        // The crew gate runs before readiness: undone dependencies and
-        // all, the stamp is the answer.
+    fn a_me_laned_flight_is_yours_never_waiting() {
+        // The lane gate runs before readiness: unclosed dependencies and
+        // all, the stored fields are the answer.
         let brief = brief_of(
             &[
-                crewed("pi.1", 10, Some("you")),
+                stored("pi.1", 10, "ready", Some("me")),
                 agent("pi.2", 20),
                 linked("pi.3", 30, "pi.1", "pi.2"),
             ],
@@ -948,23 +909,23 @@ mod tests {
         .expect("filed");
         assert!(matches!(brief.standing, Standing::Yours));
         assert_eq!(
-            brief.part.as_ref().map(|part| part.crew.as_str()),
-            Some("you"),
-            "the crew reads off the flat stamp, not the standing"
+            brief.assignee.as_deref(),
+            Some("me"),
+            "the lane reads off the flat field, not the standing"
         );
     }
 
     #[test]
-    fn a_stampless_parent_is_yours_with_no_crew() {
+    fn a_triage_flight_is_yours_with_no_lane() {
         let brief = brief_of(
-            &[crewed("pi.1", 10, None)],
+            &[filed("pi.1", 10, "s", "")],
             &reads(Vec::new(), Vec::new(), None),
             &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
         assert!(matches!(brief.standing, Standing::Yours));
-        assert!(brief.part.is_none());
+        assert!(brief.assignee.is_none());
     }
 
     #[test]
@@ -1010,12 +971,12 @@ mod tests {
     }
 
     #[test]
-    fn a_claimed_flights_beat_is_what_its_branch_blocks() {
+    fn a_flying_flights_beat_is_what_its_branch_blocks() {
         let brief = brief_of(
             &[
                 agent("pi.1", 10),
                 agent("pi.2", 20),
-                claimed("pi.3", "a@b.c", 30, "pi.1"),
+                moved("pi.3", "a@b.c", 30, "pi.1", "in_progress"),
             ],
             &reads(
                 vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
@@ -1028,7 +989,7 @@ mod tests {
             &id("pi.1"),
         )
         .expect("filed");
-        assert!(matches!(brief.standing, Standing::Claimed));
+        assert!(matches!(brief.standing, Standing::InProgress));
         assert_eq!(brief.beat.len(), 1);
         assert_eq!(brief.beat[0].flight, "pi.2");
         assert!(matches!(
@@ -1104,7 +1065,7 @@ mod tests {
 
     #[test]
     fn the_slimmed_standing_carries_no_duplicate_payload() {
-        // The mark variants flatten to the tag alone: `done_by` appears
+        // The mark variants flatten to the tag alone: `status_by` appears
         // once, from the brief's own field, never a second time from the
         // standing.
         let brief = brief_of(
@@ -1119,9 +1080,9 @@ mod tests {
         .expect("filed");
         let json = serde_json::to_value(&brief).expect("serializes");
         assert_eq!(json["standing"], serde_json::json!("done"));
-        assert_eq!(json["done_by"], serde_json::json!("closer@b.c"));
+        assert_eq!(json["status_by"], serde_json::json!("closer@b.c"));
         let text = serde_json::to_string(&brief).expect("serializes");
-        assert_eq!(text.matches("\"done_by\"").count(), 1);
+        assert_eq!(text.matches("\"status_by\"").count(), 1);
     }
 
     #[test]
@@ -1136,7 +1097,7 @@ mod tests {
         assert!(wants_verdicts(&fold(&two_branches), &paired, &id("pi.1")));
         assert!(wants_verdicts(&fold(&two_branches), &paired, &id("pi.2")));
 
-        // Done: no — not in the walk at all, whatever the board holds.
+        // Closed: no — not in the walk at all, whatever the board holds.
         let with_done = [
             agent("pi.1", 10),
             agent("pi.2", 20),
@@ -1221,8 +1182,8 @@ mod tests {
     #[test]
     fn a_skipped_probe_briefs_byte_identically() {
         // The invariance pin behind the laziness: where `wants_verdicts`
-        // says no, verdicts cannot reach the envelope. A done flight on a
-        // board whose live branches genuinely collide is the strongest
+        // says no, verdicts cannot reach the envelope. A closed flight on
+        // a board whose live branches genuinely collide is the strongest
         // case — the pairs exist, and the answer must not care.
         let events = [
             agent("pi.1", 10),
