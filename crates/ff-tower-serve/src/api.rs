@@ -52,6 +52,7 @@ use axum::http::{HeaderName, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use ff_tower_core::board::{self, ResolveError, Verdicts};
+use ff_tower_core::config;
 use ff_tower_core::ff::{self, Ff};
 use ff_tower_core::log::{self, Store};
 use ff_tower_core::machine;
@@ -176,6 +177,17 @@ fn reply(status: StatusCode, line: String) -> Reply {
 /// publishes identical bytes and stops. Best-effort: a pass that cannot
 /// run is one stderr line, and the board still folds; a lost race
 /// (`log/contended`) is another pass having concluded the same things.
+/// The board audit's threshold for this repository — the CLI's read,
+/// made once per request so a served board says the same thing a typed
+/// one does. A repository whose config will not open gets the compiled
+/// default rather than a failed request.
+fn stale_after(repo: &Path) -> i64 {
+    config::Config::open(repo)
+        .as_ref()
+        .map(config::stale_flight_threshold)
+        .unwrap_or(config::DEFAULT_STALE_FLIGHT)
+}
+
 pub(crate) fn board_envelope(repo: &Path) -> Result<String, ApiError> {
     let ff = Ff::at(repo).env_program();
     let store = Store::open(repo)?;
@@ -187,7 +199,7 @@ pub(crate) fn board_envelope(repo: &Path) -> Result<String, ApiError> {
         Err(err) => eprintln!("ff-tower-serve: the pass did not run: {err}"),
     }
     let events = store.read_all()?;
-    let board = board::assemble(&ff, &events)?;
+    let board = board::assemble(&ff, &events, board::now(), stale_after(repo))?;
     Ok(machine::emit("board", &board))
 }
 
@@ -235,8 +247,16 @@ async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<
         } else {
             Verdicts::default()
         };
-        let brief = board::brief(&fold, &events, &reads, &verdicts, &id)
-            .expect("resolved to a filed flight");
+        let brief = board::brief(
+            &fold,
+            &events,
+            &reads,
+            &verdicts,
+            &id,
+            board::now(),
+            stale_after(repo),
+        )
+        .expect("resolved to a filed flight");
         Ok(machine::emit("brief", &brief))
     })
     .await

@@ -26,6 +26,10 @@ fn xdg(repo: &Path) -> std::path::PathBuf {
         .join("xdg")
 }
 
+fn envelope(output: &Output) -> serde_json::Value {
+    serde_json::from_str(&stdout(output)).expect("an envelope")
+}
+
 fn stdout(output: &Output) -> String {
     assert!(
         output.status.success(),
@@ -35,6 +39,22 @@ fn stdout(output: &Output) -> String {
         String::from_utf8_lossy(&output.stderr),
     );
     String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// Block until the wall clock's second changes — under a second, and the
+/// only way an event and a capture taken back to back land on distinct
+/// stamps.
+fn next_second() {
+    let second = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after the epoch")
+            .as_secs()
+    };
+    let started = second();
+    while second() == started {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 /// A repository with one filed flight on its log.
@@ -71,14 +91,31 @@ fn json_emits_towers_envelope_and_round_trips() {
     let data = envelope["data"].as_object().expect("data is an object");
     for key in [
         "waiting_on_you",
-        "in_the_air",
-        "holding",
-        "open",
+        "triage",
+        "waiting",
+        "ready",
+        "in_progress",
+        "held",
+        "closed",
         "unrouted",
     ] {
         assert!(data.contains_key(key), "data is missing `{key}`");
     }
-    assert_eq!(data["open"][0]["id"], serde_json::json!("pi.1"));
+    let inbox = data["waiting_on_you"]
+        .as_object()
+        .expect("the inbox is an object");
+    for key in ["questions", "yours"] {
+        assert!(inbox.contains_key(key), "the inbox is missing `{key}`");
+    }
+    assert_eq!(data["triage"][0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(data["triage"][0]["stale"], serde_json::json!(false));
+    assert_eq!(
+        data["triage"][0]["changed_since_ready"],
+        serde_json::json!(false)
+    );
+    assert!(data["triage"][0]["last_change"].is_null());
+    assert!(data["triage"][0]["progress"].is_null());
+    assert!(data["triage"][0]["breadcrumb"].is_null());
 }
 
 #[test]
@@ -90,7 +127,7 @@ fn bare_and_the_board_alias_agree_byte_for_byte() {
 }
 
 #[test]
-fn a_piped_render_is_plain_text_and_names_its_sections() {
+fn a_piped_render_is_plain_text_and_names_its_groups() {
     let repo = repo_with_a_filing();
     let out = stdout(&ff_tower(repo.path(), &[]));
 
@@ -98,10 +135,117 @@ fn a_piped_render_is_plain_text_and_names_its_sections() {
         !out.contains('\x1b'),
         "piped output has escape bytes: {out:?}"
     );
-    assert!(out.contains("open\n"), "the section header is named: {out}");
+    assert!(
+        out.contains("triage\n"),
+        "the group header is the stored status: {out}"
+    );
     assert!(out.contains("#1"));
     assert!(out.contains("write the doctor verb"));
     assert!(out.contains("1 flight · ff tower file to add one"));
+}
+
+#[test]
+fn the_groups_are_the_stored_statuses_in_lifecycle_order() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    for subject in ["one", "two", "three", "four"] {
+        stdout(&ff_tower(repo.path(), &["file", subject]));
+    }
+    stdout(&ff_tower(repo.path(), &["status", "2", "waiting"]));
+    stdout(&ff_tower(repo.path(), &["status", "3", "ready"]));
+    stdout(&ff_tower(repo.path(), &["status", "4", "in_progress"]));
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    let order: Vec<usize> = ["triage\n", "waiting\n", "ready\n", "in progress\n"]
+        .iter()
+        .map(|title| {
+            out.find(title)
+                .unwrap_or_else(|| panic!("{title} in {out}"))
+        })
+        .collect();
+    assert!(
+        order.windows(2).all(|pair| pair[0] < pair[1]),
+        "lifecycle order: {out}"
+    );
+
+    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    let data = &envelope["data"];
+    assert_eq!(data["triage"][0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(data["waiting"][0]["id"], serde_json::json!("pi.2"));
+    assert_eq!(data["ready"][0]["id"], serde_json::json!("pi.3"));
+    assert_eq!(data["in_progress"][0]["id"], serde_json::json!("pi.4"));
+}
+
+#[test]
+fn a_closed_flight_lands_in_the_closed_group_and_out_of_the_count() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "finished"]));
+    stdout(&ff_tower(repo.path(), &["file", "still going"]));
+    stdout(&ff_tower(repo.path(), &["done", "1"]));
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("closed\n"), "{out}");
+    assert!(
+        out.contains("1 flight · ff tower file to add one"),
+        "closed is on the record, not in the count: {out}"
+    );
+
+    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["closed"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(
+        envelope["data"]["closed"][0]["status"],
+        serde_json::json!("done")
+    );
+    assert_eq!(
+        envelope["data"]["triage"][0]["id"],
+        serde_json::json!("pi.2")
+    );
+}
+
+#[test]
+fn a_held_flight_is_pinned_in_the_inbox_and_keeps_its_group() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which flow wins?"]);
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("questions\n"), "{out}");
+    assert!(out.contains("held\n"), "{out}");
+    assert!(out.contains("which flow wins?"), "{out}");
+
+    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["waiting_on_you"]["questions"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(envelope["data"]["held"][0]["id"], serde_json::json!("pi.1"));
+}
+
+#[test]
+fn a_ready_flight_in_the_me_lane_is_the_inboxs_second_group() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "mine to do"]));
+    stdout(&ff_tower(repo.path(), &["assign", "1", "me"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("yours\n"), "{out}");
+
+    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["waiting_on_you"]["yours"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(
+        envelope["data"]["ready"][0]["id"],
+        serde_json::json!("pi.1")
+    );
 }
 
 #[test]
@@ -187,11 +331,9 @@ fn colliding_flights_carry_the_warn_phrase_and_the_json_verdicts() {
 
     let out = stdout(&ff_tower(repo.path(), &["--json"]));
     let envelope: serde_json::Value = serde_json::from_str(&out).expect("an envelope");
-    let air = envelope["data"]["in_the_air"]
-        .as_array()
-        .expect("in_the_air");
-    assert_eq!(air.len(), 2);
-    for view in air {
+    let rows = envelope["data"]["triage"].as_array().expect("triage");
+    assert_eq!(rows.len(), 2);
+    for view in rows {
         let other = if view["id"] == serde_json::json!("pi.1") {
             "pi.2"
         } else {
@@ -207,7 +349,44 @@ fn colliding_flights_carry_the_warn_phrase_and_the_json_verdicts() {
 }
 
 #[test]
-fn a_decomposed_parent_carries_the_waiting_phrase_until_its_children_land() {
+fn a_ready_flight_whose_branch_moved_carries_the_audit_line() {
+    use ff_tower_core::ff::Ff;
+
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "cleared work"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+
+    // The capture has to land after the move, which is the whole test —
+    // a branch that moved *before* the flight was set Ready is the
+    // resumed hold, and says nothing. Epoch seconds are the log's
+    // granularity, so wait out the current one first.
+    next_second();
+    repo.write("work.txt", "an agent was here\n");
+    Ff::at(repo.path())
+        .session("pi.1")
+        .status()
+        .expect("status");
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(
+        out.contains("changes on the branch since it was set ready"),
+        "{out}"
+    );
+    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["ready"][0]["changed_since_ready"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        envelope["data"]["ready"][0]["stale"],
+        serde_json::json!(false),
+        "the two audits are independent facts"
+    );
+}
+
+#[test]
+fn a_decomposed_parent_is_one_row_carrying_its_familys_progress() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
@@ -216,19 +395,51 @@ fn a_decomposed_parent_carries_the_waiting_phrase_until_its_children_land() {
         &["decompose", "1", "part one", "part two"],
     ));
 
+    // Filing under a procedure visibly creates one thing, not three.
     let out = stdout(&ff_tower(repo.path(), &[]));
-    assert!(out.contains("waiting on 2 flights"), "{out}");
-
-    // A done dependency has left the board, so the phrase narrows to the
-    // live child and then clears itself.
-    stdout(&ff_tower(repo.path(), &["done", "2"]));
-    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("a broad task (0/2)"), "{out}");
+    assert!(!out.contains("part one"), "the children aggregate: {out}");
     assert!(
-        out.contains("waiting on #3"),
-        "one live child, named: {out}"
+        out.contains("1 flight · ff tower file to add one"),
+        "counts count parents: {out}"
     );
 
-    stdout(&ff_tower(repo.path(), &["done", "3"]));
+    stdout(&ff_tower(repo.path(), &["done", "2"]));
     let out = stdout(&ff_tower(repo.path(), &[]));
-    assert!(!out.contains("waiting on"), "the phrase clears: {out}");
+    assert!(out.contains("a broad task (1/2)"), "{out}");
+    assert!(
+        !out.contains("closed\n"),
+        "a closed child stays under its parent: {out}"
+    );
+
+    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["triage"][0]["progress"],
+        serde_json::json!([1, 2])
+    );
+}
+
+#[test]
+fn a_pullable_sub_flight_surfaces_beside_its_parent_breadcrumbed() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
+    stdout(&ff_tower(
+        repo.path(),
+        &["decompose", "1", "part one", "part two"],
+    ));
+    // The pass advances the first child to Ready in the agent lane; the
+    // second waits on it, so exactly one child needs someone now.
+    stdout(&ff_tower(repo.path(), &["assign", "2", "agent"]));
+    stdout(&ff_tower(repo.path(), &["status", "2", "ready"]));
+
+    let out = stdout(&ff_tower(repo.path(), &[]));
+    assert!(out.contains("a broad task › part one"), "{out}");
+    assert!(!out.contains("part two"), "{out}");
+
+    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["ready"][0]["breadcrumb"],
+        serde_json::json!("a broad task › part one")
+    );
 }

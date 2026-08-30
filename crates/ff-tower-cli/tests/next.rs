@@ -96,22 +96,24 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
     );
     assert!(text.contains("board: ff tower"), "{text}");
 
-    // The pull is a stored status move: the board shows the flight in
-    // the air with the pilot's byline, on the branch it was bound to.
+    // The pull is a stored status move. What was pulled is a sub-flight
+    // and needs nobody now, so the board keeps it under its parent's row
+    // — the brief is where one flight's pilot and branch are read.
     let board = stdout(&ff_tower(repo.path(), &[]));
-    assert!(board.contains("in the air"), "{board}");
-    assert!(
-        board.contains("in progress — tests@tower.invalid"),
-        "{board}"
-    );
-    assert!(board.contains("on flight/pi.2"), "{board}");
+    assert!(board.contains("the one flight (0/2)"), "{board}");
     let json = envelope(&ff_tower(repo.path(), &["--json"]));
-    let air = json["data"]["in_the_air"].as_array().expect("in_the_air");
-    let pulled = air
-        .iter()
-        .find(|view| view["id"] == serde_json::json!("pi.2"))
-        .expect("pi.2 is in the air");
-    assert_eq!(pulled["status"], serde_json::json!("in_progress"));
+    assert_eq!(
+        json["data"]["in_progress"],
+        serde_json::json!([]),
+        "a flight under way competes with nothing"
+    );
+
+    let brief = stdout(&ff_tower(repo.path(), &["brief", "2"]));
+    assert!(
+        brief.contains("in progress — tests@tower.invalid"),
+        "{brief}"
+    );
+    assert!(brief.contains("on flight/pi.2"), "{brief}");
 
     // The pool is empty and the parent and `verdict` are born Waiting —
     // no Ready work off the lane, so the drained code is 1, not 3.
@@ -216,9 +218,9 @@ fn peek_reads_without_pulling() {
     assert!(!text.contains("in progress"), "{text}");
 
     let board = stdout(&ff_tower(repo.path(), &[]));
-    assert!(board.contains("open"), "{board}");
+    assert!(board.contains("ready\n"), "{board}");
     assert!(
-        !board.contains("in the air"),
+        !board.contains("in progress\n"),
         "the peek wrote nothing: {board}"
     );
 
@@ -308,15 +310,15 @@ fn deconfliction_passes_the_collider_pulls_the_clear_one_and_pins_the_json() {
         "{text}"
     );
 
-    let board = stdout(&ff_tower(repo.path(), &["--json"]));
-    let board: serde_json::Value = serde_json::from_str(&board).expect("an envelope");
-    let air = board["data"]["in_the_air"].as_array().expect("in_the_air");
-    let picked = air
-        .iter()
-        .find(|view| view["id"] == serde_json::json!("pi.14"))
-        .expect("pi.14 is in the air");
-    assert_eq!(picked["status"], serde_json::json!("in_progress"));
-    assert!(picked["status_by"].is_string(), "{picked}");
+    // A pulled sub-flight sits under its parent on the board, so the
+    // move is read back off its own record.
+    let brief: serde_json::Value = serde_json::from_str(&stdout(&ff_tower(
+        repo.path(),
+        &["brief", "pi.14", "--json"],
+    )))
+    .expect("an envelope");
+    assert_eq!(brief["data"]["status"], serde_json::json!("in_progress"));
+    assert!(brief["data"]["status_by"].is_string(), "{brief}");
 }
 
 #[test]
@@ -496,7 +498,7 @@ fn peek_reports_the_bay_and_the_branch_and_binds_neither() {
     let branches = ff_at(repo.path(), &["branch", "list"]);
     assert!(!branches.contains("flight/pi.2"), "{branches}");
     let board = stdout(&ff_tower(repo.path(), &[]));
-    assert!(!board.contains("in the air"), "{board}");
+    assert!(!board.contains("in progress\n"), "{board}");
 }
 
 #[test]

@@ -110,6 +110,12 @@ pub struct Setting {
     pub desc: &'static [&'static str],
 }
 
+/// The board audit's threshold when nothing else says otherwise: two
+/// days without a change on the branch before an In Progress flight says
+/// so. Compiled in beside the registry row that spells it, the
+/// `DEFAULT_PORT` precedent, and a test holds the two together.
+pub const DEFAULT_STALE_FLIGHT: i64 = 2 * 24 * 60 * 60;
+
 /// The port `ff tower serve` binds when nothing else says otherwise —
 /// the last of the four lanes, behind `--port`, `TOWER_PORT`, and
 /// `tower.servePort`. Compiled in rather than configured because a
@@ -138,6 +144,19 @@ pub fn registry() -> &'static [Setting] {
                 "The pool root bare `bay warm` mints bay-<n> slots under: absolute,",
                 "or relative to the main worktree. Unset, bare warm refuses and",
                 "asks for a path.",
+            ],
+        },
+        Setting {
+            name: "staleFlightThreshold",
+            key: "tower.staleFlightThreshold",
+            def: "2d",
+            kind: SettingKind::Cadence,
+            desc: &[
+                "How long an In Progress flight goes without a change on its branch",
+                "before the board says so. false turns the line off; true means the",
+                "default; durations work too (12h, 7d, 2w), floored at one minute.",
+                "The other audit line — a Ready flight whose branch moved — has no",
+                "threshold and is never off.",
             ],
         },
         Setting {
@@ -187,6 +206,20 @@ pub fn registry() -> &'static [Setting] {
             ],
         },
     ]
+}
+
+/// The board audit's threshold in seconds, decoded off the registry row:
+/// `0` when the key says `false`, which turns the stale line off; the
+/// compiled default when nothing is set; the configured duration
+/// otherwise. Every board surface reads it here so the three of them
+/// cannot drift.
+pub fn stale_flight_threshold(config: &Config) -> i64 {
+    let setting = lookup("staleFlightThreshold").expect("staleFlightThreshold is registered");
+    match config.read_cadence(setting) {
+        -1 => 0,
+        0 => DEFAULT_STALE_FLIGHT,
+        seconds => seconds,
+    }
 }
 
 /// The setting a user's spelling names: case-insensitive, `tower.`

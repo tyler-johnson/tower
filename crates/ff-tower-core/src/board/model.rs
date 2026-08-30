@@ -1,36 +1,75 @@
-//! The board: the fold's flights, enriched with the repository's answer to
-//! "where is each one" and partitioned into the inbox's sections.
+//! The board: the fold's flights, enriched with the repository's answer
+//! to "where is each one" and grouped by the status a person set.
 //!
-//! `enrich` is pure again — it runs over a [`Reads`] the caller already
-//! gathered, so section classification is unit-testable with hand-built
-//! rows and no repository. The partition is a mechanical adaptation of
-//! the four sections to the stored model; the status-grouped board and
-//! its drift lines are a later rework's.
+//! `enrich` is pure — it runs over a [`Reads`] the caller already
+//! gathered, plus the two scalars it refuses to read for itself: `now`,
+//! and the threshold behind the stale line. Grouping is the stored model
+//! made visible. A flight sits in the group its own `status` field
+//! names and nothing derived moves it; `held`/`resolving` stay fufu's
+//! branch verdicts, printed on the row, deciding no section.
+//!
+//! What the repository knows lands beside the fields as two independent
+//! facts, never joined under one word: a flight In Progress that its
+//! branch has forgotten, and a Ready flight whose branch moved after it
+//! was set Ready. One is staleness and one is its opposite.
+//!
+//! Above the groups sits the inbox — questions and yours — a view of the
+//! same rows rather than a seventh group, and the one place a sub-flight
+//! is allowed to compete with its parent.
+
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
 use crate::ff::Pairing;
-use crate::log::Event;
+use crate::log::{Event, EventId};
 
 use super::flight::{Flight, Fold};
 use super::reads::{Reads, Verdicts};
 
-/// The inbox's four sections, plus what the fold could not route.
+/// How long a closed flight stays on the board: three days, so Friday
+/// still shows Monday. A constant rather than a config key — the window
+/// is a render's memory of the week, not a preference, and the log was
+/// always the full record regardless.
+const CLOSED_WINDOW: i64 = 3 * 24 * 60 * 60;
+
+/// The stored model as an envelope: the inbox, then one group per status
+/// in lifecycle order, then what the fold could not route.
 ///
-/// A closed flight — done or canceled — appears in none of them —
-/// sections and JSON both; the log keeps its record, and a `--json`
-/// consumer deliberately has no "done" list to read.
+/// A flight appears in exactly one status group — the one its `status`
+/// field names — and a status string this binary has never heard of
+/// routes nowhere rather than being invented into a group. `closed`
+/// carries done and canceled for [`CLOSED_WINDOW`]; the log keeps the
+/// rest.
 #[derive(Debug, Serialize)]
 pub struct Board {
-    pub waiting_on_you: Vec<FlightView>,
-    pub in_the_air: Vec<FlightView>,
-    pub holding: Vec<FlightView>,
-    pub open: Vec<FlightView>,
+    pub waiting_on_you: WaitingOnYou,
+    pub triage: Vec<FlightView>,
+    pub waiting: Vec<FlightView>,
+    pub ready: Vec<FlightView>,
+    pub in_progress: Vec<FlightView>,
+    pub held: Vec<FlightView>,
+    /// Done and canceled, newest first, the last [`CLOSED_WINDOW`].
+    pub closed: Vec<FlightView>,
     pub unrouted: Vec<Event>,
 }
 
-/// One flight, as a render sees it.
+/// Pinned above the status groups: what needs a person now. A view of
+/// the same rows — a flight here still appears in its status group.
 #[derive(Debug, Serialize)]
+pub struct WaitingOnYou {
+    /// Held with an open question — an agent is stopped on you. Oldest
+    /// ask first, so the longest-blocked agent takes the top row.
+    pub questions: Vec<FlightView>,
+    /// Ready in the `me` lane — the todo list. Narrower than
+    /// `Picks::yours`, which counts every Ready flight outside the agent
+    /// lane: an unassigned flight is nobody's claim, and it still stands
+    /// in the `ready` group.
+    pub yours: Vec<FlightView>,
+}
+
+/// One flight, as a render sees it.
+#[derive(Debug, Clone, Serialize)]
 pub struct FlightView {
     pub id: String,
     /// The dense per-writer flight number — the human name's numeric
@@ -61,7 +100,19 @@ pub struct FlightView {
     pub branch: Option<String>,
     /// That branch's tip, when the branch resolves to a row in the index.
     pub tip: Option<String>,
-    pub last_motion: Option<i64>,
+    /// The freshest session-tagged capture on this flight's branch — the
+    /// repository's fact, and nothing the record itself did.
+    pub last_change: Option<i64>,
+    /// In Progress, and the branch has not changed for the threshold.
+    pub stale: bool,
+    /// Ready, and the branch changed after the flight was set Ready.
+    pub changed_since_ready: bool,
+    /// Closed children over total, whenever this flight has children at
+    /// all — what a render prints as `(2/6)`.
+    pub progress: Option<(usize, usize)>,
+    /// `"{parent subject} › {leaf}"`, set only on a sub-flight that
+    /// surfaced beside its parent, so the row is legible alone.
+    pub breadcrumb: Option<String>,
     pub held: bool,
     pub resolving: bool,
     /// The branch is the one this render's own worktree sits on.
@@ -78,7 +129,7 @@ pub struct FlightView {
 }
 
 /// One discovered conflict, as a flight's row carries it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CollideView {
     /// The other flight's id.
     pub with: String,
@@ -86,26 +137,32 @@ pub struct CollideView {
     pub paths: Vec<String>,
 }
 
-/// Partition the fold's flights using already-fetched reads.
+/// Group the fold's flights by their stored status, using already-fetched
+/// reads.
 ///
-/// Per flight, in order: closed drops it before any section; an
-/// unanswered question is *waiting on you*; a branch fufu holds (`held`
-/// or `resolving`) is *holding*; an In Progress status or an op row is
-/// *in the air*; the rest is *open*. Enrichment runs before routing, so
-/// a waiting flight keeps its branch and tip — a warm bay is the point
-/// of holding. A branch of `None`, `@detached`, or a name absent from
-/// the index (deleted, or landed) cannot be held by definition: the
-/// flight stays in the air. `last_motion` is the max of the freshest op
-/// row's time, the status move, the question, the freshest answer, and
-/// the last edit.
+/// `now` and `stale_after` are arguments so the module stays pure and
+/// reads no clock and no config: a board is a function of its inputs, and
+/// `stale_after` of `0` turns the stale line off entirely.
+///
+/// Every flight is enriched first — branch from the freshest op row
+/// (`@detached` carried literal), tip and holds from the branch row,
+/// `last_change` from the op row's time — and then routed by `status`
+/// alone. The inbox is a second view over the same rows: an open question
+/// puts a flight in `questions`, Ready in the `me` lane puts it in
+/// `yours`, and both keep their place in the status group below.
+///
+/// Altitude: every depends-on edge is a parent edge, so a top-level row
+/// is a flight nothing depends on. A sub-flight is aggregated into its
+/// parent's progress mark and rendered nowhere else, except in the one
+/// situation it needs someone now — it is in the inbox, or it is what the
+/// agent queue would hand out — and there it carries a breadcrumb.
 ///
 /// Verdicts land on every live flight against every other live flight on
-/// a distinct branch — waiting and holding rows keep their conflicts,
-/// because the facts are orthogonal to the section. `Collide` becomes a
-/// `collides` entry, `Unknown` an `unanswered` one, and `Clear` or an
-/// unprobed pair adds nothing; entries keep filed order, so a render is
-/// deterministic.
-pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
+/// a distinct branch — the facts are orthogonal to the group. `Collide`
+/// becomes a `collides` entry, `Unknown` an `unanswered` one, and `Clear`
+/// or an unprobed pair adds nothing; entries keep filed order, so a
+/// render is deterministic.
+pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_after: i64) -> Board {
     let freshest = reads.freshest();
     let branches = reads.branch_index();
 
@@ -125,36 +182,78 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
         })
         .collect();
 
-    let mut waiting_on_you = Vec::new();
-    let mut in_the_air = Vec::new();
-    let mut holding = Vec::new();
-    let mut open = Vec::new();
-    for flight in fold.flights {
-        if flight.closed() {
-            continue;
+    // Altitude and the progress marks, taken before the flights are
+    // consumed and carried as owned rows.
+    let (roots, crumbs, marks) = {
+        let parents = parents_of(&fold);
+        let by_id: HashMap<&EventId, &Flight> = fold
+            .flights
+            .iter()
+            .map(|flight| (&flight.id, flight))
+            .collect();
+        let mut roots: HashSet<String> = HashSet::new();
+        let mut crumbs: HashMap<String, String> = HashMap::new();
+        let mut marks: HashMap<String, (usize, usize)> = HashMap::new();
+        for flight in &fold.flights {
+            let id = flight.id.to_string();
+            // The first parent in filed order names the lineage: a flight
+            // with two parents is a graph, and a crumb is one path.
+            match parents.get(&flight.id).and_then(|ids| ids.first()) {
+                Some(parent) => {
+                    crumbs.insert(id.clone(), breadcrumb(by_id[*parent], flight));
+                }
+                None => {
+                    roots.insert(id.clone());
+                }
+            }
+            if let Some(mark) = progress(&fold, flight) {
+                marks.insert(id, mark);
+            }
         }
-        let op = freshest.get(flight.id.to_string().as_str()).copied();
+        (roots, crumbs, marks)
+    };
+
+    let mut inbox = WaitingOnYou {
+        questions: Vec::new(),
+        yours: Vec::new(),
+    };
+    let mut triage = Vec::new();
+    let mut waiting = Vec::new();
+    let mut ready = Vec::new();
+    let mut in_progress = Vec::new();
+    let mut held = Vec::new();
+    let mut closed = Vec::new();
+    for flight in fold.flights {
+        let id = flight.id.to_string();
+        let op = freshest.get(id.as_str()).copied();
         let row = op.and_then(|op| {
             op.branch
                 .as_deref()
                 .filter(|name| *name != "@detached")
                 .and_then(|name| branches.get(name).copied())
         });
-        let last_motion = [
-            op.map(|op| op.time),
-            flight.status_mark.as_ref().map(|mark| mark.at),
-            flight.question.as_ref().map(|question| question.at),
-            flight.answered_at,
-            flight.edited.as_ref().map(|mark| mark.at),
-        ]
-        .into_iter()
-        .flatten()
-        .max();
-        let in_progress = flight.status == "in_progress";
+        let last_change = op.map(|op| op.time);
+        let status_at = flight.status_mark.as_ref().map(|mark| mark.at);
+        let is_closed = flight.closed();
+        let pullable = flight.pullable();
+
+        // The first audit: In Progress and the branch has forgotten it.
+        // With no capture at all the clock runs from the move itself —
+        // a flight declared In Progress and never touched is exactly the
+        // case the line exists for.
+        let stale = flight.status == "in_progress"
+            && stale_after > 0
+            && now - last_change.or(status_at).unwrap_or(flight.filed_at) >= stale_after;
+        // The second: Ready, and the branch moved *after* it was set
+        // Ready. After, not merely at all — `answered` forces Ready
+        // unconditionally, so every resumed hold carries a full branch
+        // and a flat check would be pure noise.
+        let changed_since_ready = flight.status == "ready"
+            && matches!((last_change, status_at), (Some(change), Some(set)) if change > set);
+
         let mut collides = Vec::new();
         let mut unanswered = Vec::new();
-        if let Some(branch) = op.and_then(|op| op.branch.as_deref()) {
-            let id = flight.id.to_string();
+        if !is_closed && let Some(branch) = op.and_then(|op| op.branch.as_deref()) {
             for (other, theirs) in &assignments {
                 if *other == id || theirs == branch {
                     continue;
@@ -169,44 +268,156 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts) -> Board {
                 }
             }
         }
+
+        let is_root = roots.contains(&id);
         let mut view = view(
             flight,
             op.and_then(|op| op.branch.clone()),
             row.and_then(|row| row.tip.clone()),
-            last_motion,
             row.is_some_and(|row| row.held),
             row.is_some_and(|row| row.resolving),
             reads.current_branch.as_deref(),
         );
+        view.last_change = last_change;
+        view.stale = stale;
+        view.changed_since_ready = changed_since_ready;
         view.collides = collides;
         view.unanswered = unanswered;
-        if view.question.is_some() {
-            waiting_on_you.push(view);
-        } else if view.held || view.resolving {
-            holding.push(view);
-        } else if op.is_some() || in_progress {
-            in_the_air.push(view);
-        } else {
-            open.push(view);
+        view.progress = marks.get(&id).copied();
+        if !is_root {
+            view.breadcrumb = crumbs.get(&id).cloned();
+        }
+
+        // The inbox, live rows only: a closed flight needs nobody, and
+        // `done` does not clear a question the log still carries.
+        let questioned = !is_closed && view.question.is_some();
+        let mine = !is_closed && view.status == "ready" && view.assignee.as_deref() == Some("me");
+        if questioned {
+            inbox.questions.push(view.clone());
+        } else if mine {
+            inbox.yours.push(view.clone());
+        }
+
+        // A sub-flight never competes with its parent for attention —
+        // unless it is what needs someone right now.
+        if !is_root && !questioned && !mine && !pullable {
+            continue;
+        }
+        match view.status.as_str() {
+            "triage" => triage.push(view),
+            "waiting" => waiting.push(view),
+            "ready" => ready.push(view),
+            "in_progress" => in_progress.push(view),
+            "held" => held.push(view),
+            "done" | "canceled" if now - closed_at(&view) <= CLOSED_WINDOW => {
+                closed.push(view);
+            }
+            // A status this binary has never heard of routes nowhere.
+            // Inventing a group for it would be the fold's tolerance
+            // spent on a guess.
+            _ => {}
         }
     }
 
-    // Waiting sorts oldest-asked first — the longest-blocked agent gets
-    // the top row. The rest are this slice's placeholders: motion
-    // freshest-first in the air and holding, filed oldest-first in open.
-    // DESIGN's status-then-priority-then-age grouping is a later
-    // rework's.
-    waiting_on_you.sort_by_key(|view| view.asked_at);
-    in_the_air.sort_by_key(|view| std::cmp::Reverse(view.last_motion));
-    holding.sort_by_key(|view| std::cmp::Reverse(view.last_motion));
-    open.sort_by_key(|view| view.filed_at);
+    inbox.questions.sort_by_key(|view| view.asked_at);
+    order(&mut inbox.yours);
+    for group in [
+        &mut triage,
+        &mut waiting,
+        &mut ready,
+        &mut in_progress,
+        &mut held,
+    ] {
+        order(group);
+    }
+    closed.sort_by_key(|view| std::cmp::Reverse(closed_at(view)));
 
     Board {
-        waiting_on_you,
-        in_the_air,
-        holding,
-        open,
+        waiting_on_you: inbox,
+        triage,
+        waiting,
+        ready,
+        in_progress,
+        held,
+        closed,
         unrouted: fold.unrouted,
+    }
+}
+
+/// Who depends on each flight: `depends_on` inverted, because every
+/// depends-on edge is a parent edge — X depends on Y makes X a parent of
+/// Y. Parents come out in filed order, the fold's own.
+fn parents_of(fold: &Fold) -> HashMap<&EventId, Vec<&EventId>> {
+    let mut parents: HashMap<&EventId, Vec<&EventId>> = HashMap::new();
+    for flight in &fold.flights {
+        for child in &flight.depends_on {
+            parents.entry(child).or_default().push(&flight.id);
+        }
+    }
+    parents
+}
+
+/// Closed children over total, or `None` for a flight with no children.
+/// Canceled counts as closed: the part is over, whatever it concluded.
+pub(super) fn progress(fold: &Fold, flight: &Flight) -> Option<(usize, usize)> {
+    if flight.depends_on.is_empty() {
+        return None;
+    }
+    let closed = flight
+        .depends_on
+        .iter()
+        .filter(|child| {
+            fold.flights
+                .iter()
+                .find(|other| &other.id == *child)
+                .is_some_and(Flight::closed)
+        })
+        .count();
+    Some((closed, flight.depends_on.len()))
+}
+
+/// A sub-flight's subject with its parent's in front. Procedure children
+/// are minted `"{parent} · {id}"` (`verb/classify.rs`), so the parent's
+/// half comes off before the join or the crumb says it twice. A parent
+/// reworded since the minting no longer matches its children's prefix,
+/// and their whole subject stands as the leaf.
+fn breadcrumb(parent: &Flight, child: &Flight) -> String {
+    let minted = format!("{} · ", parent.subject);
+    let leaf = child
+        .subject
+        .strip_prefix(minted.as_str())
+        .unwrap_or(child.subject.as_str());
+    format!("{} › {leaf}", parent.subject)
+}
+
+/// When a closed flight closed: the status move that closed it, or the
+/// filing for a flight that arrived closed.
+fn closed_at(view: &FlightView) -> i64 {
+    view.status_at.unwrap_or(view.filed_at)
+}
+
+/// Within a group: priority first, then age oldest-first. The sort is
+/// stable and the fold hands flights over in filed order, so equal rows
+/// keep it.
+fn order(views: &mut [FlightView]) {
+    views.sort_by(|a, b| {
+        rank(&a.priority)
+            .cmp(&rank(&b.priority))
+            .then(a.filed_at.cmp(&b.filed_at))
+    });
+}
+
+/// The priority vocabulary, urgent first. A word this binary has never
+/// heard of sorts after `none` rather than being invented into the middle
+/// of the ladder.
+fn rank(priority: &str) -> u8 {
+    match priority {
+        "urgent" => 0,
+        "high" => 1,
+        "medium" => 2,
+        "low" => 3,
+        "none" => 4,
+        _ => 5,
     }
 }
 
@@ -214,7 +425,6 @@ fn view(
     flight: Flight,
     branch: Option<String>,
     tip: Option<String>,
-    last_motion: Option<i64>,
     held: bool,
     resolving: bool,
     current_branch: Option<&str>,
@@ -246,7 +456,11 @@ fn view(
         skill: flight.skill,
         branch,
         tip,
-        last_motion,
+        last_change: None,
+        stale: false,
+        changed_since_ready: false,
+        progress: None,
+        breadcrumb: None,
         held,
         resolving,
         current,
@@ -265,30 +479,29 @@ mod tests {
     use crate::ff::{BranchInfo, BranchList, OpEntry};
     use crate::log::{Event, EventId, Kind};
 
-    fn filed(id: &str, time: i64) -> Event {
-        let id: EventId = id.parse().expect("id");
-        Event {
-            writer: id.writer.clone(),
-            author: "a@b.c".to_string(),
-            time,
-            id,
-            kind: Kind::Filed {
-                procedure: None,
-                subject: format!("subject of {time}"),
-                body: String::new(),
-                status: "triage".to_string(),
-                assignee: None,
-                priority: "none".to_string(),
-                labels: Vec::new(),
-                skill: None,
-                bay: None,
-                done: "asserted".to_string(),
-                branch: None,
-            },
+    /// The tests' clock: far enough past every fixture time that an age
+    /// is whatever the fixture says it is.
+    const NOW: i64 = 1_000_000;
+    /// The registry's default, in seconds.
+    const TWO_DAYS: i64 = 2 * 24 * 60 * 60;
+
+    fn filing(status: &str, priority: &str, assignee: Option<&str>, subject: &str) -> Kind {
+        Kind::Filed {
+            procedure: None,
+            subject: subject.to_string(),
+            body: String::new(),
+            status: status.to_string(),
+            assignee: assignee.map(str::to_string),
+            priority: priority.to_string(),
+            labels: Vec::new(),
+            skill: None,
+            bay: None,
+            done: "asserted".to_string(),
+            branch: None,
         }
     }
 
-    fn lifecycle(id: &str, time: i64, kind: Kind) -> Event {
+    fn event(id: &str, time: i64, kind: Kind) -> Event {
         let id: EventId = id.parse().expect("id");
         Event {
             writer: id.writer.clone(),
@@ -297,6 +510,37 @@ mod tests {
             id,
             kind,
         }
+    }
+
+    fn filed(id: &str, time: i64) -> Event {
+        event(
+            id,
+            time,
+            filing("triage", "none", None, &format!("subject of {time}")),
+        )
+    }
+
+    /// A filing carrying stored fields the grouping and the ordering read.
+    fn filed_as(
+        id: &str,
+        time: i64,
+        status: &str,
+        priority: &str,
+        assignee: Option<&str>,
+    ) -> Event {
+        event(
+            id,
+            time,
+            filing(status, priority, assignee, &format!("subject of {time}")),
+        )
+    }
+
+    fn subjected(id: &str, time: i64, subject: &str) -> Event {
+        event(id, time, filing("triage", "none", None, subject))
+    }
+
+    fn lifecycle(id: &str, time: i64, kind: Kind) -> Event {
+        event(id, time, kind)
     }
 
     fn moved(id: &str, time: i64, flight: &str, to: &str) -> Event {
@@ -329,6 +573,17 @@ mod tests {
             Kind::Answered {
                 flight: flight.parse().expect("id"),
                 answer: "an answer".to_string(),
+            },
+        )
+    }
+
+    fn linked(id: &str, time: i64, from: &str, to: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Linked {
+                from: from.parse().expect("id"),
+                to: to.parse().expect("id"),
             },
         )
     }
@@ -367,257 +622,228 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_tagged_flight_is_in_the_air() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10)]),
-            &reads(
-                vec![op("pi.1", Some("work"), 50)],
-                vec![branch("work", false, false)],
-                Some("main"),
-            ),
-            &Verdicts::default(),
-        );
-        assert_eq!(board.in_the_air.len(), 1);
-        let view = &board.in_the_air[0];
-        assert_eq!(view.id, "pi.1");
-        assert_eq!(view.number, 1);
-        assert_eq!(view.branch.as_deref(), Some("work"));
-        assert_eq!(view.tip.as_deref().map(|t| &t[..8]), Some("3c8f9168"));
-        assert_eq!(view.last_motion, Some(50));
-        assert!(!view.current);
-        assert!(board.holding.is_empty() && board.open.is_empty());
+    /// The common shape: no threshold, so the stale line never fires
+    /// where a test is not about it.
+    fn board(events: &[Event], reads: &Reads) -> Board {
+        enrich(fold(events), reads, &Verdicts::default(), NOW, 0)
+    }
+
+    fn ids(views: &[FlightView]) -> Vec<&str> {
+        views.iter().map(|view| view.id.as_str()).collect()
     }
 
     #[test]
-    fn an_in_progress_status_alone_is_in_the_air() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), moved("pi.2", 40, "pi.1", "in_progress")]),
+    fn every_status_routes_to_its_own_group_and_nothing_derived_moves_it() {
+        let board = board(
+            &[
+                filed_as("pi.1", 10, "triage", "none", None),
+                filed_as("pi.2", 20, "waiting", "none", None),
+                filed_as("pi.3", 30, "ready", "none", None),
+                filed_as("pi.4", 40, "in_progress", "none", None),
+                filed_as("pi.5", 50, "held", "none", None),
+            ],
+            // A held branch under every one of them: fufu's verdict is a
+            // fact on the row, not a section.
+            &reads(
+                vec![op("pi.1", Some("work"), 60)],
+                vec![branch("work", true, true)],
+                None,
+            ),
+        );
+        assert_eq!(ids(&board.triage), ["pi.1"]);
+        assert_eq!(ids(&board.waiting), ["pi.2"]);
+        assert_eq!(ids(&board.ready), ["pi.3"]);
+        assert_eq!(ids(&board.in_progress), ["pi.4"]);
+        assert_eq!(ids(&board.held), ["pi.5"]);
+        assert!(board.closed.is_empty());
+        assert!(board.triage[0].held && board.triage[0].resolving);
+    }
+
+    #[test]
+    fn an_unknown_status_routes_nowhere() {
+        let board = board(
+            &[filed("pi.1", 10), moved("pi.2", 20, "pi.1", "parked")],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
         );
-        assert_eq!(board.in_the_air.len(), 1);
-        let view = &board.in_the_air[0];
-        assert_eq!(view.status, "in_progress");
-        assert_eq!(view.status_by.as_deref(), Some("a@b.c"));
-        assert_eq!(view.status_at, Some(40));
-        assert!(view.branch.is_none());
-        assert_eq!(view.last_motion, Some(40));
+        assert!(board.triage.is_empty());
+        assert!(board.waiting.is_empty());
+        assert!(board.ready.is_empty());
+        assert!(board.in_progress.is_empty());
+        assert!(board.held.is_empty());
+        assert!(board.closed.is_empty());
     }
 
     #[test]
-    fn a_held_branch_puts_its_flight_in_holding() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10)]),
-            &reads(
-                vec![op("pi.1", Some("work"), 50)],
-                vec![branch("work", true, false)],
-                None,
-            ),
-            &Verdicts::default(),
+    fn a_group_sorts_by_priority_then_oldest_first() {
+        let board = board(
+            &[
+                filed_as("pi.1", 10, "triage", "low", None),
+                filed_as("pi.2", 20, "triage", "urgent", None),
+                filed_as("pi.3", 30, "triage", "none", None),
+                filed_as("pi.4", 40, "triage", "high", None),
+                filed_as("pi.5", 50, "triage", "urgent", None),
+                filed_as("pi.6", 60, "triage", "medium", None),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
         );
-        assert!(board.in_the_air.is_empty());
-        assert_eq!(board.holding.len(), 1);
-        assert!(board.holding[0].held);
-        assert!(!board.holding[0].resolving);
-    }
-
-    #[test]
-    fn a_resolving_branch_puts_its_flight_in_holding() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10)]),
-            &reads(
-                vec![op("pi.1", Some("work"), 50)],
-                vec![branch("work", false, true)],
-                None,
-            ),
-            &Verdicts::default(),
-        );
-        assert_eq!(board.holding.len(), 1);
-        assert!(board.holding[0].resolving);
-    }
-
-    #[test]
-    fn an_untouched_flight_is_open_with_its_stored_fields() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10)]),
-            &reads(Vec::new(), Vec::new(), Some("main")),
-            &Verdicts::default(),
-        );
-        assert_eq!(board.open.len(), 1);
-        let view = &board.open[0];
-        assert!(view.branch.is_none() && view.tip.is_none() && view.last_motion.is_none());
-        assert!(!view.held && !view.resolving && !view.current);
-        assert_eq!(view.status, "triage");
-        assert!(view.status_by.is_none() && view.status_at.is_none());
-        assert!(view.assignee.is_none());
-        assert_eq!(view.priority, "none");
-        assert!(view.labels.is_empty());
-        assert!(view.skill.is_none());
-        assert!(view.procedure.is_none());
-    }
-
-    #[test]
-    fn a_detached_flight_stays_in_the_air_and_is_never_held() {
-        // Even with a held branch in the index — `@detached` names nothing
-        // and must not accidentally resolve to a row.
-        let board = enrich(
-            fold(&[filed("pi.1", 10)]),
-            &reads(
-                vec![op("pi.1", Some("@detached"), 50)],
-                vec![branch("@detached", true, true)],
-                None,
-            ),
-            &Verdicts::default(),
-        );
-        assert_eq!(board.in_the_air.len(), 1);
-        let view = &board.in_the_air[0];
-        assert_eq!(view.branch.as_deref(), Some("@detached"));
-        assert!(view.tip.is_none());
-        assert!(!view.held && !view.resolving);
-    }
-
-    #[test]
-    fn the_current_branch_marks_its_flight() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10)]),
-            &reads(
-                vec![op("pi.1", Some("main"), 50)],
-                vec![branch("main", false, false)],
-                Some("main"),
-            ),
-            &Verdicts::default(),
-        );
-        assert!(board.in_the_air[0].current);
-    }
-
-    #[test]
-    fn in_the_air_is_sorted_freshest_first_and_the_freshest_row_wins_per_tag() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), filed("pi.2", 20)]),
-            &reads(
-                vec![
-                    op("pi.1", Some("old"), 40),
-                    op("pi.1", Some("new"), 60),
-                    op("pi.2", Some("other"), 50),
-                ],
-                vec![branch("new", false, false), branch("other", false, false)],
-                None,
-            ),
-            &Verdicts::default(),
-        );
-        let ids: Vec<&str> = board.in_the_air.iter().map(|v| v.id.as_str()).collect();
-        assert_eq!(ids, ["pi.1", "pi.2"], "freshest motion first");
         assert_eq!(
-            board.in_the_air[0].branch.as_deref(),
-            Some("new"),
-            "the freshest op row's branch wins"
+            ids(&board.triage),
+            ["pi.2", "pi.5", "pi.4", "pi.6", "pi.1", "pi.3"],
+            "urgent oldest-first, then high, medium, low, none"
         );
     }
 
     #[test]
-    fn open_is_sorted_oldest_filing_first() {
-        let board = enrich(
-            fold(&[filed("pi.2", 20), filed("pi.1", 10)]),
+    fn an_unknown_priority_sorts_after_none() {
+        let board = board(
+            &[
+                filed_as("pi.1", 10, "triage", "blocker", None),
+                filed_as("pi.2", 20, "triage", "none", None),
+            ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
         );
-        let times: Vec<i64> = board.open.iter().map(|v| v.filed_at).collect();
-        assert_eq!(times, [10, 20]);
+        assert_eq!(ids(&board.triage), ["pi.2", "pi.1"]);
     }
 
     #[test]
-    fn a_question_beats_a_held_branch_and_keeps_the_bay() {
-        // The routing order: waiting on you wins over holding even when
-        // fufu holds the branch, and the enrichment survives the move —
-        // a warm bay is the point of holding.
-        let board = enrich(
-            fold(&[filed("pi.1", 10), held("pi.2", 60, "pi.1", "which?")]),
-            &reads(
-                vec![op("pi.1", Some("work"), 50)],
-                vec![branch("work", true, false)],
-                None,
-            ),
-            &Verdicts::default(),
-        );
-        assert!(board.holding.is_empty() && board.in_the_air.is_empty());
-        assert_eq!(board.waiting_on_you.len(), 1);
-        let view = &board.waiting_on_you[0];
-        assert_eq!(view.question.as_deref(), Some("which?"));
-        assert_eq!(view.asked_at, Some(60));
-        assert_eq!(view.status, "held", "the hold is a status move too");
-        assert_eq!(view.branch.as_deref(), Some("work"));
-        assert!(view.tip.is_some());
-        assert!(view.held);
-    }
-
-    #[test]
-    fn a_closed_flight_appears_nowhere() {
-        let board = enrich(
-            fold(&[
+    fn the_closed_group_carries_the_window_newest_first() {
+        let fresh = NOW - 60;
+        let older = NOW - 3_600;
+        let expired = NOW - CLOSED_WINDOW - 1;
+        let board = board(
+            &[
                 filed("pi.1", 10),
                 filed("pi.2", 20),
-                done("pi.3", 60, "pi.1"),
-                moved("pi.4", 70, "pi.2", "canceled"),
-            ]),
-            &reads(
-                vec![op("pi.1", Some("work"), 50)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-            &Verdicts::default(),
+                filed("pi.3", 30),
+                done("pi.4", older, "pi.1"),
+                moved("pi.5", fresh, "pi.2", "canceled"),
+                done("pi.6", expired, "pi.3"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
         );
-        assert!(board.waiting_on_you.is_empty());
-        assert!(board.in_the_air.is_empty());
-        assert!(board.holding.is_empty());
-        assert!(board.open.is_empty());
+        assert_eq!(ids(&board.closed), ["pi.2", "pi.1"], "newest first");
+        assert_eq!(board.closed[0].status, "canceled");
+        assert!(board.triage.is_empty(), "a closed flight leaves its group");
     }
 
     #[test]
-    fn a_status_move_and_an_op_row_take_the_freshest_time_as_motion() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), moved("pi.2", 40, "pi.1", "in_progress")]),
-            &reads(
-                vec![op("pi.1", Some("work"), 70)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-            &Verdicts::default(),
-        );
-        assert_eq!(board.in_the_air[0].last_motion, Some(70));
-    }
-
-    #[test]
-    fn an_answer_releases_the_flight_with_the_answer_as_motion() {
-        let board = enrich(
-            fold(&[
+    fn the_inbox_holds_questions_oldest_first_and_the_me_lane() {
+        let board = board(
+            &[
                 filed("pi.1", 10),
-                held("pi.2", 60, "pi.1", "which?"),
-                answered("pi.3", 80, "pi.1"),
-            ]),
-            &reads(
-                vec![op("pi.1", Some("work"), 50)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-            &Verdicts::default(),
+                filed("pi.2", 20),
+                filed_as("pi.3", 30, "ready", "none", Some("me")),
+                filed_as("pi.4", 40, "ready", "none", Some("agent")),
+                filed_as("pi.5", 50, "ready", "none", None),
+                held("pi.6", 70, "pi.2", "later"),
+                held("pi.7", 60, "pi.1", "sooner"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
         );
-        assert!(board.waiting_on_you.is_empty());
-        assert_eq!(board.in_the_air.len(), 1);
-        let view = &board.in_the_air[0];
-        assert!(view.question.is_none());
-        assert_eq!(view.status, "ready", "the answer releases to Ready");
-        assert_eq!(view.last_motion, Some(80));
+        assert_eq!(ids(&board.waiting_on_you.questions), ["pi.1", "pi.2"]);
+        assert_eq!(
+            ids(&board.waiting_on_you.yours),
+            ["pi.3"],
+            "the agent lane and the unassigned stay out"
+        );
+        assert_eq!(
+            ids(&board.held),
+            ["pi.1", "pi.2"],
+            "the inbox is a view: the rows keep their group"
+        );
+        assert_eq!(ids(&board.ready), ["pi.3", "pi.4", "pi.5"]);
     }
 
     #[test]
-    fn an_edit_counts_as_motion() {
-        let board = enrich(
-            fold(&[
+    fn a_closed_flight_with_a_question_still_on_the_record_stays_out_of_the_inbox() {
+        let board = board(
+            &[
                 filed("pi.1", 10),
+                held("pi.2", 20, "pi.1", "which?"),
+                done("pi.3", NOW - 60, "pi.1"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert!(board.waiting_on_you.questions.is_empty());
+        assert_eq!(ids(&board.closed), ["pi.1"]);
+    }
+
+    #[test]
+    fn last_change_is_the_op_row_alone_and_no_record_gesture() {
+        // The audit's whole point: commenting on a stalled flight, or
+        // moving its status, must not silence its own line.
+        let board = board(
+            &[
+                filed("pi.1", 10),
+                moved("pi.2", NOW - 10, "pi.1", "in_progress"),
                 lifecycle(
-                    "pi.2",
-                    90,
+                    "pi.3",
+                    NOW - 5,
+                    Kind::Edited {
+                        target: "pi.1".parse().expect("id"),
+                        subject: Some("reworded".to_string()),
+                        body: None,
+                        priority: None,
+                        labels: None,
+                        skill: None,
+                        bay: None,
+                    },
+                ),
+            ],
+            &reads(
+                vec![op("pi.1", Some("work"), NOW - 5_000)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+        );
+        assert_eq!(board.in_progress[0].last_change, Some(NOW - 5_000));
+    }
+
+    #[test]
+    fn an_in_progress_flight_the_branch_forgot_is_stale() {
+        let events = [
+            filed("pi.1", 10),
+            moved("pi.2", NOW - TWO_DAYS - 10, "pi.1", "in_progress"),
+        ];
+        let reads = reads(
+            vec![op("pi.1", Some("work"), NOW - TWO_DAYS - 5)],
+            vec![branch("work", false, false)],
+            None,
+        );
+        let board = enrich(fold(&events), &reads, &Verdicts::default(), NOW, TWO_DAYS);
+        assert!(board.in_progress[0].stale);
+
+        // The threshold off: the same board says nothing.
+        let board = enrich(fold(&events), &reads, &Verdicts::default(), NOW, 0);
+        assert!(!board.in_progress[0].stale);
+    }
+
+    #[test]
+    fn an_in_progress_flight_never_captured_runs_the_clock_from_the_move() {
+        let events = [
+            filed("pi.1", 10),
+            moved("pi.2", NOW - TWO_DAYS - 1, "pi.1", "in_progress"),
+        ];
+        let board = enrich(
+            fold(&events),
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            NOW,
+            TWO_DAYS,
+        );
+        assert!(board.in_progress[0].stale);
+        assert!(board.in_progress[0].last_change.is_none());
+    }
+
+    #[test]
+    fn an_edit_does_not_clear_staleness() {
+        let board = enrich(
+            fold(&[
+                filed("pi.1", 10),
+                moved("pi.2", NOW - TWO_DAYS - 10, "pi.1", "in_progress"),
+                lifecycle(
+                    "pi.3",
+                    NOW - 1,
                     Kind::Edited {
                         target: "pi.1".parse().expect("id"),
                         subject: Some("reworded".to_string()),
@@ -630,31 +856,244 @@ mod tests {
                 ),
             ]),
             &reads(
-                vec![op("pi.1", Some("work"), 50)],
+                vec![op("pi.1", Some("work"), NOW - TWO_DAYS - 5)],
                 vec![branch("work", false, false)],
                 None,
             ),
             &Verdicts::default(),
+            NOW,
+            TWO_DAYS,
         );
-        let view = &board.in_the_air[0];
-        assert_eq!(view.subject, "reworded");
-        assert_eq!(view.last_motion, Some(90));
+        assert!(board.in_progress[0].stale, "a reword is not a change");
     }
 
     #[test]
-    fn waiting_on_you_is_sorted_oldest_asked_first() {
-        let board = enrich(
-            fold(&[
-                filed("pi.1", 10),
-                filed("pi.2", 20),
-                held("pi.3", 70, "pi.2", "later"),
-                held("pi.4", 60, "pi.1", "sooner"),
-            ]),
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
+    fn a_ready_flight_the_branch_moved_under_says_so() {
+        let board = board(
+            &[filed("pi.1", 10), moved("pi.2", 100, "pi.1", "ready")],
+            &reads(
+                vec![op("pi.1", Some("work"), 200)],
+                vec![branch("work", false, false)],
+                None,
+            ),
         );
-        let asked: Vec<Option<i64>> = board.waiting_on_you.iter().map(|v| v.asked_at).collect();
-        assert_eq!(asked, [Some(60), Some(70)]);
+        assert!(board.ready[0].changed_since_ready);
+    }
+
+    #[test]
+    fn a_resumed_hold_does_not_flag_changes_since_ready() {
+        // `answered` forces Ready unconditionally, so the branch is full
+        // of the work that preceded the question. Only a change *after*
+        // the release is news.
+        let board = board(
+            &[
+                filed("pi.1", 10),
+                held("pi.2", 100, "pi.1", "which?"),
+                answered("pi.3", 300, "pi.1"),
+            ],
+            &reads(
+                vec![op("pi.1", Some("work"), 200)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+        );
+        assert_eq!(board.ready[0].status, "ready");
+        assert!(!board.ready[0].changed_since_ready);
+    }
+
+    #[test]
+    fn a_parent_aggregates_its_children_and_they_do_not_compete() {
+        let board = board(
+            &[
+                subjected("pi.1", 10, "a broad task"),
+                subjected("pi.2", 20, "part one"),
+                subjected("pi.3", 30, "part two"),
+                linked("pi.4", 40, "pi.1", "pi.2"),
+                linked("pi.5", 50, "pi.1", "pi.3"),
+                done("pi.6", NOW - 60, "pi.2"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(ids(&board.triage), ["pi.1"], "the parent is the row");
+        assert_eq!(board.triage[0].progress, Some((1, 2)));
+        assert!(board.triage[0].breadcrumb.is_none());
+        assert!(
+            board.closed.is_empty(),
+            "a closed child stays under its parent"
+        );
+    }
+
+    #[test]
+    fn a_pullable_child_surfaces_breadcrumbed() {
+        let board = board(
+            &[
+                subjected("pi.1", 10, "check the PR"),
+                event(
+                    "pi.2",
+                    20,
+                    filing("ready", "none", Some("agent"), "check the PR · verdict"),
+                ),
+                linked("pi.3", 30, "pi.1", "pi.2"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(ids(&board.ready), ["pi.2"]);
+        assert_eq!(
+            board.ready[0].breadcrumb.as_deref(),
+            Some("check the PR › verdict"),
+            "the minted prefix comes off before the join"
+        );
+        assert_eq!(ids(&board.triage), ["pi.1"]);
+    }
+
+    #[test]
+    fn a_hand_filed_child_keeps_its_whole_subject_as_the_leaf() {
+        let board = board(
+            &[
+                subjected("pi.1", 10, "a broad task"),
+                event(
+                    "pi.2",
+                    20,
+                    filing("ready", "none", Some("agent"), "part one"),
+                ),
+                linked("pi.3", 30, "pi.1", "pi.2"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(
+            board.ready[0].breadcrumb.as_deref(),
+            Some("a broad task › part one")
+        );
+    }
+
+    #[test]
+    fn a_questioned_child_surfaces_too_and_carries_its_crumb() {
+        let board = board(
+            &[
+                subjected("pi.1", 10, "check the PR"),
+                subjected("pi.2", 20, "check the PR · verdict"),
+                linked("pi.3", 30, "pi.1", "pi.2"),
+                held("pi.4", 40, "pi.2", "which flow wins?"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(ids(&board.waiting_on_you.questions), ["pi.2"]);
+        assert_eq!(
+            board.waiting_on_you.questions[0].breadcrumb.as_deref(),
+            Some("check the PR › verdict")
+        );
+        assert_eq!(ids(&board.held), ["pi.2"]);
+    }
+
+    #[test]
+    fn a_grandchild_crumbs_against_its_own_parent() {
+        let board = board(
+            &[
+                subjected("pi.1", 10, "top"),
+                subjected("pi.2", 20, "middle"),
+                event("pi.3", 30, filing("ready", "none", Some("agent"), "leaf")),
+                linked("pi.4", 40, "pi.1", "pi.2"),
+                linked("pi.5", 50, "pi.2", "pi.3"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(ids(&board.triage), ["pi.1"]);
+        assert_eq!(board.ready[0].breadcrumb.as_deref(), Some("middle › leaf"));
+    }
+
+    #[test]
+    fn a_flight_with_no_children_carries_no_progress_mark() {
+        let board = board(&[filed("pi.1", 10)], &reads(Vec::new(), Vec::new(), None));
+        assert!(board.triage[0].progress.is_none());
+    }
+
+    #[test]
+    fn a_tagged_flight_keeps_its_branch_tip_and_current_mark() {
+        let board = board(
+            &[filed("pi.1", 10)],
+            &reads(
+                vec![op("pi.1", Some("main"), 50)],
+                vec![branch("main", false, false)],
+                Some("main"),
+            ),
+        );
+        let view = &board.triage[0];
+        assert_eq!(view.id, "pi.1");
+        assert_eq!(view.number, 1);
+        assert_eq!(view.branch.as_deref(), Some("main"));
+        assert_eq!(view.tip.as_deref().map(|t| &t[..8]), Some("3c8f9168"));
+        assert_eq!(view.last_change, Some(50));
+        assert!(view.current);
+    }
+
+    #[test]
+    fn an_untouched_flight_carries_its_stored_fields_and_nothing_else() {
+        let board = board(
+            &[filed("pi.1", 10)],
+            &reads(Vec::new(), Vec::new(), Some("main")),
+        );
+        let view = &board.triage[0];
+        assert!(view.branch.is_none() && view.tip.is_none() && view.last_change.is_none());
+        assert!(!view.held && !view.resolving && !view.current);
+        assert!(!view.stale && !view.changed_since_ready);
+        assert_eq!(view.status, "triage");
+        assert!(view.status_by.is_none() && view.status_at.is_none());
+        assert!(view.assignee.is_none());
+        assert_eq!(view.priority, "none");
+        assert!(view.labels.is_empty());
+        assert!(view.skill.is_none());
+        assert!(view.procedure.is_none());
+    }
+
+    #[test]
+    fn a_detached_flight_is_never_held() {
+        // Even with a held branch in the index — `@detached` names nothing
+        // and must not accidentally resolve to a row.
+        let board = board(
+            &[filed("pi.1", 10)],
+            &reads(
+                vec![op("pi.1", Some("@detached"), 50)],
+                vec![branch("@detached", true, true)],
+                None,
+            ),
+        );
+        let view = &board.triage[0];
+        assert_eq!(view.branch.as_deref(), Some("@detached"));
+        assert!(view.tip.is_none());
+        assert!(!view.held && !view.resolving);
+    }
+
+    #[test]
+    fn the_freshest_op_row_wins_per_tag() {
+        let board = board(
+            &[filed("pi.1", 10)],
+            &reads(
+                vec![op("pi.1", Some("old"), 40), op("pi.1", Some("new"), 60)],
+                vec![branch("new", false, false)],
+                None,
+            ),
+        );
+        assert_eq!(board.triage[0].branch.as_deref(), Some("new"));
+        assert_eq!(board.triage[0].last_change, Some(60));
+    }
+
+    #[test]
+    fn a_question_keeps_the_bay_warm() {
+        let board = board(
+            &[filed("pi.1", 10), held("pi.2", 60, "pi.1", "which?")],
+            &reads(
+                vec![op("pi.1", Some("work"), 50)],
+                vec![branch("work", true, false)],
+                None,
+            ),
+        );
+        let view = &board.waiting_on_you.questions[0];
+        assert_eq!(view.question.as_deref(), Some("which?"));
+        assert_eq!(view.asked_at, Some(60));
+        assert_eq!(view.status, "held", "the hold is a status move too");
+        assert_eq!(view.branch.as_deref(), Some("work"));
+        assert!(view.tip.is_some());
+        assert!(view.held);
     }
 
     fn pairing(a: &str, b: &str, pairing: Pairing) -> BranchPairing {
@@ -675,21 +1114,25 @@ mod tests {
         )
     }
 
+    fn probed(events: &[Event], reads: &Reads, verdicts: Verdicts) -> Board {
+        enrich(fold(events), reads, &verdicts, NOW, 0)
+    }
+
     #[test]
     fn a_collide_lands_on_both_flights_views_with_its_paths() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), filed("pi.2", 20)]),
+        let board = probed(
+            &[filed("pi.1", 10), filed("pi.2", 20)],
             &reads(
                 vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
                 vec![branch("left", false, false), branch("right", false, false)],
                 None,
             ),
-            &Verdicts {
+            Verdicts {
                 pairs: vec![collide("left", "right", &["shared.txt"])],
             },
         );
-        let one = board.in_the_air.iter().find(|v| v.id == "pi.1").unwrap();
-        let two = board.in_the_air.iter().find(|v| v.id == "pi.2").unwrap();
+        let one = board.triage.iter().find(|v| v.id == "pi.1").unwrap();
+        let two = board.triage.iter().find(|v| v.id == "pi.2").unwrap();
         assert_eq!(one.collides.len(), 1);
         assert_eq!(one.collides[0].with, "pi.2");
         assert_eq!(one.collides[0].paths, ["shared.txt"]);
@@ -700,14 +1143,14 @@ mod tests {
 
     #[test]
     fn an_unknown_pairing_is_unanswered_never_a_collide() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), filed("pi.2", 20)]),
+        let board = probed(
+            &[filed("pi.1", 10), filed("pi.2", 20)],
             &reads(
                 vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
                 vec![branch("left", false, false), branch("right", false, false)],
                 None,
             ),
-            &Verdicts {
+            Verdicts {
                 pairs: vec![pairing(
                     "left",
                     "right",
@@ -717,18 +1160,18 @@ mod tests {
                 )],
             },
         );
-        for view in &board.in_the_air {
+        for view in &board.triage {
             assert!(view.collides.is_empty());
             assert_eq!(view.unanswered.len(), 1);
         }
-        let one = board.in_the_air.iter().find(|v| v.id == "pi.1").unwrap();
+        let one = board.triage.iter().find(|v| v.id == "pi.1").unwrap();
         assert_eq!(one.unanswered, ["pi.2"]);
     }
 
     #[test]
     fn clear_and_unprobed_pairs_add_nothing() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)]),
+        let board = probed(
+            &[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)],
             &reads(
                 vec![
                     op("pi.1", Some("a"), 50),
@@ -743,11 +1186,11 @@ mod tests {
                 None,
             ),
             // (a, b) clear; (a, c) and (b, c) never probed.
-            &Verdicts {
+            Verdicts {
                 pairs: vec![pairing("a", "b", Pairing::Clear)],
             },
         );
-        for view in &board.in_the_air {
+        for view in &board.triage {
             assert!(view.collides.is_empty(), "{view:?}");
             assert!(view.unanswered.is_empty(), "{view:?}");
         }
@@ -757,49 +1200,72 @@ mod tests {
     fn two_flights_on_one_branch_get_no_entries_against_each_other() {
         // A same-name verdict row would be a caller bug; even with one
         // present, same-branch neighbors are one tree and never listed.
-        let board = enrich(
-            fold(&[filed("pi.1", 10), filed("pi.2", 20)]),
+        let board = probed(
+            &[filed("pi.1", 10), filed("pi.2", 20)],
             &reads(
                 vec![op("pi.1", Some("work"), 50), op("pi.2", Some("work"), 60)],
                 vec![branch("work", false, false)],
                 None,
             ),
-            &Verdicts {
+            Verdicts {
                 pairs: vec![collide("work", "work", &["shared.txt"])],
             },
         );
-        for view in &board.in_the_air {
+        for view in &board.triage {
             assert!(view.collides.is_empty());
             assert!(view.unanswered.is_empty());
         }
     }
 
     #[test]
-    fn a_waiting_flight_keeps_its_collides() {
-        let board = enrich(
-            fold(&[
+    fn a_questioned_flight_keeps_its_collides() {
+        let board = probed(
+            &[
                 filed("pi.1", 10),
                 filed("pi.2", 20),
                 held("pi.3", 70, "pi.1", "which?"),
-            ]),
+            ],
             &reads(
                 vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
                 vec![branch("left", false, false), branch("right", false, false)],
                 None,
             ),
-            &Verdicts {
+            Verdicts {
                 pairs: vec![collide("left", "right", &["shared.txt"])],
             },
         );
-        assert_eq!(board.waiting_on_you.len(), 1);
-        assert_eq!(board.waiting_on_you[0].collides[0].with, "pi.2");
-        assert_eq!(board.in_the_air[0].collides[0].with, "pi.1");
+        assert_eq!(board.waiting_on_you.questions[0].collides[0].with, "pi.2");
+        assert_eq!(board.triage[0].collides[0].with, "pi.1");
+    }
+
+    #[test]
+    fn a_closed_flight_carries_no_collides() {
+        let board = probed(
+            &[
+                filed("pi.1", 10),
+                filed("pi.2", 20),
+                done("pi.3", NOW - 60, "pi.1"),
+            ],
+            &reads(
+                vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
+                vec![branch("left", false, false), branch("right", false, false)],
+                None,
+            ),
+            Verdicts {
+                pairs: vec![collide("left", "right", &["shared.txt"])],
+            },
+        );
+        assert!(board.closed[0].collides.is_empty());
+        assert!(
+            board.triage[0].collides.is_empty(),
+            "a closed flight is not a live partner either"
+        );
     }
 
     #[test]
     fn collide_entries_follow_filed_order() {
-        let board = enrich(
-            fold(&[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)]),
+        let board = probed(
+            &[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)],
             &reads(
                 vec![
                     op("pi.1", Some("a"), 50),
@@ -815,11 +1281,11 @@ mod tests {
             ),
             // Rows deliberately out of filed order; the view's entries
             // follow the assignment list, not the verdict list.
-            &Verdicts {
+            Verdicts {
                 pairs: vec![collide("c", "b", &["y.txt"]), collide("a", "b", &["x.txt"])],
             },
         );
-        let two = board.in_the_air.iter().find(|v| v.id == "pi.2").unwrap();
+        let two = board.triage.iter().find(|v| v.id == "pi.2").unwrap();
         let withs: Vec<&str> = two.collides.iter().map(|c| c.with.as_str()).collect();
         assert_eq!(withs, ["pi.1", "pi.3"]);
     }

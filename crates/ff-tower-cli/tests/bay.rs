@@ -132,14 +132,14 @@ fn a_bay_capture_occupies_the_list_and_the_board_sees_the_flight() {
     );
 
     // The widened reads, end to end: the board rendered from main sees
-    // the flight in the air on the bay's branch.
+    // the bay's branch on the flight's row.
     let out = ff_tower(repo.path(), &["--json"]);
     let board = envelope(&out);
-    let air = board["data"]["in_the_air"].as_array().expect("in_the_air");
-    let flown = air
+    let rows = board["data"]["triage"].as_array().expect("triage");
+    let flown = rows
         .iter()
         .find(|view| view["id"] == serde_json::json!("pi.1"))
-        .expect("pi.1 is in the air");
+        .expect("pi.1 is on the board");
     assert_eq!(flown["branch"], serde_json::json!("feather"));
 }
 

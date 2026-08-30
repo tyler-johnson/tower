@@ -19,10 +19,17 @@ verb appends an event to a log kept as ordinary git refs in the
 repository, and every render folds that log fresh. Nothing is entered
 twice, and a render never blocks on the network.
 
-Bare `ff tower` is the board — an inbox in four sections matching four
-states of mind: waiting on you, in the air, holding, and open. Type it
-often; it is the fastest way to learn what to do next. `board` is the
-same render made explicit, so this page is also `ff tower help board`.
+Bare `ff tower` is the board. What needs a person is pinned on top —
+questions an agent stopped on, and your own Ready flights — and under
+it the flights group by the status someone set: triage, waiting,
+ready, in progress, held, and the last three days of closed. The
+repository audits those fields as it goes: a flight In Progress its
+branch has forgotten says so, and so does a Ready flight the branch
+moved under. A sub-flight is counted into its parent's progress mark
+rather than filed beside it, and surfaces on its own only when it is
+what needs someone now. Type it often; it is the fastest way to learn
+what to do next. `board` is the same render made explicit, so this
+page is also `ff tower help board`.
 
 A flight has two names, human against wire. The board prints the dense
 number, #3; the wire name is the id of the event that filed it,

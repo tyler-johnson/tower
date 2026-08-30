@@ -82,8 +82,16 @@ pub struct Brief {
     pub held: bool,
     pub resolving: bool,
     pub current: bool,
-    /// The board's formula.
-    pub last_motion: Option<i64>,
+    /// The freshest session-tagged capture on this flight's branch — the
+    /// repository's fact, and nothing the record itself did.
+    pub last_change: Option<i64>,
+    /// In Progress, and the branch has not changed for the threshold.
+    pub stale: bool,
+    /// Ready, and the branch changed after the flight was set Ready.
+    pub changed_since_ready: bool,
+    /// Closed children over total, whenever this flight has children at
+    /// all — the family's progress, rendered `(2/6)`.
+    pub progress: Option<(usize, usize)>,
     pub depends_on: Vec<LinkView>,
     pub blocks: Vec<LinkView>,
     /// Reading order, the fold's order.
@@ -165,14 +173,18 @@ pub struct CommentView {
 /// Enrichment is `enrich`'s per-flight derivation, reused: branch from the
 /// freshest op row (carried literal, `@detached` included), tip and holds
 /// from the branch row — `@detached` and a name absent from the index
-/// cannot be held — `current` against the reader's own branch, and
-/// `last_motion` by the same max-of formula.
+/// cannot be held — `current` against the reader's own branch,
+/// `last_change` off the op row alone, and the same two audits over it.
+/// `now` and `stale_after` ride in from the caller for the same reason
+/// the board's do: nothing here reads a clock or a config.
 pub fn brief(
     fold: &Fold,
     events: &[Event],
     reads: &Reads,
     verdicts: &Verdicts,
     id: &EventId,
+    now: i64,
+    stale_after: i64,
 ) -> Option<Brief> {
     let flight = fold.flights.iter().find(|flight| &flight.id == id)?;
     let freshest = reads.freshest();
@@ -185,16 +197,13 @@ pub fn brief(
             .filter(|name| *name != "@detached")
             .and_then(|name| branches.get(name).copied())
     });
-    let last_motion = [
-        op.map(|op| op.time),
-        flight.status_mark.as_ref().map(|mark| mark.at),
-        flight.question.as_ref().map(|question| question.at),
-        flight.answered_at,
-        flight.edited.as_ref().map(|mark| mark.at),
-    ]
-    .into_iter()
-    .flatten()
-    .max();
+    let last_change = op.map(|op| op.time);
+    let status_at = flight.status_mark.as_ref().map(|mark| mark.at);
+    let stale = flight.status == "in_progress"
+        && stale_after > 0
+        && now - last_change.or(status_at).unwrap_or(flight.filed_at) >= stale_after;
+    let changed_since_ready = flight.status == "ready"
+        && matches!((last_change, status_at), (Some(change), Some(set)) if change > set);
     let branch = op.and_then(|op| op.branch.clone());
     let current = match (branch.as_deref(), reads.current_branch.as_deref()) {
         (Some(mine), Some(here)) => mine == here,
@@ -228,7 +237,10 @@ pub fn brief(
         held: row.is_some_and(|row| row.held),
         resolving: row.is_some_and(|row| row.resolving),
         current,
-        last_motion,
+        last_change,
+        stale,
+        changed_since_ready,
+        progress: super::model::progress(fold, flight),
         depends_on: links(fold, &flight.depends_on),
         blocks: links(fold, &flight.blocks),
         comments: flight
@@ -585,8 +597,12 @@ mod tests {
         verdicts: &Verdicts,
         id: &EventId,
     ) -> Option<Brief> {
-        brief(&fold(events), events, reads, verdicts, id)
+        brief(&fold(events), events, reads, verdicts, id, NOW, 0)
     }
+
+    /// The tests' clock: far enough past every fixture time that an age
+    /// is whatever the fixture says it is.
+    const NOW: i64 = 1_000_000;
 
     #[test]
     fn the_filing_is_carried_whole() {
@@ -695,7 +711,10 @@ mod tests {
         assert_eq!(reworded.subject, "reworded");
         assert_eq!(reworded.edited_by.as_deref(), Some("editor@b.c"));
         assert_eq!(reworded.edited_at, Some(30));
-        assert_eq!(reworded.last_motion, Some(30), "an edit is motion");
+        assert!(
+            reworded.last_change.is_none(),
+            "a reword is not a change on the branch"
+        );
     }
 
     #[test]
@@ -743,7 +762,7 @@ mod tests {
         assert!(brief.held);
         assert!(brief.resolving);
         assert!(brief.current);
-        assert_eq!(brief.last_motion, Some(50));
+        assert_eq!(brief.last_change, Some(50));
     }
 
     #[test]
@@ -824,7 +843,7 @@ mod tests {
     }
 
     #[test]
-    fn last_motion_is_the_max_of_op_status_question_and_answer() {
+    fn last_change_is_the_op_row_alone_and_no_record_gesture() {
         let brief = brief_of(
             &[
                 filed("pi.1", 10, "s", ""),
@@ -837,7 +856,57 @@ mod tests {
             &id("pi.1"),
         )
         .expect("filed");
-        assert_eq!(brief.last_motion, Some(80));
+        assert_eq!(brief.last_change, Some(50));
+    }
+
+    #[test]
+    fn the_briefs_audits_and_progress_mark_match_the_boards() {
+        let stalled = [
+            filed("pi.1", 10, "s", ""),
+            moved("pi.2", "a@b.c", NOW - 200_000, "pi.1", "in_progress"),
+        ];
+        let empty = reads(Vec::new(), Vec::new(), None);
+        let stopped = brief(
+            &fold(&stalled),
+            &stalled,
+            &empty,
+            &Verdicts::default(),
+            &id("pi.1"),
+            NOW,
+            172_800,
+        )
+        .expect("filed");
+        assert!(stopped.stale);
+        assert!(!stopped.changed_since_ready);
+        assert!(stopped.progress.is_none());
+
+        let family = [
+            filed("pi.1", 10, "a broad task", ""),
+            filed("pi.2", 20, "part one", ""),
+            filed("pi.3", 30, "part two", ""),
+            linked("pi.4", 40, "pi.1", "pi.2"),
+            linked("pi.5", 50, "pi.1", "pi.3"),
+            done("pi.6", "a@b.c", 60, "pi.2"),
+        ];
+        let parent = brief_of(&family, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+        assert_eq!(parent.progress, Some((1, 2)));
+
+        let moved_under = [
+            filed("pi.1", 10, "s", ""),
+            moved("pi.2", "a@b.c", 100, "pi.1", "ready"),
+        ];
+        let ready = brief(
+            &fold(&moved_under),
+            &moved_under,
+            &reads(vec![op("pi.1", Some("work"), 200)], Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+            NOW,
+            0,
+        )
+        .expect("filed");
+        assert!(ready.changed_since_ready);
+        assert!(!ready.stale);
     }
 
     #[test]

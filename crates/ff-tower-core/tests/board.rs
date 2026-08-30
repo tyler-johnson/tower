@@ -1,6 +1,6 @@
 //! The board's repository-facing half, against a real fufu.
 //!
-//! Section classification lives in `board/model.rs`'s unit tests over
+//! Status grouping lives in `board/model.rs`'s unit tests over
 //! hand-built rows — the authoritative held/resolving coverage, cheaper
 //! and more precise than coercing a real repository into a held state.
 //! (A real-held-branch fixture is deliberately skipped for that reason.)
@@ -11,6 +11,12 @@ use ff_tower_core::board;
 use ff_tower_core::ff::Ff;
 use ff_tower_core::log::{Kind, Store};
 use ff_tower_testsupport::Repo;
+
+/// The suite's board: the real clock, and the audit off — a stale line
+/// is `model.rs`'s to prove, and a wall clock is not a fixture.
+fn assemble(repo: &std::path::Path, events: &[ff_tower_core::log::Event]) -> board::Board {
+    board::assemble(&Ff::at(repo), events, board::now(), 0).expect("assemble")
+}
 
 fn filed(subject: &str) -> Kind {
     Kind::Filed {
@@ -66,7 +72,7 @@ fn branch_list_reads_a_real_repository() {
 }
 
 #[test]
-fn a_tagged_flight_assembles_into_the_air_and_an_untouched_one_stays_open() {
+fn a_tagged_flight_carries_its_branch_and_an_untouched_one_carries_nothing() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     let store = Store::open(repo.path()).expect("open");
@@ -84,20 +90,20 @@ fn a_tagged_flight_assembles_into_the_air_and_an_untouched_one_stays_open() {
         .expect("status");
 
     let events = store.read_all().expect("read_all");
-    let board = board::assemble(&Ff::at(repo.path()), &events).expect("assemble");
+    let board = assemble(repo.path(), &events);
 
-    assert_eq!(board.in_the_air.len(), 1);
-    let flown = &board.in_the_air[0];
-    assert_eq!(flown.id, "pi.1");
+    // Both were filed into Triage and the capture does not move them:
+    // the group is the stored field, and the branch is a fact beside it.
+    assert_eq!(board.triage.len(), 2);
+    let flown = board.triage.iter().find(|v| v.id == "pi.1").expect("pi.1");
     assert_eq!(flown.branch.as_deref(), Some("main"));
     assert!(flown.tip.is_some());
     assert!(flown.current, "the fixture's worktree sits on main");
-    assert!(flown.last_motion.is_some());
+    assert!(flown.last_change.is_some());
 
-    assert_eq!(board.open.len(), 1);
-    assert_eq!(board.open[0].id, "pi.2");
-    assert!(board.holding.is_empty());
-    assert!(board.waiting_on_you.is_empty());
+    let untouched = board.triage.iter().find(|v| v.id == "pi.2").expect("pi.2");
+    assert!(untouched.branch.is_none() && untouched.last_change.is_none());
+    assert!(board.waiting_on_you.questions.is_empty());
     assert!(board.unrouted.is_empty());
 }
 
@@ -127,15 +133,16 @@ fn a_held_flight_assembles_into_waiting_on_you() {
         .expect("append");
 
     let events = store.read_all().expect("read_all");
-    let board = board::assemble(&Ff::at(repo.path()), &events).expect("assemble");
+    let board = assemble(repo.path(), &events);
 
-    assert_eq!(board.waiting_on_you.len(), 1);
-    let view = &board.waiting_on_you[0];
+    assert_eq!(board.waiting_on_you.questions.len(), 1);
+    let view = &board.waiting_on_you.questions[0];
     assert_eq!(view.id, "pi.1");
     assert_eq!(view.question.as_deref(), Some("which retry path?"));
     assert!(view.asked_at.is_some());
     assert_eq!(view.status, "held", "the hold is a status move too");
-    assert!(board.in_the_air.is_empty() && board.holding.is_empty() && board.open.is_empty());
+    assert_eq!(board.held.len(), 1, "the inbox is a view of the same row");
+    assert!(board.in_progress.is_empty() && board.triage.is_empty());
 }
 
 #[test]
@@ -172,19 +179,11 @@ fn colliding_branches_carry_their_verdicts_through_the_board() {
     repo.ff(&["commit", "-m", "right: touch shared"]);
 
     let events = store.read_all().expect("read_all");
-    let board = board::assemble(&Ff::at(repo.path()), &events).expect("assemble");
+    let board = assemble(repo.path(), &events);
 
-    assert_eq!(board.in_the_air.len(), 2);
-    let one = board
-        .in_the_air
-        .iter()
-        .find(|v| v.id == "pi.1")
-        .expect("pi.1");
-    let two = board
-        .in_the_air
-        .iter()
-        .find(|v| v.id == "pi.2")
-        .expect("pi.2");
+    assert_eq!(board.triage.len(), 3);
+    let one = board.triage.iter().find(|v| v.id == "pi.1").expect("pi.1");
+    let two = board.triage.iter().find(|v| v.id == "pi.2").expect("pi.2");
     assert_eq!(one.collides.len(), 1, "{one:?}");
     assert_eq!(one.collides[0].with, "pi.2");
     assert_eq!(one.collides[0].paths, ["shared.txt"]);
@@ -193,9 +192,7 @@ fn colliding_branches_carry_their_verdicts_through_the_board() {
     assert_eq!(two.collides[0].paths, ["shared.txt"]);
     assert!(one.unanswered.is_empty() && two.unanswered.is_empty());
 
-    assert_eq!(board.open.len(), 1);
-    let untouched = &board.open[0];
-    assert_eq!(untouched.id, "pi.3");
+    let untouched = board.triage.iter().find(|v| v.id == "pi.3").expect("pi.3");
     assert!(untouched.collides.is_empty() && untouched.unanswered.is_empty());
 }
 
@@ -203,7 +200,7 @@ fn colliding_branches_carry_their_verdicts_through_the_board() {
 fn a_bay_tagged_capture_reaches_the_board_from_main() {
     // The widened reads end to end: a session-tagged capture made inside
     // a bay lives on that bay's chain, and the board rendered from main
-    // still sees the flight in the air on the bay's branch.
+    // still sees the flight on the bay's branch.
     let repo = Repo::new();
     repo.pin_writer("pi");
     let store = Store::open(repo.path()).expect("open");
@@ -217,14 +214,13 @@ fn a_bay_tagged_capture_reaches_the_board_from_main() {
     Ff::at(&bay).session("pi.1").status().expect("status");
 
     let events = store.read_all().expect("read_all");
-    let board = board::assemble(&Ff::at(repo.path()), &events).expect("assemble");
+    let board = assemble(repo.path(), &events);
 
-    assert_eq!(board.in_the_air.len(), 1, "{board:?}");
-    let view = &board.in_the_air[0];
+    assert_eq!(board.triage.len(), 1, "{board:?}");
+    let view = &board.triage[0];
     assert_eq!(view.id, "pi.1");
     assert_eq!(view.branch.as_deref(), Some("feather"));
     assert!(!view.current, "the render's own worktree sits on main");
-    assert!(board.open.is_empty());
 }
 
 #[test]

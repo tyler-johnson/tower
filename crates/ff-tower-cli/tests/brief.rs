@@ -158,7 +158,7 @@ fn brief_renders_the_full_record_both_link_directions() {
     let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
     assert!(text.contains("#1  the dependent"), "{text}");
     assert!(text.contains("the body of the work"), "{text}");
-    assert!(text.contains("depends on\n· #2  the dependency"), "{text}");
+    assert!(text.contains("children\n· #2  the dependency"), "{text}");
     assert!(text.contains("comments\n"), "{text}");
     // The header leads with the comment's wire id — its only name, and
     // what `edit` takes.
@@ -173,8 +173,8 @@ fn brief_renders_the_full_record_both_link_directions() {
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "2"]));
     assert!(text.contains("#2  the dependency"), "{text}");
-    assert!(text.contains("blocks\n· #1  the dependent"), "{text}");
-    assert!(!text.contains("depends on"), "{text}");
+    assert!(text.contains("parents\n· #1  the dependent"), "{text}");
+    assert!(!text.contains("children"), "{text}");
 }
 
 #[test]

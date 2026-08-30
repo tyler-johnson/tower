@@ -14,6 +14,7 @@
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, Brief, Fold, Skip, Standing, Verdicts};
+use ff_tower_core::config::{self, Config};
 
 pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     super::parse_ref(flight)?;
@@ -30,33 +31,43 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     } else {
         Verdicts::default()
     };
-    let brief =
-        board::brief(&fold, &events, &reads, &verdicts, &id).expect("resolved to a filed flight");
+    let stale_after = Config::open(ff.repo())
+        .as_ref()
+        .map(config::stale_flight_threshold)
+        .unwrap_or(config::DEFAULT_STALE_FLIGHT);
+    let now = board::now();
+    let brief = board::brief(&fold, &events, &reads, &verdicts, &id, now, stale_after)
+        .expect("resolved to a filed flight");
 
     if json {
         println!("{}", machine::emit("brief", &brief));
     } else {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_secs() as i64)
-            .unwrap_or(0);
-        print!("{}", page(&fold, &brief, now, render::colored()));
+        print!(
+            "{}",
+            page(&fold, &brief, now, stale_after, render::colored())
+        );
     }
     Ok(())
 }
 
 /// The detail page: head and note in the board's grammar, then the body
-/// verbatim, the link sections, the comments in reading order, and the
-/// history last — the record before the log of how it got that way. The
-/// beat rows land right after the routing line — one dim line per row.
-fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
+/// verbatim, the family, the comments in reading order, and the history
+/// last — the record before the log of how it got that way. The beat rows
+/// land right after the routing line — one dim line per row.
+fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
     let mut out = String::new();
+    let mut subject = brief.subject.clone();
+    if let Some((closed, total)) = brief.progress {
+        subject.push_str(&format!(" ({closed}/{total})"));
+    }
     out.push_str(&format!(
-        "{}  {}\n",
+        "{}  {subject}\n",
         render::paint_id(&show(fold, &brief.id), colored),
-        brief.subject
     ));
-    out.push_str(&format!("    {}\n", note(fold, brief, now, colored)));
+    out.push_str(&format!(
+        "    {}\n",
+        note(fold, brief, now, stale_after, colored)
+    ));
     out.push_str(&format!("    {}\n", fields_line(brief, colored)));
     // The last edit, comment rewords included — the record has been
     // touched, and the mark says by whom.
@@ -92,7 +103,11 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         out.push('\n');
     }
 
-    for (title, links) in [("depends on", &brief.depends_on), ("blocks", &brief.blocks)] {
+    // The family, parents up and children down: every depends-on edge is
+    // a parent edge, so `blocks` is this flight's parents and
+    // `depends_on` is its children — the same two lists the fold already
+    // keeps, named for what they mean rather than for the edge direction.
+    for (title, links) in [("parents", &brief.blocks), ("children", &brief.depends_on)] {
         if links.is_empty() {
             continue;
         }
@@ -204,7 +219,7 @@ fn fields_line(brief: &Brief, colored: bool) -> String {
 /// before the branch: precedence makes it exclusive with the mark
 /// phrases — a walk standing only exists with no closing move, question,
 /// hold, or pull — so the line never says a thing twice.
-fn note(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
+fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
     let status = brief.status.replace('_', " ");
     phrases.push(render::paint_dim(
@@ -257,6 +272,18 @@ fn note(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
             colored,
         )),
     }
+    if brief.stale {
+        phrases.push(render::paint_warn(
+            &format!("no changes on the branch for {}", render::span(stale_after)),
+            colored,
+        ));
+    }
+    if brief.changed_since_ready {
+        phrases.push(render::paint_warn(
+            "changes on the branch since it was set ready",
+            colored,
+        ));
+    }
     match brief.branch.as_deref() {
         Some("@detached") => phrases.push(render::paint_dim("(detached)", colored)),
         Some(branch) => {
@@ -269,13 +296,13 @@ fn note(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         }
         None => {}
     }
-    match (brief.asked_at, brief.last_motion) {
+    match (brief.asked_at, brief.last_change) {
         (Some(asked), _) => phrases.push(render::paint_dim(
             &format!("asked {}", render::age(now, asked)),
             colored,
         )),
-        (None, Some(motion)) => phrases.push(render::paint_dim(
-            &format!("moved {}", render::age(now, motion)),
+        (None, Some(change)) => phrases.push(render::paint_dim(
+            &format!("changed {}", render::age(now, change)),
             colored,
         )),
         (None, None) => phrases.push(render::paint_dim(

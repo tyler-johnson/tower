@@ -296,7 +296,7 @@ fn file_carries_the_field_flags_over_http() {
     let (status, _, board) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{board}");
     let board: serde_json::Value = serde_json::from_str(&board).expect("the board envelope");
-    let flights = board["data"]["open"].as_array().expect("open");
+    let flights = board["data"]["triage"].as_array().expect("open");
     let filed = flights
         .iter()
         .find(|view| view["subject"] == json!("laned work"))
@@ -483,7 +483,7 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
     // untouched flight.
     let out = ff_tower(repo.path(), &["--json"]);
     let board: serde_json::Value = serde_json::from_slice(&out.stdout).expect("the board envelope");
-    assert_eq!(board["data"]["open"].as_array().expect("open").len(), 1);
+    assert_eq!(board["data"]["triage"].as_array().expect("open").len(), 1);
 }
 
 #[test]

@@ -2,14 +2,17 @@
 //! an indented dim note joining phrases with ` · ` in urgency order —
 //! the open question first, then held/resolving, then a `collides` warn
 //! per conflicting neighbor and a `no verdict` dim per unanswered one,
-//! then the pilot phrase — `in progress — <by>` — then `on <branch>`,
-//! then the comment count, then age. No affirmative "lands clean"
-//! phrase: absence of a warn is the verdict, and board noise is the
-//! enemy.
+//! then the two audit lines, then the pilot phrase — `in progress —
+//! <by>` — then `on <branch>`, then the comment count, then age. No
+//! affirmative "lands clean" phrase: absence of a warn is the verdict,
+//! and board noise is the enemy.
 //!
-//! Glyphs carry the meaning independent of color: `?` waiting on you, `▸`
-//! in the air, `‖` holding, `·` open. A local vocabulary, not fufu's —
-//! `@ ● ✓ ✕` name git objects, not flight states.
+//! The board is the inbox pinned above the status groups, and the groups
+//! are the stored model in lifecycle order. Glyphs carry the meaning
+//! independent of color: `?` a question stopped on you, `!` yours, `·`
+//! triage, `⋯` waiting, `○` ready, `▸` in progress, `‖` held, `▪` closed.
+//! A local vocabulary, not fufu's — `@ ● ✓ ✕` name git objects, not
+//! flight states.
 //!
 //! Ids render in DESIGN's display form: the flight's dense number,
 //! `#<n>` when the board's filed flights span one writer, `<writer>#<n>`
@@ -90,17 +93,24 @@ pub fn paths_phrase(paths: &[String]) -> String {
     }
 }
 
-/// `4m ago`, `2d ago` — s/m/h/d/w. `now` is an argument so a render is a
-/// pure function of its inputs.
-pub fn age(now: i64, then: i64) -> String {
-    let delta = (now - then).max(0);
+/// `4m`, `2h`, `2d` — a duration in seconds, s/m/h/d/w, with no trailing
+/// "ago". The threshold phrases print a span; the row's own age prints
+/// the same span with the word.
+pub fn span(seconds: i64) -> String {
+    let delta = seconds.max(0);
     match delta {
-        0..60 => format!("{delta}s ago"),
-        60..3_600 => format!("{}m ago", delta / 60),
-        3_600..86_400 => format!("{}h ago", delta / 3_600),
-        86_400..604_800 => format!("{}d ago", delta / 86_400),
-        _ => format!("{}w ago", delta / 604_800),
+        0..60 => format!("{delta}s"),
+        60..3_600 => format!("{}m", delta / 60),
+        3_600..86_400 => format!("{}h", delta / 3_600),
+        86_400..604_800 => format!("{}d", delta / 86_400),
+        _ => format!("{}w", delta / 604_800),
     }
+}
+
+/// `4m ago`, `2d ago`. `now` is an argument so a render is a pure
+/// function of its inputs.
+pub fn age(now: i64, then: i64) -> String {
+    format!("{} ago", span(now - then))
 }
 
 /// The tip column: the branch tip short, `—` for a flight with no tip, and
@@ -116,7 +126,35 @@ fn tip_column(view: &FlightView) -> String {
     }
 }
 
-fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool) -> String {
+/// The subject column: the breadcrumb where a sub-flight surfaced beside
+/// its parent, then the progress mark for a flight that has children.
+/// The mark is where "waiting on 2 flights" used to be — one fact, one
+/// place, and this one says how far along the family is.
+fn subject_column(view: &FlightView) -> String {
+    let mut text = view
+        .breadcrumb
+        .clone()
+        .unwrap_or_else(|| view.subject.clone());
+    if let Some((closed, total)) = view.progress {
+        text.push_str(&format!(" ({closed}/{total})"));
+    }
+    text
+}
+
+/// The display form for a flight the board is showing, or the wire id for
+/// one it is not: a collide partner can be a sub-flight the altitude rule
+/// aggregated under its parent, and a note must still name it.
+fn reference(refs: &HashMap<&str, String>, id: &str) -> String {
+    refs.get(id).cloned().unwrap_or_else(|| id.to_string())
+}
+
+fn note(
+    view: &FlightView,
+    refs: &HashMap<&str, String>,
+    now: i64,
+    stale_after: i64,
+    colored: bool,
+) -> String {
     let mut phrases = Vec::new();
     if let Some(question) = view.question.as_deref() {
         phrases.push(paint_warn(question, colored));
@@ -128,31 +166,32 @@ fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool
         phrases.push(paint_warn("resolving", colored));
     }
     for collide in &view.collides {
-        let with = &refs[collide.with.as_str()];
+        let with = reference(refs, &collide.with);
         let on = paths_phrase(&collide.paths);
         phrases.push(paint_warn(&format!("collides {with} on {on}"), colored));
     }
     for with in &view.unanswered {
         phrases.push(paint_dim(
-            &format!("no verdict vs {}", refs[with.as_str()]),
+            &format!("no verdict vs {}", reference(refs, with)),
             colored,
         ));
     }
-    // A dependency absent from `refs` is done — done flights leave the
-    // board — so the phrase covers only the live ones and clears itself as
-    // they land.
-    let waiting: Vec<&String> = view
-        .depends_on
-        .iter()
-        .filter_map(|dep| refs.get(dep.as_str()))
-        .collect();
-    match waiting.as_slice() {
-        [] => {}
-        [one] => phrases.push(paint_dim(&format!("waiting on {one}"), colored)),
-        many => phrases.push(paint_dim(
-            &format!("waiting on {} flights", many.len()),
+    // The two audits, each its own phrase and neither under a shared
+    // word: one says the branch has forgotten a flight that claims to be
+    // flying, the other says a branch moved under one that claims not to
+    // be. The stale phrase names the threshold, which is what the row's
+    // own age cannot say.
+    if view.stale {
+        phrases.push(paint_warn(
+            &format!("no changes on the branch for {}", span(stale_after)),
             colored,
-        )),
+        ));
+    }
+    if view.changed_since_ready {
+        phrases.push(paint_warn(
+            "changes on the branch since it was set ready",
+            colored,
+        ));
     }
     // The pilot, ahead of the branch: the stored In Progress and who set
     // it — the byline is the pilot, the field is the chip.
@@ -178,10 +217,10 @@ fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool
         };
         phrases.push(paint_dim(&format!("{} {noun}", view.comments), colored));
     }
-    match (view.asked_at, view.last_motion) {
+    match (view.asked_at, view.last_change) {
         (Some(asked), _) => phrases.push(paint_dim(&format!("asked {}", age(now, asked)), colored)),
-        (None, Some(motion)) => {
-            phrases.push(paint_dim(&format!("moved {}", age(now, motion)), colored))
+        (None, Some(change)) => {
+            phrases.push(paint_dim(&format!("changed {}", age(now, change)), colored))
         }
         (None, None) => phrases.push(paint_dim(
             &format!("filed {}", age(now, view.filed_at)),
@@ -192,14 +231,27 @@ fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool
 }
 
 /// The whole board, as one string ending in a newline.
-pub fn board(board: &Board, now: i64, colored: bool) -> String {
-    let sections: [(&str, char, &[FlightView]); 4] = [
-        ("waiting on you", '?', &board.waiting_on_you),
-        ("in the air", '▸', &board.in_the_air),
-        ("holding", '‖', &board.holding),
-        ("open", '·', &board.open),
+///
+/// The inbox first — a view of the same rows, so a flight in it prints
+/// twice — then the status groups in lifecycle order, empty ones skipped.
+/// The columns are measured across every group at once, so the board
+/// aligns down its whole height rather than per section.
+pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String {
+    let sections: [(&str, char, &[FlightView]); 8] = [
+        ("questions", '?', &board.waiting_on_you.questions),
+        ("yours", '!', &board.waiting_on_you.yours),
+        ("triage", '·', &board.triage),
+        ("waiting", '⋯', &board.waiting),
+        ("ready", '○', &board.ready),
+        ("in progress", '▸', &board.in_progress),
+        ("held", '‖', &board.held),
+        ("closed", '▪', &board.closed),
     ];
-    let flights = sections
+    // The footer counts live work: the inbox is a second view of rows the
+    // groups already carry, and a closed flight is on the record rather
+    // than on the board. Counts count parents — a sub-flight aggregated
+    // under its parent is not a row here either.
+    let flights = sections[2..7]
         .iter()
         .map(|(_, _, views)| views.len())
         .sum::<usize>();
@@ -209,9 +261,7 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
             .flat_map(|(_, _, views)| views.iter())
             .map(|view| view.id.as_str()),
     );
-    // Wire id to display form, over every section at once: a verdict
-    // partner is always a live flight, so the map answers for `collides`
-    // and `unanswered` entries too.
+    // Wire id to display form, over every section at once.
     let refs: HashMap<&str, String> = sections
         .iter()
         .flat_map(|(_, _, views)| views.iter())
@@ -230,7 +280,7 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
     let subject_width = sections
         .iter()
         .flat_map(|(_, _, views)| views.iter())
-        .map(|view| view.subject.chars().count())
+        .map(|view| subject_column(view).chars().count())
         .max()
         .unwrap_or(0);
 
@@ -243,14 +293,17 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
         out.push('\n');
         for view in views {
             let id = format!("{:<id_width$}", refs[view.id.as_str()]);
-            let subject = format!("{:<subject_width$}", view.subject);
+            let subject = format!("{:<subject_width$}", subject_column(view));
             out.push_str(&format!(
                 "{glyph} {}  {}  {}\n",
                 paint_id(&id, colored),
                 subject,
                 paint_dim(&tip_column(view), colored),
             ));
-            out.push_str(&format!("    {}\n", note(view, &refs, now, colored)));
+            out.push_str(&format!(
+                "    {}\n",
+                note(view, &refs, now, stale_after, colored)
+            ));
         }
         out.push('\n');
     }
@@ -280,4 +333,112 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
     out.push_str(&paint_dim(&footer, colored));
     out.push('\n');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ff_tower_core::board::WaitingOnYou;
+
+    const NOW: i64 = 1_000_000;
+    const TWO_DAYS: i64 = 2 * 24 * 60 * 60;
+
+    fn view(id: &str, number: u64, status: &str, subject: &str) -> FlightView {
+        FlightView {
+            id: id.to_string(),
+            number,
+            procedure: None,
+            subject: subject.to_string(),
+            filed_by: "a@b.c".to_string(),
+            filed_at: NOW - 60,
+            comments: 0,
+            depends_on: Vec::new(),
+            blocks: Vec::new(),
+            status: status.to_string(),
+            status_by: None,
+            status_at: None,
+            assignee: None,
+            priority: "none".to_string(),
+            labels: Vec::new(),
+            skill: None,
+            branch: None,
+            tip: None,
+            last_change: None,
+            stale: false,
+            changed_since_ready: false,
+            progress: None,
+            breadcrumb: None,
+            held: false,
+            resolving: false,
+            current: false,
+            question: None,
+            asked_at: None,
+            collides: Vec::new(),
+            unanswered: Vec::new(),
+        }
+    }
+
+    fn empty() -> Board {
+        Board {
+            waiting_on_you: WaitingOnYou {
+                questions: Vec::new(),
+                yours: Vec::new(),
+            },
+            triage: Vec::new(),
+            waiting: Vec::new(),
+            ready: Vec::new(),
+            in_progress: Vec::new(),
+            held: Vec::new(),
+            closed: Vec::new(),
+            unrouted: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_stale_row_names_the_threshold_it_passed() {
+        let mut flight = view("pi.1", 1, "in_progress", "the stalled work");
+        flight.stale = true;
+        flight.last_change = Some(NOW - 300_000);
+        let mut rendered = empty();
+        rendered.in_progress.push(flight);
+
+        let out = board(&rendered, NOW, TWO_DAYS, false);
+        assert!(out.contains("no changes on the branch for 2d"), "{out}");
+    }
+
+    #[test]
+    fn a_ready_row_the_branch_moved_under_says_so() {
+        let mut flight = view("pi.1", 1, "ready", "cleared, and moving");
+        flight.changed_since_ready = true;
+        flight.last_change = Some(NOW - 30);
+        let mut rendered = empty();
+        rendered.ready.push(flight);
+
+        let out = board(&rendered, NOW, TWO_DAYS, false);
+        assert!(
+            out.contains("changes on the branch since it was set ready"),
+            "{out}"
+        );
+        assert!(out.contains("changed 30s ago"), "{out}");
+        assert!(!out.contains("no changes on the branch"), "{out}");
+    }
+
+    #[test]
+    fn a_surfaced_sub_flight_prints_its_crumb_and_a_parent_its_mark() {
+        let mut parent = view("pi.1", 1, "waiting", "check the PR");
+        parent.progress = Some((2, 6));
+        let mut child = view("pi.2", 2, "ready", "check the PR · verdict");
+        child.breadcrumb = Some("check the PR › verdict".to_string());
+        let mut rendered = empty();
+        rendered.waiting.push(parent);
+        rendered.ready.push(child);
+
+        let out = board(&rendered, NOW, TWO_DAYS, false);
+        assert!(out.contains("check the PR (2/6)"), "{out}");
+        assert!(out.contains("check the PR › verdict"), "{out}");
+        assert!(
+            out.contains("2 flights · ff tower file to add one"),
+            "{out}"
+        );
+    }
 }

@@ -80,8 +80,8 @@ fn board_advances_a_satisfied_waiter_with_the_invokers_byline() {
     // The verb's own fold sees the conclusion: this one invocation both
     // advances the waiter and renders it advanced.
     let board = envelope(&ff_tower(repo.path(), &["board", "--json"]));
-    let open = board["data"]["open"].as_array().expect("open");
-    let waiter = open
+    let ready = board["data"]["ready"].as_array().expect("ready");
+    let waiter = ready
         .iter()
         .find(|flight| flight["id"] == serde_json::json!("pi.2"))
         .expect("the waiter is on the board");

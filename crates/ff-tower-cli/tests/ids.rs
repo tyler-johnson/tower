@@ -86,7 +86,7 @@ fn the_flight_number_is_dense_while_the_event_seq_is_not() {
 
     // The split, visible on one view: flight #2 rides event pi.3.
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
-    let second = &board["data"]["open"][1];
+    let second = &board["data"]["triage"][1];
     assert_eq!(second["id"], serde_json::json!("pi.3"));
     assert_eq!(second["number"], serde_json::json!(2));
 }
@@ -116,7 +116,7 @@ fn done_by_number_finishes_the_second_filed_flight_not_event_two() {
     assert_eq!(out, "done #2: the second flight\nboard: ff tower\n");
 
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
-    let open = board["data"]["open"].as_array().expect("open");
+    let open = board["data"]["triage"].as_array().expect("open");
     let ids: Vec<&str> = open.iter().filter_map(|view| view["id"].as_str()).collect();
     assert_eq!(ids, ["pi.1"], "the first flight stays");
 }
@@ -143,7 +143,7 @@ fn two_writers_bind_with_hash_and_a_bare_number_is_ambiguous() {
     stdout(&ff_tower(repo.path(), &["comment", "qi#1", "-m", "one"]));
     stdout(&ff_tower(repo.path(), &["comment", "#qi#1", "-m", "two"]));
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
-    let open = board["data"]["open"].as_array().expect("open");
+    let open = board["data"]["triage"].as_array().expect("open");
     let qi = open
         .iter()
         .find(|view| view["id"] == serde_json::json!("qi.1"))
