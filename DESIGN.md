@@ -14,7 +14,7 @@ What a tracker can know is where fufu comes in. Capture runs before every action
 
 > **Intent is stored; the repository audits it.**
 
-Status is a field someone set, the way it is everywhere else. The difference is that tower never stops watching. A flight marked In Progress with no motion for two days says so on its row; a branch moving under a flight still marked Ready says so too. Drift is flagged, never corrected — a tracker that silently rewrites your fields is guessing, and a tracker that stays silent is lying, so tower does the third thing and complains.
+Status is a field someone set, the way it is everywhere else. The difference is that tower never stops watching. Two checks, and they are unrelated on purpose — one is staleness and one is its opposite, so neither hides under a shared word. A flight marked In Progress whose branch has not changed for two days says so on its row. A flight still marked Ready whose branch changed after it was set Ready says so too. Both are flagged, never corrected — a tracker that silently rewrites your fields is guessing, and a tracker that stays silent is lying, so tower does the third thing and complains.
 
 The consequence worth the whole design: tower sees work start before the first commit exists, because the capture floor does. An agent that edits for twenty minutes and commits nothing is visible. No other tracker can audit that, because no other tracker has a record of it.
 
@@ -30,7 +30,7 @@ The contract:
 reads     ff status --json · ff log --json · ff collide --json · ff worktree list --json · ff watch
 calls     ff start · ff switch · ff worktree add|remove, every call tagged --session <flight>
 stores    refs/tower/log/<author>/<writer>
-derives   motion · conflicts · drift · land order
+derives   changes on a branch · conflicts · land order
 writes    nothing under refs/fufu/*, ever
 ```
 
@@ -77,7 +77,7 @@ Field ownership is enforced hard, or sync becomes a merge problem it does not ne
 |---|---|---|
 | upstream tracker | exists, title, body, its assignee, its priority, its status, cycle | upstream truth |
 | forge | PR, review state, CI, merge | upstream truth |
-| the repository | branch, snapshots, session, motion, conflicts | derived by fufu |
+| the repository | branch, snapshots, session, changes, conflicts | derived by fufu |
 | tower | status, assignee, priority, labels, skill, edges, queue, bays, briefs, notes | local truth |
 
 The rows do not compete, because tower's fields are the local layer and upstream's are upstream's. The same issue can be In Progress in Linear and Waiting here, and both boards are telling the truth about their own scope — Linear says where the team thinks it is, tower says where this machine's work on it actually is. tower never writes status upstream, never derives its status from upstream's, and shows upstream's fields — when an adapter supplies them — as labeled foreign facts on the brief, nothing more.
@@ -124,11 +124,11 @@ Status is a stored field with seven values, moved directly — a verb, a drag on
 - **Triage** — not yet cleared for work, deliberately. The default for anything that arrives unmatched, and the parking place for work nobody has decided about. Nothing leaves Triage except by a person's gesture or a person's match rules; that deliberateness is the definition.
 - **Waiting** — cleared, but gated by the graph: something this flight depends on is still live. Flights are not put here so much as born here by their edges, and the engine's one automation moves a flight Waiting → Ready the moment its last live dependency closes. The row says what it waits on.
 - **Ready** — cleared and unblocked. The agent queue draws from Ready flights assigned to the agent lane; your own Ready flights are the list you pick from.
-- **In Progress** — someone is flying it. The pull sets it for agents; you set it, or just start and let the drift flag remind you.
+- **In Progress** — someone is flying it. The pull sets it for agents; you set it, or just start and let the audit line remind you.
 - **Held** — stopped on a blocking question. The question piece is its own section below.
-- **Done / Canceled** — closed, finished or abandoned, with the reason on the record. Closed flights stay visible: the board carries a closed group — newest first, windowed by config so the fold stays bounded, collapsed in the web UI and behind a flag in the CLI — because a board that forgets the week is amnesiac, and the log was always the full record regardless. A canceled dependency does not satisfy the flights that waited on it; it surfaces on them as a fact needing a look, because an abandoned part is a reason to reconsider the parent, not a green light.
+- **Done / Canceled** — closed, finished or abandoned, with the reason on the record. Closed flights stay visible: the board carries a closed group — newest first, the last three days, a constant rather than a config key because the window is a render's memory of the week and not a preference — because a board that forgets the week is amnesiac, and the log was always the full record regardless. A canceled dependency does not satisfy the flights that waited on it; it surfaces on them as a fact needing a look, because an abandoned part is a reason to reconsider the parent, not a green light.
 
-The repository audits all of it. Motion — session-tagged captures on a flight's branch — is the fact tower reads from the floor, and the board annotates disagreement between motion and status without ever resolving it: "In Progress, no motion for 2d." "Motion on the branch, but status is Ready." Drift lines are the thesis made visible, and they are the entire enforcement mechanism — observe and complain, never correct, fufu's regime boundary again.
+The repository audits all of it. A change on a flight's branch — a session-tagged capture, and nothing the record itself did — is the fact tower reads from the floor, and the board annotates each way the fields disagree with it, without ever resolving either: "no changes on the branch for 2d" under In Progress, "changes on the branch since it was set ready" under Ready. The first threshold is `tower.staleFlightThreshold`, defaulting to `2d`, and `false` turns that line off; the second has no threshold and is never off. Neither line is the other's variant, and there is no umbrella word over the pair. They are the thesis made visible, and they are the entire enforcement mechanism — observe and complain, never correct, fufu's regime boundary again.
 
 Only two transitions happen without a hand on them, and both are deterministic, attributed, and explained in the history: a match rule routing an arrival out of Triage, and the Waiting → Ready advance when dependencies close. Both run on the lazy pass — any invocation, and each of serve's refolds, examines what the rules cover and appends what they conclude — so the board catches up whenever anyone asks for anything, and no standing process is required for the queue to work. Everything else conditional is judgment, and judgment lives in a skill.
 
@@ -168,7 +168,7 @@ Not files in the working tree. `.tower/flights/*.md` is the obvious move and the
 
 **An orphan ref, shaped like fufu's journal.** `refs/tower/log/<author>/<writer>` — a commit chain with its own tree, no relation to code history, never touching the working tree, CAS-appended, reachability as the gc pin. Sync is one explicit refspec. The writer component is the machine's, minted once into local config: one ref per author alone breaks the moment two machines append under one email — both chains diverge and a push is rejected with no merge available, because a commit chain has no union — while a ref per writer makes every push a fast-forward, and the fold unions `refs/tower/log/**` either way.
 
-The conflict problem dissolves because of what is stored. The repository's facts — motion, branches, conflicts — are never stored at all, so they have zero merge surface and self-heal when someone works around tower. Stored intent is an append-only event log partitioned per author, so merging divergent logs is a **union, not a merge** — conflict-free by construction. The board is a fold over the union. The only genuine collision is two people editing one field in the same window; last-writer-wins with a stable tiebreak, and both events survive in the log regardless.
+The conflict problem dissolves because of what is stored. The repository's facts — changes on branches, branches themselves, conflicts — are never stored at all, so they have zero merge surface and self-heal when someone works around tower. Stored intent is an append-only event log partitioned per author, so merging divergent logs is a **union, not a merge** — conflict-free by construction. The board is a fold over the union. The only genuine collision is two people editing one field in the same window; last-writer-wins with a stable tiebreak, and both events survive in the log regardless.
 
 **Sync is three tiers, and only one of them needs anything built.** *Machine-local* — bays, pool state, caches — never syncs and mostly rebuilds. *Mine across machines* — solo flights, notes, decompositions — is single-author and append-only, so backup or roaming is one plain `git push refs/tower/log/<me>/*` with no protocol at all — and no verb: tower builds nothing here. tower is a local tool that interfaces with remote data, and the designed way anything leaves the machine is `ff tower promote`. *Shared with others* is the only hard tier, and tower does not have it: in team mode upstream already holds it, and in solo mode it does not exist.
 
@@ -193,9 +193,9 @@ nothing         —              one sanctioned self-spawn, the
                                detached update check
 ```
 
-The board is **waiting on you** pinned above a list grouped by status. Waiting-on-you is the inbox — everything that needs a human right now — and inside it, items partition by what they cost you rather than by priority: an answer is thirty seconds, a review is twenty minutes, a decision is unbounded. Sorting them together means you cannot spend the five minutes you actually have. Cost is read off the shape of the thing, so it needs no judgment and no model call. Below the inbox, the list is the one every tracker renders — status groups, then priority, then age within them — with the closed group collapsed at the bottom. A flight in the inbox still has a status; the inbox is a view of the same rows, and it is the feature the borrowed layout does not come with.
+The board is **waiting on you** pinned above a list grouped by status. Waiting-on-you is the inbox — everything that needs a human right now — and it holds two groups, both falling out of stored fields with no judgment and no model call: **questions**, the Held flights an agent is stopped on you for, oldest ask first; and **yours**, the Ready flights in the `me` lane, which is the todo list. Below the inbox, the list is the one every tracker renders — status groups, then priority, then age within them — with the closed group collapsed at the bottom. A flight in the inbox still has a status; the inbox is a view of the same rows, and it is the feature the borrowed layout does not come with.
 
-The row is the recognizable anatomy: priority glyph, flight ref, status dot, subject, label chips, assignee, age right-aligned — plus the phrases only this tracker can print, drift and collisions, in the warn tone. Filters compose over status, priority, label, assignee, and procedure, encode into the URL so a filtered board is a shareable link, and run client-side over the board envelope the feed keeps live. The web app adds the views the model earns: a kanban board whose columns are the statuses, where a drag is a verb or it is not offered — to In Progress is pull, to Done is done, to Canceled is cancel, and a drop with no verb behind it does not land; a command palette over verbs, flights, and navigation; single-key movement and verbs on the selected row; and search over subjects and bodies, nothing semantic. The CLI renders the same model with the same vocabulary, filter flags mirroring the filter bar, and the closed group behind a flag.
+The row is the recognizable anatomy: priority glyph, flight ref, status dot, subject, label chips, assignee, age right-aligned — plus the phrases only this tracker can print, the audit lines and collisions, in the warn tone. Filters compose over status, priority, label, assignee, and procedure, encode into the URL so a filtered board is a shareable link, and run client-side over the board envelope the feed keeps live. The web app adds the views the model earns: a kanban board whose columns are the statuses, where a drag is a verb or it is not offered — to In Progress is pull, to Done is done, to Canceled is cancel, and a drop with no verb behind it does not land; a command palette over verbs, flights, and navigation; single-key movement and verbs on the selected row; and search over subjects and bodies, nothing semantic. The CLI renders the same model with the same vocabulary and the same closed group. Filters are a system rather than a flag — composable predicates, saved defaults, saved views — so both surfaces wait on it together rather than half of one landing early in one of them.
 
 The whole design is aimed at one reflex: bare `ff tower`, often, because it is the fastest way to learn what to do next. Two things have to hold or the reflex never forms. It has to be honest, which is what the audit is for. And **render must never block on the network** — fold the local log, draw, note the age, refresh on the cadence stamp. A board that is fresh and slow loses to one that is instant and honest about how stale it is.
 
@@ -233,7 +233,7 @@ The pull is one atomic append that sets the picked flights In Progress — the e
 
 `ff tower brief` is the read half of the handoff: `next` hands an agent a flight id and a subject, and the brief is what it reads next — everything the log and the repository know about one flight, in one read over the fold and the reads. No probes: verdicts stay the board's and `next`'s surfaces, and the brief stays instant. A closed flight briefs like any other, because the log keeps the record and reading it is never a lifecycle move.
 
-The brief is the record — subject, body, every field, the comments with any question and answer among them, the family tree, links carrying each linked flight's subject and status — plus the repository's facts: branch, tip, motion, drift, and whether the branch is the reader's own. The skill named on the flight is what the agent flies it with; the brief is what the agent flies it *from*, and it is why the asker of a held question does not need to be its resumer.
+The brief is the record — subject, body, every field, the comments with any question and answer among them, the family tree, links carrying each linked flight's subject and status — plus the repository's facts: branch, tip, the last change on the branch, the audit lines, and whether the branch is the reader's own. The skill named on the flight is what the agent flies it with; the brief is what the agent flies it *from*, and it is why the asker of a held question does not need to be its resumer.
 
 ### Decompose
 
@@ -331,7 +331,7 @@ Filing under it mints the parent plus every flight in the graph, in one atomic a
 
 The repository layer is in the tree, and that is not the working-tree trap from *Storage and sync*: what must never live there is mutable board state, and a procedure definition is config that changes monthly. It also has to be in the tree to be the team's at all — a definition on an orphan ref is a definition nobody clones.
 
-**The definition is read once, at file time, and its fields are copied onto the minted flights.** Readiness, conflicts, order, and drift stay the engine's as ever. Editing a procedure therefore never disturbs a flight already in the air — a board that re-read config at render time would flicker for exactly the reason principle 11 forbids re-running judgment, and forking a procedure mid-week has to be safe or nobody will.
+**The definition is read once, at file time, and its fields are copied onto the minted flights.** Readiness, conflicts, order, and the audits stay the engine's as ever. Editing a procedure therefore never disturbs a flight already in the air — a board that re-read config at render time would flicker for exactly the reason principle 11 forbids re-running judgment, and forking a procedure mid-week has to be safe or nobody will.
 
 **Procedures declare structure; skills hold judgment.** A procedure is data — a name, match rules, flights, edges — and it cannot express control flow. No conditions, no loops. Everything conditional lives in the skill an agent-assigned flight points at, in markdown, which is where this document already puts judgment. The moment a procedure needs an `if`, it is a skill. That rule is the only thing between this feature and Jira's workflow editor, which is where configurable trackers go to die: the config language grows into a bad programming language.
 
@@ -369,11 +369,11 @@ Three layers of memory stay apart: a **skill** knows how to drive tower, the **a
 
 ## Principles
 
-1. **Intent is stored; the repository audits it.** Fields are set the way every tracker sets them; the capture floor checks them. Drift is flagged, never corrected.
+1. **Intent is stored; the repository audits it.** Fields are set the way every tracker sets them; the capture floor checks them. Disagreement is flagged, never corrected.
 2. **tower is called; it never calls.** No dispatch, no agent loop. A standing process may refold and subscribe; it decides nothing. The harness schedules; tower queues.
 3. **Never auto-outward.** Local state moves freely; anything the team sees is a deliberate gesture.
 4. **Upstream owns its fields.** tower is never authoritative over someone else's tracker, and never merges into their model. tower's status, assignee, and priority are the local layer, never synced with upstream's.
-5. **Observe and complain, never enforce.** tower prints the path, reports the drift, and does not hook or veto.
+5. **Observe and complain, never enforce.** tower prints the path, reports what the branch says, and does not hook or veto.
 6. **Conflict-free by construction.** Union-merged event logs, not a synced database.
 7. **Local work stays local until promoted.** Sub-flights are anonymous branches; promotion is the publish boundary.
 8. **Deferred requires loud.** Inherited whole from fufu: a held flight is announced, pinned, and blocks its exits.
@@ -405,8 +405,9 @@ Most of what tower reads exists today: the event log store, per-flight session t
 
 ## Open questions
 
-- **Drift thresholds.** How long is "no motion" before the row says so — a constant, a config key, or scaled to the flight's own cadence. Config with a plain default, probably, but the default is the product decision.
-- **The closed window.** Days or count, and the default. Small enough to keep the fold bounded, large enough that Friday shows Monday.
+- **~~Audit thresholds.~~** *Answered.* `tower.staleFlightThreshold`, a cadence setting defaulting to `2d`, read through the same scope walk as every other key; `false` turns the line off. The other check needs no threshold — a branch that moved after the flight was set Ready either did or did not.
+- **~~The closed window.~~** *Answered.* Three days, newest first, compiled in. Not a config key: the window is a render's memory of the week, and the log was always the full record regardless.
+- **Filters and saved views.** The filter bar and the CLI's flags want the same thing underneath — composable predicates over status, priority, label, assignee, and procedure, a saved default per person, and named views that encode into a URL. What is open is where the predicates live: parsed once in core and shared, or written twice against the same envelope.
 - **Does the flight own the branch, or the branch own the flight?** If `ff branch <name>` claims a placeholder, does claiming mint a flight? The everything-is-a-flight version is seductive and probably wrong.
 - **How much forge state to absorb.** Not whether — the review shape settles that — but where it stops. Every field pulled in punctures the ownership table a little further, and that table is the only thing keeping this from becoming a second tracker.
 - **Whether the `done` enum stays at four.** It is closed on purpose, and the first genuinely missing value is the moment to check whether the answer is a fifth constant or a flight nobody wanted to own.
