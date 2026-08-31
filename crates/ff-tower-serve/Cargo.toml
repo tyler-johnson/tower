@@ -21,3 +21,4 @@ tokio-stream.workspace = true
 [dev-dependencies]
 # `test-util` for the paused clock the debounce unit test runs on.
 tokio = { workspace = true, features = ["test-util"] }
+tempfile.workspace = true

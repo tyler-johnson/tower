@@ -153,7 +153,19 @@ fn the_listing_is_what_is_installed_with_layers_and_descriptions() {
         )),
         "{out}"
     );
-    assert!(out.contains("tower/skills/<name>.md"), "{out}");
+    // Joined rather than spelled with slashes: the footer prints a real
+    // path, and Windows separates it with backslashes.
+    assert!(
+        out.contains(
+            &xdg(repo.path())
+                .join("tower")
+                .join("skills")
+                .join("<name>.md")
+                .display()
+                .to_string()
+        ),
+        "{out}"
+    );
 }
 
 #[test]

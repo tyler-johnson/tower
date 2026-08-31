@@ -79,7 +79,14 @@ fn fs_watcher(
     paths: &WatchPaths,
     dirty: Arc<Notify>,
 ) -> Result<notify::RecommendedWatcher, notify::Error> {
+    // Both spellings of the log's path, because a backend decides which
+    // one it reports: macOS hands back canonical paths, so a repository
+    // reached through a symlink — `/var/folders` into `/private` under
+    // every macOS tempdir, and any developer whose checkout sits under
+    // one — arrives under a prefix the registered spelling never
+    // matches, and the filesystem lane silently covers nothing.
     let log = paths.log.clone();
+    let resolved = resolve(&paths.log);
     let mut watcher =
         notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
             let Ok(event) = event else { return };
@@ -88,6 +95,7 @@ fn fs_watcher(
             }
             let moved = event.paths.iter().any(|path| {
                 path.starts_with(&log)
+                    || path.starts_with(&resolved)
                     || path
                         .file_name()
                         .is_some_and(|name| name.to_string_lossy().starts_with("packed-refs"))
@@ -103,6 +111,32 @@ fn fs_watcher(
         .expect("packed-refs sits in the common dir");
     watcher.watch(common, notify::RecursiveMode::NonRecursive)?;
     Ok(watcher)
+}
+
+/// A path with its symlinks resolved, for comparing against what a
+/// watcher reports. `refs/tower/log` need not exist yet — the recursive
+/// watch is installed to see it born — so the nearest ancestor that does
+/// exist is canonicalized and the rest re-joined onto it. A path nothing
+/// on it resolves comes back unchanged, which leaves the raw comparison
+/// beside this one to answer.
+fn resolve(path: &Path) -> PathBuf {
+    let mut tail = Vec::new();
+    let mut cursor = path;
+    loop {
+        if let Ok(real) = cursor.canonicalize() {
+            return tail
+                .iter()
+                .rev()
+                .fold(real, |resolved, part| resolved.join(part));
+        }
+        match (cursor.parent(), cursor.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name.to_os_string());
+                cursor = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// The process half: `ff watch --all`, respawned for as long as the
@@ -242,5 +276,30 @@ mod tests {
         tokio::time::sleep(QUIET * 2).await;
         assert!(again.is_finished(), "the stored permit was lost");
         again.await.expect("settle returns from the permit");
+    }
+
+    /// The comparison the filesystem lane stands on: a repository
+    /// reached through a symlink — every macOS tempdir — must resolve to
+    /// what the watcher will report, and a ref that does not exist yet
+    /// must resolve anyway, because the recursive watch is installed to
+    /// see it born.
+    #[test]
+    fn a_ref_path_resolves_through_a_symlink_whether_or_not_it_exists() {
+        let dir = tempfile::TempDir::new().expect("a tempdir");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(real.join("refs")).expect("the refs dir");
+        let link = dir.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).expect("a symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).expect("a symlink");
+
+        let real = real.canonicalize().expect("the real path");
+        assert_eq!(resolve(&link.join("refs")), real.join("refs"));
+        assert_eq!(
+            resolve(&link.join("refs").join("tower").join("log")),
+            real.join("refs").join("tower").join("log"),
+            "an unborn ref resolves through its nearest existing ancestor"
+        );
     }
 }
