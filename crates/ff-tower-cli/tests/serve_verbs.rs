@@ -309,6 +309,75 @@ fn file_carries_the_field_flags_over_http() {
     read_after_write(&server, repo.path());
 }
 
+/// The by-hand form over HTTP: the children and their edges in one
+/// append, and the payload naming the parent they hang from.
+#[test]
+fn decompose_appends_the_children_and_the_edges_and_answers_them() {
+    let (repo, server) = served();
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/decompose",
+        r#"{"flight":"1","parts":["the fold: parent-child edges","the cli: the verb"]}"#,
+    );
+    // The batch rides the chain in mint order behind the seeded filing:
+    // the two filings, then one edge each.
+    let chain = chain(repo.path());
+    let batch = &chain[1..];
+    assert_eq!(batch.len(), 4, "two children and two edges");
+    let (filed, linked) = batch.split_at(2);
+    ok(
+        "/api/decompose",
+        status,
+        &head,
+        &body,
+        machine::emit(
+            "decompose",
+            &verb::Decomposed {
+                filed: filed.to_vec(),
+                linked: linked.to_vec(),
+                parent: chain[0].id.to_string(),
+            },
+        ),
+    );
+    read_after_write(&server, repo.path());
+}
+
+/// The procedure form over HTTP: one argument naming an installed
+/// definition mints its flights beneath the parent, on the parent's
+/// edges and the definition's own.
+#[test]
+fn decompose_under_a_procedure_mints_the_definitions_flights_over_http() {
+    let (repo, server) = served();
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/decompose",
+        r#"{"flight":"1","parts":["review"]}"#,
+    );
+    let chain = chain(repo.path());
+    let batch = &chain[1..];
+    assert_eq!(
+        batch.len(),
+        8,
+        "three flights, three parent edges, the definition's two"
+    );
+    let (filed, linked) = batch.split_at(3);
+    ok(
+        "/api/decompose",
+        status,
+        &head,
+        &body,
+        machine::emit(
+            "decompose",
+            &verb::Decomposed {
+                filed: filed.to_vec(),
+                linked: linked.to_vec(),
+                parent: chain[0].id.to_string(),
+            },
+        ),
+    );
+    read_after_write(&server, repo.path());
+}
+
 #[test]
 fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
     let (repo, server) = served();
@@ -370,6 +439,15 @@ fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
         &["assign", "1", "agent", "--json"],
         "flight/done",
     );
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/decompose",
+        r#"{"flight":"1","parts":["too late"]}"#,
+        409,
+        &["decompose", "1", "too late", "--json"],
+        "flight/done",
+    );
 }
 
 #[test]
@@ -424,6 +502,29 @@ fn the_usage_refusals_are_four_hundreds_with_the_clis_envelope() {
         &["assign", "1", "you", "--json"],
         "usage/bad-assignee",
     );
+    // An empty list parses fine and refuses in core, the way a missing
+    // message does — `usage/bad-body` is for what the verb cannot read.
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/decompose",
+        r#"{"flight":"1","parts":[]}"#,
+        400,
+        &["decompose", "1", "--json"],
+        "usage/no-parts",
+    );
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/decompose",
+        r#"{"flight":"1","parts":["part one","  "]}"#,
+        400,
+        &["decompose", "1", "part one", "  ", "--json"],
+        "usage/empty-subject",
+    );
+    // Every refusal above appended nothing: the seeded filing is still
+    // the whole log.
+    assert_eq!(chain(repo.path()).len(), 1);
 }
 
 #[test]
@@ -467,6 +568,7 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
         ),
         ("/api/done", r#"{}"#),
         ("/api/file", r#"{"flight":"1"}"#),
+        ("/api/decompose", r#"{"flight":"1"}"#),
     ] {
         let (status, _, answered) = post(&server.addr, path, body);
         assert_eq!(status, 400, "{path} {body}: {answered}");
@@ -491,4 +593,5 @@ fn a_read_method_on_a_write_route_is_405() {
     let (_repo, server) = served();
     assert_eq!(request(&server.addr, "GET", "/api/assign").0, 405);
     assert_eq!(request(&server.addr, "GET", "/api/status").0, 405);
+    assert_eq!(request(&server.addr, "GET", "/api/decompose").0, 405);
 }

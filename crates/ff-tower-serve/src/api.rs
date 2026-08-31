@@ -3,11 +3,11 @@
 //! Two halves, one contract. The read half is four resources over five
 //! GET routes, every one answering the exact envelope the matching verb
 //! emits under `--json` — same fold, same serializer, same bytes,
-//! trailing newline included. The write half is the verb API: eight POST
-//! routes — file, assign, status, hold, answer, done, cancel, comment —
-//! each taking the verb's arguments as a small JSON body, appending to
-//! the log, and answering the verb's own data envelope. The
-//! arguments ride the body rather than the path on purpose: a flight
+//! trailing newline included. The write half is the verb API: nine POST
+//! routes — file, assign, status, hold, answer, done, cancel, comment,
+//! decompose — each taking the verb's arguments as a small JSON body,
+//! appending to the log, and answering the verb's own data envelope.
+//! The arguments ride the body rather than the path on purpose: a flight
 //! reference can carry `#`, and `#` is a URL fragment. `cmd` on each
 //! envelope keeps the CLI's wire name (`/api/bays` answers `bay list`),
 //! because the envelope is the contract and the route is only the door.
@@ -91,6 +91,7 @@ pub(crate) fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
         .route("/api/done", post(done))
         .route("/api/cancel", post(cancel))
         .route("/api/comment", post(comment))
+        .route("/api/decompose", post(decompose))
         .with_state(Arc::new(AppState {
             repo: repo.to_path_buf(),
             feed,
@@ -341,9 +342,8 @@ struct StatusBody {
     message: Option<String>,
 }
 
-/// The single-argument verbs: claim, take, requeue, done. The flight is
-/// required — for `done` deliberately so, since the server has no
-/// invoking worktree to derive one from.
+/// The single-argument verb: done. The flight is required, deliberately
+/// so, since the server has no invoking worktree to derive one from.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FlightBody {
@@ -358,6 +358,16 @@ struct FlightBody {
 struct MessageBody {
     flight: String,
     message: Option<String>,
+}
+
+/// `decompose`'s arguments: the parts are required, so an omitted list
+/// is `usage/bad-body` and an empty one reaches core's `usage/no-parts`
+/// — the refusal a caller who meant to split into nothing deserves.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DecomposeBody {
+    flight: String,
+    parts: Vec<String>,
 }
 
 async fn file(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
@@ -443,6 +453,15 @@ async fn comment(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
         let store = Store::open(repo)?;
         let outcome = verb::comment(&store, &body.flight, body.message)?;
         Ok(machine::emit("comment", &outcome.payload))
+    })
+    .await
+}
+
+async fn decompose(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("decompose", state, body, |repo, body: DecomposeBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::decompose(&store, &body.flight, &body.parts)?;
+        Ok(machine::emit("decompose", &outcome.payload))
     })
     .await
 }

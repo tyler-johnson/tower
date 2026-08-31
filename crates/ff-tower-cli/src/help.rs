@@ -515,14 +515,15 @@ every path outside /api answers a build file or the app shell.
 The read API is four GET routes — /api/board, /api/brief/<flight>,
 /api/bays, and /api/procedures, bare or /<name> — each answering the
 same envelope the matching verb emits under --json, folded fresh per
-request; nothing is cached. The verb API is eight POST routes —
+request; nothing is cached. The verb API is nine POST routes —
 /api/file, /api/assign, /api/status, /api/hold, /api/answer,
-/api/done, /api/cancel, /api/comment — each taking the verb's
-arguments as a small JSON body ({\"flight\": …} with an optional
-\"message\", file's {\"subject\": …}, assign's {\"assignee\": …},
-status's {\"status\": …}), appending to the log, and answering the
-verb's own data envelope; hold answers 200, its exit-3 outcome being
-the CLI's channel, and done requires the flight named.
+/api/done, /api/cancel, /api/comment, /api/decompose — each taking
+the verb's arguments as a small JSON body ({\"flight\": …} with an
+optional \"message\", file's {\"subject\": …}, assign's
+{\"assignee\": …}, status's {\"status\": …}, decompose's
+{\"parts\": […]}), appending to the log, and answering the verb's own
+data envelope; hold answers 200, its exit-3 outcome being the CLI's
+channel, and done requires the flight named.
 A refusal is the same one-line error envelope: 400 for a reference
 or body that does not parse, 404 for a reference that names nothing,
 409 when the board's standing state refuses the write, 503 when the

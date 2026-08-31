@@ -43,7 +43,7 @@ use ff_tower_core::board::Fold;
 pub use ff_tower_core::board::{FlightRef, count, display, flight, parse_ref, resolve};
 use ff_tower_core::ff::Ff;
 use ff_tower_core::log::{EventId, Store};
-pub use ff_tower_core::verb::{appended, appended_all, ensure_active};
+pub use ff_tower_core::verb::appended;
 
 /// The repository handle for the verbs that spawn fufu, with core's
 /// `TOWER_FF` test seam applied.

@@ -30,6 +30,9 @@ pub enum Error {
 
     #[error("the subject is empty")]
     EmptySubject,
+    /// `decompose` with no procedure and no subjects — nothing to mint.
+    #[error("there is nothing to split into")]
+    NoParts,
     #[error("the procedure name is empty")]
     EmptyProcedure,
     #[error("no question given")]
@@ -70,6 +73,7 @@ impl Error {
             Error::Log(err) => err.id(),
             Error::Procedure(err) => err.id(),
             Error::EmptySubject => "usage/empty-subject",
+            Error::NoParts => "usage/no-parts",
             Error::EmptyProcedure => "usage/empty-procedure",
             Error::NeedsQuestion | Error::NeedsAnswer | Error::NeedsNote => "usage/needs-message",
             Error::BadStatus { .. } => "usage/bad-status",
@@ -88,7 +92,7 @@ impl Error {
             Error::Resolve(err) => return err.exits(),
             Error::Log(err) => return err.exits(),
             Error::Procedure(err) => return err.exits(),
-            Error::EmptySubject => &[],
+            Error::EmptySubject | Error::NoParts => &[],
             Error::EmptyProcedure => &["ff tower procedures"],
             Error::NeedsQuestion => &["ff tower hold <flight> -m <question>"],
             Error::NeedsAnswer | Error::AlreadyHeld { .. } | Error::StatusHeld { .. } => {
