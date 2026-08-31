@@ -14,15 +14,16 @@
 //! was set Ready. One is staleness and one is its opposite.
 //!
 //! Above the groups sits the inbox — questions and yours — a view of the
-//! same rows rather than a seventh group, and the one place a sub-flight
-//! is allowed to compete with its parent.
+//! same rows rather than a seventh group. Having a parent is not a
+//! grouping fact either: a sub-flight is a flight, and it files beside
+//! every other row.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde::Serialize;
 
 use crate::ff::Pairing;
-use crate::log::{Event, EventId};
+use crate::log::Event;
 
 use super::flight::{Flight, Fold};
 use super::reads::{Reads, Verdicts};
@@ -110,9 +111,6 @@ pub struct FlightView {
     /// Closed children over total, whenever this flight has children at
     /// all — what a render prints as `(2/6)`.
     pub progress: Option<(usize, usize)>,
-    /// `"{parent subject} › {leaf}"`, set only on a sub-flight that
-    /// surfaced beside its parent, so the row is legible alone.
-    pub breadcrumb: Option<String>,
     pub held: bool,
     pub resolving: bool,
     /// The branch is the one this render's own worktree sits on.
@@ -151,11 +149,11 @@ pub struct CollideView {
 /// puts a flight in `questions`, Ready in the `me` lane puts it in
 /// `yours`, and both keep their place in the status group below.
 ///
-/// Altitude: every depends-on edge is a parent edge, so a top-level row
-/// is a flight nothing depends on. A sub-flight is aggregated into its
-/// parent's progress mark and rendered nowhere else, except in the one
-/// situation it needs someone now — it is in the inbox, or it is what the
-/// agent queue would hand out — and there it carries a breadcrumb.
+/// A sub-flight is a flight: it lands in its own status group beside
+/// every other row, and nothing about having a parent moves or hides it.
+/// What says a row is a family is the parent's progress mark, closed
+/// children over total, which every parent carries. The family itself is
+/// the projects view's shape, not this list's.
 ///
 /// Verdicts land on every live flight against every other live flight on
 /// a distinct branch — the facts are orthogonal to the group. `Collide`
@@ -182,36 +180,13 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
         })
         .collect();
 
-    // Altitude and the progress marks, taken before the flights are
-    // consumed and carried as owned rows.
-    let (roots, crumbs, marks) = {
-        let parents = parents_of(&fold);
-        let by_id: HashMap<&EventId, &Flight> = fold
-            .flights
-            .iter()
-            .map(|flight| (&flight.id, flight))
-            .collect();
-        let mut roots: HashSet<String> = HashSet::new();
-        let mut crumbs: HashMap<String, String> = HashMap::new();
-        let mut marks: HashMap<String, (usize, usize)> = HashMap::new();
-        for flight in &fold.flights {
-            let id = flight.id.to_string();
-            // The first parent in filed order names the lineage: a flight
-            // with two parents is a graph, and a crumb is one path.
-            match parents.get(&flight.id).and_then(|ids| ids.first()) {
-                Some(parent) => {
-                    crumbs.insert(id.clone(), breadcrumb(by_id[*parent], flight));
-                }
-                None => {
-                    roots.insert(id.clone());
-                }
-            }
-            if let Some(mark) = progress(&fold, flight) {
-                marks.insert(id, mark);
-            }
-        }
-        (roots, crumbs, marks)
-    };
+    // The progress marks, taken before the flights are consumed and
+    // carried as owned rows.
+    let marks: HashMap<String, (usize, usize)> = fold
+        .flights
+        .iter()
+        .filter_map(|flight| Some((flight.id.to_string(), progress(&fold, flight)?)))
+        .collect();
 
     let mut inbox = WaitingOnYou {
         questions: Vec::new(),
@@ -235,7 +210,6 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
         let last_change = op.map(|op| op.time);
         let status_at = flight.status_mark.as_ref().map(|mark| mark.at);
         let is_closed = flight.closed();
-        let pullable = flight.pullable();
 
         // The first audit: In Progress and the branch has forgotten it.
         // With no capture at all the clock runs from the move itself —
@@ -269,7 +243,6 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
             }
         }
 
-        let is_root = roots.contains(&id);
         let mut view = view(
             flight,
             op.and_then(|op| op.branch.clone()),
@@ -284,9 +257,6 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
         view.collides = collides;
         view.unanswered = unanswered;
         view.progress = marks.get(&id).copied();
-        if !is_root {
-            view.breadcrumb = crumbs.get(&id).cloned();
-        }
 
         // The inbox, live rows only: a closed flight needs nobody, and
         // `done` does not clear a question the log still carries.
@@ -298,11 +268,6 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
             inbox.yours.push(view.clone());
         }
 
-        // A sub-flight never competes with its parent for attention —
-        // unless it is what needs someone right now.
-        if !is_root && !questioned && !mine && !pullable {
-            continue;
-        }
         match view.status.as_str() {
             "triage" => triage.push(view),
             "waiting" => waiting.push(view),
@@ -344,19 +309,6 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
     }
 }
 
-/// Who depends on each flight: `depends_on` inverted, because every
-/// depends-on edge is a parent edge — X depends on Y makes X a parent of
-/// Y. Parents come out in filed order, the fold's own.
-fn parents_of(fold: &Fold) -> HashMap<&EventId, Vec<&EventId>> {
-    let mut parents: HashMap<&EventId, Vec<&EventId>> = HashMap::new();
-    for flight in &fold.flights {
-        for child in &flight.depends_on {
-            parents.entry(child).or_default().push(&flight.id);
-        }
-    }
-    parents
-}
-
 /// Closed children over total, or `None` for a flight with no children.
 /// Canceled counts as closed: the part is over, whatever it concluded.
 pub(super) fn progress(fold: &Fold, flight: &Flight) -> Option<(usize, usize)> {
@@ -374,20 +326,6 @@ pub(super) fn progress(fold: &Fold, flight: &Flight) -> Option<(usize, usize)> {
         })
         .count();
     Some((closed, flight.depends_on.len()))
-}
-
-/// A sub-flight's subject with its parent's in front. Procedure children
-/// are minted `"{parent} · {id}"` (`verb/classify.rs`), so the parent's
-/// half comes off before the join or the crumb says it twice. A parent
-/// reworded since the minting no longer matches its children's prefix,
-/// and their whole subject stands as the leaf.
-fn breadcrumb(parent: &Flight, child: &Flight) -> String {
-    let minted = format!("{} · ", parent.subject);
-    let leaf = child
-        .subject
-        .strip_prefix(minted.as_str())
-        .unwrap_or(child.subject.as_str());
-    format!("{} › {leaf}", parent.subject)
 }
 
 /// When a closed flight closed: the status move that closed it, or the
@@ -460,7 +398,6 @@ fn view(
         stale: false,
         changed_since_ready: false,
         progress: None,
-        breadcrumb: None,
         held,
         resolving,
         current,
@@ -901,8 +838,43 @@ mod tests {
         assert!(!board.ready[0].changed_since_ready);
     }
 
+    /// The flat board: having a parent moves a flight nowhere. Every
+    /// generation files into the group its own status names, and the
+    /// family is a view over these same rows rather than a filter on
+    /// them.
     #[test]
-    fn a_parent_aggregates_its_children_and_they_do_not_compete() {
+    fn a_sub_flight_lands_in_its_own_status_group_beside_its_parent() {
+        let board = board(
+            &[
+                subjected("pi.1", 10, "top"),
+                event(
+                    "pi.2",
+                    20,
+                    filing("ready", "none", Some("agent"), "top · middle"),
+                ),
+                subjected("pi.3", 30, "leaf"),
+                linked("pi.4", 40, "pi.1", "pi.2"),
+                linked("pi.5", 50, "pi.2", "pi.3"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(
+            ids(&board.triage),
+            ["pi.1", "pi.3"],
+            "the parent and the grandchild, filed order within the group"
+        );
+        assert_eq!(ids(&board.ready), ["pi.2"], "the child on its own row");
+        assert_eq!(
+            board.ready[0].subject, "top · middle",
+            "the subject is the stored one — nothing is prefixed onto it"
+        );
+    }
+
+    /// A parent keeps its mark, which is what still says the row is a
+    /// family, and a closed child is a row in the closed group like any
+    /// other closed flight.
+    #[test]
+    fn a_parent_keeps_its_progress_mark() {
         let board = board(
             &[
                 subjected("pi.1", 10, "a broad task"),
@@ -914,60 +886,19 @@ mod tests {
             ],
             &reads(Vec::new(), Vec::new(), None),
         );
-        assert_eq!(ids(&board.triage), ["pi.1"], "the parent is the row");
+        assert_eq!(ids(&board.triage), ["pi.1", "pi.3"]);
         assert_eq!(board.triage[0].progress, Some((1, 2)));
-        assert!(board.triage[0].breadcrumb.is_none());
         assert!(
-            board.closed.is_empty(),
-            "a closed child stays under its parent"
+            board.triage[1].progress.is_none(),
+            "a child with no children of its own carries no mark"
         );
+        assert_eq!(ids(&board.closed), ["pi.2"]);
     }
 
+    /// The inbox is still a second view over the same rows, and a
+    /// sub-flight reaches it on the same terms as any flight.
     #[test]
-    fn a_pullable_child_surfaces_breadcrumbed() {
-        let board = board(
-            &[
-                subjected("pi.1", 10, "check the PR"),
-                event(
-                    "pi.2",
-                    20,
-                    filing("ready", "none", Some("agent"), "check the PR · verdict"),
-                ),
-                linked("pi.3", 30, "pi.1", "pi.2"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
-        assert_eq!(ids(&board.ready), ["pi.2"]);
-        assert_eq!(
-            board.ready[0].breadcrumb.as_deref(),
-            Some("check the PR › verdict"),
-            "the minted prefix comes off before the join"
-        );
-        assert_eq!(ids(&board.triage), ["pi.1"]);
-    }
-
-    #[test]
-    fn a_hand_filed_child_keeps_its_whole_subject_as_the_leaf() {
-        let board = board(
-            &[
-                subjected("pi.1", 10, "a broad task"),
-                event(
-                    "pi.2",
-                    20,
-                    filing("ready", "none", Some("agent"), "part one"),
-                ),
-                linked("pi.3", 30, "pi.1", "pi.2"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
-        assert_eq!(
-            board.ready[0].breadcrumb.as_deref(),
-            Some("a broad task › part one")
-        );
-    }
-
-    #[test]
-    fn a_questioned_child_surfaces_too_and_carries_its_crumb() {
+    fn a_questioned_sub_flight_reaches_the_inbox_and_its_group() {
         let board = board(
             &[
                 subjected("pi.1", 10, "check the PR"),
@@ -978,27 +909,8 @@ mod tests {
             &reads(Vec::new(), Vec::new(), None),
         );
         assert_eq!(ids(&board.waiting_on_you.questions), ["pi.2"]);
-        assert_eq!(
-            board.waiting_on_you.questions[0].breadcrumb.as_deref(),
-            Some("check the PR › verdict")
-        );
         assert_eq!(ids(&board.held), ["pi.2"]);
-    }
-
-    #[test]
-    fn a_grandchild_crumbs_against_its_own_parent() {
-        let board = board(
-            &[
-                subjected("pi.1", 10, "top"),
-                subjected("pi.2", 20, "middle"),
-                event("pi.3", 30, filing("ready", "none", Some("agent"), "leaf")),
-                linked("pi.4", 40, "pi.1", "pi.2"),
-                linked("pi.5", 50, "pi.2", "pi.3"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
         assert_eq!(ids(&board.triage), ["pi.1"]);
-        assert_eq!(board.ready[0].breadcrumb.as_deref(), Some("middle › leaf"));
     }
 
     #[test]

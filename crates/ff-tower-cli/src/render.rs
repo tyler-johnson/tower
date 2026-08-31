@@ -126,15 +126,12 @@ fn tip_column(view: &FlightView) -> String {
     }
 }
 
-/// The subject column: the breadcrumb where a sub-flight surfaced beside
-/// its parent, then the progress mark for a flight that has children.
-/// The mark is where "waiting on 2 flights" used to be — one fact, one
-/// place, and this one says how far along the family is.
+/// The subject column: the subject, then the progress mark for a flight
+/// that has children. The mark is where "waiting on 2 flights" used to
+/// be — one fact, one place — and on a flat board it is the whole of
+/// what says a row is a family.
 fn subject_column(view: &FlightView) -> String {
-    let mut text = view
-        .breadcrumb
-        .clone()
-        .unwrap_or_else(|| view.subject.clone());
+    let mut text = view.subject.clone();
     if let Some((closed, total)) = view.progress {
         text.push_str(&format!(" ({closed}/{total})"));
     }
@@ -142,8 +139,8 @@ fn subject_column(view: &FlightView) -> String {
 }
 
 /// The display form for a flight the board is showing, or the wire id for
-/// one it is not: a collide partner can be a sub-flight the altitude rule
-/// aggregated under its parent, and a note must still name it.
+/// one it is not: a collide partner can be a flight outside the closed
+/// window, and a note must still name it.
 fn reference(refs: &HashMap<&str, String>, id: &str) -> String {
     refs.get(id).cloned().unwrap_or_else(|| id.to_string())
 }
@@ -249,8 +246,8 @@ pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String
     ];
     // The footer counts live work: the inbox is a second view of rows the
     // groups already carry, and a closed flight is on the record rather
-    // than on the board. Counts count parents — a sub-flight aggregated
-    // under its parent is not a row here either.
+    // than on the board. Every other live flight is a row in exactly one
+    // of the five, sub-flights included, so the sum is the whole board.
     let flights = sections[2..7]
         .iter()
         .map(|(_, _, views)| views.len())
@@ -367,7 +364,6 @@ mod tests {
             stale: false,
             changed_since_ready: false,
             progress: None,
-            breadcrumb: None,
             held: false,
             resolving: false,
             current: false,
@@ -424,18 +420,17 @@ mod tests {
     }
 
     #[test]
-    fn a_surfaced_sub_flight_prints_its_crumb_and_a_parent_its_mark() {
+    fn a_parent_prints_its_mark_and_a_sub_flight_its_own_subject() {
         let mut parent = view("pi.1", 1, "waiting", "check the PR");
         parent.progress = Some((2, 6));
-        let mut child = view("pi.2", 2, "ready", "check the PR · verdict");
-        child.breadcrumb = Some("check the PR › verdict".to_string());
+        let child = view("pi.2", 2, "ready", "check the PR · verdict");
         let mut rendered = empty();
         rendered.waiting.push(parent);
         rendered.ready.push(child);
 
         let out = board(&rendered, NOW, TWO_DAYS, false);
         assert!(out.contains("check the PR (2/6)"), "{out}");
-        assert!(out.contains("check the PR › verdict"), "{out}");
+        assert!(out.contains("check the PR · verdict"), "{out}");
         assert!(
             out.contains("2 flights · ff tower file to add one"),
             "{out}"

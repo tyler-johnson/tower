@@ -96,16 +96,21 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
     );
     assert!(text.contains("board: ff tower"), "{text}");
 
-    // The pull is a stored status move. What was pulled is a sub-flight
-    // and needs nobody now, so the board keeps it under its parent's row
-    // — the brief is where one flight's pilot and branch are read.
+    // The pull is a stored status move, and the board is flat: the
+    // pulled sub-flight is a row under In Progress, and its parent keeps
+    // the mark. The brief is still where one flight's pilot and branch
+    // are read.
     let board = stdout(&ff_tower(repo.path(), &[]));
     assert!(board.contains("the one flight (0/2)"), "{board}");
     let json = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(
-        json["data"]["in_progress"],
-        serde_json::json!([]),
-        "a flight under way competes with nothing"
+        json["data"]["in_progress"][0]["id"],
+        serde_json::json!("pi.2")
+    );
+    assert_eq!(
+        json["data"]["in_progress"][0]["status_by"],
+        serde_json::json!("tests@tower.invalid"),
+        "the byline on the pull is the pilot"
     );
 
     let brief = stdout(&ff_tower(repo.path(), &["brief", "2"]));
@@ -310,8 +315,8 @@ fn deconfliction_passes_the_collider_pulls_the_clear_one_and_pins_the_json() {
         "{text}"
     );
 
-    // A pulled sub-flight sits under its parent on the board, so the
-    // move is read back off its own record.
+    // The move is a stored fact on the flight's own record, whatever
+    // group the board files it in.
     let brief: serde_json::Value = serde_json::from_str(&stdout(&ff_tower(
         repo.path(),
         &["brief", "pi.14", "--json"],

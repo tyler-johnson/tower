@@ -9,9 +9,11 @@
 		beatLine,
 		briefNote,
 		buildRefs,
+		fieldsLine,
 		flightRef,
-		partLine,
 		refusalLines,
+		statusDot,
+		statusWord,
 		unknownRows,
 		writerOf
 	} from './tower';
@@ -22,24 +24,23 @@
 	let now = $derived(feed.now);
 
 	// The board's display form when the flight is on it; the long form
-	// otherwise — a done flight has left the board, and the brief still
-	// knows its own number.
+	// otherwise — a flight past the closed window has left the board, and
+	// the brief still knows its own number.
 	let ref = $derived(
 		brief ? (refs.get(brief.id) ?? flightRef(writerOf(brief.id), brief.number, false)) : ''
 	);
 	let note = $derived(brief ? briefNote(brief, refs, now) : []);
+	let subject = $derived(
+		brief
+			? brief.progress === null
+				? brief.subject
+				: `${brief.subject} (${brief.progress[0]}/${brief.progress[1]})`
+			: ''
+	);
 	// The bay flying it, off the shared pool the strip keeps live: one
 	// fewer request per open, and the line moves with the strip.
 	let bay = $derived(brief ? (bays.pool.find((row) => row.flight === brief.id) ?? null) : null);
 	let other = $derived(brief ? unknownRows(brief) : []);
-	let links = $derived(
-		brief
-			? ([
-					['depends on', brief.depends_on],
-					['blocks', brief.blocks]
-				] as const)
-			: []
-	);
 
 	function escape(event: KeyboardEvent) {
 		if (event.key === 'Escape') goto('/');
@@ -59,7 +60,7 @@
 			<header class="flex flex-col gap-2">
 				<div class="flex items-baseline gap-3">
 					<span class="font-mono text-primary">{ref}</span>
-					<h2 class="flex-1 font-medium">{brief.subject}</h2>
+					<h2 class="flex-1 font-medium">{subject}</h2>
 					<a href="/" class="btn btn-ghost btn-sm btn-square" aria-label="close">✕</a>
 				</div>
 				<p class="text-sm text-base-content/40">
@@ -68,19 +69,15 @@
 						<span class={phrase.tone === 'warn' ? 'text-warning' : ''}>{phrase.text}</span>
 					{/each}
 				</p>
-				{#if brief.part}
-					<p class="text-sm text-base-content/40">{partLine(brief.part)}</p>
-				{/if}
 				<!--
-					The routing, explained — the stored stamp beside who wrote
-					it and why, so a bad call is correctable in a glance.
+					The stored fields, one line, the way cmd/brief.rs prints
+					them — with the status ahead as its own dot and word,
+					since that is the field a reader looks for first.
 				-->
-				{#if brief.routed_by !== null && brief.routed_at !== null}
-					<p class="text-sm text-base-content/40">
-						routed {brief.procedure} · by {brief.routed_by} · {age(now, brief.routed_at)}{#if brief.because}
-							· {brief.because}{/if}
-					</p>
-				{/if}
+				<p class="flex items-baseline gap-2 text-sm text-base-content/40">
+					<span class="status {statusDot(brief.status)}"></span>
+					<span>{statusWord(brief.status)} · {fieldsLine(brief)}</span>
+				</p>
 				{#if brief.edited_by !== null && brief.edited_at !== null}
 					<p class="text-sm text-base-content/40">
 						edited · by {brief.edited_by} · {age(now, brief.edited_at)}
@@ -101,27 +98,65 @@
 				<p class="text-sm whitespace-pre-wrap">{brief.body}</p>
 			{/if}
 
-			{#each links as [title, rows] (title)}
-				{#if rows.length > 0}
-					<section class="flex flex-col gap-1">
-						<h3
-							class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
+			<!--
+				The family, parents up and children down: every depends-on
+				edge is a parent edge, so `blocks` is this flight's parents
+				and `depends_on` is its children.
+			-->
+			{#if brief.blocks.length > 0}
+				<section class="flex flex-col gap-1">
+					<h3
+						class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
+					>
+						parents
+					</h3>
+					{#each brief.blocks as link (link.flight)}
+						<a
+							href="/f/{link.flight}"
+							class="flex items-baseline gap-2 rounded-field px-1 hover:bg-base-200"
 						>
-							{title}
-						</h3>
-						{#each rows as link (link.flight)}
-							<a
-								href="/f/{link.flight}"
-								class="flex items-baseline gap-2 rounded-field px-1 hover:bg-base-200"
-							>
-								<span class="font-mono text-primary">{refs.get(link.flight) ?? link.flight}</span>
-								<span class="flex-1 truncate">{link.subject}</span>
-								{#if link.done}<span class="badge badge-ghost badge-sm">done</span>{/if}
-							</a>
-						{/each}
-					</section>
-				{/if}
-			{/each}
+							<span class="font-mono text-primary">
+								{refs.get(link.flight) ?? link.flight}
+							</span>
+							<span class="status {statusDot(link.status)}" title={link.status}></span>
+							<span class="flex-1 truncate">{link.subject}</span>
+						</a>
+					{/each}
+				</section>
+			{/if}
+
+			<!--
+				The children as a folder: one level, because a brief carries
+				one level of links and no more. The whole tree, parents up
+				and children down over the same edges, is the projects
+				view's job, and it stops here.
+			-->
+			{#if brief.depends_on.length > 0}
+				<section class="flex flex-col gap-1">
+					<h3
+						class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
+					>
+						children
+					</h3>
+					<p class="flex items-baseline gap-2 font-mono text-sm text-base-content/60">
+						<span>📁</span>
+						<span class="truncate">{brief.subject}</span>
+					</p>
+					{#each brief.depends_on as link (link.flight)}
+						<a
+							href="/f/{link.flight}"
+							class="ml-4 flex items-baseline gap-2 rounded-field border-l border-base-300 px-1 pl-3 hover:bg-base-200"
+						>
+							<span class="font-mono text-primary">
+								{refs.get(link.flight) ?? link.flight}
+							</span>
+							<span class="status {statusDot(link.status)}" title={link.status}></span>
+							<span class="flex-1 truncate">{link.subject}</span>
+							{#if link.closed}<span class="text-success">✓</span>{/if}
+						</a>
+					{/each}
+				</section>
+			{/if}
 
 			{#if brief.comments.length > 0}
 				<section class="flex flex-col gap-3">

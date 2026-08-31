@@ -45,9 +45,19 @@ fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// One flight's record through `brief` — the surface that answers for a
-/// sub-flight, which the board aggregates under its parent's row.
+/// flight's family, which the board's own rows say nothing about.
 fn brief_of(repo: &Path, flight: &str) -> serde_json::Value {
     envelope(&ff_tower(repo, &["brief", flight, "--json"]))["data"].clone()
+}
+
+/// The flight ids on one of a board's groups, in the group's own order.
+fn row_ids(group: &serde_json::Value) -> Vec<&str> {
+    group
+        .as_array()
+        .expect("a group")
+        .iter()
+        .map(|view| view["id"].as_str().expect("id"))
+        .collect()
 }
 
 /// The flight ids on one of a brief's family lists, in the fold's order.
@@ -338,9 +348,8 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
         ]
     );
 
-    // And the briefs read the same DAG back off the log. The board shows
-    // the parent alone — a sub-flight is counted into its progress mark,
-    // so the family is the brief's to answer for.
+    // And the briefs read the same DAG back off the log — one level of
+    // links each, which is the family a brief answers for.
     let parent = brief_of(repo.path(), "pi.1");
     assert_eq!(family(&parent, "depends_on"), ["pi.2", "pi.3", "pi.4"]);
     assert_eq!(parent["progress"], serde_json::json!([0, 3]));
@@ -350,26 +359,17 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
     assert_eq!(pass["assignee"], serde_json::json!("agent"));
     assert_eq!(pass["status"], serde_json::json!("ready"));
 
-    // The board shows the parent, born Waiting on its children, with the
-    // mark; the two children that need someone now surface beside it,
-    // breadcrumbed — `pass` for the agent queue, `smoke` in the me lane.
+    // The board is flat: the parent, born Waiting on its children, with
+    // the mark, and every sub-flight a row in the group its own status
+    // names — `pass` and `smoke` Ready, `verdict` Waiting behind them.
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(board["data"]["waiting"][0]["id"], serde_json::json!("pi.1"));
     assert_eq!(
         board["data"]["waiting"][0]["progress"],
         serde_json::json!([0, 3])
     );
-    let ready: Vec<&str> = board["data"]["ready"]
-        .as_array()
-        .expect("ready")
-        .iter()
-        .map(|view| view["breadcrumb"].as_str().expect("a breadcrumb"))
-        .collect();
-    assert_eq!(
-        ready,
-        ["the retry test › pass", "the retry test › smoke"],
-        "the minted `· ` prefix comes off before the join"
-    );
+    assert_eq!(row_ids(&board["data"]["waiting"]), ["pi.1", "pi.4"]);
+    assert_eq!(row_ids(&board["data"]["ready"]), ["pi.2", "pi.3"]);
     assert_eq!(
         board["data"]["waiting_on_you"]["yours"][0]["id"],
         serde_json::json!("pi.3")

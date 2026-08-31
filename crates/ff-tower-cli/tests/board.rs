@@ -115,7 +115,6 @@ fn json_emits_towers_envelope_and_round_trips() {
     );
     assert!(data["triage"][0]["last_change"].is_null());
     assert!(data["triage"][0]["progress"].is_null());
-    assert!(data["triage"][0]["breadcrumb"].is_null());
 }
 
 #[test]
@@ -386,7 +385,7 @@ fn a_ready_flight_whose_branch_moved_carries_the_audit_line() {
 }
 
 #[test]
-fn a_decomposed_parent_is_one_row_carrying_its_familys_progress() {
+fn a_decomposed_parent_carries_its_familys_progress_and_the_children_are_rows() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
@@ -395,32 +394,39 @@ fn a_decomposed_parent_is_one_row_carrying_its_familys_progress() {
         &["decompose", "1", "part one", "part two"],
     ));
 
-    // Filing under a procedure visibly creates one thing, not three.
+    // Decomposing creates three things and the board says so: the
+    // parent's mark is what marks it a family, and the children are
+    // rows of their own beside it.
     let out = stdout(&ff_tower(repo.path(), &[]));
     assert!(out.contains("a broad task (0/2)"), "{out}");
-    assert!(!out.contains("part one"), "the children aggregate: {out}");
+    assert!(out.contains("part one"), "{out}");
+    assert!(out.contains("part two"), "{out}");
     assert!(
-        out.contains("1 flight · ff tower file to add one"),
-        "counts count parents: {out}"
+        out.contains("3 flights · ff tower file to add one"),
+        "the count counts every live flight: {out}"
     );
 
     stdout(&ff_tower(repo.path(), &["done", "2"]));
     let out = stdout(&ff_tower(repo.path(), &[]));
     assert!(out.contains("a broad task (1/2)"), "{out}");
-    assert!(
-        !out.contains("closed\n"),
-        "a closed child stays under its parent: {out}"
-    );
 
     let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(
         envelope["data"]["triage"][0]["progress"],
         serde_json::json!([1, 2])
     );
+    assert_eq!(
+        envelope["data"]["closed"][0]["subject"],
+        serde_json::json!("part one"),
+        "a closed child is a closed row like any other"
+    );
 }
 
+/// The flat board: a sub-flight files into the group its own status
+/// names whether or not it needs anyone, and it carries the subject it
+/// was filed with — nothing is prefixed onto it.
 #[test]
-fn a_pullable_sub_flight_surfaces_beside_its_parent_breadcrumbed() {
+fn a_sub_flight_is_a_row_in_its_own_status_group() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     stdout(&ff_tower(repo.path(), &["file", "a broad task"]));
@@ -428,18 +434,28 @@ fn a_pullable_sub_flight_surfaces_beside_its_parent_breadcrumbed() {
         repo.path(),
         &["decompose", "1", "part one", "part two"],
     ));
-    // The pass advances the first child to Ready in the agent lane; the
-    // second waits on it, so exactly one child needs someone now.
     stdout(&ff_tower(repo.path(), &["assign", "2", "agent"]));
     stdout(&ff_tower(repo.path(), &["status", "2", "ready"]));
 
     let out = stdout(&ff_tower(repo.path(), &[]));
-    assert!(out.contains("a broad task › part one"), "{out}");
-    assert!(!out.contains("part two"), "{out}");
+    assert!(out.contains("part one"), "{out}");
+    assert!(out.contains("part two"), "{out}");
+    assert!(
+        !out.contains("\u{203a}"),
+        "no crumb rides the subject: {out}"
+    );
 
     let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(
-        envelope["data"]["ready"][0]["breadcrumb"],
-        serde_json::json!("a broad task › part one")
+        envelope["data"]["ready"][0]["subject"],
+        serde_json::json!("part one")
+    );
+    assert_eq!(
+        envelope["data"]["triage"][0]["subject"],
+        serde_json::json!("a broad task")
+    );
+    assert_eq!(
+        envelope["data"]["triage"][1]["subject"],
+        serde_json::json!("part two")
     );
 }

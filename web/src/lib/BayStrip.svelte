@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { bays } from './bays.svelte';
 	import { feed } from './board.svelte';
-	import { buildRefs, type BayView, type Board } from './tower';
+	import { buildRefs, statusDot, type BayView, type Board } from './tower';
 
 	// The pool rides no SSE, so its liveness is this: touching the last
 	// frame's stamp subscribes the effect to the board, and `updatedAt`
@@ -18,27 +18,29 @@
 	// without holding any state of its own.
 	let here = $derived(page.params.bay ?? null);
 
-	/// A chip's glyph is its occupant's board-section glyph, so the strip
-	/// and the board are one vocabulary rather than two. Derived entirely
-	/// from the board frame already in hand — `BayView` carries only
+	/// A chip carries its occupant's status dot, so the strip and the
+	/// board are one vocabulary rather than two. Derived entirely from the
+	/// board frame already in hand — `BayView` carries only
 	/// free-or-occupied by design.
 	///
-	/// An occupant can only ever be in one of the three moving sections: a
-	/// bay is occupied by branch, and the board's `open` means no branch
-	/// op. So the last case is a board that has not arrived or a flight
-	/// the live sections do not carry, and it renders occupied rather than
-	/// free — the pool read and the board frame are two reads, and
-	/// rounding an unknown down to free would invite a release on a bay
-	/// somebody is sitting in.
-	function chip(bay: BayView, board: Board | null): { glyph: string; tone: string } {
-		if (bay.flight === null) return { glyph: '·', tone: 'text-base-content/40' };
-		const on = (views: { id: string }[]) => views.some((view) => view.id === bay.flight);
+	/// A board that has not arrived, or an occupant outside the live
+	/// groups, renders as held rather than free: the pool read and the
+	/// board frame are two reads, and rounding an unknown down to free
+	/// would invite a release on a bay somebody is sitting in.
+	function chip(bay: BayView, board: Board | null): { dot: string; title: string } {
+		if (bay.flight === null) return { dot: 'status-neutral', title: 'free' };
 		if (board) {
-			if (on(board.in_the_air)) return { glyph: '▸', tone: 'text-primary' };
-			if (on(board.holding)) return { glyph: '‖', tone: 'text-warning' };
-			if (on(board.waiting_on_you)) return { glyph: '?', tone: 'text-warning' };
+			const live = [
+				board.triage,
+				board.waiting,
+				board.ready,
+				board.in_progress,
+				board.held
+			].flat();
+			const view = live.find((row) => row.id === bay.flight);
+			if (view) return { dot: statusDot(view.status), title: view.status };
 		}
-		return { glyph: '‖', tone: 'text-warning' };
+		return { dot: 'status-error', title: 'occupied' };
 	}
 </script>
 
@@ -59,7 +61,7 @@
 				? 'bg-base-200'
 				: ''}"
 		>
-			<span class={state.tone}>{state.glyph}</span>
+			<span class="status {state.dot}" title={state.title}></span>
 			<span class="font-mono">{bay.id}</span>
 			{#if bay.flight !== null}
 				<span class="font-mono text-primary">{refs.get(bay.flight) ?? bay.flight}</span>

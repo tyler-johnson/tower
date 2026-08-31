@@ -19,33 +19,61 @@ export interface TowerError {
 }
 
 export interface Board {
-	waiting_on_you: FlightView[];
-	in_the_air: FlightView[];
-	holding: FlightView[];
-	open: FlightView[];
+	waiting_on_you: WaitingOnYou;
+	triage: FlightView[];
+	waiting: FlightView[];
+	ready: FlightView[];
+	in_progress: FlightView[];
+	held: FlightView[];
+	/// Done and canceled, newest first, the last three days.
+	closed: FlightView[];
 	unrouted: TowerEvent[];
+}
+
+/// Pinned above the status groups: what needs a person now. A view of the
+/// same rows — a flight here still appears in its status group.
+export interface WaitingOnYou {
+	questions: FlightView[];
+	yours: FlightView[];
 }
 
 export interface FlightView {
 	id: string;
 	number: number;
-	procedure: string;
-	part: PartStamp | null;
+	/// Provenance only: the procedure the filing was minted under, or the
+	/// pass routed it under.
+	procedure: string | null;
 	subject: string;
 	filed_by: string;
 	filed_at: number;
 	comments: number;
 	depends_on: string[];
 	blocks: string[];
+	/// The stored status, verbatim.
+	status: string;
+	/// Who last moved the status, and when — `null` while the flight still
+	/// stands where it was filed.
+	status_by: string | null;
+	status_at: number | null;
+	assignee: string | null;
+	priority: string;
+	labels: string[];
+	skill: string | null;
 	branch: string | null;
 	tip: string | null;
-	last_motion: number | null;
+	/// The freshest session-tagged capture on this flight's branch — the
+	/// repository's fact, and nothing the record itself did.
+	last_change: number | null;
+	/// In Progress, and the branch has not changed for the threshold.
+	stale: boolean;
+	/// Ready, and the branch changed after the flight was set Ready.
+	changed_since_ready: boolean;
+	/// Closed children over total, a JSON array — Rust's `(usize, usize)`
+	/// serializes as one, not as an object.
+	progress: [number, number] | null;
 	held: boolean;
 	resolving: boolean;
 	current: boolean;
-	claimed_by: string | null;
-	taken: boolean;
-	requeued_at: number | null;
 	question: string | null;
 	asked_at: number | null;
 	collides: CollideView[];
@@ -57,17 +85,6 @@ export interface CollideView {
 	paths: string[];
 }
 
-export interface PartStamp {
-	id: string;
-	crew: string;
-	skill?: string;
-	/// A free string on the wire, not a flag: a newer tower's completion
-	/// word must not fail an older tower's parse.
-	done: string;
-	bay?: string;
-	branch?: string;
-}
-
 // The unrouted rows are raw log events; the board renders only their count,
 // so the shape stays loose. Named TowerEvent to avoid the DOM's Event.
 export interface TowerEvent {
@@ -77,6 +94,13 @@ export interface TowerEvent {
 	id: string;
 	kind: unknown;
 }
+
+/// The staleness threshold's rendering, `config::DEFAULT_STALE_FLIGHT`
+/// through `render::span`. The board envelope carries neither a clock nor
+/// the config, so a repo that set `tower.staleFlightThreshold` to
+/// something else will read wrong here until the envelope carries it —
+/// the flag itself is the server's, and only the word is guessed.
+const STALE_AFTER = '2d';
 
 /// The writer half of a wire id — everything before the last `.`.
 export function writerOf(id: string): string {
@@ -121,16 +145,88 @@ export function tipColumn(view: FlightView): string {
 	return view.tip ? view.tip.slice(0, 8) : '—';
 }
 
+/// The priority glyph, urgent first. A word this build has never heard of
+/// falls to `·` rather than being given a rung of its own — the same
+/// posture `rank()` takes when it sorts an unknown priority last.
+export function priorityGlyph(priority: string): string {
+	switch (priority) {
+		case 'urgent':
+			return '!';
+		case 'high':
+			return '↑';
+		case 'medium':
+			return '→';
+		case 'low':
+			return '↓';
+		default:
+			return '·';
+	}
+}
+
+/// The status dot's daisyUI modifier. A status this build has never heard
+/// of gets the neutral dot: the row still renders, and the word beside it
+/// is the honest answer about what the status is.
+export function statusDot(status: string): string {
+	switch (status) {
+		case 'waiting':
+			return 'status-warning';
+		case 'ready':
+			return 'status-info';
+		case 'in_progress':
+			return 'status-primary';
+		case 'held':
+			return 'status-error';
+		case 'done':
+			return 'status-success';
+		case 'triage':
+		case 'canceled':
+		default:
+			return 'status-neutral';
+	}
+}
+
+/// The status as a person reads it — `in_progress` is the only stored
+/// word with an underscore in it, and cmd/brief.rs spells it out the same
+/// way.
+export function statusWord(status: string): string {
+	return status.replaceAll('_', ' ');
+}
+
+/// The right-aligned age column, on `note()`'s own precedence: the ask if
+/// there is one, else the branch's last change, else the filing.
+export function ageColumn(view: FlightView, now: number): string {
+	if (view.asked_at !== null) return age(now, view.asked_at);
+	if (view.last_change !== null) return age(now, view.last_change);
+	return age(now, view.filed_at);
+}
+
+/// The subject column: the subject, then the progress mark for a flight
+/// that has children. On a flat board the mark is the whole of what says
+/// a row is a family.
+export function subjectColumn(view: FlightView): string {
+	if (view.progress === null) return view.subject;
+	return `${view.subject} (${view.progress[0]}/${view.progress[1]})`;
+}
+
 /// Wire id to display form, over every section at once: a verdict partner
 /// is always a live flight, so the map answers for `collides` and
-/// `unanswered` entries too. Also the total flight count, for the footer.
+/// `unanswered` entries too. Also the live flight count, for the footer —
+/// the five status groups, which on a flat board is every live flight
+/// exactly once; the inbox is a second view of rows they already carry,
+/// and a closed flight is on the record rather than on the board.
 export function buildRefs(board: Board): { refs: Map<string, string>; flights: number } {
-	const views = [board.waiting_on_you, board.in_the_air, board.holding, board.open].flat();
+	const live = [board.triage, board.waiting, board.ready, board.in_progress, board.held];
+	const views = [
+		board.waiting_on_you.questions,
+		board.waiting_on_you.yours,
+		...live,
+		board.closed
+	].flat();
 	const short = shortIds(views.map((view) => view.id));
 	const refs = new Map(
 		views.map((view) => [view.id, flightRef(writerOf(view.id), view.number, short)])
 	);
-	return { refs, flights: views.length };
+	return { refs, flights: live.reduce((sum, group) => sum + group.length, 0) };
 }
 
 export interface NotePhrase {
@@ -139,13 +235,13 @@ export interface NotePhrase {
 }
 
 /// The note line's phrases, in render.rs's urgency order: question, held,
-/// resolving, collides, no-verdicts, waiting-on, ownership, branch,
-/// comments, age. The age phrase means the line is never empty.
-export function notePhrases(
-	view: FlightView,
-	refs: Map<string, string>,
-	now: number
-): NotePhrase[] {
+/// resolving, collides, no-verdicts, the two audits, the pilot, branch,
+/// comments.
+///
+/// The one deliberate divergence from `note()`: the trailing age phrase is
+/// omitted, because the web row has a column for the age and the CLI has
+/// no room for one. `ageColumn` is that phrase's other half.
+export function notePhrases(view: FlightView, refs: Map<string, string>): NotePhrase[] {
 	const phrases: NotePhrase[] = [];
 	const warn = (text: string) => phrases.push({ text, tone: 'warn' });
 	const dim = (text: string) => phrases.push({ text, tone: 'dim' });
@@ -153,31 +249,25 @@ export function notePhrases(
 	if (view.held) warn('held');
 	if (view.resolving) warn('resolving');
 	for (const collide of view.collides) {
-		warn(`collides ${refs.get(collide.with)} on ${pathsPhrase(collide.paths)}`);
+		warn(`collides ${show(refs, collide.with)} on ${pathsPhrase(collide.paths)}`);
 	}
 	for (const with_ of view.unanswered) {
-		dim(`no verdict vs ${refs.get(with_)}`);
+		dim(`no verdict vs ${show(refs, with_)}`);
 	}
-	// A dependency absent from `refs` is done — done flights leave the
-	// board — so the phrase covers only the live ones and clears itself as
-	// they land.
-	const waiting = view.depends_on.filter((dep) => refs.has(dep));
-	if (waiting.length === 1) dim(`waiting on ${refs.get(waiting[0])}`);
-	else if (waiting.length > 1) dim(`waiting on ${waiting.length} flights`);
-	// Ownership, ahead of the branch. `taken` prints whether or not a
-	// branch exists; a bare `claimed` needs no branch; `requeued` stands
-	// where neither does.
-	if (view.taken) dim('taken');
-	else if (view.claimed_by !== null) {
-		if (view.branch === null) dim('claimed');
-	} else if (view.requeued_at !== null) dim('requeued');
+	// The two audits, each its own phrase and neither under a shared word:
+	// one says the branch has forgotten a flight that claims to be flying,
+	// the other says a branch moved under one that claims not to be.
+	if (view.stale) warn(`no changes on the branch for ${STALE_AFTER}`);
+	if (view.changed_since_ready) warn('changes on the branch since it was set ready');
+	// The pilot, ahead of the branch: the stored In Progress and who set
+	// it — the byline is the pilot, the field is the chip.
+	if (view.status === 'in_progress') {
+		dim(view.status_by !== null ? `in progress — ${view.status_by}` : 'in progress');
+	}
 	if (view.branch !== null && view.branch !== '@detached') dim(`on ${view.branch}`);
 	if (view.comments > 0) {
 		dim(`${view.comments} ${view.comments === 1 ? 'comment' : 'comments'}`);
 	}
-	if (view.asked_at !== null) dim(`asked ${age(now, view.asked_at)}`);
-	else if (view.last_motion !== null) dim(`moved ${age(now, view.last_motion)}`);
-	else dim(`filed ${age(now, view.filed_at)}`);
 	return phrases;
 }
 
@@ -188,18 +278,21 @@ export type StandingTag =
 	| 'done'
 	| 'question'
 	| 'held'
-	| 'claimed'
+	| 'in-progress'
 	| 'yours'
 	| 'ready'
 	| 'waiting'
 	| 'collides'
 	| 'no-verdict';
 
-/// One linked flight, as the brief carries it.
+/// One linked flight, as the brief carries it. `status` is the stored
+/// word; `closed` is the arbitrated fact, since done and canceled are two
+/// words for one end.
 export interface LinkView {
 	flight: string;
 	subject: string;
-	done: boolean;
+	status: string;
+	closed: boolean;
 }
 
 /// A note on the record. `id` is the wire id — a comment's only name, and
@@ -233,33 +326,37 @@ export interface Passed {
 export interface Brief {
 	id: string;
 	number: number;
-	procedure: string;
-	part: PartStamp | null;
+	procedure: string | null;
 	subject: string;
 	body: string;
 	filed_by: string;
 	filed_at: number;
-	claimed_by: string | null;
-	claimed_at: number | null;
-	taken_by: string | null;
-	taken_at: number | null;
-	requeued_at: number | null;
-	routed_by: string | null;
-	routed_at: number | null;
-	because: string | null;
+	/// The stored fields, read here because the brief is the read surface
+	/// for one flight.
+	status: string;
+	status_by: string | null;
+	status_at: number | null;
+	assignee: string | null;
+	priority: string;
+	labels: string[];
+	skill: string | null;
+	bay: string | null;
+	/// The last edit touching the record — the flight's own fields or a
+	/// comment's text — flat like the status mark.
 	edited_by: string | null;
 	edited_at: number | null;
 	question: string | null;
 	asked_by: string | null;
 	asked_at: number | null;
-	done_by: string | null;
-	done_at: number | null;
 	branch: string | null;
 	tip: string | null;
 	held: boolean;
 	resolving: boolean;
 	current: boolean;
-	last_motion: number | null;
+	last_change: number | null;
+	stale: boolean;
+	changed_since_ready: boolean;
+	progress: [number, number] | null;
 	depends_on: LinkView[];
 	blocks: LinkView[];
 	comments: CommentView[];
@@ -287,15 +384,15 @@ export interface Pool {
 
 /// One procedure as the registry holds it, mirroring
 /// ff-tower-core/src/procedure/mod.rs. This is the *definition* — a file
-/// on disk; `PartStamp` above is the flight's own copy of one part of it,
-/// taken at file or route time and never re-read.
+/// on disk, and nothing a flight carries: a filing keeps only the
+/// procedure's name, as provenance.
 export interface Definition {
 	name: string;
 	/// What the flight's subject resolves against later; `branch` on
 	/// `review`. Nothing derives from it yet.
 	subject: string | null;
 	matches: ProcedureMatch[];
-	parts: Part[];
+	flights: FlightDef[];
 	source: Source;
 }
 
@@ -312,16 +409,19 @@ export interface ProcedureMatch {
 	assignee: string | null;
 }
 
-/// One part of a definition. `done` stays a free string for the reason
-/// `PartStamp.done` is one: a newer tower's completion word must not fail
-/// an older tower's parse.
-export interface Part {
+/// One flight a definition declares. `done` stays a free string: a newer
+/// tower's completion word must not fail an older tower's parse.
+export interface FlightDef {
 	id: string;
-	crew: 'you' | 'agent';
+	assignee: 'me' | 'agent';
 	skill: string | null;
 	after: string[];
 	done: string;
 	bay: string | null;
+	/// The priority and labels the flight is born with — free here because
+	/// they are free on the flight.
+	priority: string | null;
+	labels: string[];
 }
 
 /// Which layer a definition was read from, and the file it came from —
@@ -336,41 +436,40 @@ export interface Listing {
 }
 
 /// A flight's display form, or its wire id when the board has no entry —
-/// a linked or beat flight that is done has left the board, and its wire
-/// id is still a name that resolves.
+/// a linked or beat flight outside the closed window has left the board,
+/// and its wire id is still a name that resolves.
 function show(refs: Map<string, string>, id: string): string {
 	return refs.get(id) ?? id;
 }
 
-/// The brief's note line, ported from cmd/brief.rs's `note()`: the done
-/// mark ahead of everything, because a reader must know first that the
-/// flight is over, then the question, the holds, the ownership, the
-/// standing, the branch, and the age. Precedence makes the standing
-/// exclusive with the mark phrases, so the line never says a thing twice.
+/// The brief's note line, ported from cmd/brief.rs's `note()`: the status
+/// ahead of everything, because a reader must know first where the flight
+/// stands and who put it there, then the question, the holds, the
+/// standing, the audits, the branch, and the age. Precedence makes the
+/// standing exclusive with the mark phrases, so the line never says a
+/// thing twice.
 export function briefNote(brief: Brief, refs: Map<string, string>, now: number): NotePhrase[] {
 	const phrases: NotePhrase[] = [];
 	const warn = (text: string) => phrases.push({ text, tone: 'warn' });
 	const dim = (text: string) => phrases.push({ text, tone: 'dim' });
-	if (brief.done_by !== null && brief.done_at !== null) {
-		dim(`done by ${brief.done_by} ${age(now, brief.done_at)}`);
-	}
+	const status = statusWord(brief.status);
+	dim(
+		brief.status_by !== null && brief.status_at !== null
+			? `${status} — ${brief.status_by} ${age(now, brief.status_at)}`
+			: status
+	);
 	if (brief.question !== null) warn(brief.question);
 	if (brief.held) warn('held');
 	if (brief.resolving) warn('resolving');
-	// A take is a claim with a provenance: same owner, different gesture,
-	// and the word is what says the agent lane is closed.
-	if (brief.claimed_by !== null) {
-		dim(`${brief.taken_by !== null ? 'taken' : 'claimed'} by ${brief.claimed_by}`);
-	}
 	switch (brief.standing) {
 		// Said above, from the brief's own flat facts.
 		case 'done':
 		case 'question':
 		case 'held':
-		case 'claimed':
+		case 'in-progress':
 			break;
 		case 'yours':
-			dim(brief.part ? `yours — crewed ${brief.part.crew}` : 'yours — no part stamp');
+			dim(brief.assignee !== null ? `yours — assigned ${brief.assignee}` : 'yours — unassigned');
 			break;
 		case 'ready':
 			dim('ready');
@@ -387,25 +486,29 @@ export function briefNote(brief: Brief, refs: Map<string, string>, now: number):
 			warn(`no verdict vs ${show(refs, brief.with ?? '')}`);
 			break;
 	}
+	if (brief.stale) warn(`no changes on the branch for ${STALE_AFTER}`);
+	if (brief.changed_since_ready) warn('changes on the branch since it was set ready');
 	if (brief.branch === '@detached') dim('(detached)');
 	else if (brief.branch !== null) {
 		dim(`on ${brief.branch}${brief.tip !== null ? ` ${brief.tip.slice(0, 8)}` : ''}`);
 	}
 	if (brief.asked_at !== null) dim(`asked ${age(now, brief.asked_at)}`);
-	else if (brief.last_motion !== null) dim(`moved ${age(now, brief.last_motion)}`);
+	else if (brief.last_change !== null) dim(`changed ${age(now, brief.last_change)}`);
 	else dim(`filed ${age(now, brief.filed_at)}`);
 	return phrases;
 }
 
-/// What part of its procedure this flight is, ported from cmd/brief.rs's
-/// `part_line()`. Its own line rather than a phrase in the note: the note
-/// is urgency ordered, and crew is not urgency.
-export function partLine(part: PartStamp): string {
-	const phrases = [`part ${part.id}`, part.crew];
-	if (part.skill) phrases.push(`skill ${part.skill}`);
-	if (part.bay) phrases.push(`bay ${part.bay}`);
-	if (part.branch) phrases.push(`branch ${part.branch}`);
-	phrases.push(`done ${part.done}`);
+/// The stored fields, one line, ported from cmd/brief.rs's `fields_line()`:
+/// lane, priority, labels, skill, bay, and the procedure the filing was
+/// minted under. Its own line rather than phrases in the note — the note
+/// is urgency ordered, and a field is not urgency.
+export function fieldsLine(brief: Brief): string {
+	const phrases = [brief.assignee !== null ? `assignee ${brief.assignee}` : 'unassigned'];
+	if (brief.priority !== 'none') phrases.push(`priority ${brief.priority}`);
+	if (brief.labels.length > 0) phrases.push(brief.labels.join(', '));
+	if (brief.skill !== null) phrases.push(`skill ${brief.skill}`);
+	if (brief.bay !== null) phrases.push(`bay ${brief.bay}`);
+	if (brief.procedure !== null) phrases.push(`under ${brief.procedure}`);
 	return phrases.join(' · ');
 }
 
@@ -431,27 +534,25 @@ export function refusalLines(error: TowerError): string[] {
 	return lines;
 }
 
-export type Verb = 'claim' | 'take' | 'requeue' | 'hold' | 'answer' | 'done' | 'comment';
+export type Verb = 'assign' | 'status' | 'hold' | 'answer' | 'done' | 'cancel' | 'comment';
 
 /// The verbs this flight's state accepts, from the guards in
-/// ff-tower-core/src/verb/. `done` is what `ensure_active` refuses on, so
-/// a finished flight keeps only `comment` — a note on a closed record is
-/// fine, and comment.rs runs no `ensure_active` for exactly that reason.
+/// ff-tower-core/src/verb/.
+///
+/// A closed flight is what `ensure_active` refuses on, so it keeps only
+/// `comment` — a note on a closed record is fine, and comment.rs runs no
+/// `ensure_active` for exactly that reason. An open question closes two
+/// more: `status` refuses with `status/held` for any target but done or
+/// canceled, and `hold` refuses with `hold/exists`. `assign` re-lanes a
+/// held flight freely, which is how a question gets handed to someone.
 ///
 /// Derived from a fold that may be a frame stale, so this decides what to
 /// offer and never what is allowed: the server's refusal is still the
 /// word that counts.
 export function allowedVerbs(brief: Brief): Verb[] {
-	if (brief.done_at !== null) return ['comment'];
-	const verbs: Verb[] = [];
-	if (brief.claimed_by === null) verbs.push('claim');
-	if (brief.taken_by === null) verbs.push('take');
-	if (brief.claimed_by !== null || brief.taken_by !== null) verbs.push('requeue');
-	if (brief.question === null) verbs.push('hold');
-	else verbs.push('answer');
-	verbs.push('done');
-	verbs.push('comment');
-	return verbs;
+	if (brief.status === 'done' || brief.status === 'canceled') return ['comment'];
+	if (brief.question !== null) return ['assign', 'answer', 'done', 'cancel', 'comment'];
+	return ['assign', 'status', 'hold', 'done', 'cancel', 'comment'];
 }
 
 /// Every top-level key this build does not know, as labelled rows.
@@ -465,32 +566,32 @@ const KNOWN_BRIEF_KEYS = new Set([
 	'id',
 	'number',
 	'procedure',
-	'part',
 	'subject',
 	'body',
 	'filed_by',
 	'filed_at',
-	'claimed_by',
-	'claimed_at',
-	'taken_by',
-	'taken_at',
-	'requeued_at',
-	'routed_by',
-	'routed_at',
-	'because',
+	'status',
+	'status_by',
+	'status_at',
+	'assignee',
+	'priority',
+	'labels',
+	'skill',
+	'bay',
 	'edited_by',
 	'edited_at',
 	'question',
 	'asked_by',
 	'asked_at',
-	'done_by',
-	'done_at',
 	'branch',
 	'tip',
 	'held',
 	'resolving',
 	'current',
-	'last_motion',
+	'last_change',
+	'stale',
+	'changed_since_ready',
+	'progress',
 	'depends_on',
 	'blocks',
 	'comments',

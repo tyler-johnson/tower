@@ -25,10 +25,10 @@ it the flights group by the status someone set: triage, waiting,
 ready, in progress, held, and the last three days of closed. The
 repository audits those fields as it goes: a flight In Progress its
 branch has forgotten says so, and so does a Ready flight the branch
-moved under. A sub-flight is counted into its parent's progress mark
-rather than filed beside it, and surfaces on its own only when it is
-what needs someone now. Type it often; it is the fastest way to learn
-what to do next. `board` is the same render made explicit, so this
+moved under. A sub-flight is a flight: it files into its own status
+group like anything else, and what says a row is a family is the
+parent's progress mark, (1/3), closed children over total. Type it
+often; it is the fastest way to learn what to do next. `board` is the same render made explicit, so this
 page is also `ff tower help board`.
 
 A flight has two names, human against wire. The board prints the dense
