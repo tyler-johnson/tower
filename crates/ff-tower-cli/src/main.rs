@@ -33,8 +33,9 @@ mod selfupdate;
 
 use clap::Parser;
 
-use cli::{BayAction, Cli, Command};
+use cli::{BayAction, BoardArgs, Cli, Command};
 use error::CliError;
+use ff_tower_core::board::{self, ClosedWindow};
 use ff_tower_core::ff::Ff;
 
 fn main() {
@@ -68,13 +69,33 @@ fn main() {
             ),
         );
     }
+    // `--closed` sits on `Cli` so bare `ff tower --closed 7d` parses,
+    // which also makes it typeable ahead of any other verb. The board's
+    // flag does not ride a verb that is not the board.
+    if cli.board.closed.is_some() && !matches!(cli.command, None | Some(Command::Board { .. })) {
+        report(
+            cli.json,
+            "board",
+            &CliError::coded(
+                "usage/bad-flags",
+                "--closed is the board's flag; it does not ride another verb",
+                vec![
+                    "ff tower --closed 7d".into(),
+                    "ff tower board --closed 7d".into(),
+                ],
+            ),
+        );
+    }
     // The lanes are decided from the command line, before anything runs:
     // bare `ff tower` is the board and rides the board's, and bare
     // `ff tower -v` is the version verb spelled as a flag, so it takes
     // that verb's lane instead.
     let lanes = match (&cli.command, cli.version) {
         (None, true) => Command::Version.lanes(),
-        (None, false) => Command::Board.lanes(),
+        (None, false) => Command::Board {
+            args: BoardArgs::default(),
+        }
+        .lanes(),
         (Some(cmd), _) => cmd.lanes(),
     };
 
@@ -122,6 +143,35 @@ fn main() {
     }
 }
 
+/// The closed window this render asks for: the subcommand's `--closed`
+/// wins, the top-level one is the fallback, and nothing said is the
+/// compiled default. A value the grammar does not cover is the verb's
+/// own coded refusal, so a `--json` caller gets an envelope.
+fn closed(cli: &Cli) -> Result<ClosedWindow, CliError> {
+    let raw = match &cli.command {
+        Some(Command::Board { args }) => args.closed.as_deref(),
+        _ => None,
+    }
+    .or(cli.board.closed.as_deref());
+    let Some(raw) = raw else {
+        return Ok(board::DEFAULT_CLOSED);
+    };
+    board::parse_closed(raw).ok_or_else(|| {
+        CliError::coded(
+            "usage/bad-closed",
+            format!(
+                "board: \"{raw}\" is not a closed window — want a count, a span like 7d, \
+                 `all`, or `none`"
+            ),
+            vec![
+                "ff tower --closed 10".into(),
+                "ff tower --closed 7d".into(),
+                "ff tower --closed none".into(),
+            ],
+        )
+    })
+}
+
 /// The lazy pass: fold the board, and append what the rules cover —
 /// routing out of Triage, and the Waiting → Ready advance. No repository
 /// is no pass; a lost race (`log/contended`) is another pass having
@@ -160,7 +210,7 @@ fn preflight_pass() {
 fn verb(command: &Option<Command>, version: bool) -> &'static str {
     match command {
         None if version => "version",
-        None | Some(Command::Board) => "board",
+        None | Some(Command::Board { .. }) => "board",
         Some(Command::Next { .. }) => "next",
         Some(Command::Brief { .. }) => "brief",
         Some(Command::File { .. }) => "file",
@@ -198,7 +248,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
 fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
         None if cli.version => cmd::version::run(cli.json)?,
-        None | Some(Command::Board) => cmd::board::run(cli.json)?,
+        None | Some(Command::Board { .. }) => cmd::board::run(cli.json, closed(cli)?)?,
         Some(Command::Next { count, peek }) => {
             return cmd::next::run(cli.json, count.unwrap_or(1), *peek);
         }

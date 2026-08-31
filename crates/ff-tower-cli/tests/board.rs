@@ -123,6 +123,94 @@ fn bare_and_the_board_alias_agree_byte_for_byte() {
     let bare = stdout(&ff_tower(repo.path(), &["--json"]));
     let alias = stdout(&ff_tower(repo.path(), &["board", "--json"]));
     assert_eq!(bare, alias);
+
+    // The flag is declared once and flattened into both spellings, so
+    // the two agree carrying it too.
+    let bare = stdout(&ff_tower(repo.path(), &["--closed", "2", "--json"]));
+    let alias = stdout(&ff_tower(
+        repo.path(),
+        &["board", "--closed", "2", "--json"],
+    ));
+    assert_eq!(bare, alias);
+}
+
+/// A repository with four closed flights, filed and closed through the
+/// verbs — every one of them just closed, which is why span expiry is a
+/// core test and not this one.
+fn repo_with_four_closed() -> Repo {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    for subject in ["one", "two", "three", "four"] {
+        stdout(&ff_tower(repo.path(), &["file", subject]));
+    }
+    for n in ["1", "2", "3", "4"] {
+        stdout(&ff_tower(repo.path(), &["done", n]));
+    }
+    repo
+}
+
+fn closed_ids(repo: &Repo, args: &[&str]) -> Vec<String> {
+    let envelope = envelope(&ff_tower(repo.path(), args));
+    envelope["data"]["closed"]
+        .as_array()
+        .expect("the closed group is an array")
+        .iter()
+        .map(|view| view["id"].as_str().expect("an id").to_string())
+        .collect()
+}
+
+#[test]
+fn the_closed_flag_takes_a_count_a_word_or_the_whole_group() {
+    let repo = repo_with_four_closed();
+
+    assert_eq!(
+        closed_ids(&repo, &["--json"]).len(),
+        3,
+        "the compiled default is the three newest"
+    );
+    assert_eq!(closed_ids(&repo, &["--json", "--closed", "4"]).len(), 4);
+    assert_eq!(closed_ids(&repo, &["--json", "--closed", "all"]).len(), 4);
+    assert!(closed_ids(&repo, &["--json", "--closed", "none"]).is_empty());
+
+    let out = stdout(&ff_tower(repo.path(), &["--closed", "none"]));
+    assert!(!out.contains("closed\n"), "no group at all: {out}");
+}
+
+#[test]
+fn a_bare_closed_flag_is_all() {
+    let repo = repo_with_four_closed();
+    assert_eq!(
+        stdout(&ff_tower(repo.path(), &["--json", "--closed"])),
+        stdout(&ff_tower(repo.path(), &["--json", "--closed", "all"])),
+    );
+}
+
+#[test]
+fn a_closed_window_the_grammar_does_not_cover_is_a_coded_refusal() {
+    let repo = repo_with_a_filing();
+    let out = ff_tower(repo.path(), &["--json", "--closed", "soon"]);
+    assert_eq!(out.status.code(), Some(2), "a usage refusal exits 2");
+    let envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
+    assert_eq!(envelope["cmd"], serde_json::json!("board"));
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!("usage/bad-closed")
+    );
+    assert!(envelope.get("data").is_none(), "data and error, never both");
+}
+
+#[test]
+fn the_closed_flag_does_not_ride_another_verb() {
+    let repo = repo_with_a_filing();
+    let out = ff_tower(repo.path(), &["--json", "--closed", "7d", "brief", "1"]);
+    assert_eq!(out.status.code(), Some(2), "a usage refusal exits 2");
+    let envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!("usage/bad-flags")
+    );
 }
 
 #[test]

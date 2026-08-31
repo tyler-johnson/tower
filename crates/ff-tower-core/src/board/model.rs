@@ -28,11 +28,57 @@ use crate::log::Event;
 use super::flight::{Flight, Fold};
 use super::reads::{Reads, Verdicts};
 
-/// How long a closed flight stays on the board: three days, so Friday
-/// still shows Monday. A constant rather than a config key — the window
-/// is a render's memory of the week, not a preference, and the log was
-/// always the full record regardless.
-const CLOSED_WINDOW: i64 = 3 * 24 * 60 * 60;
+/// How much of the closed group a render carries.
+///
+/// A count rather than a span by default: three rows hold their size
+/// whatever the week did, where a span shows nothing on a quiet Monday
+/// and a wall after a Friday sweep. Compiled in and not a config key —
+/// the window is a render's memory of the week, not a preference, and
+/// the log was always the full record regardless. The CLI's `--closed`
+/// overrides it for one render.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosedWindow {
+    /// Every closed flight, however old.
+    All,
+    /// No closed group at all.
+    None,
+    /// The `n` newest.
+    Count(usize),
+    /// Everything closed inside the last `n` seconds.
+    Span(i64),
+}
+
+/// The compiled-in window: the three newest closed flights.
+pub const DEFAULT_CLOSED: ClosedWindow = ClosedWindow::Count(3);
+
+impl Default for ClosedWindow {
+    fn default() -> Self {
+        DEFAULT_CLOSED
+    }
+}
+
+/// Parse a closed window, modeled on [`crate::config::parse_cadence`]:
+/// `true` or `all` for everything, `false` or `none` for nothing, a
+/// suffixed duration (`7d`, `12h`, `2w`) for a span, and a bare integer
+/// for a count. Anything else is `None`, and the caller refuses.
+///
+/// The suffix grammar is the one this project already has,
+/// `config::parse_duration`, so `30s` parses here too — a harmless
+/// superset, and better than a second spelling of the same thing. A bare
+/// integer never reaches it: here a number is a count, where the cadence
+/// grammar reads it as days.
+pub fn parse_closed(raw: &str) -> Option<ClosedWindow> {
+    let raw = raw.trim();
+    match raw.to_ascii_lowercase().as_str() {
+        "true" | "all" => return Some(ClosedWindow::All),
+        "false" | "none" => return Some(ClosedWindow::None),
+        _ => {}
+    }
+    if raw.ends_with(['s', 'm', 'h', 'd', 'w']) {
+        return crate::config::parse_duration(raw).map(ClosedWindow::Span);
+    }
+    raw.parse().ok().map(ClosedWindow::Count)
+}
 
 /// The stored model as an envelope: the inbox, then one group per status
 /// in lifecycle order, then what the fold could not route.
@@ -40,8 +86,8 @@ const CLOSED_WINDOW: i64 = 3 * 24 * 60 * 60;
 /// A flight appears in exactly one status group — the one its `status`
 /// field names — and a status string this binary has never heard of
 /// routes nowhere rather than being invented into a group. `closed`
-/// carries done and canceled for [`CLOSED_WINDOW`]; the log keeps the
-/// rest.
+/// carries done and canceled for as much of the [`ClosedWindow`] the
+/// caller asked for; the log keeps the rest.
 #[derive(Debug, Serialize)]
 pub struct Board {
     pub waiting_on_you: WaitingOnYou,
@@ -50,7 +96,7 @@ pub struct Board {
     pub ready: Vec<FlightView>,
     pub in_progress: Vec<FlightView>,
     pub held: Vec<FlightView>,
-    /// Done and canceled, newest first, the last [`CLOSED_WINDOW`].
+    /// Done and canceled, newest first, cut to the [`ClosedWindow`].
     pub closed: Vec<FlightView>,
     pub unrouted: Vec<Event>,
     /// Kinds tower retired: carried for the machine envelope, and never
@@ -141,9 +187,10 @@ pub struct CollideView {
 /// Group the fold's flights by their stored status, using already-fetched
 /// reads.
 ///
-/// `now` and `stale_after` are arguments so the module stays pure and
-/// reads no clock and no config: a board is a function of its inputs, and
-/// `stale_after` of `0` turns the stale line off entirely.
+/// `now`, `stale_after`, and `closed` are arguments so the module stays
+/// pure and reads no clock, no config, and no command line: a board is a
+/// function of its inputs, and `stale_after` of `0` turns the stale line
+/// off entirely.
 ///
 /// Every flight is enriched first — branch from the freshest op row
 /// (`@detached` carried literal), tip and holds from the branch row,
@@ -163,7 +210,14 @@ pub struct CollideView {
 /// becomes a `collides` entry, `Unknown` an `unanswered` one, and `Clear`
 /// or an unprobed pair adds nothing; entries keep filed order, so a
 /// render is deterministic.
-pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_after: i64) -> Board {
+pub fn enrich(
+    fold: Fold,
+    reads: &Reads,
+    verdicts: &Verdicts,
+    now: i64,
+    stale_after: i64,
+    closed: ClosedWindow,
+) -> Board {
     let freshest = reads.freshest();
     let branches = reads.branch_index();
 
@@ -200,7 +254,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
     let mut ready = Vec::new();
     let mut in_progress = Vec::new();
     let mut held = Vec::new();
-    let mut closed = Vec::new();
+    let mut group = Vec::new();
     for flight in fold.flights {
         let id = flight.id.to_string();
         let op = freshest.get(id.as_str()).copied();
@@ -277,9 +331,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
             "ready" => ready.push(view),
             "in_progress" => in_progress.push(view),
             "held" => held.push(view),
-            "done" | "canceled" if now - closed_at(&view) <= CLOSED_WINDOW => {
-                closed.push(view);
-            }
+            "done" | "canceled" => group.push(view),
             // A status this binary has never heard of routes nowhere.
             // Inventing a group for it would be the fold's tolerance
             // spent on a guess.
@@ -298,7 +350,16 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
     ] {
         order(group);
     }
-    closed.sort_by_key(|view| std::cmp::Reverse(closed_at(view)));
+    // The window is applied after the sort, never before: `Count` means
+    // the newest n, and a truncation of what arrived first would answer
+    // a different question.
+    group.sort_by_key(|view| std::cmp::Reverse(closed_at(view)));
+    match closed {
+        ClosedWindow::All => {}
+        ClosedWindow::None => group.clear(),
+        ClosedWindow::Count(n) => group.truncate(n),
+        ClosedWindow::Span(secs) => group.retain(|view| now - closed_at(view) <= secs),
+    }
 
     Board {
         waiting_on_you: inbox,
@@ -307,7 +368,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
         ready,
         in_progress,
         held,
-        closed,
+        closed: group,
         unrouted: fold.unrouted,
         retired: fold.retired,
     }
@@ -566,7 +627,20 @@ mod tests {
     /// The common shape: no threshold, so the stale line never fires
     /// where a test is not about it.
     fn board(events: &[Event], reads: &Reads) -> Board {
-        enrich(fold(events), reads, &Verdicts::default(), NOW, 0)
+        enrich(
+            fold(events),
+            reads,
+            &Verdicts::default(),
+            NOW,
+            0,
+            ClosedWindow::default(),
+        )
+    }
+
+    /// The same board with the closed window named, where a test is
+    /// about the window itself.
+    fn windowed(events: &[Event], reads: &Reads, closed: ClosedWindow) -> Board {
+        enrich(fold(events), reads, &Verdicts::default(), NOW, 0, closed)
     }
 
     fn ids(views: &[FlightView]) -> Vec<&str> {
@@ -647,24 +721,119 @@ mod tests {
     }
 
     #[test]
-    fn the_closed_group_carries_the_window_newest_first() {
-        let fresh = NOW - 60;
-        let older = NOW - 3_600;
-        let expired = NOW - CLOSED_WINDOW - 1;
+    fn the_closed_group_carries_the_three_newest_by_default() {
         let board = board(
             &[
                 filed("pi.1", 10),
                 filed("pi.2", 20),
                 filed("pi.3", 30),
-                done("pi.4", older, "pi.1"),
-                moved("pi.5", fresh, "pi.2", "canceled"),
-                done("pi.6", expired, "pi.3"),
+                filed("pi.4", 40),
+                done("pi.5", NOW - 3_600, "pi.1"),
+                moved("pi.6", NOW - 60, "pi.2", "canceled"),
+                done("pi.7", NOW - 600, "pi.3"),
+                done("pi.8", NOW - 10, "pi.4"),
             ],
             &reads(Vec::new(), Vec::new(), None),
         );
-        assert_eq!(ids(&board.closed), ["pi.2", "pi.1"], "newest first");
-        assert_eq!(board.closed[0].status, "canceled");
+        assert_eq!(
+            ids(&board.closed),
+            ["pi.4", "pi.2", "pi.3"],
+            "the three newest, newest first — the fourth is dropped by the count, \
+             minutes old though it is"
+        );
+        assert_eq!(board.closed[1].status, "canceled");
         assert!(board.triage.is_empty(), "a closed flight leaves its group");
+    }
+
+    #[test]
+    fn all_carries_every_closed_flight_and_none_carries_no_group() {
+        // Closed at 100, older than any span a person would type.
+        let events = [
+            filed("pi.1", 10),
+            filed("pi.2", 20),
+            done("pi.3", 100, "pi.1"),
+            done("pi.4", NOW - 60, "pi.2"),
+        ];
+        let reads = reads(Vec::new(), Vec::new(), None);
+
+        let board = windowed(&events, &reads, ClosedWindow::All);
+        assert_eq!(ids(&board.closed), ["pi.2", "pi.1"]);
+
+        let board = windowed(&events, &reads, ClosedWindow::None);
+        assert!(board.closed.is_empty());
+    }
+
+    #[test]
+    fn a_count_takes_the_newest_and_not_the_first_seen() {
+        // Filed order is the reverse of closed order on purpose: a
+        // truncation before the sort would keep pi.1 and pi.2.
+        let events = [
+            filed("pi.1", 10),
+            filed("pi.2", 20),
+            filed("pi.3", 30),
+            done("pi.4", NOW - 3_000, "pi.1"),
+            done("pi.5", NOW - 2_000, "pi.2"),
+            done("pi.6", NOW - 1_000, "pi.3"),
+        ];
+        let reads = reads(Vec::new(), Vec::new(), None);
+
+        let board = windowed(&events, &reads, ClosedWindow::Count(2));
+        assert_eq!(ids(&board.closed), ["pi.3", "pi.2"]);
+
+        let board = windowed(&events, &reads, ClosedWindow::Count(0));
+        assert!(board.closed.is_empty());
+    }
+
+    #[test]
+    fn a_span_keeps_what_closed_inside_it() {
+        const DAY: i64 = 24 * 60 * 60;
+        let board = windowed(
+            &[
+                filed("pi.1", 10),
+                filed("pi.2", 20),
+                done("pi.3", NOW - DAY + 1, "pi.1"),
+                done("pi.4", NOW - DAY - 1, "pi.2"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+            ClosedWindow::Span(DAY),
+        );
+        assert_eq!(
+            ids(&board.closed),
+            ["pi.1"],
+            "a second inside the edge stays, a second past it goes"
+        );
+    }
+
+    #[test]
+    fn parse_closed_reads_the_words_the_counts_and_the_spans() {
+        assert_eq!(parse_closed("true"), Some(ClosedWindow::All));
+        assert_eq!(parse_closed("TRUE"), Some(ClosedWindow::All));
+        assert_eq!(parse_closed(" all "), Some(ClosedWindow::All));
+        assert_eq!(parse_closed("false"), Some(ClosedWindow::None));
+        assert_eq!(parse_closed("none"), Some(ClosedWindow::None));
+        assert_eq!(
+            parse_closed("10"),
+            Some(ClosedWindow::Count(10)),
+            "a bare number is a count of rows, and never ten days"
+        );
+        assert_eq!(parse_closed("0"), Some(ClosedWindow::Count(0)));
+        assert_eq!(
+            parse_closed("7d"),
+            Some(ClosedWindow::Span(7 * 24 * 60 * 60))
+        );
+        assert_eq!(parse_closed("12h"), Some(ClosedWindow::Span(12 * 60 * 60)));
+        assert_eq!(parse_closed("90m"), Some(ClosedWindow::Span(90 * 60)));
+        assert_eq!(
+            parse_closed("2w"),
+            Some(ClosedWindow::Span(2 * 7 * 24 * 60 * 60))
+        );
+    }
+
+    #[test]
+    fn a_value_the_closed_grammar_does_not_cover_parses_to_nothing() {
+        for raw in ["", "soon", "-1", "3x"] {
+            assert_eq!(parse_closed(raw), None, "{raw}");
+        }
     }
 
     #[test]
@@ -751,11 +920,25 @@ mod tests {
             vec![branch("work", false, false)],
             None,
         );
-        let board = enrich(fold(&events), &reads, &Verdicts::default(), NOW, TWO_DAYS);
+        let board = enrich(
+            fold(&events),
+            &reads,
+            &Verdicts::default(),
+            NOW,
+            TWO_DAYS,
+            ClosedWindow::default(),
+        );
         assert!(board.in_progress[0].stale);
 
         // The threshold off: the same board says nothing.
-        let board = enrich(fold(&events), &reads, &Verdicts::default(), NOW, 0);
+        let board = enrich(
+            fold(&events),
+            &reads,
+            &Verdicts::default(),
+            NOW,
+            0,
+            ClosedWindow::default(),
+        );
         assert!(!board.in_progress[0].stale);
     }
 
@@ -771,6 +954,7 @@ mod tests {
             &Verdicts::default(),
             NOW,
             TWO_DAYS,
+            ClosedWindow::default(),
         );
         assert!(board.in_progress[0].stale);
         assert!(board.in_progress[0].last_change.is_none());
@@ -804,6 +988,7 @@ mod tests {
             &Verdicts::default(),
             NOW,
             TWO_DAYS,
+            ClosedWindow::default(),
         );
         assert!(board.in_progress[0].stale, "a reword is not a change");
     }
@@ -1031,7 +1216,14 @@ mod tests {
     }
 
     fn probed(events: &[Event], reads: &Reads, verdicts: Verdicts) -> Board {
-        enrich(fold(events), reads, &verdicts, NOW, 0)
+        enrich(
+            fold(events),
+            reads,
+            &verdicts,
+            NOW,
+            0,
+            ClosedWindow::default(),
+        )
     }
 
     #[test]

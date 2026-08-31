@@ -2,11 +2,11 @@
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board;
+use ff_tower_core::board::{self, ClosedWindow};
 use ff_tower_core::config::{self, Config};
 use ff_tower_core::log::Store;
 
-pub fn run(json: bool) -> Result<(), CliError> {
+pub fn run(json: bool, closed: ClosedWindow) -> Result<(), CliError> {
     let ff = super::ff()?;
     let store = Store::open(ff.repo())?;
     let events = store.read_all()?;
@@ -18,7 +18,7 @@ pub fn run(json: bool) -> Result<(), CliError> {
         .map(config::stale_flight_threshold)
         .unwrap_or(config::DEFAULT_STALE_FLIGHT);
     let now = board::now();
-    let board = board::assemble(&ff, &events, now, stale_after)?;
+    let board = board::assemble(&ff, &events, now, stale_after, closed)?;
     if json {
         println!("{}", machine::emit("board", &board));
     } else {

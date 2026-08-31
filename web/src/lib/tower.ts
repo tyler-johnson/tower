@@ -25,7 +25,9 @@ export interface Board {
 	ready: FlightView[];
 	in_progress: FlightView[];
 	held: FlightView[];
-	/// Done and canceled, newest first, the last three days.
+	/// Done and canceled, newest first, the three newest. The CLI's
+	/// `--closed` widens that for one render; the server always sends the
+	/// default.
 	closed: FlightView[];
 	unrouted: TowerEvent[];
 	/// Kinds tower retired — carried, and never warned about.

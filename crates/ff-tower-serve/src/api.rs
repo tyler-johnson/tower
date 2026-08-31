@@ -200,7 +200,16 @@ pub(crate) fn board_envelope(repo: &Path) -> Result<String, ApiError> {
         Err(err) => eprintln!("ff-tower-serve: the pass did not run: {err}"),
     }
     let events = store.read_all()?;
-    let board = board::assemble(&ff, &events, board::now(), stale_after(repo))?;
+    // The default window, always: `--closed` is the CLI's per-render
+    // override, and the browser board keeps the parity `/api/board` and
+    // `ff tower --json` are asserted to have.
+    let board = board::assemble(
+        &ff,
+        &events,
+        board::now(),
+        stale_after(repo),
+        board::ClosedWindow::default(),
+    )?;
     Ok(machine::emit("board", &board))
 }
 

@@ -325,8 +325,11 @@ pub fn stale_after(cached: i64) -> i64 {
 }
 
 /// The duration grammar under the cadence: `<n>[smhdw]`, or a bare
-/// integer of days.
-fn parse_duration(raw: &str) -> Option<i64> {
+/// integer of days. Crate-visible because the board's closed window
+/// takes the suffixed half of it — a second duration parser would be a
+/// second spelling waiting to drift — and reads a bare integer as a
+/// count of rows instead, so it calls this only once a suffix is there.
+pub(crate) fn parse_duration(raw: &str) -> Option<i64> {
     if raw.is_empty() {
         return None;
     }

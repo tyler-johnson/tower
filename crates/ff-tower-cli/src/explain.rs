@@ -84,6 +84,23 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/bad-closed",
+        summary: "that is not a closed window",
+        detail: "`--closed` says how much of the closed group a render carries, and it takes \
+                 four shapes: a bare count of rows, `10`; a span, `7d`, `12h`, `90m`, `2w`; \
+                 `all` or `true` for every closed flight there has ever been; and `none` or \
+                 `false` for no closed group at all. Bare `--closed` means `all`. A number \
+                 with no suffix is a count and never a number of days — the board's default \
+                 is the three newest, a count rather than a span, so a quiet week still shows \
+                 three rows and a busy one does not show forty. The flag is the CLI's alone \
+                 and rides one render; serve and the browser board keep the default.",
+        exits: &[
+            "ff tower --closed 10",
+            "ff tower --closed 7d",
+            "ff tower --closed none",
+        ],
+    },
+    Entry {
         id: "usage/needs-path",
         summary: "bare `warm` needs a pool root",
         detail: "`bay warm` with no path mints the next slot under the `tower.bays` setting, and \

@@ -15,7 +15,14 @@ use ff_tower_testsupport::Repo;
 /// The suite's board: the real clock, and the audit off — a stale line
 /// is `model.rs`'s to prove, and a wall clock is not a fixture.
 fn assemble(repo: &std::path::Path, events: &[ff_tower_core::log::Event]) -> board::Board {
-    board::assemble(&Ff::at(repo), events, board::now(), 0).expect("assemble")
+    board::assemble(
+        &Ff::at(repo),
+        events,
+        board::now(),
+        0,
+        board::ClosedWindow::default(),
+    )
+    .expect("assemble")
 }
 
 fn filed(subject: &str) -> Kind {

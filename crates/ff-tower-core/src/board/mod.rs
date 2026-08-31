@@ -42,7 +42,10 @@ pub use brief::{Brief, CommentView, LinkView, Standing, brief, wants_verdicts};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use history::{Moment, history};
-pub use model::{Board, CollideView, FlightView, WaitingOnYou, enrich};
+pub use model::{
+    Board, ClosedWindow, CollideView, DEFAULT_CLOSED, FlightView, WaitingOnYou, enrich,
+    parse_closed,
+};
 pub use pick::{Passed, Pick, Picks, Skip, pick};
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};
 pub use resolve::{FlightRef, ResolveError, count, display, flight, parse_ref, resolve};
@@ -52,15 +55,22 @@ use crate::log::Event;
 
 /// One board: fold the log, gather the reads, probe the pairs, enrich.
 ///
-/// `now` and `stale_after` ride in from the caller — the board module
-/// reads no clock and no config, so a board stays a pure function of what
-/// it was handed. [`now`] takes the one, `config::stale_flight_threshold`
-/// the other.
-pub fn assemble(ff: &Ff, events: &[Event], now: i64, stale_after: i64) -> ff::Result<Board> {
+/// `now`, `stale_after`, and `closed` ride in from the caller — the board
+/// module reads no clock, no config, and no command line, so a board
+/// stays a pure function of what it was handed. [`now`] takes the first,
+/// `config::stale_flight_threshold` the second, and the third is
+/// [`DEFAULT_CLOSED`] wherever nobody asked for another window.
+pub fn assemble(
+    ff: &Ff,
+    events: &[Event],
+    now: i64,
+    stale_after: i64,
+    closed: ClosedWindow,
+) -> ff::Result<Board> {
     let fold = fold(events);
     let reads = gather(ff)?;
     let verdicts = probe(ff, &fold, &reads)?;
-    Ok(enrich(fold, &reads, &verdicts, now, stale_after))
+    Ok(enrich(fold, &reads, &verdicts, now, stale_after, closed))
 }
 
 /// Wall-clock seconds, taken once per invocation — the `now` every

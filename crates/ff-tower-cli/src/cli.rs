@@ -67,15 +67,41 @@ pub struct Cli {
     /// clap's bare "unexpected argument" answers a different one.
     #[arg(short = 'V', hide = true, action = clap::ArgAction::SetTrue)]
     pub version_shouted: bool,
+    /// The board's own flags, declared here as well as on the variant so
+    /// bare `ff tower --closed 7d` parses: bare `ff tower` is the board,
+    /// but it never constructs `Command::Board` from a parse, so a flag
+    /// declared on the variant alone would be typeable one way and not
+    /// the other. Not `global`: it would then be in every verb's help,
+    /// and it belongs to one.
+    #[command(flatten)]
+    pub board: BoardArgs,
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+/// The board's flags, shared by the bare form and the `board` alias so
+/// the two agree by construction.
+#[derive(clap::Args, Default)]
+pub struct BoardArgs {
+    // A string, not a parsed value, for the same reason `--port` is one:
+    // a bad value has to be the verb's own coded refusal, so a `--json`
+    // caller gets an envelope instead of clap's usage text and its exit
+    // 2. `num_args` with the missing value makes bare `--closed` mean
+    // everything.
+    /// How much of the closed group to show: a count, a span like 7d,
+    /// `all`, or `none`. The three newest when unsaid.
+    #[arg(long, value_name = "n|span", num_args = 0..=1, default_missing_value = "all")]
+    pub closed: Option<String>,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
     /// The board — what is filed, what is moving, what is stuck.
     #[command(long_about = help::ROOT, after_long_help = help::ROOT_EXAMPLES)]
-    Board,
+    Board {
+        #[command(flatten)]
+        args: BoardArgs,
+    },
     /// Claim the next ready flight, or a set of `k` that collide with
     /// neither each other nor anything already flying.
     #[command(long_about = help::NEXT, after_long_help = help::NEXT_EXAMPLES)]
@@ -388,7 +414,7 @@ impl Command {
                 notice: true,
                 pass: false,
             },
-            Command::Board
+            Command::Board { .. }
             | Command::Next { .. }
             | Command::Brief { .. }
             | Command::File { .. }

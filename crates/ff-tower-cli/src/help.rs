@@ -22,14 +22,16 @@ twice, and a render never blocks on the network.
 Bare `ff tower` is the board. What needs a person is pinned on top —
 questions an agent stopped on, and your own Ready flights — and under
 it the flights group by the status someone set: triage, waiting,
-ready, in progress, held, and the last three days of closed. The
-repository audits those fields as it goes: a flight In Progress its
-branch has forgotten says so, and so does a Ready flight the branch
-moved under. A sub-flight is a flight: it files into its own status
-group like anything else, and what says a row is a family is the
-parent's progress mark, (1/3), closed children over total. Type it
-often; it is the fastest way to learn what to do next. `board` is the same render made explicit, so this
-page is also `ff tower help board`.
+ready, in progress, held, and the three newest closed. --closed takes
+more or less of that last group: a count, a span like 7d, `all`, or
+`none`. The repository audits those fields as it goes: a flight In
+Progress its branch has forgotten says so, and so does a Ready flight
+the branch moved under. A sub-flight is a flight: it files into its
+own status group like anything else, and what says a row is a family
+is the parent's progress mark, (1/3), closed children over total.
+Type it often; it is the fastest way to learn what to do next.
+`board` is the same render made explicit, so this page is also
+`ff tower help board`.
 
 A flight has two names, human against wire. The board prints the dense
 number, #3; the wire name is the id of the event that filed it,
@@ -57,6 +59,7 @@ Examples:
   ff tower file \"fix the login redirect\"   put work on the board
   ff tower hold 17 -m \"which flow wins?\"   stop with a question, bay warm
   ff tower done 17               off the board, on the record
+  ff tower --closed 7d           a week of closed instead of three rows
   ff tower explain --list        every refusal tower can make
 
 `ff tower help <command>` (or `ff tower <command> --help`) has the details.";
