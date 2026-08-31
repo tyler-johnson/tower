@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import BriefPanel from '$lib/BriefPanel.svelte';
-	import { feed } from '$lib/board.svelte';
+	import { feed } from '$lib/feed.svelte';
 	import { panel } from '$lib/panel.svelte';
 
 	// Two dependencies, both deliberate: the path, so a different flight

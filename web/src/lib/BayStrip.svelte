@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { bays } from './bays.svelte';
-	import { feed } from './board.svelte';
+	import { feed } from './feed.svelte';
 	import { buildRefs, statusDot, type BayView, type Board } from './tower';
 
 	// The pool rides no SSE, so its liveness is this: touching the last

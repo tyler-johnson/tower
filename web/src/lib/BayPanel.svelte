@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { bays } from './bays.svelte';
-	import { feed } from './board.svelte';
+	import { feed } from './feed.svelte';
 	import { buildRefs } from './tower';
 
 	// Nothing is fetched here: the pool is already live from the strip's

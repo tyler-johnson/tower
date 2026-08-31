@@ -2,6 +2,13 @@
 // envelope, replaced wholesale — no client diffing. Recovery is the
 // browser's own reconnect: a new subscriber immediately gets the current
 // board, so onerror never closes the source.
+//
+// Named for what it exports rather than for the board, because
+// `board.svelte.ts` beside `Board.svelte` is one name on a
+// case-insensitive filesystem: the component's own `./board.svelte`
+// import resolved to the component, and the build failed on macOS and
+// Windows while passing on Linux. Nothing here may take a component's
+// name in a different case.
 
 import type { Board, Envelope } from './tower';
 

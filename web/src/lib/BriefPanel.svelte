@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import VerbBar from './VerbBar.svelte';
 	import { bays } from './bays.svelte';
-	import { feed } from './board.svelte';
+	import { feed } from './feed.svelte';
 	import { panel } from './panel.svelte';
 	import {
 		age,

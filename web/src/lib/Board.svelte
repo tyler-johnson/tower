@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import FlightRow from './FlightRow.svelte';
-	import { feed } from './board.svelte';
+	import { feed } from './feed.svelte';
 	import { age, buildRefs, type FlightView } from './tower';
 
 	$effect(() => {
