@@ -306,14 +306,14 @@ pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String
     }
 
     if !board.unrouted.is_empty() {
-        let noun = if board.unrouted.len() == 1 {
-            "event"
+        let (noun, verb) = if board.unrouted.len() == 1 {
+            ("event", "is")
         } else {
-            "events"
+            ("events", "are")
         };
         out.push_str(&paint_warn(
             &format!(
-                "{} {noun} unrouted — a merge ahead of a filing, or a future tower",
+                "{} {noun} in the log {verb} not on the board — `ff tower doctor` says which and why",
                 board.unrouted.len()
             ),
             colored,
@@ -387,6 +387,7 @@ mod tests {
             held: Vec::new(),
             closed: Vec::new(),
             unrouted: Vec::new(),
+            retired: Vec::new(),
         }
     }
 

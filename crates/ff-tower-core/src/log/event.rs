@@ -180,6 +180,13 @@ pub enum Kind {
     Unknown { kind: String, body: Box<RawValue> },
 }
 
+/// The kinds tower once wrote and no longer reads. An old log's events
+/// land on [`Kind::Unknown`] exactly as a newer tower's do, and only this
+/// list tells the two apart — what is behind this binary can never route,
+/// what is ahead routes on the next upgrade — so doctor reads it to say
+/// which of the two a person is looking at.
+pub const RETIRED_KINDS: &[&str] = &["claimed", "taken", "requeued", "done"];
+
 impl Kind {
     /// The wire name.
     pub fn name(&self) -> &str {

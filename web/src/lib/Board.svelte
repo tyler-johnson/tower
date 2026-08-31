@@ -99,8 +99,9 @@
 	{#if b && b.unrouted.length > 0}
 		<p class="text-sm text-warning">
 			{b.unrouted.length}
-			{b.unrouted.length === 1 ? 'event' : 'events'} unrouted — a merge ahead of a filing, or a future
-			tower
+			{b.unrouted.length === 1 ? 'event' : 'events'} in the log
+			{b.unrouted.length === 1 ? 'is' : 'are'} not on the board — run `ff tower doctor` to see which and
+			why
 		</p>
 	{/if}
 

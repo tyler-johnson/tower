@@ -53,6 +53,9 @@ pub struct Board {
     /// Done and canceled, newest first, the last [`CLOSED_WINDOW`].
     pub closed: Vec<FlightView>,
     pub unrouted: Vec<Event>,
+    /// Kinds tower retired: carried for the machine envelope, and never
+    /// warned about, because no command routes them.
+    pub retired: Vec<Event>,
 }
 
 /// Pinned above the status groups: what needs a person now. A view of
@@ -306,6 +309,7 @@ pub fn enrich(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_af
         held,
         closed,
         unrouted: fold.unrouted,
+        retired: fold.retired,
     }
 }
 

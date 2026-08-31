@@ -1,4 +1,4 @@
-//! The doctor fold: stale bays and drift, as rows.
+//! The doctor fold: stale bays, drift, and events off the board, as rows.
 //!
 //! Principle 5 is the verb's whole license: doctor observes and
 //! complains, never enforces. Nothing here fixes, prunes, or retries —
@@ -16,12 +16,25 @@
 //! so only actionable rows drive the exit. The leftover-branch check is
 //! orphan-derived only: the orphan row records its branch, so the check
 //! is exact, never a `bay-<n>` naming heuristic.
+//!
+//! The same rule sorts the log rows. The board says only how many events
+//! are off it, because a count is all a board has room for; the causes
+//! are four, they are not guessable from the count, and each has its own
+//! answer — so doctor is where a person finds out which one they have.
+//!
+//! A retired kind is info, and the board does not count it at all. It is
+//! tower's own former vocabulary: no fetch places it, no upgrade reads
+//! it, and the flights it once moved carry their standing from the
+//! events that replaced it. A permanent warning about history nobody can
+//! change is a warning a person learns to scroll past, and the next one
+//! that matters goes with it.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::Serialize;
 
 use crate::ff::CONTRACT;
+use crate::log::{EventId, Kind};
 
 use super::flight::Fold;
 use super::reads::Reads;
@@ -65,7 +78,7 @@ pub struct Doctor {
     pub findings: usize,
 }
 
-/// The four checks, over facts the caller fetched. `gone` is the survey
+/// The checks, over facts the caller fetched. `gone` is the survey
 /// rows whose directory the CLI found missing, as `(id, path)` pairs. On
 /// a broken seam the caller passes an empty fold and reads — only the
 /// seam row emerges, and absence of a row asserts nothing.
@@ -91,6 +104,8 @@ pub fn doctor(fold: &Fold, reads: &Reads, seam: &SeamHealth, gone: &[(String, St
             "`ff` is not on PATH — tower runs on fufu (bay checks skipped)".to_string(),
         )),
     }
+
+    rows.extend(log_rows(fold));
 
     // The half-gone shape: admin entry alive, directory deleted by hand.
     for (id, path) in gone {
@@ -159,6 +174,142 @@ pub fn doctor(fold: &Fold, reads: &Reads, seam: &SeamHealth, gone: &[(String, St
 
     let findings = rows.iter().filter(|row| row.level == Level::Warn).count();
     Doctor { rows, findings }
+}
+
+/// The unrouted events, sorted by cause, one row per cause. Every row
+/// says what the events are and what places them, because "unrouted" on
+/// its own is a word for a person to go looking with.
+///
+/// Ordered by what can be done about it: a chain to fetch, an upgrade to
+/// run, then the two shapes no command fixes.
+fn log_rows(fold: &Fold) -> Vec<DoctorRow> {
+    let filed: HashSet<&EventId> = fold.flights.iter().map(|flight| &flight.id).collect();
+    let known: HashSet<&str> = fold
+        .flights
+        .iter()
+        .map(|flight| flight.id.writer.as_str())
+        .collect();
+
+    // Keyed for a stable row order out of an unordered log.
+    let mut absent_chain: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut absent_filing: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut ahead: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut retired: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut refiled: Vec<String> = Vec::new();
+
+    for event in &fold.retired {
+        *retired.entry(event.kind.name()).or_default() += 1;
+    }
+
+    for event in &fold.unrouted {
+        match &event.kind {
+            Kind::Filed { .. } => refiled.push(event.id.to_string()),
+            Kind::Unknown { kind, .. } => {
+                *ahead.entry(kind.as_str()).or_default() += 1;
+            }
+            // Counted per event and per writer, not per id: a link with
+            // both endpoints missing is one event against one writer when
+            // they share one, and one against each when they do not.
+            kind => {
+                let mut counted: Vec<&str> = Vec::new();
+                for id in named(kind) {
+                    let writer = id.writer.as_str();
+                    if filed.contains(id) || counted.contains(&writer) {
+                        continue;
+                    }
+                    counted.push(writer);
+                    let table = if known.contains(writer) {
+                        &mut absent_filing
+                    } else {
+                        &mut absent_chain
+                    };
+                    *table.entry(writer).or_default() += 1;
+                }
+            }
+        }
+    }
+
+    let mut rows = Vec::new();
+    for (writer, count) in absent_chain {
+        let (noun, verb) = agree(count, "names", "name");
+        rows.push(row(
+            Level::Warn,
+            "log/absent-chain",
+            format!(
+                "{count} {noun} {verb} flights filed by `{writer}`, whose chain this repository does not have — fetch `refs/tower/log/*/{writer}` and they land on the board"
+            ),
+        ));
+    }
+    for (writer, count) in absent_filing {
+        let (noun, verb) = agree(count, "names", "name");
+        rows.push(row(
+            Level::Warn,
+            "log/absent-filing",
+            format!(
+                "{count} {noun} {verb} flights `{writer}` never filed, though its chain is here — the filing they answer is gone, which takes a hand-edited log"
+            ),
+        ));
+    }
+    for (kind, count) in ahead {
+        let (noun, verb) = agree(count, "is", "are");
+        rows.push(row(
+            Level::Warn,
+            "log/newer-tower",
+            format!(
+                "{count} {noun} {verb} `{kind}`, a kind this tower does not read — a newer tower wrote them, and `ff tower update` reads them"
+            ),
+        ));
+    }
+    for (kind, count) in retired {
+        let (noun, verb) = agree(count, "is", "are");
+        rows.push(row(
+            Level::Info,
+            "log/retired-kind",
+            format!(
+                "{count} {noun} {verb} `{kind}`, a kind tower has retired — they stay in the log, and the flights they moved carry their standing from later events"
+            ),
+        ));
+    }
+    for id in refiled {
+        rows.push(row(
+            Level::Warn,
+            "log/refiled",
+            format!(
+                "{id} files a flight already filed — the first filing stands and this one is carried unread, which takes a hand-edited log"
+            ),
+        ));
+    }
+    rows
+}
+
+/// The flights an unrouted event names. `Filed` and `Unknown` name none —
+/// what is wrong with those two is the event itself.
+fn named(kind: &Kind) -> Vec<&EventId> {
+    match kind {
+        Kind::Status { flight, .. }
+        | Kind::Assigned { flight, .. }
+        | Kind::Commented { flight, .. }
+        | Kind::Held { flight, .. }
+        | Kind::Answered { flight, .. }
+        | Kind::Routed { flight, .. } => vec![flight],
+        Kind::Edited { target, .. } => vec![target],
+        Kind::Linked { from, to } => vec![from, to],
+        Kind::Filed { .. } | Kind::Unknown { .. } => Vec::new(),
+    }
+}
+
+/// Doctor counts in digits rather than words, so its nouns and verbs
+/// agree by hand — the verb in whichever shape the row needs it.
+fn agree(
+    count: usize,
+    singular: &'static str,
+    plural: &'static str,
+) -> (&'static str, &'static str) {
+    if count == 1 {
+        ("event", singular)
+    } else {
+        ("events", plural)
+    }
 }
 
 fn row(level: Level, check: &str, message: String) -> DoctorRow {
@@ -479,5 +630,130 @@ mod tests {
             .count();
         assert_eq!(leftovers, 1, "deduplicated per branch across orphans");
         assert_eq!(report.findings, 1);
+    }
+
+    fn unknown(id: &str, time: i64, kind: &str) -> Event {
+        let id: EventId = id.parse().expect("id");
+        Event {
+            writer: id.writer.clone(),
+            author: "a@b.c".to_string(),
+            time,
+            id,
+            kind: Kind::Unknown {
+                kind: kind.to_string(),
+                body: serde_json::value::RawValue::from_string("{}".to_string()).expect("body"),
+            },
+        }
+    }
+
+    fn commented(id: &str, time: i64, flight: &str) -> Event {
+        let id: EventId = id.parse().expect("id");
+        Event {
+            writer: id.writer.clone(),
+            author: "a@b.c".to_string(),
+            time,
+            id,
+            kind: Kind::Commented {
+                flight: flight.parse().expect("id"),
+                text: "a note".to_string(),
+            },
+        }
+    }
+
+    /// The report over a log alone — no bays, a healthy seam.
+    fn over(events: &[Event]) -> Doctor {
+        doctor(
+            &fold(events),
+            &reads(Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+            &healthy(),
+            &[],
+        )
+    }
+
+    #[test]
+    fn a_retired_kind_is_info_and_no_finding() {
+        // tower's own history: nothing routes it, and no command will, so
+        // a row that drove the exit would be a chore with no end.
+        let report = over(&[filed("pi.1", 10), unknown("pi.2", 20, "claimed")]);
+        assert_eq!(
+            checks(&report),
+            [("ff/version", Level::Ok), ("log/retired-kind", Level::Info)]
+        );
+        assert_eq!(report.findings, 0);
+        let message = &report.rows[1].message;
+        assert!(message.contains("1 event"), "{message}");
+        assert!(message.contains("claimed"), "{message}");
+        assert!(message.contains("retired"), "{message}");
+    }
+
+    #[test]
+    fn a_kind_from_ahead_is_a_finding_naming_the_upgrade() {
+        let report = over(&[filed("pi.1", 10), unknown("pi.2", 20, "promoted")]);
+        assert_eq!(
+            checks(&report),
+            [("ff/version", Level::Ok), ("log/newer-tower", Level::Warn)]
+        );
+        assert_eq!(report.findings, 1);
+        let message = &report.rows[1].message;
+        assert!(message.contains("promoted"), "{message}");
+        assert!(message.contains("ff tower update"), "{message}");
+    }
+
+    #[test]
+    fn an_absent_chain_names_the_ref_to_fetch() {
+        let report = over(&[filed("pi.1", 10), commented("pi.2", 20, "qi.1")]);
+        assert_eq!(
+            checks(&report),
+            [("ff/version", Level::Ok), ("log/absent-chain", Level::Warn)]
+        );
+        assert_eq!(report.findings, 1);
+        let message = &report.rows[1].message;
+        assert!(message.contains("refs/tower/log/*/qi"), "{message}");
+    }
+
+    #[test]
+    fn a_missing_filing_on_a_chain_that_is_here_reads_as_hand_editing() {
+        // `pi` filed pi.1, so the chain is present — a move naming pi.9
+        // is a filing removed, not a chain unfetched.
+        let report = over(&[filed("pi.1", 10), done("pi.3", 30, "pi.9")]);
+        assert_eq!(
+            checks(&report),
+            [
+                ("ff/version", Level::Ok),
+                ("log/absent-filing", Level::Warn)
+            ]
+        );
+        let message = &report.rows[1].message;
+        assert!(message.contains("hand-edited"), "{message}");
+    }
+
+    #[test]
+    fn one_writer_s_absent_flights_are_one_row() {
+        let report = over(&[
+            filed("pi.1", 10),
+            commented("pi.2", 20, "qi.1"),
+            commented("pi.3", 30, "qi.2"),
+            commented("pi.4", 40, "zi.1"),
+        ]);
+        let absent: Vec<&str> = report
+            .rows
+            .iter()
+            .filter(|row| row.check == "log/absent-chain")
+            .map(|row| row.message.as_str())
+            .collect();
+        assert_eq!(absent.len(), 2, "one row per writer, not per event");
+        assert!(absent[0].contains("2 events") && absent[0].contains("qi"));
+        assert!(absent[1].contains("1 event") && absent[1].contains("zi"));
+    }
+
+    #[test]
+    fn a_second_filing_of_one_id_is_a_finding() {
+        let report = over(&[filed("pi.1", 10), filed("pi.1", 20)]);
+        assert_eq!(
+            checks(&report),
+            [("ff/version", Level::Ok), ("log/refiled", Level::Warn)]
+        );
+        assert_eq!(report.findings, 1);
+        assert!(report.rows[1].message.contains("pi.1"));
     }
 }

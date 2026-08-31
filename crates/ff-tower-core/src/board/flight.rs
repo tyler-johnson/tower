@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::log::{Event, EventId, Kind};
+use crate::log::{Event, EventId, Kind, RETIRED_KINDS};
 
 /// One flight, assembled from its `filed` event and everything that named
 /// it since.
@@ -114,16 +114,21 @@ pub struct Comment {
 }
 
 /// What the fold produced: every flight, and every event it could not
-/// route.
+/// route, split by whether anything can be done about it.
 #[derive(Debug)]
 pub struct Fold {
     /// Filed order.
     pub flights: Vec<Flight>,
-    /// Comments and links naming a flight never filed, and unknown kinds
-    /// wholesale. Carried, never dropped, never an error — a fold that
-    /// refused data it half-understood would flicker between board and
-    /// error as a newer tower's events roll in.
+    /// Comments and links naming a flight never filed, and kinds from
+    /// ahead of this binary. Carried, never dropped, never an error — a
+    /// fold that refused data it half-understood would flicker between
+    /// board and error as a newer tower's events roll in.
     pub unrouted: Vec<Event>,
+    /// Events on [`RETIRED_KINDS`] — tower's own former vocabulary,
+    /// which no fetch and no upgrade will ever route. Carried like the
+    /// rest and kept apart from it, because a board that warns about
+    /// history it cannot change is a board a person learns to ignore.
+    pub retired: Vec<Event>,
 }
 
 /// Fold the union into flights. Three passes, and that is load-bearing:
@@ -139,6 +144,7 @@ pub fn fold(events: &[Event]) -> Fold {
     let mut flights: Vec<Flight> = Vec::new();
     let mut by_id: HashMap<&EventId, usize> = HashMap::new();
     let mut unrouted: Vec<Event> = Vec::new();
+    let mut retired: Vec<Event> = Vec::new();
 
     for event in events {
         if let Kind::Filed {
@@ -321,6 +327,9 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 None => unrouted.push(event.clone()),
             },
+            Kind::Unknown { kind, .. } if RETIRED_KINDS.contains(&kind.as_str()) => {
+                retired.push(event.clone())
+            }
             Kind::Unknown { .. } => unrouted.push(event.clone()),
         }
     }
@@ -420,7 +429,11 @@ pub fn fold(events: &[Event]) -> Fold {
         }
     }
 
-    Fold { flights, unrouted }
+    Fold {
+        flights,
+        unrouted,
+        retired,
+    }
 }
 
 #[cfg(test)]
@@ -649,6 +662,39 @@ mod tests {
         assert_eq!(fold.flights.len(), 1);
         assert_eq!(fold.unrouted.len(), 1);
         assert!(matches!(&fold.unrouted[0].kind, Kind::Unknown { kind, .. } if kind == "promoted"));
+        assert!(fold.retired.is_empty(), "ahead is not behind");
+    }
+
+    #[test]
+    fn a_retired_kind_is_carried_apart_from_the_unrouted() {
+        // A kind from ahead routes on the next upgrade and a retired one
+        // never does, so the board can warn about the first alone.
+        let events: Vec<Event> = RETIRED_KINDS
+            .iter()
+            .enumerate()
+            .map(|(at, kind)| {
+                event(
+                    &format!("pi.{}", at + 2),
+                    20 + at as i64,
+                    Kind::Unknown {
+                        kind: (*kind).to_string(),
+                        body: serde_json::value::to_raw_value(
+                            &serde_json::json!({"flight": "pi.1"}),
+                        )
+                        .expect("raw"),
+                    },
+                )
+            })
+            .collect();
+        let mut log = vec![filed("pi.1", 10, "s")];
+        log.extend(events);
+        let fold = fold(&log);
+        assert_eq!(fold.flights.len(), 1);
+        assert!(
+            fold.unrouted.is_empty(),
+            "nothing to be done is not a warning"
+        );
+        assert_eq!(fold.retired.len(), RETIRED_KINDS.len());
     }
 
     #[test]

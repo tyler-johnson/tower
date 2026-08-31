@@ -496,22 +496,27 @@ Examples:
   ff tower version               is a newer release already cached?";
 
 pub const DOCTOR: &str = "\
-Stale bays and drift: doctor observes and complains, never enforces —
-read-only, with no --fix and no writes. The seam comes first: fufu's
-version runs before any bay-facing read, because a drifted contract
-fails every spawn, and doctor is the verb that reports the broken
-seam rather than dying of it.
+Stale bays, drift, and events off the board: doctor observes and
+complains, never enforces — read-only, with no --fix and no writes.
+The seam comes first: fufu's version runs before any bay-facing read,
+because a drifted contract fails every spawn, and doctor is the verb
+that reports the broken seam rather than dying of it.
 
 On a healthy seam it reads what the board reads — the pool, with the
 bays whose directories are gone from disk — and the update lane's
-cache. Rows come at three levels: ok counts nothing, info is news
-rather than a problem, WARN is a finding. Findings drive the exit —
-0 healthy, 1 findings — an outcome on the success path, so a script
+cache. It also names every event the fold could not place, which the
+board can only count: a chain this repository has yet to fetch, a
+kind a newer tower wrote, a kind tower has retired, and the two
+shapes only a hand-edited log produces.
+
+Rows come at three levels: ok counts nothing, info is news rather
+than a problem, WARN is a finding. Findings drive the exit — 0
+healthy, 1 findings — an outcome on the success path, so a script
 gates on the code, and --json emits the same rows.";
 
 pub const DOCTOR_EXAMPLES: &str = "\
 Examples:
-  ff tower doctor                read the pool and the seam
+  ff tower doctor                read the pool, the seam, and the log
   ff tower doctor --json         the same rows, for machines
   ff tower bay                   the pool it is judging";
 

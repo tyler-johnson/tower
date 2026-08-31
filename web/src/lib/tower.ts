@@ -28,6 +28,8 @@ export interface Board {
 	/// Done and canceled, newest first, the last three days.
 	closed: FlightView[];
 	unrouted: TowerEvent[];
+	/// Kinds tower retired — carried, and never warned about.
+	retired: TowerEvent[];
 }
 
 /// Pinned above the status groups: what needs a person now. A view of the
@@ -85,8 +87,9 @@ export interface CollideView {
 	paths: string[];
 }
 
-// The unrouted rows are raw log events; the board renders only their count,
-// so the shape stays loose. Named TowerEvent to avoid the DOM's Event.
+// The unrouted and retired rows are raw log events; the board renders only
+// the unrouted count, so the shape stays loose. Named TowerEvent to avoid
+// the DOM's Event.
 export interface TowerEvent {
 	writer: string;
 	author: string;
