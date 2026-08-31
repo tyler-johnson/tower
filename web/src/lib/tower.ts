@@ -424,11 +424,11 @@ export interface FlightDef {
 	labels: string[];
 }
 
-/// Which layer a definition was read from, and the file it came from —
-/// `null` for what ships in the binary.
+/// Which layer a definition was read from, and the file it came from.
+/// Both layers are directories, so every definition has a path.
 export interface Source {
-	layer: 'built-in' | 'user' | 'repo';
-	path: string | null;
+	layer: 'user' | 'repo';
+	path: string;
 }
 
 export interface Listing {

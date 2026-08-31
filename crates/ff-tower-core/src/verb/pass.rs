@@ -283,6 +283,7 @@ mod tests {
     use super::*;
     use crate::log::Event;
     use crate::procedure::{self, Source};
+    use std::path::PathBuf;
 
     fn event(id: &str, time: i64, kind: Kind) -> Event {
         let id: EventId = id.parse().expect("id");
@@ -344,11 +345,13 @@ mod tests {
     }
 
     /// A registry over hand-written definitions, loaded through the real
-    /// loader so a test rule is always one the validator accepts.
+    /// loader so a test rule is always one the validator accepts. The
+    /// layer is the repository's, which is where a rule file lives.
     fn registry(definitions: &[&str]) -> Registry {
         let mut installed = Registry::default();
-        for text in definitions {
-            installed.insert(procedure::load(text, Source::BuiltIn).expect("loads"));
+        for (index, text) in definitions.iter().enumerate() {
+            let source = Source::Repo(PathBuf::from(format!("rule-{index}.toml")));
+            installed.insert(procedure::load(text, source).expect("loads"));
         }
         installed
     }

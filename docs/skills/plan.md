@@ -17,6 +17,6 @@ Write each brief for a cold reader: the files it touches, the prior art by path,
 
 Unresolved decisions stay visible. A genuine open question becomes a flight of its own, crewed to a person and linked ahead of its dependents, or it lands in the body where the worker will hold on it. Never a silent guess.
 
-End with a person. The last flight of any plan is the operator's — review, verify, decide — the same rule the procedure loader already enforces for procedures.
+End with a person. The last flight of any plan is the operator's — review, verify, decide — the same rule the procedure loader already warns about for procedures.
 
 Sanity pass, then report: `ff tower board` to see the whole shape, then report the flights filed with their numbers and edges, and stop. Working them is a different run.

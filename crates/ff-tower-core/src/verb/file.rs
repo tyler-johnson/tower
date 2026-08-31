@@ -150,6 +150,45 @@ mod tests {
         (repo, store)
     }
 
+    /// The engine ships empty, so a filing under a procedure needs one
+    /// installed first: the repository layer, which beats whatever the
+    /// machine's own user layer happens to hold.
+    fn install(repo: &Repo, name: &str, text: &str) {
+        repo.write(format!(".tower/procedures/{name}.toml"), text);
+    }
+
+    /// `docs/procedures/review.toml`'s shape: `pass` and `smoke` fly
+    /// together, and `verdict` waits on both.
+    const REVIEW: &str = r#"
+name    = "review"
+subject = "branch"
+
+[[flight]]
+id       = "pass"
+assignee = "agent"
+skill    = "review"
+
+[[flight]]
+id       = "smoke"
+assignee = "me"
+bay      = "warm"
+
+[[flight]]
+id       = "verdict"
+assignee = "me"
+after    = ["pass", "smoke"]
+"#;
+
+    /// `docs/procedures/ticket.toml`'s: one flight, the collapse case.
+    const TICKET: &str = r#"
+name = "ticket"
+
+[[flight]]
+id       = "work"
+assignee = "me"
+done     = "asserted"
+"#;
+
     fn folded(store: &Store) -> board::Fold {
         board::fold(&store.read_all().expect("read"))
     }
@@ -192,7 +231,8 @@ mod tests {
 
     #[test]
     fn a_multi_flight_procedure_mints_ready_waiting_and_a_waiting_parent() {
-        let (_repo, store) = store();
+        let (repo, store) = store();
+        install(&repo, "review", REVIEW);
         let outcome = file(
             &store,
             "feather",
@@ -244,7 +284,8 @@ mod tests {
 
     #[test]
     fn a_single_flight_procedure_collapses_ready_and_the_caller_wins() {
-        let (_repo, store) = store();
+        let (repo, store) = store();
+        install(&repo, "ticket", TICKET);
         let outcome = file(
             &store,
             "fix the typo",
@@ -253,14 +294,14 @@ mod tests {
                 labels: vec!["chore".to_string()],
                 ..Fields::default()
             },
-            Some("open"),
+            Some("ticket"),
         )
         .expect("files");
         assert!(outcome.part_ids.is_empty(), "one flight, no parent");
 
         let fold = folded(&store);
         let flight = &fold.flights[0];
-        assert_eq!(flight.procedure.as_deref(), Some("open"));
+        assert_eq!(flight.procedure.as_deref(), Some("ticket"));
         assert_eq!(flight.subject, "fix the typo");
         assert_eq!(flight.status, "ready", "the collapse is born Ready");
         assert_eq!(
@@ -269,5 +310,29 @@ mod tests {
             "the caller's lane beats the definition's"
         );
         assert_eq!(flight.labels, ["chore"]);
+    }
+
+    #[test]
+    fn a_definitions_done_word_rides_onto_the_filed_event() {
+        // The enum is closed in the loader and open in the log: what
+        // `done` parsed to is copied onto the filing as the free string
+        // the log wants, so a non-default value has to survive the mint.
+        let (repo, store) = store();
+        install(
+            &repo,
+            "landing",
+            r#"
+name = "landing"
+
+[[flight]]
+id       = "ship"
+assignee = "me"
+done     = "landed"
+"#,
+        );
+        file(&store, "the release", Fields::default(), Some("landing")).expect("files");
+
+        let fold = folded(&store);
+        assert_eq!(fold.flights[0].done_kind, "landed");
     }
 }

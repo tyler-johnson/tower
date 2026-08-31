@@ -218,7 +218,7 @@ gets made.";
 pub const DECOMPOSE_EXAMPLES: &str = "\
 Examples:
   ff tower decompose 17 \"the parser\" \"the render\"   two sub-flights, linked
-  ff tower decompose 17 review   the definition's flights, minted under it
+  ff tower decompose 17 review   an installed procedure's flights, under it
   ff tower brief 17              the parent, its children under depends on
   ff tower next                  sub-flights are what it hands out first";
 
@@ -228,13 +228,20 @@ and the flights it stamps out with their lanes. A name is the detail
 page — the match rules by name with their predicates, which route
 what sits in Triage the next time anything runs (adapter-keyed ones
 stay inert until an adapter exists to fire them); every flight with
-assignee, skill, after, and done; and the path a fork of it belongs
-at.
+assignee, skill, after, and done; and the file it was read from.
+
+Two layers, the most specific winning whole: user,
+~/.config/tower/procedures/<name>.toml; repo,
+.tower/procedures/<name>.toml under the main worktree. tower ships
+none of its own — the documentation's docs/procedures/ carries worked
+examples to copy in and fork.
 
 Read-only, and it spawns no fufu. Filing under one is
 `ff tower file <name> <subject>`, and the definition is copied into
 the log at filing, so editing an installed procedure never disturbs a
-flight already in the air.";
+flight already in the air. A definition whose terminal flights are
+all agent-assigned carries a warning line: a procedure should end
+with you.";
 
 pub const PROCEDURES_EXAMPLES: &str = "\
 Examples:
@@ -250,15 +257,17 @@ every name with its layer and one-line description; a name prints
 the file raw, byte for byte, so redirecting it into a harness's
 skill directory or a fork's starting point needs no flag.
 
-Three layers, the most specific winning whole: built-in, shipped in
-the binary; user, ~/.config/tower/skills/<name>.md; repo,
-.tower/skills/<name>.md under the main worktree. A flight names the
-skill it is flown with, and `next` hands the name out on the picked
-row.
+Two layers, the most specific winning whole: user,
+~/.config/tower/skills/<name>.md; repo, .tower/skills/<name>.md under
+the main worktree. tower ships none of its own — the documentation's
+docs/skills/ carries worked examples to copy in and fork. A flight
+names the skill it is flown with, and `next` hands the name out on
+the picked row.
 
-Read-only, and it spawns no fufu. The shipped skills stop at
-committed on a branch — no push, no PR — and editing that boundary
-is a fork of the file, visibly the operator's.";
+Read-only, and it spawns no fufu. The documented examples stop at
+committed on a branch — no push, no PR — and where your own copy
+draws that line is your call, visibly yours: the listing names the
+layer every skill came from.";
 
 pub const SKILLS_EXAMPLES: &str = "\
 Examples:

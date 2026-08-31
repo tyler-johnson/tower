@@ -17,8 +17,8 @@ use ff_tower_core::procedure::{self, Registry};
 use ff_tower_core::verb;
 use ff_tower_testsupport::Repo;
 
-/// The repository layer's registry, the built-ins underneath — exactly
-/// what the production pass loads, minus the machine's user layer.
+/// The repository layer's registry alone — exactly what the production
+/// pass loads, minus the machine's user layer.
 fn registry(repo: &Repo) -> Registry {
     procedure::layered(None, Some(&procedure::repo_dir(repo.path()))).expect("the registry loads")
 }

@@ -293,10 +293,12 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "procedure/not-found",
         summary: "no procedure by that name is installed",
-        detail: "Procedures resolve against the installed registry — the built-ins, the user \
-                 layer, and the repository's `.tower/procedures/` — and this name is in none of \
-                 them. The refusal lists what is installed; `procedures` shows each one in full \
-                 and where to fork it.",
+        detail: "Procedures resolve against the installed registry — the user layer, \
+                 `~/.config/tower/procedures/`, and the repository's `.tower/procedures/` — and \
+                 this name is in neither. The engine ships none, so an empty registry is the \
+                 normal state of a fresh box: the refusal says as much, `procedures` names both \
+                 directories, and the tower repository's `docs/procedures/` carries worked \
+                 examples to copy in.",
         exits: &["ff tower procedures"],
     },
     Entry {
@@ -314,8 +316,8 @@ pub static ENTRIES: &[Entry] = &[
         summary: "the procedure declares no flights",
         detail: "A procedure is the flights it stamps out — a definition with none has \
                  nothing to file and nothing to hand out. Declare at least one `[[flight]]`, \
-                 and remember the last one must be assigned to `me`: every procedure ends \
-                 with a human.",
+                 and end the shape on one assigned to `me`: a procedure that comes back to no \
+                 one still loads, but it is warned about.",
         exits: &["ff tower procedures"],
     },
     Entry {
@@ -361,18 +363,23 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         id: "procedure/no-human-end",
-        summary: "the procedure ends on an agent flight",
-        detail: "Every procedure ends with you — the final flight must be assigned to `me`, \
-                 so that finished work always crosses a human's desk before it counts as \
-                 done. Add a closing flight assigned to `me`, or re-assign the last one.",
+        summary: "the procedure comes back to no one",
+        detail: "A warning, not a refusal: every terminal flight of the definition — every \
+                 flight nothing else waits on — is assigned to an agent, so the shape never \
+                 crosses a person's desk before it counts as finished. One human close is what \
+                 the rule is about, so a `me` flight beside an agent one is enough to quiet it. \
+                 It warns rather than refuses because the file is yours and the boundary that \
+                 actually holds is `never auto-outward`: whatever an agent finishes, nothing \
+                 leaves the machine without a person's verb. `doctor` raises the same row.",
         exits: &["ff tower procedures"],
     },
     Entry {
         id: "skill/not-found",
         summary: "no skill by that name is installed",
-        detail: "The name is in no layer — built-in, user, or repository. Bare \
-                 `ff tower skills` lists what is installed and where each came from, and the \
-                 refusal itself names the set.",
+        detail: "The name is in neither layer — `~/.config/tower/skills/` or the \
+                 repository's `.tower/skills/`. The engine ships none, so an empty shelf is the \
+                 normal state of a fresh box: bare `ff tower skills` names both directories, \
+                 and the tower repository's `docs/skills/` carries worked examples to copy in.",
         exits: &["ff tower skills"],
     },
     Entry {
@@ -734,7 +741,12 @@ mod tests {
     /// cannot hide behind a habit of adding names here. Empty today:
     /// every entry traces to a `CliError::coded(` call or an `fn id()`
     /// table arm.
-    const UNRAISED: &[(&str, &str)] = &[];
+    const UNRAISED: &[(&str, &str)] = &[(
+        "procedure/no-human-end",
+        "a doctor check name rather than a refusal: the shape loads and warns, so the id \
+         reaches a person through `cmd/doctor.rs`'s Warn row, which this walk deliberately \
+         does not read — check names wear the same shape as ids and are not errors.",
+    )];
 
     /// The mirror of the guard above, and the reason both ship: the
     /// forward guard catches an id added without prose, and cannot catch

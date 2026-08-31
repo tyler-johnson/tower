@@ -1,5 +1,5 @@
-//! `ff tower procedures [<name>]` — what is installed, and where to fork
-//! it.
+//! `ff tower procedures [<name>]` — what is installed, and where it
+//! came from.
 //!
 //! Read-only, and beside `file` and the pass one of the few surfaces
 //! that reads a definition. Bare is the list: every name, the layer it
@@ -7,13 +7,19 @@
 //! the detail page: the match rules by name with their predicates —
 //! adapter-keyed ones marked inert, because no adapter exists to fire
 //! them, while field-keyed ones route Triage on the lazy pass — every
-//! flight with assignee, skill, `after`, and `done`, and the path a
-//! fork of it belongs at.
+//! flight with assignee, skill, `after`, and `done`, and the file it was
+//! read from.
+//!
+//! The engine ships empty, so nothing installed is the normal state of a
+//! fresh box rather than a fault: the empty list says where a definition
+//! goes and where the worked examples are. DESIGN.md:338's warning rides
+//! both renders — a definition whose terminal flights are all
+//! agent-assigned carries a line saying so, by name and by flight.
 //!
 //! No fufu spawn, like `file`: the repository layer resolves through
 //! `Store::main_worktree`.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::error::CliError;
 use crate::{machine, render};
@@ -37,7 +43,7 @@ pub fn run(json: bool, name: Option<&str>) -> Result<(), CliError> {
                     )
                 );
             } else {
-                print!("{}", list(&installed, render::colored()));
+                print!("{}", list(&installed, root.as_deref(), render::colored()));
             }
         }
         Some(name) => {
@@ -53,7 +59,7 @@ pub fn run(json: bool, name: Option<&str>) -> Result<(), CliError> {
                     )
                 );
             } else {
-                print!("{}", detail(definition, root.as_deref(), render::colored()));
+                print!("{}", detail(definition, render::colored()));
             }
         }
     }
@@ -61,8 +67,14 @@ pub fn run(json: bool, name: Option<&str>) -> Result<(), CliError> {
 }
 
 /// The list: a head line per procedure, its flights under it, and the
-/// footer's count in the board's grammar.
-fn list(installed: &Registry, colored: bool) -> String {
+/// footer's count in the board's grammar — or, on a box where nobody has
+/// authored one yet, the two directories a definition goes in and the
+/// documentation's worked examples.
+fn list(installed: &Registry, repo_root: Option<&Path>, colored: bool) -> String {
+    if installed.is_empty() {
+        return empty(repo_root, colored);
+    }
+
     let names: Vec<String> = installed
         .definitions()
         .map(|definition| definition.name.clone())
@@ -88,6 +100,10 @@ fn list(installed: &Registry, colored: bool) -> String {
                 render::paint_dim(flight.assignee.name(), colored)
             ));
         }
+        if let Some(warning) = no_human_end(definition) {
+            out.push_str(&render::paint_dim(&warning, colored));
+            out.push('\n');
+        }
         out.push('\n');
     }
 
@@ -111,7 +127,7 @@ fn list(installed: &Registry, colored: bool) -> String {
 /// cannot fire — a rule that looks live and never runs is the kind of
 /// thing you debug for an hour — while a field-keyed one is live on the
 /// pass and prints its predicates plain.
-fn detail(definition: &Definition, repo_root: Option<&std::path::Path>, colored: bool) -> String {
+fn detail(definition: &Definition, colored: bool) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "{}  {}\n",
@@ -196,34 +212,74 @@ fn detail(definition: &Definition, repo_root: Option<&std::path::Path>, colored:
         ));
     }
 
+    if let Some(warning) = no_human_end(definition) {
+        out.push('\n');
+        out.push_str(&render::paint_dim(&warning, colored));
+        out.push('\n');
+    }
+
     out.push('\n');
     out.push_str(&render::paint_dim(
-        &provenance(definition, repo_root),
+        &format!("file: {}", definition.source.path().display()),
         colored,
     ));
     out.push('\n');
     out
 }
 
-/// Where it came from, or — for a built-in — where a fork of it belongs.
-/// The repository layer is offered first: a forked procedure is normally
-/// the team's, and the user layer is the one that roams with a person.
-fn provenance(definition: &Definition, repo_root: Option<&std::path::Path>) -> String {
-    match definition.source.path() {
-        Some(path) => format!("file: {}", path.display()),
-        None => match fork_target(&definition.name, repo_root) {
-            Some(path) => format!("fork: {}", path.display()),
-            None => "built-in · shipped in the binary".to_string(),
-        },
-    }
+/// DESIGN.md:338's warning, as a line: a procedure should end with you,
+/// and it fires only when no terminal flight does. Advice, never a
+/// refusal — the file is the owner's, and the boundary that actually
+/// holds is `never auto-outward`.
+fn no_human_end(definition: &Definition) -> Option<String> {
+    let terminal = definition.no_human_end()?;
+    let noun = if terminal.len() == 1 {
+        "flight"
+    } else {
+        "flights"
+    };
+    Some(format!(
+        "! ends on agent {noun} {} — a procedure should end with you",
+        terminal.join(", ")
+    ))
 }
 
-fn fork_target(name: &str, repo_root: Option<&std::path::Path>) -> Option<PathBuf> {
-    let dir = match repo_root {
-        Some(root) => procedure::repo_dir(root),
-        None => procedure::user_dir()?,
-    };
-    Some(dir.join(format!("{name}.toml")))
+/// Nothing installed: the engine ships empty, so the list says where a
+/// definition goes rather than printing a bare zero. The repository
+/// layer is offered first — a definition is normally the team's, and the
+/// user layer is the one that roams with a person.
+fn empty(repo_root: Option<&Path>, colored: bool) -> String {
+    let mut targets = Vec::new();
+    if let Some(root) = repo_root {
+        targets.push(procedure::repo_dir(root).join("<name>.toml"));
+    }
+    if let Some(user) = procedure::user_dir() {
+        targets.push(user.join("<name>.toml"));
+    }
+
+    let mut out = String::new();
+    out.push_str(&render::paint_dim("no procedures installed", colored));
+    out.push('\n');
+    if !targets.is_empty() {
+        out.push_str(&render::paint_dim(
+            &format!(
+                "author: {}",
+                targets
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            ),
+            colored,
+        ));
+        out.push('\n');
+    }
+    out.push_str(&render::paint_dim(
+        "examples: docs/procedures/ in the tower repository",
+        colored,
+    ));
+    out.push('\n');
+    out
 }
 
 fn width(items: &[String]) -> usize {

@@ -2,9 +2,11 @@
 //!
 //! DESIGN.md's *Skills*, loaded. A skill is instructions the harness
 //! executes, not a process tower spawns — policy in markdown the user can
-//! fork, layered exactly as procedures are: built-in, then
-//! `~/.config/tower/skills/*.md`, then `.tower/skills/*.md` under the
-//! main worktree, the same name replacing wholesale. The content is
+//! fork, layered exactly as procedures are: `~/.config/tower/skills/*.md`,
+//! then `.tower/skills/*.md` under the main worktree, the same name
+//! replacing wholesale. Nothing sits under those two — the engine ships
+//! empty, and the worked examples a person copies in live in the
+//! repository's `docs/`. The content is
 //! opaque UTF-8 here; the name is the file stem, and the only structure
 //! this module reads is an optional front matter block whose
 //! `description:` line becomes the listing's summary.
@@ -23,7 +25,7 @@ pub use crate::procedure::Source;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// One skill, loaded. `source` is the loader's, never the file's — a
-/// skill cannot claim to be built in.
+/// skill cannot claim which layer it came from.
 #[derive(Debug, Clone)]
 pub struct Skill {
     /// The file stem — layering and lookup key both.
@@ -125,16 +127,7 @@ impl Registry {
     }
 }
 
-/// The three skills shipped in the binary. Name beside text, because
-/// markdown carries no name field — the registry key is the file stem
-/// either way.
-const BUILT_INS: [(&str, &str); 3] = [
-    ("plan", include_str!("builtin/plan.md")),
-    ("review", include_str!("builtin/review.md")),
-    ("work", include_str!("builtin/work.md")),
-];
-
-/// The three layers, lowest first: built-in, then user, then repository.
+/// The two layers, lowest first: user, then repository.
 ///
 /// A missing directory is an empty layer, not an error. A file inside a
 /// directory being read that cannot be read *is* an error, named by
@@ -149,13 +142,6 @@ pub fn registry(repo_root: Option<&Path>) -> Result<Registry> {
 /// most of all, says so instead of setting a process-global variable.
 pub fn layered(user: Option<&Path>, repo: Option<&Path>) -> Result<Registry> {
     let mut installed = Registry::default();
-    for (name, text) in BUILT_INS {
-        installed.insert(Skill {
-            name: name.to_string(),
-            text: text.to_string(),
-            source: Source::BuiltIn,
-        });
-    }
     if let Some(dir) = user {
         read_dir(&mut installed, dir, Source::User)?;
     }
@@ -263,47 +249,38 @@ impl Error {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_built_ins_load_with_front_matter_and_a_body() {
-        // A shipped skill without the front matter a harness redirect
-        // depends on would be the worst bug in this module; it fails
-        // here instead.
-        let installed = layered(None, None).expect("the built-ins load");
-        assert_eq!(installed.names(), ["plan", "review", "work"]);
-        assert_eq!(installed.len(), 3);
-        assert!(!installed.is_empty());
+    /// A skill file with the front matter a harness redirect depends on
+    /// — the shape `docs/skills/` carries, written by the test rather
+    /// than shipped.
+    fn markdown(name: &str, description: &str) -> String {
+        format!("---\nname: tower-{name}\ndescription: {description}\n---\n\n# {name}\n\nProse.\n")
+    }
 
-        for skill in installed.skills() {
-            assert_eq!(skill.source, Source::BuiltIn, "{}", skill.name);
-            assert!(skill.text.starts_with("---\n"), "{}", skill.name);
-            let (matter, markdown) = split_front_matter(&skill.text).expect("front matter");
-            assert!(
-                matter.contains(&format!("name: tower-{}", skill.name)),
-                "{}: {matter}",
-                skill.name
-            );
-            assert!(!skill.summary().is_empty(), "{}", skill.name);
-            assert!(
-                skill.summary() != skill.text,
-                "{}: the summary is the description, not the file",
-                skill.name
-            );
-            assert!(
-                markdown.contains(&format!("# {}", skill.name)),
-                "{}: a body follows the block",
-                skill.name
-            );
-        }
+    #[test]
+    fn the_registry_starts_empty() {
+        // Principle 12: nothing sits under the two layers, so a box with
+        // neither directory has no skills at all — an empty registry,
+        // not a floor.
+        let installed = layered(None, None).expect("no layers is not an error");
+        assert!(installed.is_empty());
+        assert_eq!(installed.len(), 0);
+        assert!(installed.names().is_empty());
+        assert!(installed.get("work").is_none());
     }
 
     #[test]
     fn the_summary_is_the_front_matter_description() {
-        let installed = layered(None, None).expect("loads");
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let text = markdown("work", "claim, do, hold or commit, repeat");
+        std::fs::write(repo.join("work.md"), &text).unwrap();
+
+        let installed = layered(None, Some(&repo)).expect("loads");
         let work = installed.get("work").expect("work");
-        assert_eq!(
-            work.summary(),
-            "claim, do, hold or commit, repeat — the loop that pairs with `ff tower next`"
-        );
+        assert_eq!(work.text, text, "the file rides byte for byte");
+        assert_eq!(work.summary(), "claim, do, hold or commit, repeat");
+        assert_eq!(work.source, Source::Repo(repo.join("work.md")));
     }
 
     #[test]
@@ -311,40 +288,32 @@ mod tests {
         let skill = Skill {
             name: "bare".to_string(),
             text: "\n# bare\n\nProse.\n".to_string(),
-            source: Source::BuiltIn,
+            source: Source::Repo(PathBuf::from("bare.md")),
         };
         assert_eq!(skill.summary(), "bare");
     }
 
     #[test]
-    fn a_user_file_replaces_the_built_in_wholesale() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let user = dir.path().join("skills");
-        std::fs::create_dir_all(&user).unwrap();
-        std::fs::write(user.join("work.md"), "# mine\n\nMy loop.\n").unwrap();
-
-        let installed = layered(Some(&user), None).expect("loads");
-        assert_eq!(installed.names(), ["plan", "review", "work"]);
-        let work = installed.get("work").expect("work");
-        assert_eq!(work.text, "# mine\n\nMy loop.\n");
-        assert_eq!(work.source, Source::User(user.join("work.md")));
-        assert_eq!(work.summary(), "mine");
-    }
-
-    #[test]
-    fn the_repo_layer_beats_the_user_layer() {
+    fn the_repo_layer_replaces_the_user_layer_wholesale() {
         let dir = tempfile::TempDir::new().unwrap();
         let user = dir.path().join("user");
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&user).unwrap();
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(user.join("work.md"), "the user's\n").unwrap();
+        std::fs::write(user.join("plan.md"), "mine alone\n").unwrap();
         std::fs::write(repo.join("work.md"), "the team's\n").unwrap();
 
         let installed = layered(Some(&user), Some(&repo)).expect("loads");
+        assert_eq!(installed.names(), ["plan", "work"]);
         let work = installed.get("work").expect("work");
         assert_eq!(work.text, "the team's\n");
         assert_eq!(work.source, Source::Repo(repo.join("work.md")));
+        // A name the repository layer does not carry is the user's still.
+        assert_eq!(
+            installed.get("plan").expect("plan").source,
+            Source::User(user.join("plan.md"))
+        );
     }
 
     #[test]
@@ -357,7 +326,7 @@ mod tests {
         std::fs::write(repo.join("notes.txt"), "not a skill").unwrap();
 
         let installed = layered(Some(&dir.path().join("never-made")), Some(&repo)).expect("loads");
-        assert_eq!(installed.names(), ["plan", "review", "triage", "work"]);
+        assert_eq!(installed.names(), ["triage"]);
         assert_eq!(installed.get("triage").expect("triage").summary(), "triage");
     }
 

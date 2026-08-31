@@ -5,7 +5,7 @@
 //! fields any flight carries, pre-filled — no conditions and no loops,
 //! because principle 13 puts every conditional in the skill an
 //! agent-assigned flight points at. What is here is a parser, a
-//! validator, and three layers to read them from.
+//! validator, and two layers to read them from.
 //!
 //! **The definition is read once, at file time.** Nothing in this module
 //! is consulted by the fold or by a render: `file` reads a definition,
@@ -37,7 +37,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// One procedure, loaded and validated.
 ///
 /// `source` is the loader's, never the file's — a definition cannot claim
-/// to be built in.
+/// which layer it came from.
 #[derive(Debug, Clone, Serialize)]
 pub struct Definition {
     pub name: String,
@@ -50,6 +50,33 @@ pub struct Definition {
     /// Declaration order — the order `file` mints the flights in.
     pub flights: Vec<FlightDef>,
     pub source: Source,
+}
+
+impl Definition {
+    /// The terminal flights when every one of them is an agent's, and
+    /// `None` otherwise. Derived, never stored: nothing on the wire says
+    /// this, and the surfaces that warn re-derive it from the flights.
+    ///
+    /// Terminal: nothing waits on it. DESIGN.md:338 — a procedure should
+    /// end with you, and the warning fires only when no terminal flight
+    /// does, because one human close is the boundary the rule is about.
+    pub fn no_human_end(&self) -> Option<Vec<&str>> {
+        let waited_on: HashSet<&str> = self
+            .flights
+            .iter()
+            .flat_map(|flight| flight.after.iter().map(String::as_str))
+            .collect();
+        let terminal: Vec<&FlightDef> = self
+            .flights
+            .iter()
+            .filter(|flight| !waited_on.contains(flight.id.as_str()))
+            .collect();
+        let all_agents = !terminal.is_empty()
+            && terminal
+                .iter()
+                .all(|flight| flight.assignee != Assignee::Me);
+        all_agents.then(|| terminal.iter().map(|flight| flight.id.as_str()).collect())
+    }
 }
 
 /// One intake rule: a name — what the routing event records as having
@@ -157,11 +184,10 @@ impl Bay {
     }
 }
 
-/// Which layer a definition came from, and the file it came from when
-/// there is one.
+/// Which layer a definition came from, and the file it came from. Both
+/// layers are directories, so every definition has a path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    BuiltIn,
     User(PathBuf),
     Repo(PathBuf),
 }
@@ -170,36 +196,31 @@ impl Source {
     /// The layer's name — the word a listing prints.
     pub fn layer(&self) -> &'static str {
         match self {
-            Source::BuiltIn => "built-in",
             Source::User(_) => "user",
             Source::Repo(_) => "repo",
         }
     }
 
-    /// The file it was read from; `None` for what ships in the binary.
-    pub fn path(&self) -> Option<&Path> {
+    /// The file it was read from.
+    pub fn path(&self) -> &Path {
         match self {
-            Source::BuiltIn => None,
-            Source::User(path) | Source::Repo(path) => Some(path),
+            Source::User(path) | Source::Repo(path) => path,
         }
     }
 
     /// What a refusal names the definition by.
     fn describe(&self) -> String {
-        match self.path() {
-            Some(path) => path.display().to_string(),
-            None => "built-in".to_string(),
-        }
+        self.path().display().to_string()
     }
 }
 
-/// `{"layer": …, "path": …}` — flat, and `path` is present and null for a
-/// built-in rather than missing, the same rule the board's views follow.
+/// `{"layer": …, "path": …}` — flat, the same two keys on every emitting
+/// surface.
 impl Serialize for Source {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let mut out = serializer.serialize_struct("Source", 2)?;
         out.serialize_field("layer", self.layer())?;
-        out.serialize_field("path", &self.path().map(|path| path.display().to_string()))?;
+        out.serialize_field("path", &self.path().display().to_string())?;
         out.end()
     }
 }
@@ -254,15 +275,6 @@ impl Registry {
     }
 }
 
-/// The two definitions shipped in the binary, parsed through the same
-/// loader as everything else — a built-in that failed its own rules would
-/// be the worst bug this module could have, so it fails in a unit test
-/// instead.
-const BUILT_INS: [&str; 2] = [
-    include_str!("builtin/open.toml"),
-    include_str!("builtin/review.toml"),
-];
-
 /// The registry as one payload — what a bare `procedures` envelope
 /// carries as `data`. Named structs rather than ad-hoc maps so the key
 /// and the field order are the same on every emitting surface.
@@ -277,7 +289,9 @@ pub struct One<'a> {
     pub procedure: &'a Definition,
 }
 
-/// The three layers, lowest first: built-in, then user, then repository.
+/// The two layers, lowest first: user, then repository. Nothing sits
+/// under them — the engine ships empty, and the worked examples a person
+/// copies in live in the repository's `docs/`.
 ///
 /// A missing directory is an empty layer, not an error. A file inside a
 /// directory being read that does not parse *is* an error, named by path:
@@ -293,9 +307,6 @@ pub fn registry(repo_root: Option<&Path>) -> Result<Registry> {
 /// process-global variable.
 pub fn layered(user: Option<&Path>, repo: Option<&Path>) -> Result<Registry> {
     let mut installed = Registry::default();
-    for text in BUILT_INS {
-        installed.insert(load(text, Source::BuiltIn)?);
-    }
     if let Some(dir) = user {
         read_dir(&mut installed, dir, Source::User)?;
     }
@@ -402,9 +413,11 @@ struct Wire {
     flights: Vec<FlightDef>,
 }
 
-/// Seven refusals, in the order it is cheapest to be sure of them: no
+/// Six refusals, in the order it is cheapest to be sure of them: no
 /// flights, a rule with no predicates, two rules under one name, a
-/// duplicate id, an `after` naming nothing, a cycle, and principle 12.
+/// duplicate id, an `after` naming nothing, and a cycle. The human end is
+/// not among them: [`Definition::no_human_end`] is a warning the surfaces
+/// raise, because the file is personal.
 fn validate(definition: &Definition, at: &str) -> Result<()> {
     let name = definition.name.clone();
     let at = at.to_string();
@@ -457,23 +470,6 @@ fn validate(definition: &Definition, at: &str) -> Result<()> {
 
     if let Some(part) = cycle(&definition.flights) {
         return Err(Error::Cyclic { name, at, part });
-    }
-
-    // Terminal: nothing else waits on it. Every one of them is yours, or
-    // the procedure ends on an agent and is a script.
-    let waited_on: HashSet<&str> = definition
-        .flights
-        .iter()
-        .flat_map(|flight| flight.after.iter().map(String::as_str))
-        .collect();
-    for flight in &definition.flights {
-        if !waited_on.contains(flight.id.as_str()) && flight.assignee != Assignee::Me {
-            return Err(Error::NoHumanEnd {
-                name,
-                at,
-                part: flight.id.clone(),
-            });
-        }
     }
 
     Ok(())
@@ -605,22 +601,22 @@ pub enum Error {
         part: String,
     },
 
-    /// Principle 12, refused at load: the procedure ends on a flight
-    /// that is not yours.
-    #[error(
-        "procedure `{name}` ({at}) ends on flight `{part}`, assigned to an agent — every procedure ends with you"
-    )]
-    NoHumanEnd {
-        name: String,
-        at: String,
-        part: String,
-    },
-
     /// A name the registry does not carry — the one refusal here about
     /// the asking rather than the definition. Raised by
     /// [`Registry::require`], never by the loader.
-    #[error("no procedure `{name}` — installed: {installed}")]
+    #[error("no procedure `{name}` — {}", installed_note(installed))]
     NotFound { name: String, installed: String },
+}
+
+/// The tail of a `not-found` refusal. Empty is the normal state of a box
+/// nobody has authored a definition on yet, and `installed: ` with
+/// nothing after it reads like a bug rather than an answer.
+fn installed_note(installed: &str) -> String {
+    if installed.is_empty() {
+        "nothing installed".to_string()
+    } else {
+        format!("installed: {installed}")
+    }
 }
 
 impl Error {
@@ -634,7 +630,6 @@ impl Error {
             Error::DuplicatePart { .. } => "procedure/duplicate-part",
             Error::UnknownAfter { .. } => "procedure/unknown-after",
             Error::Cyclic { .. } => "procedure/cyclic",
-            Error::NoHumanEnd { .. } => "procedure/no-human-end",
             Error::NotFound { .. } => "procedure/not-found",
         }
     }
@@ -651,42 +646,58 @@ impl Error {
 mod tests {
     use super::*;
 
+    /// A source for a hand-written definition: the loader wants one, and
+    /// a refusal names the definition by its path, so the tests read the
+    /// same way a real file's would.
+    fn at(name: &str) -> Source {
+        Source::Repo(PathBuf::from(name))
+    }
+
     #[test]
-    fn the_built_ins_load_and_validate() {
-        // A shipped definition that failed its own rules would be the
-        // worst bug in this module; it fails here instead.
-        let installed = Registry {
-            by_name: BUILT_INS
-                .iter()
-                .map(|text| {
-                    let definition = load(text, Source::BuiltIn).expect("a built-in loads");
-                    (definition.name.clone(), definition)
-                })
-                .collect(),
-        };
-        assert_eq!(installed.names(), ["open", "review"]);
+    fn the_registry_starts_empty_and_says_so() {
+        // Principle 12, asserted where it is cheapest: nothing sits under
+        // the two layers, so a box with neither directory has nothing
+        // installed at all.
+        let installed = layered(None, None).expect("no layers is not an error");
+        assert!(installed.is_empty());
+        assert_eq!(installed.len(), 0);
+        assert!(installed.names().is_empty());
 
-        let open = installed.get("open").expect("open");
-        assert_eq!(open.flights.len(), 1);
-        assert_eq!(open.flights[0].assignee, Assignee::Me);
-        assert_eq!(open.flights[0].done, Done::Asserted);
-
-        let review = installed.get("review").expect("review");
-        assert_eq!(review.subject.as_deref(), Some("branch"));
-        assert_eq!(review.matches.len(), 1);
-        assert_eq!(review.flights.len(), 3);
+        let err = installed
+            .require("review")
+            .expect_err("nothing is installed");
+        assert_eq!(err.id(), "procedure/not-found");
+        assert_eq!(err.to_string(), "no procedure `review` — nothing installed");
+        assert_eq!(err.exits(), ["ff tower procedures"]);
     }
 
     #[test]
     fn require_answers_or_refuses_with_the_installed_list() {
-        let installed = layered(None, None).expect("the built-ins load");
-        assert_eq!(installed.require("open").expect("installed").name, "open");
+        let dir = tempfile::TempDir::new().unwrap();
+        let user = dir.path().join("procedures");
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::write(
+            user.join("review.toml"),
+            "name = \"review\"\n[[flight]]\nid = \"verdict\"\nassignee = \"me\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            user.join("ticket.toml"),
+            "name = \"ticket\"\n[[flight]]\nid = \"work\"\nassignee = \"me\"\n",
+        )
+        .unwrap();
+
+        let installed = layered(Some(&user), None).expect("loads");
+        assert_eq!(
+            installed.require("review").expect("installed").name,
+            "review"
+        );
 
         let err = installed.require("nope").expect_err("not installed");
         assert_eq!(err.id(), "procedure/not-found");
         assert_eq!(
             err.to_string(),
-            "no procedure `nope` — installed: open, review"
+            "no procedure `nope` — installed: review, ticket"
         );
         assert_eq!(err.exits(), ["ff tower procedures"]);
     }
@@ -705,11 +716,33 @@ assignee = "me"
 after    = ["first"]
 done     = "landed"
 "#,
-            Source::BuiltIn,
+            at("shapes.toml"),
         )
         .expect("loads");
         assert_eq!(definition.flights[0].done, Done::Asserted);
         assert_eq!(definition.flights[1].done, Done::Landed);
+    }
+
+    #[test]
+    fn a_word_the_done_enum_does_not_carry_is_refused_by_path() {
+        // The enum is closed here and open in the log: a completion word
+        // a newer tower minted must not take an older tower's board
+        // down, but the refusal belongs where a person is editing a file.
+        let err = load(
+            r#"
+name = "shapes"
+[[flight]]
+id       = "only"
+assignee = "me"
+done     = "shipped"
+"#,
+            at("shapes.toml"),
+        )
+        .expect_err("an unrecognized word refuses");
+        assert_eq!(err.id(), "procedure/invalid");
+        let message = err.to_string();
+        assert!(message.contains("shapes.toml"), "names the path: {message}");
+        assert!(!message.contains('\n'), "one line: {message}");
     }
 
     #[test]
@@ -728,7 +761,7 @@ assignee = "agent"
 id       = "work"
 assignee = "me"
 "#,
-            Source::BuiltIn,
+            at("chores.toml"),
         )
         .expect("loads");
         assert_eq!(definition.matches.len(), 2);
@@ -750,7 +783,7 @@ event  = "review_requested"
 id       = "work"
 assignee = "me"
 "#,
-            Source::BuiltIn,
+            at("old.toml"),
         )
         .expect_err("a nameless rule refuses");
         assert_eq!(err.id(), "procedure/invalid");
@@ -764,13 +797,13 @@ name = "everything"
 id       = "work"
 assignee = "me"
 "#,
-            Source::BuiltIn,
+            at("vacuous.toml"),
         )
         .expect_err("a rule with no predicates refuses");
         assert_eq!(err.id(), "procedure/empty-rule");
         assert_eq!(
             err.to_string(),
-            "procedure `vacuous` (built-in): rule `everything` declares no predicates"
+            "procedure `vacuous` (vacuous.toml): rule `everything` declares no predicates"
         );
 
         let err = load(
@@ -786,13 +819,13 @@ label = "ops"
 id       = "work"
 assignee = "me"
 "#,
-            Source::BuiltIn,
+            at("twice.toml"),
         )
         .expect_err("two rules under one name refuse");
         assert_eq!(err.id(), "procedure/duplicate-rule");
         assert_eq!(
             err.to_string(),
-            "procedure `twice` (built-in) declares rule `same` twice"
+            "procedure `twice` (twice.toml) declares rule `same` twice"
         );
     }
 
@@ -806,7 +839,7 @@ id       = "only"
 assignee = "me"
 skil     = "review"
 "#,
-            Source::BuiltIn,
+            at("typo.toml"),
         )
         .expect_err("a typo'd key is a refusal");
         assert_eq!(err.id(), "procedure/invalid");
@@ -825,7 +858,7 @@ name = "old"
 id   = "work"
 crew = "you"
 "#,
-            Source::BuiltIn,
+            at("old.toml"),
         )
         .expect_err("the old grammar refuses");
         assert_eq!(err.id(), "procedure/invalid");

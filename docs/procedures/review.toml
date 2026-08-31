@@ -1,5 +1,5 @@
 # Someone else's work you have been asked to look at. DESIGN.md's block,
-# shipped: `pass` and `smoke` fly together because neither names the other,
+# worked: `pass` and `smoke` fly together because neither names the other,
 # and `verdict` waits on both.
 name    = "review"
 subject = "branch"            # may resolve to a PR later

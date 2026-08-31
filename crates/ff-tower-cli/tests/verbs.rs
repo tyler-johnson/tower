@@ -92,6 +92,21 @@ fn repo() -> Repo {
 
 /// A single-flight procedure in the repository layer, so a test can file
 /// one flight under a name that is not built in.
+/// `docs/procedures/review.toml`'s shape in the repository layer. The
+/// engine ships empty, so the procedure forms need a definition
+/// installed before they have a name to take.
+fn install_review(repo: &Repo) {
+    repo.write(
+        ".tower/procedures/review.toml",
+        concat!(
+            "name    = \"review\"\nsubject = \"branch\"\n\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nskill    = \"review\"\n\n",
+            "[[flight]]\nid       = \"smoke\"\nassignee = \"me\"\nbay      = \"warm\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\", \"smoke\"]\n",
+        ),
+    );
+}
+
 fn install_chore(repo: &Repo) {
     repo.write(
         ".tower/procedures/chore.toml",
@@ -227,6 +242,7 @@ fn a_bad_lane_at_filing_is_a_usage_refusal() {
 #[test]
 fn file_under_review_echoes_the_parent_and_its_flights() {
     let repo = repo();
+    install_review(&repo);
     let out = stdout(&ff_tower(
         repo.path(),
         &["file", "review", "the retry test"],
@@ -244,6 +260,7 @@ fn file_under_review_echoes_the_parent_and_its_flights() {
 #[test]
 fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
     let repo = repo();
+    install_review(&repo);
     let out = ff_tower(
         repo.path(),
         &[
@@ -397,11 +414,12 @@ fn caller_flags_win_on_a_collapsed_filing() {
 #[test]
 fn a_procedure_that_is_not_installed_is_refused() {
     let repo = repo();
+    install_chore(&repo);
     let out = ff_tower(repo.path(), &["file", "ghost", "a subject", "--json"]);
     let refused = refusal(&out, 1, "procedure/not-found");
     assert_eq!(
         refused["error"]["message"],
-        serde_json::json!("no procedure `ghost` — installed: open, review")
+        serde_json::json!("no procedure `ghost` — installed: chore")
     );
     assert_eq!(
         refused["error"]["exits"],
@@ -1086,6 +1104,7 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
 #[test]
 fn decompose_under_a_procedure_mints_the_definitions_flights() {
     let repo = repo();
+    install_review(&repo);
     stdout(&ff_tower(repo.path(), &["file", "look this over"]));
     let out = stdout(&ff_tower(repo.path(), &["decompose", "1", "review"]));
     assert!(

@@ -1,6 +1,6 @@
 //! Definitions, loaded: DESIGN's `review` block round-tripping to
-//! flights and edges, the six refusals, the shipped set, and the three
-//! layers.
+//! flights and edges, the six refusals, the human-end warning, and the
+//! two layers over an engine that ships empty.
 //!
 //! The layering tests call `procedure::layered` with tempdirs rather than
 //! `procedure::registry` with `XDG_CONFIG_HOME` set: environment is
@@ -9,7 +9,7 @@
 //! first. The CLI suite sets the variable on the child it spawns, where
 //! it is a per-process fact again.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ff_tower_core::procedure::{self, Assignee, Bay, Done, Source};
 
@@ -39,14 +39,30 @@ assignee = "me"
 after = ["pass", "smoke"]
 "#;
 
+/// The ticket shape, `docs/procedures/ticket.toml`'s: one flight, yours.
+const TICKET: &str = r#"
+name = "ticket"
+
+[[flight]]
+id       = "work"
+assignee = "me"
+done     = "asserted"
+"#;
+
 fn write(dir: &Path, name: &str, text: &str) {
     std::fs::create_dir_all(dir).expect("mkdir");
     std::fs::write(dir.join(name), text).expect("write");
 }
 
+/// The source a hand-written definition is loaded under: a refusal names
+/// the definition by its path, so the tests read as a real file's would.
+fn at(name: &str) -> Source {
+    Source::Repo(PathBuf::from(name))
+}
+
 #[test]
 fn designs_review_block_loads_to_its_flights_and_edges() {
-    let definition = procedure::load(REVIEW, Source::BuiltIn).expect("loads");
+    let definition = procedure::load(REVIEW, at("review.toml")).expect("loads");
     assert_eq!(definition.name, "review");
     assert_eq!(definition.subject.as_deref(), Some("branch"));
 
@@ -88,7 +104,7 @@ fn designs_review_block_loads_to_its_flights_and_edges() {
 
 #[test]
 fn a_procedure_with_no_flights_is_refused() {
-    let err = procedure::load(r#"name = "empty""#, Source::BuiltIn).expect_err("refused");
+    let err = procedure::load(r#"name = "empty""#, at("empty.toml")).expect_err("refused");
     assert_eq!(err.id(), "procedure/no-parts");
     assert!(err.to_string().contains("empty"), "{err}");
 }
@@ -105,7 +121,7 @@ assignee = "me"
 id       = "same"
 assignee = "me"
 "#,
-        Source::BuiltIn,
+        at("twice.toml"),
     )
     .expect_err("refused");
     assert_eq!(err.id(), "procedure/duplicate-part");
@@ -125,7 +141,7 @@ id       = "last"
 assignee = "me"
 after    = ["frist"]
 "#,
-        Source::BuiltIn,
+        at("typo.toml"),
     )
     .expect_err("refused");
     assert_eq!(err.id(), "procedure/unknown-after");
@@ -146,7 +162,7 @@ id       = "b"
 assignee = "me"
 after    = ["a"]
 "#,
-        Source::BuiltIn,
+        at("circular.toml"),
     )
     .expect_err("refused");
     assert_eq!(err.id(), "procedure/cyclic");
@@ -160,17 +176,18 @@ id       = "only"
 assignee = "me"
 after    = ["only"]
 "#,
-        Source::BuiltIn,
+        at("selfish.toml"),
     )
     .expect_err("refused");
     assert_eq!(err.id(), "procedure/cyclic");
 }
 
 #[test]
-fn a_procedure_that_does_not_end_with_you_is_refused() {
-    // Principle 12, at load: nothing waits on `pass`, so the procedure
-    // ends on an agent and is a script.
-    let err = procedure::load(
+fn a_procedure_that_does_not_end_with_you_loads_and_warns() {
+    // DESIGN.md:338, and it warns rather than refuses: the file is
+    // personal, and the boundary that actually holds is
+    // `never auto-outward`.
+    let definition = procedure::load(
         r#"
 name = "script"
 [[flight]]
@@ -181,19 +198,38 @@ id       = "pass"
 assignee = "agent"
 after    = ["plan"]
 "#,
-        Source::BuiltIn,
+        at("script.toml"),
     )
-    .expect_err("refused");
-    assert_eq!(err.id(), "procedure/no-human-end");
-    assert!(err.to_string().contains("`pass`"), "{err}");
-    assert!(err.to_string().contains("ends with you"), "{err}");
+    .expect("a shape that ends on an agent still loads");
+    assert_eq!(definition.no_human_end(), Some(vec!["pass"]));
 
-    // Terminal is about the edges, not the order: a part declared last
+    // Terminal is about the edges, not the order: a flight declared last
     // that something waits on is not an end, and one declared first that
-    // nothing waits on is.
-    let err = procedure::load(
+    // nothing waits on is. Both terminals here are agents.
+    let definition = procedure::load(
         r#"
 name = "parallel"
+[[flight]]
+id       = "loose"
+assignee = "agent"
+[[flight]]
+id       = "also"
+assignee = "agent"
+"#,
+        at("parallel.toml"),
+    )
+    .expect("loads");
+    assert_eq!(definition.no_human_end(), Some(vec!["loose", "also"]));
+}
+
+#[test]
+fn one_human_terminal_flight_is_enough_to_stay_silent() {
+    // *All* the terminal flights, not any: a shape whose last human
+    // flight sits beside an agent one is fine, because one human close
+    // is the boundary the rule is about.
+    let definition = procedure::load(
+        r#"
+name = "beside"
 [[flight]]
 id       = "loose"
 assignee = "agent"
@@ -201,11 +237,15 @@ assignee = "agent"
 id       = "mine"
 assignee = "me"
 "#,
-        Source::BuiltIn,
+        at("beside.toml"),
     )
-    .expect_err("refused");
-    assert_eq!(err.id(), "procedure/no-human-end");
-    assert!(err.to_string().contains("`loose`"), "{err}");
+    .expect("loads");
+    assert!(definition.no_human_end().is_none());
+
+    // And the ordinary shape: everything funnels into one flight of
+    // yours.
+    let definition = procedure::load(REVIEW, at("review.toml")).expect("loads");
+    assert!(definition.no_human_end().is_none());
 }
 
 #[test]
@@ -222,49 +262,36 @@ fn toml_that_does_not_parse_is_refused_by_path() {
 }
 
 #[test]
-fn the_shipped_set_is_open_and_review_both_built_in() {
-    let installed = procedure::layered(None, None).expect("the built-ins load");
-    assert_eq!(installed.names(), ["open", "review"]);
-    for definition in installed.definitions() {
-        assert_eq!(definition.source, Source::BuiltIn);
-    }
-
-    // `open` is the single-flight case the collapse rule turns on.
-    let open = installed.get("open").expect("open");
-    assert_eq!(open.flights.len(), 1);
-    assert_eq!(open.flights[0].assignee, Assignee::Me);
+fn the_engine_ships_empty() {
+    // Principle 12: no layer sits under the two, so a box with neither
+    // directory has nothing installed.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let installed = procedure::layered(None, None).expect("not an error");
+    assert!(installed.is_empty());
+    assert!(
+        procedure::layered(
+            Some(&dir.path().join("nope")),
+            Some(&dir.path().join("nor"))
+        )
+        .expect("a missing directory is an empty layer")
+        .is_empty()
+    );
 }
 
 #[test]
-fn a_user_file_overrides_a_built_in_and_a_repo_file_overrides_both() {
+fn a_repo_file_replaces_a_user_file_wholesale() {
     let dir = tempfile::tempdir().expect("tempdir");
     let user = dir.path().join("user");
     let repo = dir.path().join("repo");
 
-    write(
-        &user,
-        "review.toml",
-        r#"
-name = "review"
-[[flight]]
-id       = "mine"
-assignee = "me"
-"#,
-    );
+    write(&user, "review.toml", REVIEW);
+    write(&user, "ticket.toml", TICKET);
 
     let installed = procedure::layered(Some(&user), None).expect("loads");
+    assert_eq!(installed.names(), ["review", "ticket"]);
     let review = installed.get("review").expect("review");
     assert_eq!(review.source, Source::User(user.join("review.toml")));
-    // Wholesale, never field by field: the built-in's three flights are
-    // gone, not merged with.
-    let ids: Vec<&str> = review
-        .flights
-        .iter()
-        .map(|flight| flight.id.as_str())
-        .collect();
-    assert_eq!(ids, ["mine"]);
-    assert!(review.subject.is_none());
-    assert_eq!(installed.get("open").expect("open").source, Source::BuiltIn);
+    assert_eq!(review.flights.len(), 3);
 
     write(
         &repo,
@@ -280,8 +307,21 @@ assignee = "me"
     let installed = procedure::layered(Some(&user), Some(&repo)).expect("loads");
     let review = installed.get("review").expect("review");
     assert_eq!(review.source, Source::Repo(repo.join("review.toml")));
-    assert_eq!(review.flights[0].id, "ours");
-    assert_eq!(installed.names(), ["open", "review"]);
+    // Wholesale, never field by field: the user file's three flights are
+    // gone, not merged with.
+    let ids: Vec<&str> = review
+        .flights
+        .iter()
+        .map(|flight| flight.id.as_str())
+        .collect();
+    assert_eq!(ids, ["ours"]);
+    assert!(review.subject.is_none());
+    assert_eq!(installed.names(), ["review", "ticket"]);
+    // A name the repository layer does not carry is the user's still.
+    assert_eq!(
+        installed.get("ticket").expect("ticket").source,
+        Source::User(user.join("ticket.toml"))
+    );
 }
 
 #[test]
@@ -300,15 +340,8 @@ assignee = "me"
     );
 
     let installed = procedure::layered(Some(&user), None).expect("loads");
-    assert_eq!(installed.names(), ["chore", "open", "review"]);
+    assert_eq!(installed.names(), ["chore"]);
     assert!(installed.get("anything").is_none());
-}
-
-#[test]
-fn a_missing_directory_is_an_empty_layer() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let installed = procedure::layered(Some(&dir.path().join("nope")), None).expect("not an error");
-    assert_eq!(installed.names(), ["open", "review"]);
 }
 
 #[test]
@@ -316,6 +349,7 @@ fn a_file_that_is_not_toml_is_left_alone() {
     let dir = tempfile::tempdir().expect("tempdir");
     let user = dir.path().join("user");
     write(&user, "README.md", "how to fork a procedure\n");
+    write(&user, "ticket.toml", TICKET);
     let installed = procedure::layered(Some(&user), None).expect("loads");
-    assert_eq!(installed.names(), ["open", "review"]);
+    assert_eq!(installed.names(), ["ticket"]);
 }

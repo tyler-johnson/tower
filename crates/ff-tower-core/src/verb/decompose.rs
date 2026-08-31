@@ -144,6 +144,34 @@ mod tests {
         (repo, store)
     }
 
+    /// The engine ships empty, so the procedure form needs a definition
+    /// installed first — the repository layer, `docs/procedures/`'s
+    /// review shape.
+    fn install_review(repo: &Repo) {
+        repo.write(
+            ".tower/procedures/review.toml",
+            r#"
+name    = "review"
+subject = "branch"
+
+[[flight]]
+id       = "pass"
+assignee = "agent"
+skill    = "review"
+
+[[flight]]
+id       = "smoke"
+assignee = "me"
+bay      = "warm"
+
+[[flight]]
+id       = "verdict"
+assignee = "me"
+after    = ["pass", "smoke"]
+"#,
+        );
+    }
+
     fn filed(store: &Store, subject: &str) {
         store
             .append(vec![Kind::Filed {
@@ -205,7 +233,8 @@ mod tests {
 
     #[test]
     fn the_procedure_form_mints_the_definitions_flights_beneath_it() {
-        let (_repo, store) = store();
+        let (repo, store) = store();
+        install_review(&repo);
         filed(&store, "look this over");
         let outcome =
             decompose(&store, "1", &["review".to_string()]).expect("the definition is installed");

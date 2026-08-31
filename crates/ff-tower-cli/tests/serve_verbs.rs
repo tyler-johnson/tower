@@ -31,6 +31,21 @@ fn served() -> (Repo, Server) {
     (repo, server)
 }
 
+/// `docs/procedures/review.toml`'s shape in the repository layer. The
+/// engine ships empty, so the two procedure-form routes need a
+/// definition installed before they have a name to take.
+fn install_review(repo: &Repo) {
+    repo.write(
+        ".tower/procedures/review.toml",
+        concat!(
+            "name    = \"review\"\nsubject = \"branch\"\n\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nskill    = \"review\"\n\n",
+            "[[flight]]\nid       = \"smoke\"\nassignee = \"me\"\nbay      = \"warm\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\", \"smoke\"]\n",
+        ),
+    );
+}
+
 fn file(repo: &Path, subject: &str) {
     Store::open(repo)
         .expect("open")
@@ -253,6 +268,7 @@ fn comment_done_and_cancel_land_on_the_record() {
 #[test]
 fn file_appends_the_whole_batch_and_answers_it() {
     let (repo, server) = served();
+    install_review(&repo);
     let (status, head, body) = post(
         &server.addr,
         "/api/file",
@@ -348,6 +364,7 @@ fn decompose_appends_the_children_and_the_edges_and_answers_them() {
 #[test]
 fn decompose_under_a_procedure_mints_the_definitions_flights_over_http() {
     let (repo, server) = served();
+    install_review(&repo);
     let (status, head, body) = post(
         &server.addr,
         "/api/decompose",

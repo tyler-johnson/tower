@@ -1,0 +1,9 @@
+# The smallest shape there is: one flight, yours. A single-flight procedure
+# collapses onto the flight, so filing under `ticket` mints one flight
+# carrying these fields rather than a parent and a lone child.
+name = "ticket"
+
+[[flight]]
+id       = "work"
+assignee = "me"
+done     = "asserted"

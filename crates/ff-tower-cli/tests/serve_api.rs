@@ -122,6 +122,13 @@ fn the_bays_route_is_the_bay_list_verb_byte_for_byte() {
 #[test]
 fn the_procedures_routes_are_the_verb_bare_and_named() {
     let (repo, server) = served();
+    // The engine ships empty, so the named route needs a definition to
+    // name: `docs/procedures/ticket.toml`'s shape, in the repository
+    // layer the server reads through `Store::main_worktree`.
+    repo.write(
+        ".tower/procedures/ticket.toml",
+        "name = \"ticket\"\n\n[[flight]]\nid       = \"work\"\nassignee = \"me\"\n",
+    );
     parity(
         &server,
         repo.path(),
@@ -131,8 +138,8 @@ fn the_procedures_routes_are_the_verb_bare_and_named() {
     parity(
         &server,
         repo.path(),
-        "/api/procedures/open",
-        &["procedures", "open", "--json"],
+        "/api/procedures/ticket",
+        &["procedures", "ticket", "--json"],
     );
 }
 

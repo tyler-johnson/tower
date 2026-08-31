@@ -229,14 +229,14 @@ fn a_procedure_naming_a_ghost_skill_is_a_finding() {
     assert!(message.contains("spooky"), "{message}");
     assert!(message.contains("pass"), "{message}");
     assert!(message.contains("`ghost`"), "{message}");
-    assert!(
-        message.contains("installed: plan, review, work"),
-        "{message}"
-    );
+    // The engine ships empty, so no skills at all is the ordinary case
+    // and the row says that rather than trailing an empty list.
+    assert!(message.contains("the skill shelf is empty"), "{message}");
     assert_eq!(findings, 1);
 
-    // Install the missing prose: the row goes, and the shipped set alone
-    // never warned — `a_fresh_repository_is_healthy` holds that half.
+    // Install the missing prose: the row goes, and an empty registry
+    // alone never warned — `a_fresh_repository_is_healthy` holds that
+    // half.
     repo.write(".tower/skills/ghost.md", "# ghost\n");
     let out = ff_tower(repo.path(), &["doctor", "--json"]);
     assert_eq!(out.status.code(), Some(0));
@@ -244,6 +244,72 @@ fn a_procedure_naming_a_ghost_skill_is_a_finding() {
     assert!(
         !all.iter()
             .any(|row| row["check"] == serde_json::json!("skill/unresolved")),
+        "{all:?}"
+    );
+    assert_eq!(findings, 0);
+
+    // With a second skill on the shelf the row names the set again.
+    repo.write(
+        ".tower/procedures/spooky.toml",
+        concat!(
+            "name = \"spooky\"\n\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nskill    = \"phantom\"\n\n",
+            "[[flight]]\nid       = \"end\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
+        ),
+    );
+    let out = ff_tower(repo.path(), &["doctor", "--json"]);
+    let (all, _) = rows(&out);
+    let message = row(&all, "skill/unresolved")["message"]
+        .as_str()
+        .expect("message")
+        .to_string();
+    assert!(message.contains("installed: ghost"), "{message}");
+}
+
+#[test]
+fn a_procedure_that_ends_on_an_agent_is_a_finding() {
+    // DESIGN.md:338 warns rather than refuses, so the definition loads
+    // and doctor is where it surfaces — by name and by flight.
+    let repo = repo();
+    repo.write(
+        ".tower/procedures/script.toml",
+        concat!(
+            "name = \"script\"\n\n",
+            "[[flight]]\nid       = \"plan\"\nassignee = \"me\"\n\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nafter    = [\"plan\"]\n",
+        ),
+    );
+
+    let out = ff_tower(repo.path(), &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let (all, findings) = rows(&out);
+    let warned = row(&all, "procedure/no-human-end");
+    assert_eq!(warned["level"], serde_json::json!("warn"));
+    assert_eq!(
+        warned["message"],
+        serde_json::json!(
+            "procedure script ends on agent flight pass — a procedure should end with you"
+        )
+    );
+    assert_eq!(findings, 1);
+
+    // One human terminal flight is enough to quiet it: `verdict` closes
+    // the shape, and the row goes.
+    repo.write(
+        ".tower/procedures/script.toml",
+        concat!(
+            "name = \"script\"\n\n",
+            "[[flight]]\nid       = \"plan\"\nassignee = \"me\"\n\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nafter    = [\"plan\"]\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
+        ),
+    );
+    let out = ff_tower(repo.path(), &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let (all, findings) = rows(&out);
+    assert!(
+        !all.iter()
+            .any(|row| row["check"] == serde_json::json!("procedure/no-human-end")),
         "{all:?}"
     );
     assert_eq!(findings, 0);

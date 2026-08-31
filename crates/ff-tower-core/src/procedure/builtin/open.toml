@@ -1,9 +1,0 @@
-# The unclassified default: one flight, yours. A single-flight procedure
-# collapses onto the flight, so filing under `open` mints one flight
-# carrying these fields rather than a parent and a lone child.
-name = "open"
-
-[[flight]]
-id       = "work"
-assignee = "me"
-done     = "asserted"

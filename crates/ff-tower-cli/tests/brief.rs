@@ -94,6 +94,20 @@ fn install_pipeline(repo: &Repo) {
     );
 }
 
+/// `docs/procedures/review.toml`'s shape, for the one test that needs a
+/// flight born with a skill and another born with a bay.
+fn install_review(repo: &Repo) {
+    repo.write(
+        ".tower/procedures/review.toml",
+        concat!(
+            "name    = \"review\"\nsubject = \"branch\"\n\n",
+            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nskill    = \"review\"\n\n",
+            "[[flight]]\nid       = \"smoke\"\nassignee = \"me\"\nbay      = \"warm\"\n\n",
+            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\", \"smoke\"]\n",
+        ),
+    );
+}
+
 fn file_pipeline(repo: &Repo, subject: &str) {
     stdout(&ff_tower(repo.path(), &["file", "pipeline", subject]));
 }
@@ -180,6 +194,7 @@ fn brief_renders_the_full_record_both_link_directions() {
 #[test]
 fn the_stored_fields_get_their_own_line_under_the_head() {
     let repo = repo();
+    install_review(&repo);
     stdout(&ff_tower(
         repo.path(),
         &["file", "review", "the retry test"],

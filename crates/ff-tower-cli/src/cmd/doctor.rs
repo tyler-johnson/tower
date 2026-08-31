@@ -53,11 +53,12 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         _ => board::doctor(&board::fold(&[]), &no_reads(), &seam, &[]),
     };
     // The registries ride both arms too: they read files, never the
-    // seam, so a drifted contract cannot hide an unresolved skill.
+    // seam, so a drifted contract cannot hide an unresolved skill or a
+    // shape that never comes back to a person.
     let root = Store::open(ff.repo())
         .ok()
         .and_then(|store| store.main_worktree());
-    for row in skill_rows(root.as_deref()) {
+    for row in registry_rows(root.as_deref()) {
         if row.level == Level::Warn {
             report.findings += 1;
         }
@@ -99,12 +100,17 @@ pub fn run(json: bool) -> Result<i32, CliError> {
     Ok(if report.findings == 0 { 0 } else { 1 })
 }
 
-/// Principle 5's half of the skill seam: a procedure naming a skill
-/// nothing installs still loads and flies — nothing validates the link
-/// at load — so doctor is where the unresolved name surfaces. A layer
-/// that refuses to load is itself a Warn row naming the path rather
-/// than a dead doctor.
-fn skill_rows(root: Option<&Path>) -> Vec<DoctorRow> {
+/// The registry rows: principle 5's half of the skill seam, and
+/// DESIGN.md:338's warning.
+///
+/// A procedure naming a skill nothing installs still loads and flies —
+/// nothing validates the link at load — so doctor is where the
+/// unresolved name surfaces. The human end is the same shape of
+/// complaint: the loader takes a definition whose terminal flights are
+/// all agent-assigned, and doctor names it, by name and by flight. A
+/// layer that refuses to load is itself a Warn row naming the path
+/// rather than a dead doctor.
+fn registry_rows(root: Option<&Path>) -> Vec<DoctorRow> {
     let mut rows = Vec::new();
     let skills = match skill::registry(root) {
         Ok(registry) => registry,
@@ -129,6 +135,22 @@ fn skill_rows(root: Option<&Path>) -> Vec<DoctorRow> {
         }
     };
     for definition in procedures.definitions() {
+        if let Some(terminal) = definition.no_human_end() {
+            let noun = if terminal.len() == 1 {
+                "flight"
+            } else {
+                "flights"
+            };
+            rows.push(DoctorRow {
+                level: Level::Warn,
+                check: "procedure/no-human-end".to_string(),
+                message: format!(
+                    "procedure {} ends on agent {noun} {} — a procedure should end with you",
+                    definition.name,
+                    terminal.join(", ")
+                ),
+            });
+        }
         for flight in &definition.flights {
             if flight.assignee != Assignee::Agent {
                 continue;
@@ -141,16 +163,27 @@ fn skill_rows(root: Option<&Path>) -> Vec<DoctorRow> {
                     level: Level::Warn,
                     check: "skill/unresolved".to_string(),
                     message: format!(
-                        "procedure {} flies flight {} with skill `{name}`, which nothing installs — installed: {}",
+                        "procedure {} flies flight {} with skill `{name}`, which nothing installs — {}",
                         definition.name,
                         flight.id,
-                        skills.names().join(", ")
+                        installed_note(&skills)
                     ),
                 });
             }
         }
     }
     rows
+}
+
+/// The tail of an unresolved-skill row. The engine ships empty, so no
+/// skills at all is the ordinary case, and `installed: ` with nothing
+/// after it would read like a bug rather than an answer.
+fn installed_note(skills: &skill::Registry) -> String {
+    if skills.is_empty() {
+        "the skill shelf is empty".to_string()
+    } else {
+        format!("installed: {}", skills.names().join(", "))
+    }
 }
 
 /// The passive lane's cache, read and reported — the cache's two readers

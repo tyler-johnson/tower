@@ -15,7 +15,7 @@ Intent is stored; the repository audits it.*
 
 The model is the one every tracker uses, on purpose: a flight is an issue with a status, an assignee, a priority, labels, and links, recognizable in one glance to anyone who has used Linear. The engine underneath is what no other tracker has. fufu's capture floor runs before every action, so tower checks the claims its own board makes — a flight marked In Progress with no motion says so on its row, work is visible before the first commit exists, and two agents editing the same hunk on different branches is a discovered conflict, not a surprise at merge. Drift is flagged, never corrected.
 
-**tower is a thing agents call. It never calls agents.** There is no dispatch and no iteration verb: the harness loops and calls `ff tower next`, which hands back the next conflict-free set of ready work — the harness is the scheduler, tower is only the queue. And the engine ships empty: no built-in procedures, no built-in skills, no default opinions about how work should flow. Structure and judgment are files their owner authors; the documentation teaches by example.
+**tower is a thing agents call. It never calls agents.** There is no dispatch and no iteration verb: the harness loops and calls `ff tower next`, which hands back the next conflict-free set of ready work — the harness is the scheduler, tower is only the queue. And the engine ships empty: no built-in procedures, no built-in skills, no default opinions about how work should flow. Structure and judgment are files their owner authors; the documentation teaches by example, and [`docs/`](docs/) carries the worked ones to copy in.
 
 ## The seam
 
