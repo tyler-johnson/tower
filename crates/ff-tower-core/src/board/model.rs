@@ -129,6 +129,10 @@ pub struct FlightView {
     /// the pass routed it under.
     pub procedure: Option<String>,
     pub subject: String,
+    /// The filing's prose, verbatim. Carried on the row because the
+    /// query filters over it — `body=contains:…` cannot be answered
+    /// from a row that has no body — and never rendered as a column.
+    pub body: String,
     pub filed_by: String,
     /// Raw epoch; relative age is the render's concern.
     pub filed_at: i64,
@@ -145,6 +149,9 @@ pub struct FlightView {
     pub priority: String,
     pub labels: Vec<String>,
     pub skill: Option<String>,
+    /// The bay a filing or an edit stamped this flight for — a stored
+    /// field, and not the pool's own answer about occupancy.
+    pub bay: Option<String>,
     /// `@detached` is a real literal value here, carried as fufu emitted
     /// it; a render decides how to print it.
     pub branch: Option<String>,
@@ -184,40 +191,36 @@ pub struct CollideView {
     pub paths: Vec<String>,
 }
 
-/// Group the fold's flights by their stored status, using already-fetched
-/// reads.
+/// The fold's flights as flat rows, enriched with what the repository
+/// knows — everything [`enrich`] does before it sections anything.
 ///
-/// `now`, `stale_after`, and `closed` are arguments so the module stays
-/// pure and reads no clock, no config, and no command line: a board is a
-/// function of its inputs, and `stale_after` of `0` turns the stale line
-/// off entirely.
+/// The flat half exists on its own because two folds read it: the
+/// board's sectioning below, and [`Query::fold`](super::Query::fold),
+/// which groups the same rows by whatever axis a query names. Rows
+/// arrive in filed order, which every sort downstream is stable over.
+#[derive(Debug)]
+pub struct Rows {
+    pub flights: Vec<FlightView>,
+    pub unrouted: Vec<Event>,
+    pub retired: Vec<Event>,
+}
+
+/// Enrich every folded flight into a row, routing nothing.
 ///
-/// Every flight is enriched first — branch from the freshest op row
-/// (`@detached` carried literal), tip and holds from the branch row,
-/// `last_change` from the op row's time — and then routed by `status`
-/// alone. The inbox is a second view over the same rows: an open question
-/// puts a flight in `questions`, Ready in the `me` lane puts it in
-/// `yours`, and both keep their place in the status group below.
+/// `now` and `stale_after` are arguments so the module stays pure and
+/// reads no clock and no config: rows are a function of their inputs,
+/// and `stale_after` of `0` turns the stale line off entirely.
 ///
-/// A sub-flight is a flight: it lands in its own status group beside
-/// every other row, and nothing about having a parent moves or hides it.
-/// What says a row is a family is the parent's progress mark, closed
-/// children over total, which every parent carries. The family itself is
-/// the projects view's shape, not this list's.
+/// Every flight is enriched the same way — branch from the freshest op
+/// row (`@detached` carried literal), tip and holds from the branch row,
+/// `last_change` from the op row's time.
 ///
 /// Verdicts land on every live flight against every other live flight on
-/// a distinct branch — the facts are orthogonal to the group. `Collide`
-/// becomes a `collides` entry, `Unknown` an `unanswered` one, and `Clear`
-/// or an unprobed pair adds nothing; entries keep filed order, so a
-/// render is deterministic.
-pub fn enrich(
-    fold: Fold,
-    reads: &Reads,
-    verdicts: &Verdicts,
-    now: i64,
-    stale_after: i64,
-    closed: ClosedWindow,
-) -> Board {
+/// a distinct branch — the facts are orthogonal to any grouping.
+/// `Collide` becomes a `collides` entry, `Unknown` an `unanswered` one,
+/// and `Clear` or an unprobed pair adds nothing; entries keep filed
+/// order, so a render is deterministic.
+pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_after: i64) -> Rows {
     let freshest = reads.freshest();
     let branches = reads.branch_index();
 
@@ -245,16 +248,7 @@ pub fn enrich(
         .filter_map(|flight| Some((flight.id.to_string(), progress(&fold, flight)?)))
         .collect();
 
-    let mut inbox = WaitingOnYou {
-        questions: Vec::new(),
-        yours: Vec::new(),
-    };
-    let mut triage = Vec::new();
-    let mut waiting = Vec::new();
-    let mut ready = Vec::new();
-    let mut in_progress = Vec::new();
-    let mut held = Vec::new();
-    let mut group = Vec::new();
+    let mut flights = Vec::with_capacity(fold.flights.len());
     for flight in fold.flights {
         let id = flight.id.to_string();
         let op = freshest.get(id.as_str()).copied();
@@ -314,11 +308,62 @@ pub fn enrich(
         view.collides = collides;
         view.unanswered = unanswered;
         view.progress = marks.get(&id).copied();
+        flights.push(view);
+    }
 
+    Rows {
+        flights,
+        unrouted: fold.unrouted,
+        retired: fold.retired,
+    }
+}
+
+/// Group the fold's flights by their stored status, using already-fetched
+/// reads.
+///
+/// `now`, `stale_after`, and `closed` are arguments so the module stays
+/// pure and reads no clock, no config, and no command line: a board is a
+/// function of its inputs, and `stale_after` of `0` turns the stale line
+/// off entirely.
+///
+/// [`rows`] does the enrichment; what happens here is the routing. A row
+/// lands in the group its `status` field names and a status string this
+/// binary has never heard of routes nowhere rather than being invented
+/// into a group. The inbox is a second view over the same rows: an open
+/// question puts a flight in `questions`, Ready in the `me` lane puts it
+/// in `yours`, and both keep their place in the status group below.
+///
+/// A sub-flight is a flight: it lands in its own status group beside
+/// every other row, and nothing about having a parent moves or hides it.
+/// What says a row is a family is the parent's progress mark, closed
+/// children over total, which every parent carries. The family itself is
+/// the projects view's shape, not this list's.
+pub fn enrich(
+    fold: Fold,
+    reads: &Reads,
+    verdicts: &Verdicts,
+    now: i64,
+    stale_after: i64,
+    closed: ClosedWindow,
+) -> Board {
+    let rows = rows(fold, reads, verdicts, now, stale_after);
+
+    let mut inbox = WaitingOnYou {
+        questions: Vec::new(),
+        yours: Vec::new(),
+    };
+    let mut triage = Vec::new();
+    let mut waiting = Vec::new();
+    let mut ready = Vec::new();
+    let mut in_progress = Vec::new();
+    let mut held = Vec::new();
+    let mut group = Vec::new();
+    for view in rows.flights {
         // The inbox, live rows only: a closed flight needs nobody, and
         // `done` does not clear a question the log still carries.
-        let questioned = !is_closed && view.question.is_some();
-        let mine = !is_closed && view.status == "ready" && view.assignee.as_deref() == Some("me");
+        let live = !closed_row(&view);
+        let questioned = live && view.question.is_some();
+        let mine = live && view.status == "ready" && view.assignee.as_deref() == Some("me");
         if questioned {
             inbox.questions.push(view.clone());
         } else if mine {
@@ -369,8 +414,8 @@ pub fn enrich(
         in_progress,
         held,
         closed: group,
-        unrouted: fold.unrouted,
-        retired: fold.retired,
+        unrouted: rows.unrouted,
+        retired: rows.retired,
     }
 }
 
@@ -393,9 +438,15 @@ pub(super) fn progress(fold: &Fold, flight: &Flight) -> Option<(usize, usize)> {
     Some((closed, flight.depends_on.len()))
 }
 
+/// Off the board: done or canceled — [`Flight::closed`] read off the
+/// row rather than the fold, for the surfaces that only have rows.
+pub(super) fn closed_row(view: &FlightView) -> bool {
+    view.status == "done" || view.status == "canceled"
+}
+
 /// When a closed flight closed: the status move that closed it, or the
 /// filing for a flight that arrived closed.
-fn closed_at(view: &FlightView) -> i64 {
+pub(super) fn closed_at(view: &FlightView) -> i64 {
     view.status_at.unwrap_or(view.filed_at)
 }
 
@@ -413,7 +464,7 @@ fn order(views: &mut [FlightView]) {
 /// The priority vocabulary, urgent first. A word this binary has never
 /// heard of sorts after `none` rather than being invented into the middle
 /// of the ladder.
-fn rank(priority: &str) -> u8 {
+pub(super) fn rank(priority: &str) -> u8 {
     match priority {
         "urgent" => 0,
         "high" => 1,
@@ -445,6 +496,7 @@ fn view(
         number: flight.number,
         procedure: flight.procedure,
         subject: flight.subject,
+        body: flight.body,
         filed_by: flight.filed_by,
         filed_at: flight.filed_at,
         comments: flight.comments.len(),
@@ -457,6 +509,7 @@ fn view(
         priority: flight.priority,
         labels: flight.labels,
         skill: flight.skill,
+        bay: flight.bay,
         branch,
         tip,
         last_change: None,

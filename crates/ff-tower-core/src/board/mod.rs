@@ -25,7 +25,10 @@
 //! drift as rows over the same reads plus the seam's own answer, and it
 //! observes and complains, never enforces. [`resolve`] is how a typed
 //! reference becomes a flight id against the fold — every surface's
-//! front door to one flight.
+//! front door to one flight. [`Query`] is the second fold over the same
+//! rows — filters, grouping, ordering and the display window as one
+//! type, parsed once from a param string and shared by every surface,
+//! where [`enrich`] stays the board's own fixed sectioning.
 
 mod bay;
 mod brief;
@@ -34,6 +37,7 @@ mod flight;
 mod history;
 mod model;
 mod pick;
+mod query;
 mod reads;
 mod resolve;
 
@@ -43,10 +47,14 @@ pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use history::{Moment, history};
 pub use model::{
-    Board, ClosedWindow, CollideView, DEFAULT_CLOSED, FlightView, WaitingOnYou, enrich,
-    parse_closed,
+    Board, ClosedWindow, CollideView, DEFAULT_CLOSED, FlightView, Rows, WaitingOnYou, enrich,
+    parse_closed, rows,
 };
 pub use pick::{Passed, Pick, Picks, Skip, pick};
+pub use query::{
+    DEFAULT_SHOW, FIELDS, Field, Filter, Folded, Group, Mode, Op, Order, Query, QueryError, Value,
+    When,
+};
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};
 pub use resolve::{FlightRef, ResolveError, count, display, flight, parse_ref, resolve};
 
