@@ -282,6 +282,15 @@ pub static ENTRIES: &[Entry] = &[
         exits: &["ff tower brief <flight>"],
     },
     Entry {
+        id: "link/missing",
+        summary: "no such dependency is declared",
+        detail: "The edge `a` → `b` is not on the record, and `unlink` needs an edge to take \
+                 back. The brief shows each flight's declared edges in both directions — check \
+                 the order of the two flights, since the edge runs from the dependent to what \
+                 it depends on.",
+        exits: &["ff tower brief <flight>"],
+    },
+    Entry {
         id: "hold/exists",
         summary: "the flight is already held",
         detail: "One open question at a time: a second hold would bury the first, and the \

@@ -560,6 +560,91 @@ fn the_same_edge_twice_is_refused() {
 }
 
 #[test]
+fn unlink_drops_the_edge_both_ways() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
+    stdout(&ff_tower(repo.path(), &["file", "the dependent"]));
+    stdout(&ff_tower(repo.path(), &["link", "pi.2", "pi.1"]));
+    // Bare seqs, so the wire form is covered too.
+    let out = stdout(&ff_tower(repo.path(), &["unlink", "2", "1"]));
+    assert_eq!(
+        out,
+        "unlinked #2: no longer depends on #1\nboard: ff tower\n"
+    );
+
+    let dependent = brief_of(repo.path(), "pi.2");
+    let dependency = brief_of(repo.path(), "pi.1");
+    assert!(family(&dependent, "depends_on").is_empty());
+    assert!(family(&dependency, "blocks").is_empty());
+    for brief in [&dependent, &dependency] {
+        let history = brief["history"].as_array().expect("a history");
+        assert_eq!(
+            history.last().expect("a row")["what"],
+            serde_json::json!("unlinked")
+        );
+    }
+}
+
+#[test]
+fn an_unlink_of_no_edge_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
+    stdout(&ff_tower(repo.path(), &["file", "the dependent"]));
+    let out = ff_tower(repo.path(), &["unlink", "pi.2", "pi.1", "--json"]);
+    let envelope = refusal(&out, 1, "link/missing");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#2` does not depend on `#1`")
+    );
+    // No exits at the raise site: the registry entry's answer.
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower brief <flight>"])
+    );
+    // A self-edge is never on the record, so it falls to the same
+    // refusal rather than a usage error.
+    let out = ff_tower(repo.path(), &["unlink", "1", "1", "--json"]);
+    refusal(&out, 1, "link/missing");
+}
+
+#[test]
+fn an_unlink_releases_a_waiting_flight() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the dependent"]));
+    stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
+    stdout(&ff_tower(repo.path(), &["link", "1", "2"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["waiting"][0]["id"], serde_json::json!("pi.1"));
+
+    // The edge gone, the fold derives Ready on the flight's own mark:
+    // no dependency closed, so no reason names one.
+    stdout(&ff_tower(repo.path(), &["unlink", "1", "2"]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["ready"][0]["id"], serde_json::json!("pi.1"));
+    assert!(board["data"]["ready"][0]["status_reason"].is_null());
+    assert!(
+        board["data"]["waiting"]
+            .as_array()
+            .expect("a group")
+            .is_empty()
+    );
+
+    // Declared again, the edge re-gates it.
+    stdout(&ff_tower(repo.path(), &["link", "1", "2"]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["waiting"][0]["id"], serde_json::json!("pi.1"));
+}
+
+#[test]
+fn an_unlink_to_a_missing_flight_is_refused() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the only flight"]));
+    let out = ff_tower(repo.path(), &["unlink", "pi.1", "pi.9", "--json"]);
+    refusal(&out, 1, "flight/not-found");
+}
+
+#[test]
 fn a_comment_shows_in_the_rendered_note_line() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "carry a note"]));

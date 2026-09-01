@@ -108,7 +108,7 @@ A flight is an issue, and it carries what every issue carries:
 | priority | urgent · high · medium · low · none |
 | labels | freeform strings, rendered as chips, filterable everywhere |
 | skill | what an agent reads to fly it — the one field other trackers do not have |
-| edges | depends-on and blocks, declared with `link`; a parent depends on its sub-flights |
+| edges | depends-on and blocks, declared with `link`, taken back with `unlink`; a parent depends on its sub-flights |
 | comments, history | the record, append-only |
 
 Every field is settable directly at filing — `ff tower file "subject" -p high --label chore --skill review --assignee agent` — and editable after. A procedure (below) is nothing more than those same fields saved across a graph of flights.
@@ -122,7 +122,7 @@ Every field is settable directly at filing — `ff tower file "subject" -p high 
 Status is derived from the record, moved through the same verbs and words, and every gesture is attributed in the history. A status word — a verb, a drag on the board, an agent's gesture mid-loop — assigns three stored facts, in triage, started, closed; the open question and the dependency edges are facts of their own; and every fold projects the seven words back out of them. The names are chosen so a Linear user reads the board cold, and the two nonstandard ones earn their sentence:
 
 - **Triage** — not yet cleared for work, deliberately. The default for anything that arrives unmatched, and the parking place for work nobody has decided about. Nothing leaves Triage except by a person's gesture or a person's match rules; that deliberateness is the definition.
-- **Waiting** — cleared, but gated by the graph: something this flight depends on is still live. Never written: a flight is born here by its edges and computed here at every fold, so linking a dependency re-gates a Ready flight, and a dependency closing, done or canceled, releases it with no event appended — the closer's gesture is the mark. The row says what it waits on.
+- **Waiting** — cleared, but gated by the graph: something this flight depends on is still live. Never written: a flight is born here by its edges and computed here at every fold, so linking a dependency re-gates a Ready flight, and a dependency closing, done or canceled, releases it with no event appended — the closer's gesture is the mark. Unlinking the dependency releases it the same way: the edge leaves, and the next fold derives Ready. The row says what it waits on.
 - **Ready** — cleared and unblocked. The agent queue draws from Ready flights assigned to the agent lane; your own Ready flights are the list you pick from.
 - **In Progress** — someone is flying it. The pull sets it for agents; you set it, or just start and let the audit line remind you.
 - **Held** — stopped on a blocking question. Holding clears started: the answer returns the flight to Ready or Waiting by the graph, never straight back In Progress. The question piece is its own section below.
@@ -257,6 +257,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `ff tower done [<flight>]` | finish it; bare in a bay, the session tag names the flight | either |
 | `ff tower cancel <flight> [-m <why>]` | close it unfinished, reason on the record | you |
 | `ff tower link <a> <b>` | declare that one flight depends on another — discovered conflicts need no verb | either |
+| `ff tower unlink <a> <b>` | take back a declared dependency — the only way to disagree with a derived Waiting | either |
 | `ff tower comment <flight> -m <note>` | a note on the record, local; saying it to the team is a separate, deliberate gesture | either |
 | `ff tower edit <target> [-s <subject>] [-m <msg>]` | reword a flight's subject/body, or a comment's text by its event id — an overlay event, the log keeps every prior word | either |
 | `ff tower decompose <flight> [<procedure> \| <part>…]` | make a flight a parent — a procedure's flights, or parts by hand | either |

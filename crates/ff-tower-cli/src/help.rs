@@ -196,13 +196,32 @@ depends on and blocks.
 
 The identical edge declared twice is refused: the fold would render
 it twice, and nothing in the log means it twice. Discovered conflicts
-need no edge — verdicts are probed fresh per render, never stored.";
+need no edge — verdicts are probed fresh per render, never stored.
+`ff tower unlink <a> <b>` takes the edge back.";
 
 pub const LINK_EXAMPLES: &str = "\
 Examples:
   ff tower link 18 17            18 waits until 17 is done
   ff tower decompose 17 \"…\" \"…\"  parts ride these same edges
   ff tower brief 17              the edge, read from both sides";
+
+pub const UNLINK: &str = "\
+Take back a declared dependency: `a` no longer depends on `b`. One
+`unlinked` event naming the edge, and the fold drops it from both
+records. Waiting is derived from the edges, so the edge leaving is the
+whole release: if `a` waited on `b` alone, the next render derives it
+Ready with no event of its own. This is the only way to disagree with
+a Waiting the record derives.
+
+The edge must be on the record — there is nothing to take back
+otherwise, and the refusal says so. The log keeps both events: the
+brief's history shows the link and the unlink, and the edge can be
+declared again.";
+
+pub const UNLINK_EXAMPLES: &str = "\
+Examples:
+  ff tower unlink 18 17          18 no longer waits on 17
+  ff tower brief 17              the record, the edge gone from both sides";
 
 pub const DECOMPOSE: &str = "\
 Make a flight a parent. Exactly one argument that names an installed

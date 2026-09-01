@@ -148,6 +148,9 @@ pub enum Kind {
     },
     /// `from` depends on `to` — a declared dependency, stored intent.
     Linked { from: EventId, to: EventId },
+    /// Takes back a declared dependency: the edge `from` → `to` leaves
+    /// the record.
+    Unlinked { from: EventId, to: EventId },
     /// Stops the flight with a question — the fold derives Held while
     /// it stands, waiting on you until answered — and clears started:
     /// holding is stopping.
@@ -205,6 +208,7 @@ impl Kind {
             Kind::Commented { .. } => "commented",
             Kind::Edited { .. } => "edited",
             Kind::Linked { .. } => "linked",
+            Kind::Unlinked { .. } => "unlinked",
             Kind::Held { .. } => "held",
             Kind::Answered { .. } => "answered",
             Kind::Routed { .. } => "routed",
@@ -431,10 +435,14 @@ impl Serialize for Event {
                 skill: skill.clone(),
                 bay: bay.clone(),
             }),
-            Kind::Linked { from, to } => serde_json::value::to_raw_value(&LinkedBody {
-                from: from.clone(),
-                to: to.clone(),
-            }),
+            // One body for both edge kinds: the wire shape is identical,
+            // and history's loose parse reads `from`/`to` either way.
+            Kind::Linked { from, to } | Kind::Unlinked { from, to } => {
+                serde_json::value::to_raw_value(&LinkedBody {
+                    from: from.clone(),
+                    to: to.clone(),
+                })
+            }
             Kind::Held { flight, question } => serde_json::value::to_raw_value(&HeldBody {
                 flight: flight.clone(),
                 question: question.clone(),
@@ -567,6 +575,10 @@ impl<'de> Deserialize<'de> for Event {
             let LinkedBody { from, to } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Linked { from, to }
+        } else if kind == "unlinked" {
+            let LinkedBody { from, to } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Unlinked { from, to }
         } else if kind == "held" {
             let HeldBody { flight, question } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
@@ -1102,8 +1114,16 @@ mod tests {
                 question: "which retry path?".to_string(),
             },
             Kind::Answered {
-                flight,
+                flight: flight.clone(),
                 answer: "the outer one".to_string(),
+            },
+            Kind::Linked {
+                from: flight.clone(),
+                to: "pi.9".parse().expect("id"),
+            },
+            Kind::Unlinked {
+                from: flight,
+                to: "pi.9".parse().expect("id"),
             },
         ];
         for (seq, kind) in kinds.into_iter().enumerate() {

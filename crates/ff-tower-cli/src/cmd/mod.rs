@@ -30,6 +30,7 @@ pub mod procedures;
 pub mod serve;
 pub mod skills;
 pub mod status;
+pub mod unlink;
 pub mod update;
 pub mod version;
 

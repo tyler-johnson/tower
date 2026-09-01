@@ -199,6 +199,16 @@ pub enum Command {
         #[arg(value_name = "b")]
         b: String,
     },
+    /// Take back a dependency: `a` no longer depends on `b`.
+    #[command(long_about = help::UNLINK, after_long_help = help::UNLINK_EXAMPLES)]
+    Unlink {
+        /// The flight that depends.
+        #[arg(value_name = "a")]
+        a: String,
+        /// The flight it depends on.
+        #[arg(value_name = "b")]
+        b: String,
+    },
     /// Split a flight into sub-flights: by hand with one subject per
     /// argument, or under a procedure whose definition mints them.
     #[command(long_about = help::DECOMPOSE, after_long_help = help::DECOMPOSE_EXAMPLES)]
@@ -421,6 +431,7 @@ impl Command {
             | Command::Comment { .. }
             | Command::Edit { .. }
             | Command::Link { .. }
+            | Command::Unlink { .. }
             | Command::Decompose { .. }
             | Command::Assign { .. }
             | Command::Status { .. }

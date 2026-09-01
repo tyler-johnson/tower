@@ -293,7 +293,7 @@ fn named(kind: &Kind) -> Vec<&EventId> {
         | Kind::Answered { flight, .. }
         | Kind::Routed { flight, .. } => vec![flight],
         Kind::Edited { target, .. } => vec![target],
-        Kind::Linked { from, to } => vec![from, to],
+        Kind::Linked { from, to } | Kind::Unlinked { from, to } => vec![from, to],
         Kind::Filed { .. } | Kind::Unknown { .. } => Vec::new(),
     }
 }

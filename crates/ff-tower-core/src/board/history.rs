@@ -67,7 +67,9 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
             | Kind::Answered { flight: on, .. }
             | Kind::Routed { flight: on, .. } => on == flight,
             Kind::Edited { target, .. } => target == flight || comments.contains(&target),
-            Kind::Linked { from, to } => from == flight || to == flight,
+            Kind::Linked { from, to } | Kind::Unlinked { from, to } => {
+                from == flight || to == flight
+            }
             Kind::Unknown { body, .. } => {
                 serde_json::from_str::<Names>(body.get()).is_ok_and(|names| {
                     [names.flight, names.target, names.from, names.to]

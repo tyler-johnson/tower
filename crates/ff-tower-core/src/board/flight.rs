@@ -376,6 +376,21 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 _ => unrouted.push(event.clone()),
             },
+            // Log order like `linked`, so link, unlink, link folds to one
+            // edge. An unlink whose edge is not standing is a no-op, not
+            // unrouted: the fold stays tolerant of the log. Cross-writer
+            // clock skew that sorts an `unlinked` before its `linked`
+            // leaves the edge standing until unlinked again — the same
+            // accepted skew `answered` documents below, and seq order
+            // makes it impossible single-writer.
+            Kind::Unlinked { from, to } => match (by_id.get(from).copied(), by_id.get(to).copied())
+            {
+                (Some(dependent), Some(dependency)) => {
+                    flights[dependent].depends_on.retain(|dep| dep != to);
+                    flights[dependency].blocks.retain(|dep| dep != from);
+                }
+                _ => unrouted.push(event.clone()),
+            },
             // Holding is stopping: the question is a fact the derivation
             // reads first, and the flight is no longer started — so the
             // answer lands it on the facts that remain, never back In
@@ -713,6 +728,17 @@ mod tests {
         )
     }
 
+    fn unlinked(id: &str, time: i64, from: &str, to: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Unlinked {
+                from: from.parse().expect("id"),
+                to: to.parse().expect("id"),
+            },
+        )
+    }
+
     fn held(id: &str, time: i64, flight: &str, question: &str) -> Event {
         event(
             id,
@@ -820,6 +846,75 @@ mod tests {
         assert!(fold.flights[0].depends_on.is_empty());
         assert!(fold.flights[0].blocks.is_empty());
         assert_eq!(fold.unrouted.len(), 1);
+    }
+
+    #[test]
+    fn an_unlink_drops_the_edge_both_ways() {
+        let fold = fold(&[
+            filed("pi.1", 10, "dependency"),
+            filed("pi.2", 20, "dependent"),
+            linked("pi.3", 30, "pi.2", "pi.1"),
+            unlinked("pi.4", 40, "pi.2", "pi.1"),
+        ]);
+        assert!(fold.flights[1].depends_on.is_empty());
+        assert!(fold.flights[0].blocks.is_empty());
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn an_unlink_with_a_missing_endpoint_is_unrouted() {
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            unlinked("pi.2", 20, "pi.1", "pi.99"),
+        ]);
+        assert!(fold.flights[0].depends_on.is_empty());
+        assert!(fold.flights[0].blocks.is_empty());
+        assert_eq!(fold.unrouted.len(), 1);
+    }
+
+    #[test]
+    fn an_unlink_of_no_edge_folds_as_nothing() {
+        // Tolerant of the log: nothing to take back is a no-op, not a
+        // fault.
+        let fold = fold(&[
+            filed("pi.1", 10, "dependency"),
+            filed("pi.2", 20, "dependent"),
+            unlinked("pi.3", 30, "pi.2", "pi.1"),
+        ]);
+        assert!(fold.flights[1].depends_on.is_empty());
+        assert!(fold.flights[0].blocks.is_empty());
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_relink_after_an_unlink_stands() {
+        let fold = fold(&[
+            filed("pi.1", 10, "dependency"),
+            filed("pi.2", 20, "dependent"),
+            linked("pi.3", 30, "pi.2", "pi.1"),
+            unlinked("pi.4", 40, "pi.2", "pi.1"),
+            linked("pi.5", 50, "pi.2", "pi.1"),
+        ]);
+        assert_eq!(fold.flights[1].depends_on, ["pi.1".parse().expect("id")]);
+        assert_eq!(fold.flights[0].blocks, ["pi.2".parse().expect("id")]);
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn an_unlinked_dependency_derives_ready() {
+        // The edge leaving is the whole release: no event of the
+        // dependent's own, and the Ready rests on its own last move.
+        let fold = fold(&[
+            filed("pi.1", 10, "dependent"),
+            filed("pi.2", 20, "dependency"),
+            status("pi.3", 30, "pi.1", "ready"),
+            linked("pi.4", 40, "pi.1", "pi.2"),
+            unlinked("pi.5", 50, "pi.1", "pi.2"),
+        ]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.status, "ready");
+        assert!(flight.status_dep.is_none());
+        assert_eq!(flight.status_mark.as_ref().expect("moved").at, 30);
     }
 
     #[test]
