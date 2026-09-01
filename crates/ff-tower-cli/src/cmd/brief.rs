@@ -82,7 +82,6 @@ fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
     }
     for beaten in &brief.beat {
         let reason = match &beaten.reason {
-            Skip::Waiting { .. } => unreachable!("waiting rows never enter beat"),
             Skip::Collides { paths, .. } => {
                 format!("collides on {}", render::paths_phrase(paths))
             }
@@ -215,7 +214,9 @@ fn fields_line(brief: &Brief, colored: bool) -> String {
 
 /// The note line, in the board's phrase order with the status ahead of
 /// everything — a reader must know first where the flight stands, and
-/// who put it there when someone did. The standing joins as one phrase
+/// who put it there when someone did; when that someone closed a
+/// dependency rather than moving this flight, the since line says so
+/// right after. The standing joins as one phrase
 /// before the branch: precedence makes it exclusive with the mark
 /// phrases — a walk standing only exists with no closing move, question,
 /// hold, or pull — so the line never says a thing twice.
@@ -229,6 +230,9 @@ fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
         },
         colored,
     ));
+    if let Some(reason) = brief.status_reason.as_deref() {
+        phrases.push(render::paint_dim(reason, colored));
+    }
     if let Some(question) = brief.question.as_deref() {
         phrases.push(render::paint_warn(question, colored));
     }
@@ -249,16 +253,6 @@ fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
             colored,
         )),
         Standing::Ready => phrases.push(render::paint_dim("ready", colored)),
-        Standing::Waiting { on } => phrases.push(render::paint_dim(
-            &format!(
-                "waiting on {}",
-                on.iter()
-                    .map(|dep| show(fold, dep))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            colored,
-        )),
         Standing::Collides { with, paths } => phrases.push(render::paint_warn(
             &format!(
                 "collides with {} on {}",

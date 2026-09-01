@@ -1,9 +1,14 @@
 //! `status <flight> <status>` — move a flight; `done` and `cancel` are
 //! this verb carrying a payload.
 //!
-//! One `status` event, last-wins in the fold, the byline the mover. The
-//! word is checked against the closed vocabulary here — the wire stays a
-//! free string. A closed flight refuses every move, and an open question
+//! One `status` event, the byline the mover. The word assigns the facts
+//! the fold stores — in triage, started, closed — and the fold derives
+//! the status the board shows, so `ready` on a flight with a live
+//! dependency lands it Waiting, and the echo says so. The word is
+//! checked against the closed vocabulary here — the wire stays a free
+//! string — and two words in it are refused by hand: `waiting` comes
+//! from links and `held` from a question, and neither is a fact a word
+//! can assign. A closed flight refuses every move, and an open question
 //! refuses any move except `done` and `canceled`: abandoning the
 //! question is deliberate when the flight itself is over, and everything
 //! short of that goes through `answer`.
@@ -29,8 +34,14 @@ pub struct Move {
     pub payload: Moved,
     pub display: String,
     pub subject: String,
-    /// The status as stored — the wire word.
+    /// The word the move wrote — the wire word.
     pub status: &'static str,
+    /// The status the fold derives after the append — where the flight
+    /// landed, which is the word unless the edges say Waiting.
+    pub landed: String,
+    /// The live dependencies holding it there, when `landed` is
+    /// `waiting`; zero otherwise.
+    pub waiting_on: usize,
 }
 
 pub fn status(
@@ -48,6 +59,19 @@ pub fn status(
     let fold = board::fold(&store.read_all()?);
     let flight = board::resolve(&fold, flight)?;
     let filed = ensure_active(&fold, &flight)?;
+    match target {
+        Status::Waiting => {
+            return Err(Error::StatusWaiting {
+                display: display(&fold, &flight),
+            });
+        }
+        Status::Held => {
+            return Err(Error::StatusHold {
+                display: display(&fold, &flight),
+            });
+        }
+        _ => {}
+    }
     if let Some(question) = &filed.question
         && !matches!(target, Status::Done | Status::Canceled)
     {
@@ -104,6 +128,20 @@ fn append(
     }])?;
     let id = ids.into_iter().next().expect("one status event");
 
+    // Re-fold to read where the word landed: the fold derives the
+    // status, and the echo must say what the board will.
+    let after = board::fold(&store.read_all()?);
+    let landed = board::flight(&after, &flight);
+    let waiting_on = if landed.status == "waiting" {
+        landed
+            .depends_on
+            .iter()
+            .filter(|dep| !board::flight(&after, dep).closed())
+            .count()
+    } else {
+        0
+    };
+
     Ok(Move {
         payload: Moved {
             status: appended(store, &id)?,
@@ -111,5 +149,7 @@ fn append(
         display: display(fold, &flight),
         subject,
         status: target.name(),
+        landed: landed.status.clone(),
+        waiting_on,
     })
 }

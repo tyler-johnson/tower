@@ -2,8 +2,10 @@
 //! hold.
 //!
 //! The answer goes on the log's record and counts as the flight's motion;
-//! it does not become a comment. A flight with no open question refuses —
-//! an answer to nothing would append a gesture the board cannot show.
+//! it does not become a comment, and it writes no status — the fold
+//! derives Ready or Waiting from the facts and the edges beneath. A
+//! flight with no open question refuses — an answer to nothing would
+//! append a gesture the board cannot show.
 
 use serde::Serialize;
 

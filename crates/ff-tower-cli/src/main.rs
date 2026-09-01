@@ -112,7 +112,7 @@ fn main() {
     }
 
     // The lazy pass, ahead of the verb so the verb's own fold sees the
-    // conclusions — `next` pulls a freshly advanced flight. Best-effort
+    // conclusions — `next` pulls a freshly routed flight. Best-effort
     // like the update lane: a lane must never change what a command
     // does, so a pass that cannot run costs at most one stderr line.
     if lanes.pass {
@@ -173,7 +173,7 @@ fn closed(cli: &Cli) -> Result<ClosedWindow, CliError> {
 }
 
 /// The lazy pass: fold the board, and append what the rules cover —
-/// routing out of Triage, and the Waiting → Ready advance. No repository
+/// routing out of Triage. No repository
 /// is no pass; a lost race (`log/contended`) is another pass having
 /// concluded the same things and stays silent; anything else is one
 /// stderr line — safe under `--json`, which owns stdout alone — and the

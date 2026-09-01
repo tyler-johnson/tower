@@ -1,10 +1,10 @@
 //! The lazy pass against a real store: what only a repository can prove.
 //!
-//! The routing and advance rules themselves are pinned in
-//! `verb/pass.rs`'s unit tests over hand-built events; what runs here is
-//! the store seam — the quiet pass touching neither writer nor lock, a
-//! concluding batch landing as one commit, and idempotence over real
-//! appends.
+//! The routing rule itself is pinned in `verb/pass.rs`'s unit tests
+//! over hand-built events; what runs here is the store seam — the quiet
+//! pass touching neither writer nor lock, a concluding batch landing as
+//! one commit, idempotence over real appends, and the release of a
+//! waiter being the fold's work rather than the pass's.
 //!
 //! The registry is built through `procedure::layered` with the fixture's
 //! own directories rather than `procedure::registry`: environment is
@@ -113,8 +113,9 @@ fn a_board_no_rule_covers_passes_without_appending() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     let store = Store::open(repo.path()).expect("open");
-    // Triage with no matching rule, ready, and a hand-parked waiter with
-    // no edges: nothing concludes.
+    // Triage with no matching rule, ready, and an old log's hand-set
+    // `waiting` word with no edges, which folds as cleared: nothing
+    // concludes.
     store
         .append(vec![
             filed("unmatched", "triage", &["ops"]),
@@ -204,50 +205,51 @@ fn a_multi_flight_route_mints_the_family_in_one_commit() {
 }
 
 #[test]
-fn done_on_the_last_dependency_advances_the_waiter_with_the_reason() {
+fn done_on_the_last_dependency_releases_the_waiter_with_no_event() {
+    // The fold's work, not the pass's: the closing is the waiter's Ready
+    // mark, and no history moment is minted for it.
     let repo = Repo::new();
     repo.pin_writer("pi");
     let store = Store::open(repo.path()).expect("open");
     store
         .append(vec![
             filed("the dep", "ready", &[]),
-            filed("the waiter", "waiting", &[]),
+            filed("the waiter", "ready", &[]),
             linked("pi.2", "pi.1"),
-            moved("pi.1", "done"),
         ])
         .expect("append");
+    assert_eq!(
+        board::fold(&store.read_all().expect("read")).flights[1].status,
+        "waiting",
+        "the edge alone gates it"
+    );
+    store.append(vec![moved("pi.1", "done")]).expect("append");
 
     let appended = verb::pass(&store, &registry(&repo)).expect("pass");
-    assert_eq!(appended.len(), 1);
+    assert!(appended.is_empty(), "nothing to conclude");
 
     let events = store.read_all().expect("read");
-    let advance: &Event = events
-        .iter()
-        .find(|event| event.id == appended[0])
-        .expect("on the chain");
-    let Kind::Status { status, reason, .. } = &advance.kind else {
-        panic!("the advance is a status move");
-    };
-    assert_eq!(status, "ready");
-    assert_eq!(reason.as_deref(), Some("dependency pi.1 done"));
-    assert_eq!(
-        advance.author, "tests@tower.invalid",
-        "attributed to the invoker"
-    );
-
+    assert_eq!(events.len(), 4, "no advance on the record");
     let fold = board::fold(&events);
-    assert_eq!(fold.flights[1].status, "ready");
+    let waiter = &fold.flights[1];
+    assert_eq!(waiter.status, "ready");
+    let mark = waiter.status_mark.as_ref().expect("released");
+    assert_eq!(mark.by, "tests@tower.invalid", "the closer's byline");
+    let closing: &Event = events.last().expect("the closing");
+    assert!(matches!(&closing.kind, Kind::Status { status, .. } if status == "done"));
+    assert_eq!(mark.at, closing.time, "the closing's time");
+    assert_eq!(waiter.status_dep, Some("pi.1".parse().expect("id")));
 }
 
 #[test]
-fn a_canceled_dependency_never_advances_its_waiter() {
+fn a_canceled_dependency_releases_its_waiter_too() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     let store = Store::open(repo.path()).expect("open");
     store
         .append(vec![
             filed("the dep", "ready", &[]),
-            filed("the waiter", "waiting", &[]),
+            filed("the waiter", "ready", &[]),
             linked("pi.2", "pi.1"),
             moved("pi.1", "canceled"),
         ])
@@ -256,5 +258,5 @@ fn a_canceled_dependency_never_advances_its_waiter() {
     let appended = verb::pass(&store, &registry(&repo)).expect("pass");
     assert!(appended.is_empty());
     let fold = board::fold(&store.read_all().expect("read"));
-    assert_eq!(fold.flights[1].status, "waiting", "the waiter stands");
+    assert_eq!(fold.flights[1].status, "ready", "closed is closed");
 }

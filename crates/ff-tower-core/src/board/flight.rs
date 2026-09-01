@@ -7,10 +7,20 @@
 //! needs from the repository arrives later, in `enrich`, over data the
 //! caller already fetched.
 //!
-//! The fold stores the wire's free strings — status, assignee, priority
-//! — and never rounds them into enums: the closed vocabularies live at
-//! the verb and loader boundaries, so a value this binary has never
-//! heard of survives the fold intact and simply matches nothing.
+//! The fold stores the wire's free strings — assignee, priority — and
+//! never rounds them into enums: the closed vocabularies live at the
+//! verb and loader boundaries, so a value this binary has never heard
+//! of survives the fold intact and simply matches nothing.
+//!
+//! Status is the one field the fold derives rather than stores. A status
+//! word in the log assigns the facts in [`Stand`] — in triage, started,
+//! closed — and the question and the edges are facts of their own; a
+//! post-pass projects the seven words back out of them. Waiting and
+//! Ready are never written: a flight with a live dependency is Waiting
+//! and a cleared one with none is Ready, at every fold, so a link
+//! re-gates a flight and a dependency closing releases it with no event
+//! appended. Old logs fold without migration — a hand `waiting` word
+//! reads as cleared, and the edges say the rest.
 
 use std::collections::HashMap;
 
@@ -44,12 +54,30 @@ pub struct Flight {
     /// The reverse edge, folded in here so a render never has to scan
     /// every other flight to answer "what waits on this one".
     pub blocks: Vec<EventId>,
-    /// The stored status, last-wins: the filing seeds it, `status`
-    /// events overwrite it, `held` and `answered` move it too.
+    /// The stored facts a status word assigns, last-wins as a tuple:
+    /// the filing seeds them, `status` and `routed` words overwrite
+    /// them, `held` clears started.
+    pub stand: Stand,
+    /// The last gesture that touched the facts — a `status`, a routing
+    /// with a word, or a hold — `None` while the flight still stands
+    /// where it was filed.
+    pub moved: Option<Mark>,
+    /// The freshest answer — an answer counts as motion even though its
+    /// text lives only in the log, and it is the Ready mark of a
+    /// released hold.
+    pub answered: Option<Mark>,
+    /// The derived status: the projection of `stand`, the question, and
+    /// the edges, written by the fold's last pass. Every reader reads
+    /// this word.
     pub status: String,
-    /// Who last moved the status, and when — `None` while the flight
-    /// still stands where it was filed.
+    /// Who made the gesture the derived status rests on, and when —
+    /// the mover, the asker, the answerer, or the closer of the
+    /// dependency that released it. `None` while the flight still
+    /// stands where it was filed.
     pub status_mark: Option<Mark>,
+    /// The dependency whose closing produced a derived Ready, when that
+    /// closing is the mark — what the brief's since line names.
+    pub status_dep: Option<EventId>,
     /// The stored lane, last-wins; `assigned` overwrites it, absent
     /// clears it.
     pub assignee: Option<String>,
@@ -68,9 +96,6 @@ pub struct Flight {
     /// comment's text, either target type. A reword is a gesture on the
     /// flight, so it counts as motion.
     pub edited: Option<Mark>,
-    /// The freshest answer's time — an answer counts as motion even
-    /// though its text lives only in the log.
-    pub answered_at: Option<i64>,
 }
 
 impl Flight {
@@ -89,11 +114,65 @@ impl Flight {
     }
 }
 
+/// The stored facts a status word assigns, last-wins as a tuple.
+///
+/// Waiting and Held are not facts: they are the edges and the question,
+/// read at derivation. The words that name them assign the cleared
+/// tuple, which is what makes an old log's hand-set `waiting` fold as a
+/// flight the edges alone decide.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stand {
+    pub triage: bool,
+    pub started: bool,
+    /// "done" or "canceled".
+    pub closed: Option<String>,
+    /// A status word this binary does not know, kept verbatim so it
+    /// still matches nothing; cleared by the next known word.
+    pub foreign: Option<String>,
+}
+
+/// One status word, as an assignment of the facts. A known word rewrites
+/// the whole tuple; an unknown one leaves the facts standing and rides
+/// beside them until a known word lands.
+fn assign(stand: &mut Stand, word: &str) {
+    *stand = match word {
+        "triage" => Stand {
+            triage: true,
+            ..Stand::default()
+        },
+        "ready" | "waiting" | "held" => Stand::default(),
+        "in_progress" => Stand {
+            started: true,
+            ..Stand::default()
+        },
+        "done" | "canceled" => Stand {
+            closed: Some(word.to_string()),
+            ..Stand::default()
+        },
+        foreign => Stand {
+            foreign: Some(foreign.to_string()),
+            ..stand.clone()
+        },
+    };
+}
+
 /// Who made a lifecycle mark, and when.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mark {
     pub by: String,
     pub at: i64,
+    /// The gesture's position in the union — what orders two marks that
+    /// share a second, so the derivation follows the log and never a
+    /// coin toss. Not a fact of the record: the union's order is.
+    pub(crate) order: usize,
+}
+
+impl Mark {
+    /// Whether this mark came after `other`: by time, and by union
+    /// order within a second.
+    fn after(&self, other: &Mark) -> bool {
+        (self.at, self.order) > (other.at, other.order)
+    }
 }
 
 /// The question a held flight is waiting on.
@@ -139,7 +218,10 @@ pub struct Fold {
 /// applies edits after every comment exists, because an edit can name a
 /// comment and ride the same skew. A numbering post-pass then ranks each
 /// writer's filings by seq — by seq and not union order, so a clock step
-/// can reorder the union without ever renumbering a flight.
+/// can reorder the union without ever renumbering a flight — and a
+/// derivation post-pass projects every flight's status out of its facts
+/// and its dependencies' facts, which is why it must run after every
+/// word and every edge has landed.
 pub fn fold(events: &[Event]) -> Fold {
     let mut flights: Vec<Flight> = Vec::new();
     let mut by_id: HashMap<&EventId, usize> = HashMap::new();
@@ -169,6 +251,8 @@ pub fn fold(events: &[Event]) -> Fold {
                 continue;
             }
             by_id.insert(&event.id, flights.len());
+            let mut stand = Stand::default();
+            assign(&mut stand, status);
             flights.push(Flight {
                 id: event.id.clone(),
                 number: 0,
@@ -180,8 +264,12 @@ pub fn fold(events: &[Event]) -> Fold {
                 comments: Vec::new(),
                 depends_on: Vec::new(),
                 blocks: Vec::new(),
-                status: status.clone(),
+                stand,
+                moved: None,
+                answered: None,
+                status: String::new(),
                 status_mark: None,
+                status_dep: None,
                 assignee: assignee.clone(),
                 priority: priority.clone(),
                 labels: labels.clone(),
@@ -191,7 +279,6 @@ pub fn fold(events: &[Event]) -> Fold {
                 branch_stamp: branch.clone(),
                 question: None,
                 edited: None,
-                answered_at: None,
             });
         }
     }
@@ -214,7 +301,7 @@ pub fn fold(events: &[Event]) -> Fold {
     // routing, in union order — so a later edit beats an earlier
     // routing's fields and the other way around.
     let mut overlays: Vec<&Event> = Vec::new();
-    for event in events {
+    for (order, event) in events.iter().enumerate() {
         match &event.kind {
             Kind::Filed { .. } => {}
             // Held for pass 3: pass 2 attaches comments in union order,
@@ -237,10 +324,11 @@ pub fn fold(events: &[Event]) -> Fold {
                     let flight = &mut flights[at];
                     flight.procedure = Some(procedure.clone());
                     if let Some(status) = status {
-                        flight.status = status.clone();
-                        flight.status_mark = Some(Mark {
+                        assign(&mut flight.stand, status);
+                        flight.moved = Some(Mark {
                             by: event.author.clone(),
                             at: event.time,
+                            order,
                         });
                     }
                     if let Some(assignee) = assignee {
@@ -259,10 +347,11 @@ pub fn fold(events: &[Event]) -> Fold {
             Kind::Status { flight, status, .. } => match by_id.get(flight) {
                 Some(&at) => {
                     let flight = &mut flights[at];
-                    flight.status = status.clone();
-                    flight.status_mark = Some(Mark {
+                    assign(&mut flight.stand, status);
+                    flight.moved = Some(Mark {
                         by: event.author.clone(),
                         at: event.time,
+                        order,
                     });
                 }
                 None => unrouted.push(event.clone()),
@@ -287,9 +376,10 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 _ => unrouted.push(event.clone()),
             },
-            // The hold is a status move as well as a question: the flight
-            // reads `held` wherever status is read, and the question is
-            // what the release answers.
+            // Holding is stopping: the question is a fact the derivation
+            // reads first, and the flight is no longer started — so the
+            // answer lands it on the facts that remain, never back In
+            // Progress.
             Kind::Held { flight, question } => match by_id.get(flight) {
                 Some(&at) => {
                     let flight = &mut flights[at];
@@ -298,10 +388,11 @@ pub fn fold(events: &[Event]) -> Fold {
                         at: event.time,
                         text: question.clone(),
                     });
-                    flight.status = "held".to_string();
-                    flight.status_mark = Some(Mark {
+                    flight.stand.started = false;
+                    flight.moved = Some(Mark {
                         by: event.author.clone(),
                         at: event.time,
+                        order,
                     });
                 }
                 None => unrouted.push(event.clone()),
@@ -310,20 +401,20 @@ pub fn fold(events: &[Event]) -> Fold {
             // sort an `answered` before the `held` it answers, leaving
             // that question open until re-answered. Accepted — it heals
             // itself, and seq order makes it impossible single-writer.
+            // An answer writes no status: it clears the question and
+            // the facts beneath decide where the flight lands.
             Kind::Answered { flight, .. } => match by_id.get(flight) {
                 Some(&at) => {
                     let flight = &mut flights[at];
                     flight.question = None;
-                    flight.status = "ready".to_string();
-                    flight.status_mark = Some(Mark {
+                    let mark = Mark {
                         by: event.author.clone(),
                         at: event.time,
-                    });
-                    flight.answered_at = Some(
-                        flight
-                            .answered_at
-                            .map_or(event.time, |at| at.max(event.time)),
-                    );
+                        order,
+                    };
+                    if flight.answered.as_ref().is_none_or(|old| !old.after(&mark)) {
+                        flight.answered = Some(mark);
+                    }
                 }
                 None => unrouted.push(event.clone()),
             },
@@ -385,6 +476,7 @@ pub fn fold(events: &[Event]) -> Fold {
         let mark = Mark {
             by: event.author.clone(),
             at: event.time,
+            order: 0,
         };
         if let Some(&at) = by_id.get(target) {
             let flight = &mut flights[at];
@@ -429,10 +521,93 @@ pub fn fold(events: &[Event]) -> Fold {
         }
     }
 
+    derive(&mut flights, &by_id);
+
     Fold {
         flights,
         unrouted,
         retired,
+    }
+}
+
+/// The derivation: every flight's status word, projected from its facts,
+/// its question, and its dependencies' facts. First rule wins.
+///
+/// 1. A foreign word stands verbatim — unknown never rounds down.
+/// 2. Closed is closed, whatever the edges say.
+/// 3. An open question is Held.
+/// 4. Triage.
+/// 5. Started is In Progress — a pull beats an open dependency, because
+///    someone is flying it and the board should say so.
+/// 6. Any dependency not closed is Waiting.
+/// 7. Ready.
+///
+/// The mark is the gesture the word rests on: the mover for the words a
+/// gesture wrote, the asker for a question, and for the derived pair the
+/// latest of the move, the answer, and — for Ready — every dependency's
+/// closing, since the closing is what released the flight. When a
+/// closing wins, `status_dep` names it. One loop suffices: the rule reads
+/// other flights' `stand`, a fact, never their derived word.
+fn derive(flights: &mut [Flight], by_id: &HashMap<&EventId, usize>) {
+    let mut derived = Vec::with_capacity(flights.len());
+    for flight in flights.iter() {
+        let latest = |a: Option<&Mark>, b: Option<&Mark>| match (a, b) {
+            (Some(a), Some(b)) if b.after(a) => Some(b.clone()),
+            (Some(a), _) => Some(a.clone()),
+            (None, b) => b.cloned(),
+        };
+        let own = latest(flight.moved.as_ref(), flight.answered.as_ref());
+        let stand = &flight.stand;
+        let (status, mark, dep) = if let Some(word) = &stand.foreign {
+            (word.clone(), flight.moved.clone(), None)
+        } else if let Some(word) = &stand.closed {
+            (word.clone(), flight.moved.clone(), None)
+        } else if let Some(question) = &flight.question {
+            (
+                "held".to_string(),
+                Some(Mark {
+                    by: question.by.clone(),
+                    at: question.at,
+                    order: 0,
+                }),
+                None,
+            )
+        } else if stand.triage {
+            ("triage".to_string(), flight.moved.clone(), None)
+        } else if stand.started {
+            ("in_progress".to_string(), flight.moved.clone(), None)
+        } else {
+            // Dep ids always resolve — the fold routes unresolvable
+            // links to `unrouted` — so a missing lookup is simply open.
+            let deps: Vec<&Flight> = flight
+                .depends_on
+                .iter()
+                .filter_map(|dep| by_id.get(dep).map(|&at| &flights[at]))
+                .collect();
+            let open = deps.len() < flight.depends_on.len()
+                || deps.iter().any(|dep| dep.stand.closed.is_none());
+            if open {
+                ("waiting".to_string(), own, None)
+            } else {
+                let mut mark = own;
+                let mut since = None;
+                for dep in deps {
+                    if let Some(closing) = &dep.moved
+                        && mark.as_ref().is_none_or(|mark| closing.after(mark))
+                    {
+                        mark = Some(closing.clone());
+                        since = Some(dep.id.clone());
+                    }
+                }
+                ("ready".to_string(), mark, since)
+            }
+        };
+        derived.push((status, mark, dep));
+    }
+    for (flight, (status, mark, dep)) in flights.iter_mut().zip(derived) {
+        flight.status = status;
+        flight.status_mark = mark;
+        flight.status_dep = dep;
     }
 }
 
@@ -745,14 +920,24 @@ mod tests {
 
     #[test]
     fn an_unknown_status_is_stored_and_never_rounds_down() {
-        let fold = fold(&[
+        let parked = fold(&[
             filed_agent("pi.1", 10, "s"),
             status("pi.2", 20, "pi.1", "parked"),
         ]);
-        let flight = &fold.flights[0];
+        let flight = &parked.flights[0];
         assert_eq!(flight.status, "parked");
+        assert_eq!(flight.stand.foreign.as_deref(), Some("parked"));
         assert!(!flight.pullable(), "unknown is not ready");
         assert!(!flight.closed(), "unknown is not closed either");
+
+        // The next known word clears it.
+        let cleared = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            status("pi.2", 20, "pi.1", "parked"),
+            status("pi.3", 30, "pi.1", "ready"),
+        ]);
+        assert!(cleared.flights[0].stand.foreign.is_none());
+        assert!(cleared.flights[0].pullable());
     }
 
     #[test]
@@ -784,25 +969,154 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_clears_the_question_and_releases_to_ready() {
-        let fold = fold(&[
+    fn an_answer_clears_the_question_and_releases_by_the_graph() {
+        // No status write: the answer clears the question and the facts
+        // beneath decide — a cleared flight with no edges is Ready, and
+        // the answer is its mark.
+        let released = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            held("pi.2", 20, "pi.1", "which?"),
+            answered("pi.3", 30, "pi.1"),
+        ]);
+        let flight = &released.flights[0];
+        assert!(flight.question.is_none());
+        assert_eq!(flight.status, "ready");
+        assert_eq!(flight.answered.as_ref().expect("answered").at, 30);
+        assert_eq!(flight.status_mark.as_ref().expect("marked").at, 30);
+        assert!(flight.comments.is_empty());
+
+        // With a live dependency the same answer lands on Waiting.
+        let gated = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            filed("pi.2", 15, "dep"),
+            linked("pi.3", 16, "pi.1", "pi.2"),
+            held("pi.4", 20, "pi.1", "which?"),
+            answered("pi.5", 30, "pi.1"),
+        ]);
+        assert_eq!(gated.flights[0].status, "waiting");
+        assert_eq!(
+            gated.flights[0].status_mark.as_ref().expect("marked").at,
+            30
+        );
+
+        // A held Triage flight answers back into Triage: nobody cleared
+        // it, and an answer is not a clearance.
+        let parked = fold(&[
             filed("pi.1", 10, "s"),
             held("pi.2", 20, "pi.1", "which?"),
             answered("pi.3", 30, "pi.1"),
         ]);
-        let flight = &fold.flights[0];
-        assert!(flight.question.is_none());
-        assert_eq!(flight.status, "ready");
-        assert_eq!(flight.answered_at, Some(30));
-        assert!(flight.comments.is_empty());
+        assert_eq!(parked.flights[0].status, "triage");
     }
 
     #[test]
     fn an_answer_with_no_open_question_is_a_silent_no_op() {
         let fold = fold(&[filed("pi.1", 10, "s"), answered("pi.2", 20, "pi.1")]);
         assert!(fold.flights[0].question.is_none());
-        assert_eq!(fold.flights[0].answered_at, Some(20));
+        assert_eq!(fold.flights[0].answered.as_ref().expect("answered").at, 20);
+        assert_eq!(fold.flights[0].status, "triage");
         assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_hold_clears_started_so_the_answer_never_resumes_in_progress() {
+        let fold = fold(&[
+            filed_agent("pi.1", 10, "s"),
+            status("pi.2", 20, "pi.1", "in_progress"),
+            held("pi.3", 30, "pi.1", "which?"),
+            answered("pi.4", 40, "pi.1"),
+        ]);
+        let flight = &fold.flights[0];
+        assert!(!flight.stand.started, "holding is stopping");
+        assert_eq!(flight.status, "ready");
+        assert!(flight.pullable(), "back in the pool for whoever pulls next");
+    }
+
+    #[test]
+    fn a_live_dependency_makes_a_cleared_flight_waiting() {
+        // Waiting is never written: the link alone re-gates a Ready
+        // flight, and the mark stays the flight's own last gesture.
+        let mut cleared = status("pi.3", 30, "pi.1", "ready");
+        cleared.author = "mover@b.c".to_string();
+        let fold = fold(&[
+            filed("pi.1", 10, "dependent"),
+            filed("pi.2", 20, "dependency"),
+            cleared,
+            linked("pi.4", 40, "pi.1", "pi.2"),
+        ]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.status, "waiting");
+        assert_eq!(flight.stand, Stand::default(), "cleared underneath");
+        let mark = flight.status_mark.as_ref().expect("moved");
+        assert_eq!((mark.by.as_str(), mark.at), ("mover@b.c", 30));
+        assert!(flight.status_dep.is_none());
+        assert!(!flight.pullable());
+    }
+
+    #[test]
+    fn a_dependency_closing_releases_its_dependent_with_the_closers_mark() {
+        // Done and canceled alike: a closed dependency is closed, and
+        // the closing is the gesture the Ready rests on.
+        for word in ["done", "canceled"] {
+            let mut closing = status("qi.1", 50, "pi.2", word);
+            closing.author = "closer@b.c".to_string();
+            let fold = fold(&[
+                filed("pi.1", 10, "dependent"),
+                filed("pi.2", 20, "dependency"),
+                status("pi.3", 30, "pi.1", "ready"),
+                linked("pi.4", 40, "pi.1", "pi.2"),
+                closing,
+            ]);
+            let flight = &fold.flights[0];
+            assert_eq!(flight.status, "ready", "{word}");
+            let mark = flight.status_mark.as_ref().expect("released");
+            assert_eq!((mark.by.as_str(), mark.at), ("closer@b.c", 50));
+            assert_eq!(flight.status_dep, Some("pi.2".parse().expect("id")));
+        }
+
+        // A move after the release outranks the closing, and names no
+        // dependency.
+        let fold = fold(&[
+            filed("pi.1", 10, "dependent"),
+            filed("pi.2", 20, "dependency"),
+            linked("pi.3", 30, "pi.1", "pi.2"),
+            done("pi.4", 40, "pi.2"),
+            status("pi.5", 50, "pi.1", "ready"),
+        ]);
+        assert_eq!(fold.flights[0].status_mark.as_ref().expect("moved").at, 50);
+        assert!(fold.flights[0].status_dep.is_none());
+    }
+
+    #[test]
+    fn in_progress_beats_an_open_dependency() {
+        let fold = fold(&[
+            filed("pi.1", 10, "dependent"),
+            filed("pi.2", 20, "dependency"),
+            linked("pi.3", 30, "pi.1", "pi.2"),
+            status("pi.4", 40, "pi.1", "in_progress"),
+        ]);
+        assert_eq!(fold.flights[0].status, "in_progress");
+    }
+
+    #[test]
+    fn a_hand_waiting_word_folds_as_cleared() {
+        // An old log's `status … waiting`, and a procedure filing born
+        // `waiting`: both assign the cleared tuple, and the edges — here
+        // none — decide. The mark is still the word's.
+        let moved = fold(&[
+            filed("pi.1", 10, "s"),
+            status("pi.2", 20, "pi.1", "waiting"),
+        ]);
+        assert_eq!(moved.flights[0].status, "ready");
+        assert_eq!(moved.flights[0].status_mark.as_ref().expect("moved").at, 20);
+
+        let mut born = filed("pi.1", 10, "s");
+        if let Kind::Filed { status, .. } = &mut born.kind {
+            "waiting".clone_into(status);
+        }
+        let born = fold(&[born]);
+        assert_eq!(born.flights[0].status, "ready");
+        assert!(born.flights[0].status_mark.is_none());
     }
 
     #[test]

@@ -367,7 +367,7 @@ pub struct Lanes {
     /// Print the "vX.Y.Z available" line on stderr when one is pending.
     pub notice: bool,
     /// Run the lazy pass before the verb, so its own fold sees the
-    /// conclusions — `next` pulls a freshly advanced flight.
+    /// conclusions — `next` pulls a freshly routed flight.
     pub pass: bool,
 }
 

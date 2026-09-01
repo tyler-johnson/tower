@@ -21,8 +21,9 @@ twice, and a render never blocks on the network.
 
 Bare `ff tower` is the board. What needs a person is pinned on top —
 questions an agent stopped on, and your own Ready flights — and under
-it the flights group by the status someone set: triage, waiting,
-ready, in progress, held, and the three newest closed. --closed takes
+it the flights group by the status the record derives: triage,
+waiting, ready, in progress, held, and the three newest closed.
+--closed takes
 more or less of that last group: a count, a span like 7d, `all`, or
 `none`. The repository audits those fields as it goes: a flight In
 Progress its branch has forgotten says so, and so does a Ready flight
@@ -84,9 +85,10 @@ fufu's \"no.\" A loop over `ff tower next` terminates on the code
 alone.
 
 The passed rows are the explained ranking: each flight the walk
-examined and why it lost — waiting, collides, no-verdict — and
-nothing past where the walk stopped, so the output stays bounded by
-the ask rather than the board.";
+examined and why it lost — collides, no-verdict — and nothing past
+where the walk stopped, so the output stays bounded by the ask rather
+than the board. A flight with a live dependency is Waiting, not in the
+pool, and never reaches the walk.";
 
 pub const NEXT_EXAMPLES: &str = "\
 Examples:
@@ -187,9 +189,10 @@ Examples:
 
 pub const LINK: &str = "\
 Declare a dependency: `a` depends on `b`. One edge per event, stored
-intent — the readiness gate holds `a` back until `b` is done, the
-brief renders both directions as depends on and blocks, and the board
-says waiting on over a parent's undone dependencies.
+intent — the edge makes `a` Waiting until `b` closes, done or
+canceled, at which point the record derives `a` Ready with the closer's
+mark and no event of its own. The brief renders both directions as
+depends on and blocks.
 
 The identical edge declared twice is refused: the fold would render
 it twice, and nothing in the log means it twice. Discovered conflicts
@@ -203,20 +206,21 @@ Examples:
 
 pub const DECOMPOSE: &str = "\
 Make a flight a parent. Exactly one argument that names an installed
-procedure mints the definition's flights beneath it — statuses
-falling out of the edges, Ready with no `after` and Waiting with any.
-Anything else is the by-hand form: each argument files as one
-sub-flight, born in Triage like any bare filing, cleared by your own
-gesture. A subject that happens to collide with a procedure name is
-spelled around by giving two subjects or renaming one.
+procedure mints the definition's flights beneath it. Anything else is
+the by-hand form: each argument files as one sub-flight. Either way
+the parts are born cleared, not in Triage — decomposing is your
+gesture — and the record derives Waiting for any part whose edges say
+so, the `after` of a procedure's flights included. A subject that
+happens to collide with a procedure name is spelled around by giving
+two subjects or renaming one.
 
 Either way the children ride ordinary link edges —
 `ff tower link <a> <b>` declares the same edge by hand, and every
 reader works on both unchanged — and the filings and the edges land
 in one append, so no sub-flight is ever live, unlinked, and pullable.
-Every sub-flight closed makes the parent Ready, not finished: whether
-the broad task is over is a judgment, and `ff tower done` is where it
-gets made.";
+Every sub-flight closed, canceled included, makes the parent Ready,
+not finished: whether the broad task is over is a judgment, and
+`ff tower done` is where it gets made.";
 
 pub const DECOMPOSE_EXAMPLES: &str = "\
 Examples:
@@ -297,10 +301,14 @@ Examples:
   ff tower next --peek           what the agent lane would hand out";
 
 pub const STATUS: &str = "\
-Move a flight: triage, waiting, ready, in_progress, held, done, or
-canceled. One event, last-wins, with your byline — the lifecycle
-verbs are this verb carrying a payload, and the board is grouped by
-what this verb stores.
+Move a flight: triage, ready, in_progress, done, or canceled. One
+event with your byline saying where you want it — the lifecycle verbs
+are this verb carrying a payload — and the record derives where it
+lands. Waiting and held are not words you can type: waiting comes
+from links and held from a question, so `ff tower link <a> <b>` and
+`ff tower hold <flight> -m <question>` are how a flight gets there.
+`ready` clears the flight, and the record decides between ready and
+waiting by its dependencies; the echo says which, and on how many.
 
 A closed flight refuses every move — the log keeps its record. An
 open question refuses any move except done and canceled: abandoning
@@ -336,7 +344,9 @@ on you with its bay intact — branch and tip stay on the row, because
 a warm bay is the point of holding rather than abandoning — and the
 exit is 3: an outcome, not an error, fufu's precedent. The envelope
 is a full success envelope with the held event in it; only the code
-says the flight stopped with a question.
+says the flight stopped with a question. Holding is stopping: the
+flight is no longer in progress, and the answer returns it to ready
+or waiting for whoever pulls it next.
 
 -m carries the question, and a missing one is tower's coded refusal,
 never clap usage. `ff tower answer <flight> -m <answer>` releases
@@ -353,8 +363,9 @@ Examples:
 pub const ANSWER: &str = "\
 Answer the open question and release the hold. The answer goes on the
 log's record and counts as the flight's freshest motion — it does not
-become a comment — and the flight returns to wherever the board's
-partition puts it.
+become a comment — and the flight returns to ready, or to waiting when
+a dependency is still live: the record derives which from the graph,
+and the answer is the mark.
 
 A flight with no open question refuses: an answer to nothing would
 append a gesture the board cannot show.";

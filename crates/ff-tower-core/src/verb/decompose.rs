@@ -3,10 +3,11 @@
 //!
 //! Two forms, told apart by the arguments: exactly one argument that
 //! names an installed procedure mints the definition's flights beneath
-//! the parent — statuses falling out of the edges, Ready with no `after`
-//! and Waiting with any; anything else is the by-hand form, one subject
-//! per argument, each filed bare — Triage, like any bare filing, cleared
-//! by a person's own gesture. Either way the children ride ordinary
+//! the parent; anything else is the by-hand form, one subject per
+//! argument. Either way the parts are born cleared — the person
+//! decomposing is the person clearing them, and a bare `file` alone
+//! lands in Triage — and the fold derives Waiting for any part whose
+//! edges say so. Either way the children ride ordinary
 //! `linked` edges, so a sub-flight is indistinguishable from a
 //! hand-declared dependency, and the filings and the edges land in one
 //! `append_with` — two appends would leave a window where the parent is
@@ -89,11 +90,11 @@ pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decomp
             .iter()
             .map(|subject| Kind::Filed {
                 // Provenance follows the parent; the fields are a bare
-                // filing's — Triage, no lane, defaults.
+                // filing's — no lane, defaults — born cleared.
                 procedure: procedure.clone(),
                 subject: subject.clone(),
                 body: String::new(),
-                status: "triage".to_string(),
+                status: "ready".to_string(),
                 assignee: None,
                 priority: "none".to_string(),
                 labels: Vec::new(),
@@ -219,7 +220,7 @@ after    = ["pass", "smoke"]
         let first = child(&outcome.filed_ids[0]);
         assert_eq!(first.subject, "part one", "the subject is trimmed");
         assert_eq!(child(&outcome.filed_ids[1]).subject, "part two");
-        assert_eq!(first.status, "triage", "a bare filing, cleared by hand");
+        assert_eq!(first.status, "ready", "a part is born cleared");
         assert!(first.assignee.is_none());
         assert_eq!(
             first.procedure.as_deref(),
@@ -272,7 +273,7 @@ after    = ["pass", "smoke"]
             .find(|flight| flight.id == outcome.filed_ids[0])
             .expect("minted");
         assert_eq!(child.subject, "review the docs");
-        assert_eq!(child.status, "triage");
+        assert_eq!(child.status, "ready");
     }
 
     #[test]

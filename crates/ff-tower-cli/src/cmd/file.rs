@@ -66,21 +66,21 @@ pub fn run(
             .iter()
             .map(|id| super::display(&fold, id))
             .collect();
+        // The status is the fold's, not the filing's word: every part
+        // is filed cleared, and the edges are what make one Waiting.
         let rows: Vec<(&str, String)> = outcome
             .payload
             .parts
             .iter()
-            .map(|event| {
+            .zip(&outcome.part_ids)
+            .map(|(event, id)| {
                 let Kind::Filed {
-                    subject,
-                    status,
-                    assignee,
-                    ..
+                    subject, assignee, ..
                 } = &event.kind
                 else {
                     unreachable!("a minted row is a filing")
                 };
-                let mut note = status.replace('_', " ");
+                let mut note = board::flight(&fold, id).status.replace('_', " ");
                 if let Some(lane) = assignee.as_deref() {
                     note.push_str(&format!(" · {lane}"));
                 }

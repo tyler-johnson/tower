@@ -188,14 +188,14 @@ fn a_concluding_repo_serves_a_settled_board_and_the_loop_terminates() {
 }
 
 #[test]
-fn done_on_the_last_dependency_advances_the_waiter_into_a_frame() {
+fn done_on_the_last_dependency_releases_the_waiter_into_a_frame() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     Store::open(repo.path())
         .expect("open")
         .append(vec![
             filed_kind("the dep", "ready"),
-            filed_kind("the waiter", "waiting"),
+            filed_kind("the waiter", "ready"),
             ff_tower_core::log::Kind::Linked {
                 from: "pi.2".parse().expect("id"),
                 to: "pi.1".parse().expect("id"),
@@ -206,9 +206,10 @@ fn done_on_the_last_dependency_advances_the_waiter_into_a_frame() {
     let mut feed = sse(&server.addr, "/api/feed");
     let _initial = feed.next_data();
 
-    // The POST appends the finish; the watcher refolds, that refold's
-    // pass appends the advance, and the frame carrying the waiter Ready
-    // reaches the stream through the same loop as everything else.
+    // The POST appends the finish; the watcher refolds, and that fold
+    // derives the waiter Ready — no advance appended — so the frame
+    // carrying it reaches the stream through the same loop as
+    // everything else.
     let (status, _, body) = post(&server.addr, "/api/done", r#"{"flight":"pi.1"}"#);
     assert_eq!(status, 200, "{body}");
     for _ in 0..20 {
@@ -218,7 +219,7 @@ fn done_on_the_last_dependency_advances_the_waiter_into_a_frame() {
             return;
         }
     }
-    panic!("the feed never carried the advanced waiter");
+    panic!("the feed never carried the released waiter");
 }
 
 fn filed_kind(subject: &str, status: &str) -> ff_tower_core::log::Kind {

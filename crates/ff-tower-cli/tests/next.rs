@@ -5,10 +5,10 @@
 //! Triage — are never handed out, and every pullable fixture files under
 //! a two-flight repo-layer procedure whose `pass` is agent-assigned and
 //! born Ready; the flight `next` hands out is that one, and the parent
-//! and `verdict` are born Waiting. The lazy pass rides every `next`, so
-//! a Waiting flight whose dependencies close advances to Ready on the
-//! following invocation — exit 3 when the advanced flight is off the
-//! agent lane, which in this shape it always is.
+//! and `verdict` fold Waiting by their edges. The fold derives the
+//! release, so a Waiting flight whose dependencies close reads Ready on
+//! the following invocation — exit 3 when the released flight is off
+//! the agent lane, which in this shape it always is.
 //!
 //! The assignment half rides the same fixtures. Main is a bay and it is
 //! first in survey order, so the solo norm's single pick binds *there*;
@@ -96,7 +96,7 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
     );
     assert!(text.contains("board: ff tower"), "{text}");
 
-    // The pull is a stored status move, and the board is flat: the
+    // The pull is a status move, and the board is flat: the
     // pulled sub-flight is a row under In Progress, and its parent keeps
     // the mark. The brief is still where one flight's pilot and branch
     // are read.
@@ -175,7 +175,7 @@ fn a_triage_filing_is_never_pulled_and_the_board_drains_to_1() {
 }
 
 #[test]
-fn the_parent_is_never_pulled_and_the_pass_advances_a_satisfied_waiter() {
+fn the_parent_is_never_pulled_and_the_fold_releases_a_satisfied_waiter() {
     let repo = repo();
     file_pipeline(&repo, "a broad task");
 
@@ -186,15 +186,15 @@ fn the_parent_is_never_pulled_and_the_pass_advances_a_satisfied_waiter() {
     );
     stdout(&ff_tower(repo.path(), &["done", "2"]));
 
-    // `verdict` was born Waiting on `pass`; this invocation's pass
-    // advances it — Ready off the agent lane, so exit 3, yours.
+    // `verdict` waited on `pass`; this invocation's fold derives it
+    // Ready — off the agent lane, so exit 3, yours.
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(3));
     let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
     stdout(&ff_tower(repo.path(), &["done", "3"]));
 
-    // Every child closed advances the parent the same way — Ready, not
+    // Every child closed releases the parent the same way — Ready, not
     // finished: whether the broad task is over stays a judgment.
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(
@@ -240,13 +240,15 @@ fn peek_reads_without_pulling() {
 }
 
 #[test]
-fn an_unclosed_dependency_is_passed_as_waiting_and_the_dependency_is_pulled() {
+fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
     let repo = repo();
     file_pipeline(&repo, "the dependent");
     file_pipeline(&repo, "the dependency");
     // The agent flights: the first filing's is #2, the second's is #5.
     stdout(&ff_tower(repo.path(), &["link", "2", "5"]));
 
+    // The dependent is Waiting, not a candidate: neither pulled nor
+    // passed, and the dependency is what the walk hands out.
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
@@ -254,14 +256,22 @@ fn an_unclosed_dependency_is_passed_as_waiting_and_the_dependency_is_pulled() {
         text.contains("in progress #5: the dependency · pass"),
         "{text}"
     );
-    assert!(text.contains("passed #2 · waiting on #5"), "{text}");
+    assert!(!text.contains("passed"), "{text}");
+    assert!(!text.contains("#2"), "{text}");
 
     let out = ff_tower(repo.path(), &["next", "--peek", "--json"]);
-    let envelope = envelope(&out);
-    let passed = &envelope["data"]["passed"];
-    assert_eq!(passed[0]["flight"], serde_json::json!("pi.2"));
-    assert_eq!(passed[0]["reason"], serde_json::json!("waiting"));
-    assert_eq!(passed[0]["on"], serde_json::json!(["pi.8"]));
+    let peek = envelope(&out);
+    assert_eq!(peek["data"]["passed"], serde_json::json!([]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["waiting"][0]["id"], serde_json::json!("pi.1"));
+    assert!(
+        board["data"]["waiting"]
+            .as_array()
+            .expect("waiting")
+            .iter()
+            .any(|view| view["id"] == serde_json::json!("pi.2")),
+        "{board}"
+    );
 }
 
 #[test]

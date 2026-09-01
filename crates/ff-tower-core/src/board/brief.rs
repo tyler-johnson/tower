@@ -20,14 +20,16 @@
 //! the first hit, so `beat` is under-inclusive by design — `next`'s
 //! surface, not a full conflict matrix — and same-branch flights are one
 //! tree, so a flight can take a beat row its branchmate would otherwise
-//! have taken. The lane gate runs before readiness, so a me-laned
-//! flight with unclosed dependencies is `yours`, never `waiting`.
+//! have taken. Waiting is a status the fold derives, not a walk outcome:
+//! a flight with a live dependency is not pullable, so it stands as
+//! `yours` with the status line saying Waiting.
 //!
 //! Standing precedence is `enrich`'s partition, not pick's one boolean:
 //! closed, then the open question, then fufu's branch hold, then In
-//! Progress, then the lane — `!pullable()` is *yours* — and only a pool
-//! candidate takes the walk's outcome. A brief that said "in progress"
-//! where the board shows *holding* would fail the one-glance test.
+//! Progress, then the lane and the edges — `!pullable()` is *yours* —
+//! and only a pool candidate takes the walk's outcome. A brief that
+//! said "in progress" where the board shows *holding* would fail the
+//! one-glance test.
 
 use serde::Serialize;
 
@@ -56,13 +58,19 @@ pub struct Brief {
     pub body: String,
     pub filed_by: String,
     pub filed_at: i64,
-    /// The stored status, verbatim — the brief is the read surface for
-    /// one flight, so this is where the fields are meant to be read.
+    /// The derived status — the brief is the read surface for one
+    /// flight, so this is where the fields are meant to be read.
     pub status: String,
-    /// Who last moved it, and when — `None` while the flight still
-    /// stands where it was filed.
+    /// Who made the gesture the status rests on, and when — the mover,
+    /// the asker, the answerer, or the closer of the dependency that
+    /// released it. `None` while the flight still stands where it was
+    /// filed.
     pub status_by: Option<String>,
     pub status_at: Option<i64>,
+    /// Why the mark is someone else's gesture: "dependency <id> done"
+    /// or "… canceled" when a dependency's closing is what made the
+    /// flight Ready. `None` when the mark is the flight's own.
+    pub status_reason: Option<String>,
     pub assignee: Option<String>,
     pub priority: String,
     pub labels: Vec<String>,
@@ -107,8 +115,7 @@ pub struct Brief {
     /// The full walk's passed rows whose reason names this flight. A
     /// flying flight's list is what its branch is blocking right now; a
     /// passed candidate's is always empty — only gate entries and
-    /// admitted candidates are ever named. Waiting rows name
-    /// dependencies, never competitors, so they never land here.
+    /// admitted candidates are ever named.
     pub beat: Vec<Passed>,
 }
 
@@ -128,16 +135,15 @@ pub enum Standing {
     Question,
     /// fufu's branch verdict — derived, not authored.
     Held,
-    /// The stored In Progress — someone already flies it; the status
-    /// mark beside it says who.
+    /// In Progress — someone already flies it; the status mark beside
+    /// it says who.
     InProgress,
-    /// Not in the pool by the stored fields alone: not Ready, or not in
-    /// the agent lane. Unknown never rounds down.
+    /// Not in the pool by the status and the lane alone: not Ready —
+    /// Triage, or Waiting on a live dependency — or not in the agent
+    /// lane. Unknown never rounds down.
     Yours,
     /// In the pool and admitted by the full walk.
     Ready,
-    /// Declared dependencies not yet closed — all of them.
-    Waiting { on: Vec<String> },
     /// A collide against a flying flight or an earlier-admitted
     /// candidate; the first hit wins.
     Collides { with: String, paths: Vec<String> },
@@ -222,6 +228,7 @@ pub fn brief(
         status: flight.status.clone(),
         status_by: flight.status_mark.as_ref().map(|mark| mark.by.clone()),
         status_at: flight.status_mark.as_ref().map(|mark| mark.at),
+        status_reason: super::model::status_reason(fold, flight),
         assignee: flight.assignee.clone(),
         priority: flight.priority.clone(),
         labels: flight.labels.clone(),
@@ -335,7 +342,6 @@ fn standing_and_beat(
         // The full walk never breaks, so a candidate it did not admit has
         // a passed row.
         match own.expect("a pool candidate lands in picked or passed") {
-            Skip::Waiting { on } => Standing::Waiting { on },
             Skip::Collides { with, paths } => Standing::Collides { with, paths },
             Skip::NoVerdict { with } => Standing::NoVerdict { with },
         }
@@ -344,10 +350,9 @@ fn standing_and_beat(
 }
 
 /// Whether a passed row's reason names this flight as the competitor it
-/// lost to. Waiting names dependencies, never competitors.
+/// lost to.
 fn names(reason: &Skip, id: &str) -> bool {
     match reason {
-        Skip::Waiting { .. } => false,
         Skip::Collides { with, .. } | Skip::NoVerdict { with } => with == id,
     }
 }
@@ -963,9 +968,9 @@ mod tests {
     }
 
     #[test]
-    fn a_me_laned_flight_is_yours_never_waiting() {
-        // The lane gate runs before readiness: unclosed dependencies and
-        // all, the stored fields are the answer.
+    fn a_me_laned_flight_is_yours_and_reads_waiting() {
+        // Waiting is the status, yours is the standing: the flight is
+        // not pullable, and the lane reads off the flat field.
         let brief = brief_of(
             &[
                 stored("pi.1", 10, "ready", Some("me")),
@@ -978,6 +983,7 @@ mod tests {
         )
         .expect("filed");
         assert!(matches!(brief.standing, Standing::Yours));
+        assert_eq!(brief.status, "waiting");
         assert_eq!(
             brief.assignee.as_deref(),
             Some("me"),
@@ -1110,7 +1116,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_deps_brief_as_waiting_and_never_enter_beat() {
+    fn a_waiting_dependent_is_yours_and_its_release_names_the_closer() {
         let events = [
             agent("pi.1", 10),
             agent("pi.2", 20),
@@ -1118,19 +1124,34 @@ mod tests {
         ];
         let empty = reads(Vec::new(), Vec::new(), None);
 
+        // Derived Waiting: not a pool candidate, so not a walk outcome.
         let dependent =
             brief_of(&events, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
-        match &dependent.standing {
-            Standing::Waiting { on } => assert_eq!(on, &["pi.2"]),
-            other => panic!("expected waiting, got {other:?}"),
-        }
+        assert_eq!(dependent.status, "waiting");
+        assert!(matches!(dependent.standing, Standing::Yours));
+        assert!(dependent.status_reason.is_none());
 
-        // The waiting row names pi.2 as a dependency, not a competitor —
-        // its beat stays empty.
+        // The dependency was never named as a competitor — its beat
+        // stays empty.
         let dependency =
             brief_of(&events, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
         assert!(matches!(dependency.standing, Standing::Ready));
         assert!(dependency.beat.is_empty());
+
+        // The closing releases the dependent, and the brief says whose
+        // gesture the Ready is.
+        let mut released = events.to_vec();
+        released.push(moved("pi.4", "closer@b.c", 40, "pi.2", "canceled"));
+        let dependent =
+            brief_of(&released, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+        assert_eq!(dependent.status, "ready");
+        assert!(matches!(dependent.standing, Standing::Ready));
+        assert_eq!(dependent.status_by.as_deref(), Some("closer@b.c"));
+        assert_eq!(dependent.status_at, Some(40));
+        assert_eq!(
+            dependent.status_reason.as_deref(),
+            Some("dependency pi.2 canceled")
+        );
     }
 
     #[test]

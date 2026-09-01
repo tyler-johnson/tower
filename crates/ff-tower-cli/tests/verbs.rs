@@ -277,8 +277,8 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
     assert_eq!(filing["cmd"], serde_json::json!("file"));
     let data = &filing["data"];
 
-    // The parent keeps the procedure stamp and the body, and is born
-    // Waiting on its children.
+    // The parent keeps the procedure stamp and the body, and is filed
+    // cleared — its edges to the children are what fold it Waiting.
     let filed = &data["filed"];
     assert_eq!(filed["id"], serde_json::json!("pi.1"));
     assert_eq!(filed["body"]["procedure"], serde_json::json!("review"));
@@ -287,7 +287,7 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
         serde_json::json!("the retry test")
     );
     assert_eq!(filed["body"]["body"], serde_json::json!("body text"));
-    assert_eq!(filed["body"]["status"], serde_json::json!("waiting"));
+    assert_eq!(filed["body"]["status"], serde_json::json!("ready"));
 
     let parts = data["parts"].as_array().expect("parts");
     assert_eq!(parts.len(), 3);
@@ -297,7 +297,8 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
         .collect();
     assert_eq!(ids, ["pi.2", "pi.3", "pi.4"]);
     // Every row stands alone: `next` hands one to an agent with no parent
-    // context attached — and the born statuses fall out of the edges.
+    // context attached — and every row is filed cleared, the edges
+    // saying the rest.
     assert_eq!(
         parts[0]["body"],
         serde_json::json!({
@@ -334,7 +335,7 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
             "procedure": "review",
             "subject": "the retry test · verdict",
             "body": "",
-            "status": "waiting",
+            "status": "ready",
             "assignee": "me",
             "priority": "none",
             "done": "asserted",
@@ -376,9 +377,10 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
     assert_eq!(pass["assignee"], serde_json::json!("agent"));
     assert_eq!(pass["status"], serde_json::json!("ready"));
 
-    // The board is flat: the parent, born Waiting on its children, with
-    // the mark, and every sub-flight a row in the group its own status
-    // names — `pass` and `smoke` Ready, `verdict` Waiting behind them.
+    // The board is flat: the parent, derived Waiting on its children,
+    // with the mark, and every sub-flight a row in the group its own
+    // derived status names — `pass` and `smoke` Ready, `verdict`
+    // Waiting behind them.
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(board["data"]["waiting"][0]["id"], serde_json::json!("pi.1"));
     assert_eq!(
@@ -686,6 +688,84 @@ fn a_word_outside_the_status_vocabulary_is_refused() {
 }
 
 #[test]
+fn waiting_and_held_are_refused_with_the_verb_that_derives_them() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "standing work"]));
+
+    let out = ff_tower(repo.path(), &["status", "1", "waiting", "--json"]);
+    let refused = refusal(&out, 2, "usage/status-waiting");
+    assert_eq!(
+        refused["error"]["message"],
+        serde_json::json!(
+            "`#1` cannot be set waiting — waiting comes from links: `ff tower link <flight> <dependency>`"
+        )
+    );
+    assert_eq!(
+        refused["error"]["exits"],
+        serde_json::json!(["ff tower link <flight> <dependency>"])
+    );
+
+    let out = ff_tower(repo.path(), &["status", "1", "held", "--json"]);
+    let refused = refusal(&out, 2, "usage/status-held");
+    assert_eq!(
+        refused["error"]["message"],
+        serde_json::json!(
+            "`#1` cannot be set held — held comes from a question: `ff tower hold <flight> -m <question>`"
+        )
+    );
+    assert_eq!(
+        refused["error"]["exits"],
+        serde_json::json!(["ff tower hold <flight> -m <question>"])
+    );
+
+    // Nothing landed: the board still holds one Triage flight.
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(
+        board["data"]["triage"][0]["status"],
+        serde_json::json!("triage")
+    );
+}
+
+#[test]
+fn ready_on_a_gated_flight_lands_waiting_and_the_echo_says_so() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the dependent"]));
+    stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
+    stdout(&ff_tower(repo.path(), &["link", "1", "2"]));
+
+    let out = stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+    assert_eq!(
+        out,
+        "moved #1 to waiting on one flight: the dependent\nboard: ff tower\n"
+    );
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["waiting"][0]["id"], serde_json::json!("pi.1"));
+    assert!(board["data"]["waiting"][0]["status_reason"].is_null());
+
+    // The dependency canceled: the fold releases the dependent, and the
+    // brief says whose gesture the Ready is.
+    stdout(&ff_tower(repo.path(), &["cancel", "2", "-m", "not needed"]));
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let released = &board["data"]["ready"][0];
+    assert_eq!(released["id"], serde_json::json!("pi.1"));
+    assert_eq!(
+        released["status_reason"],
+        serde_json::json!("dependency pi.2 canceled")
+    );
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    assert!(
+        text.contains("ready — tests@tower.invalid"),
+        "the closer's mark: {text}"
+    );
+    assert!(text.contains(" · dependency pi.2 canceled · "), "{text}");
+
+    // And the word itself, once the flight is unblocked, lands where it
+    // says.
+    let out = stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+    assert_eq!(out, "moved #1 to ready: the dependent\nboard: ff tower\n");
+}
+
+#[test]
 fn assign_moves_the_lane_and_none_clears_it() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "laned work"]));
@@ -873,6 +953,7 @@ fn an_open_question_refuses_a_move_short_of_closing() {
 fn answer_releases_the_hold_to_ready() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "in_progress"]));
     ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
     let out = stdout(&ff_tower(
         repo.path(),
@@ -890,13 +971,33 @@ fn answer_releases_the_hold_to_ready() {
     assert_eq!(
         released["status"],
         serde_json::json!("ready"),
-        "the answer releases to Ready"
+        "holding cleared started, so the answer releases to Ready"
     );
     assert!(released["question"].is_null());
     assert!(
         released["last_change"].is_null(),
         "an answer is a record gesture, not a change on the branch"
     );
+}
+
+#[test]
+fn answer_on_a_gated_flight_lands_waiting() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    stdout(&ff_tower(repo.path(), &["file", "its dependency"]));
+    stdout(&ff_tower(repo.path(), &["link", "1", "2"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "in_progress"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which retry path?"]);
+    stdout(&ff_tower(
+        repo.path(),
+        &["answer", "1", "-m", "the outer one"],
+    ));
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let released = &board["data"]["waiting"][0];
+    assert_eq!(released["id"], serde_json::json!("pi.1"));
+    assert_eq!(released["status"], serde_json::json!("waiting"));
+    assert!(released["question"].is_null());
 }
 
 #[test]
@@ -1048,8 +1149,8 @@ fn decompose_files_the_sub_flights_and_echoes_them() {
     assert_eq!(
         out,
         "decomposed #1 into two sub-flights\n\
-         · #2  the fold: parent-child edges  triage\n\
-         · #3  the cli: decompose verb  triage\n\
+         · #2  the fold: parent-child edges  ready\n\
+         · #3  the cli: decompose verb  ready\n\
          board: ff tower\n"
     );
 }
@@ -1076,9 +1177,9 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
         assert_eq!(event["body"]["subject"], serde_json::json!(subject));
         assert_eq!(event["body"]["body"], serde_json::json!(""));
         // The children inherit the parent's procedure as provenance, and
-        // are otherwise bare filings — Triage, no lane.
+        // are otherwise bare filings born cleared — no lane.
         assert_eq!(event["body"]["procedure"], serde_json::json!("chore"));
-        assert_eq!(event["body"]["status"], serde_json::json!("triage"));
+        assert_eq!(event["body"]["status"], serde_json::json!("ready"));
         assert!(event["body"]["assignee"].is_null());
     }
     assert_eq!(filed[0]["id"], serde_json::json!("pi.2"));

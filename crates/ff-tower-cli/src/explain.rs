@@ -182,6 +182,24 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/status-waiting",
+        summary: "waiting is not a word you set",
+        detail: "Waiting is what the record derives for a flight with a live dependency, at \
+                 every fold, and it lifts the moment the last one closes — done or canceled. \
+                 A hand-set word would be a second source for the same fact, so the verb \
+                 refuses it: declare the edge and the board says waiting on its own.",
+        exits: &["ff tower link <flight> <dependency>"],
+    },
+    Entry {
+        id: "usage/status-held",
+        summary: "held is not a word you set",
+        detail: "Held is what the record derives for a flight with an open question, and the \
+                 question is what makes it a hold — what the board pins under waiting on you, \
+                 and what `answer` releases. A held word with nothing asked would be a hold \
+                 nobody can answer, so the verb refuses it: hold with the question attached.",
+        exits: &["ff tower hold <flight> -m <question>"],
+    },
+    Entry {
         id: "usage/bad-assignee",
         summary: "that is not a lane",
         detail: "The lane is deliberately coarse — `me` or `agent`, plus `none` to clear it — \
@@ -284,9 +302,9 @@ pub static ENTRIES: &[Entry] = &[
         summary: "an open question blocks the move",
         detail: "The flight is held on a question, and a status move short of closing it \
                  would bury the question unanswered. `answer` is the release — it clears the \
-                 question and sets the flight Ready — while `done` and `cancel` override the \
-                 hold, because abandoning the question is deliberate when the flight itself \
-                 is over.",
+                 question and the flight returns to ready or waiting by the graph — while \
+                 `done` and `cancel` override the hold, because abandoning the question is \
+                 deliberate when the flight itself is over.",
         exits: &["ff tower answer <flight> -m <answer>"],
     },
     Entry {

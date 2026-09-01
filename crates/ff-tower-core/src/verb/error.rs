@@ -46,6 +46,16 @@ pub enum Error {
         "`{word}` is not a status — triage, waiting, ready, in_progress, held, done, or canceled"
     )]
     BadStatus { word: String },
+    /// `waiting` typed as a move — the fold derives it from the edges.
+    #[error(
+        "`{display}` cannot be set waiting — waiting comes from links: `ff tower link <flight> <dependency>`"
+    )]
+    StatusWaiting { display: String },
+    /// `held` typed as a move — the fold derives it from a question.
+    #[error(
+        "`{display}` cannot be set held — held comes from a question: `ff tower hold <flight> -m <question>`"
+    )]
+    StatusHold { display: String },
     /// A word the assignee vocabulary does not carry.
     #[error("`{word}` is not a lane — me, agent, or none")]
     BadAssignee { word: String },
@@ -77,6 +87,8 @@ impl Error {
             Error::EmptyProcedure => "usage/empty-procedure",
             Error::NeedsQuestion | Error::NeedsAnswer | Error::NeedsNote => "usage/needs-message",
             Error::BadStatus { .. } => "usage/bad-status",
+            Error::StatusWaiting { .. } => "usage/status-waiting",
+            Error::StatusHold { .. } => "usage/status-held",
             Error::BadAssignee { .. } => "usage/bad-assignee",
             Error::FlightDone { .. } | Error::AlreadyDone { .. } => "flight/done",
             Error::StatusHeld { .. } => "status/held",
@@ -94,7 +106,10 @@ impl Error {
             Error::Procedure(err) => return err.exits(),
             Error::EmptySubject | Error::NoParts => &[],
             Error::EmptyProcedure => &["ff tower procedures"],
-            Error::NeedsQuestion => &["ff tower hold <flight> -m <question>"],
+            Error::NeedsQuestion | Error::StatusHold { .. } => {
+                &["ff tower hold <flight> -m <question>"]
+            }
+            Error::StatusWaiting { .. } => &["ff tower link <flight> <dependency>"],
             Error::NeedsAnswer | Error::AlreadyHeld { .. } | Error::StatusHeld { .. } => {
                 &["ff tower answer <flight> -m <answer>"]
             }

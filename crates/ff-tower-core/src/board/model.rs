@@ -139,12 +139,19 @@ pub struct FlightView {
     pub comments: usize,
     pub depends_on: Vec<String>,
     pub blocks: Vec<String>,
-    /// The stored status, verbatim.
+    /// The derived status: the fold's projection of the facts a status
+    /// word assigns, the open question, and the edges.
     pub status: String,
-    /// Who last moved the status, and when — `null` while the flight
-    /// still stands where it was filed.
+    /// Who made the gesture the status rests on, and when — the mover,
+    /// the asker, the answerer, or the closer of the dependency that
+    /// released it. `null` while the flight still stands where it was
+    /// filed.
     pub status_by: Option<String>,
     pub status_at: Option<i64>,
+    /// Why the mark is someone else's gesture: "dependency <id> done"
+    /// or "… canceled" when a dependency's closing made the flight
+    /// Ready. `null` when the mark is the flight's own.
+    pub status_reason: Option<String>,
     pub assignee: Option<String>,
     pub priority: String,
     pub labels: Vec<String>,
@@ -240,12 +247,17 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
         })
         .collect();
 
-    // The progress marks, taken before the flights are consumed and
-    // carried as owned rows.
+    // The progress marks and the since lines, taken before the flights
+    // are consumed and carried as owned rows.
     let marks: HashMap<String, (usize, usize)> = fold
         .flights
         .iter()
         .filter_map(|flight| Some((flight.id.to_string(), progress(&fold, flight)?)))
+        .collect();
+    let mut reasons: HashMap<String, String> = fold
+        .flights
+        .iter()
+        .filter_map(|flight| Some((flight.id.to_string(), status_reason(&fold, flight)?)))
         .collect();
 
     let mut flights = Vec::with_capacity(fold.flights.len());
@@ -270,9 +282,9 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
             && stale_after > 0
             && now - last_change.or(status_at).unwrap_or(flight.filed_at) >= stale_after;
         // The second: Ready, and the branch moved *after* it was set
-        // Ready. After, not merely at all — `answered` forces Ready
-        // unconditionally, so every resumed hold carries a full branch
-        // and a flat check would be pure noise.
+        // Ready. After, not merely at all — the answer that releases a
+        // hold is the Ready mark, so every resumed hold carries a full
+        // branch and a flat check would be pure noise.
         let changed_since_ready = flight.status == "ready"
             && matches!((last_change, status_at), (Some(change), Some(set)) if change > set);
 
@@ -296,6 +308,7 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
 
         let mut view = view(
             flight,
+            reasons.remove(&id),
             op.and_then(|op| op.branch.clone()),
             row.and_then(|row| row.tip.clone()),
             row.is_some_and(|row| row.held),
@@ -318,8 +331,8 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
     }
 }
 
-/// Group the fold's flights by their stored status, using already-fetched
-/// reads.
+/// Group the fold's flights by their derived status, using
+/// already-fetched reads.
 ///
 /// `now`, `stale_after`, and `closed` are arguments so the module stays
 /// pure and reads no clock, no config, and no command line: a board is a
@@ -419,6 +432,20 @@ pub fn enrich(
     }
 }
 
+/// The since line under a derived Ready: the dependency whose closing
+/// is the status mark, and how it closed — "dependency pi.2 done".
+pub(super) fn status_reason(fold: &Fold, flight: &Flight) -> Option<String> {
+    let dep = flight.status_dep.as_ref()?;
+    let closed = fold
+        .flights
+        .iter()
+        .find(|other| &other.id == dep)?
+        .stand
+        .closed
+        .as_deref()?;
+    Some(format!("dependency {dep} {closed}"))
+}
+
 /// Closed children over total, or `None` for a flight with no children.
 /// Canceled counts as closed: the part is over, whatever it concluded.
 pub(super) fn progress(fold: &Fold, flight: &Flight) -> Option<(usize, usize)> {
@@ -477,6 +504,7 @@ pub(super) fn rank(priority: &str) -> u8 {
 
 fn view(
     flight: Flight,
+    status_reason: Option<String>,
     branch: Option<String>,
     tip: Option<String>,
     held: bool,
@@ -505,6 +533,7 @@ fn view(
         status: flight.status,
         status_by: flight.status_mark.as_ref().map(|mark| mark.by.clone()),
         status_at: flight.status_mark.as_ref().map(|mark| mark.at),
+        status_reason,
         assignee: flight.assignee,
         priority: flight.priority,
         labels: flight.labels,
@@ -701,14 +730,18 @@ mod tests {
     }
 
     #[test]
-    fn every_status_routes_to_its_own_group_and_nothing_derived_moves_it() {
+    fn every_status_routes_to_its_own_group_and_nothing_from_the_reads_moves_it() {
+        // Waiting and Held are never words a filing sets: the edge and
+        // the question are what put a row in those groups.
         let board = board(
             &[
                 filed_as("pi.1", 10, "triage", "none", None),
-                filed_as("pi.2", 20, "waiting", "none", None),
+                filed_as("pi.2", 20, "ready", "none", None),
                 filed_as("pi.3", 30, "ready", "none", None),
                 filed_as("pi.4", 40, "in_progress", "none", None),
-                filed_as("pi.5", 50, "held", "none", None),
+                filed_as("pi.5", 50, "ready", "none", None),
+                linked("pi.6", 60, "pi.2", "pi.1"),
+                held("pi.7", 70, "pi.5", "which?"),
             ],
             // A held branch under every one of them: fufu's verdict is a
             // fact on the row, not a section.
@@ -1061,14 +1094,15 @@ mod tests {
 
     #[test]
     fn a_resumed_hold_does_not_flag_changes_since_ready() {
-        // `answered` forces Ready unconditionally, so the branch is full
-        // of the work that preceded the question. Only a change *after*
-        // the release is news.
+        // The answer is the Ready mark of a released hold, so the branch
+        // is full of the work that preceded the question. Only a change
+        // *after* the release is news.
         let board = board(
             &[
                 filed("pi.1", 10),
-                held("pi.2", 100, "pi.1", "which?"),
-                answered("pi.3", 300, "pi.1"),
+                moved("pi.2", 50, "pi.1", "ready"),
+                held("pi.3", 100, "pi.1", "which?"),
+                answered("pi.4", 300, "pi.1"),
             ],
             &reads(
                 vec![op("pi.1", Some("work"), 200)],
@@ -1077,13 +1111,38 @@ mod tests {
             ),
         );
         assert_eq!(board.ready[0].status, "ready");
+        assert_eq!(board.ready[0].status_at, Some(300));
         assert!(!board.ready[0].changed_since_ready);
     }
 
+    #[test]
+    fn a_canceled_child_lifts_the_parent_to_ready_with_the_reason() {
+        let board = board(
+            &[
+                filed_as("pi.1", 10, "ready", "none", None),
+                filed("pi.2", 20),
+                linked("pi.3", 30, "pi.1", "pi.2"),
+                moved("pi.4", 40, "pi.2", "canceled"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(ids(&board.waiting), [] as [&str; 0]);
+        let parent = &board.ready[0];
+        assert_eq!(parent.id, "pi.1");
+        assert_eq!(parent.status_at, Some(40));
+        assert_eq!(
+            parent.status_reason.as_deref(),
+            Some("dependency pi.2 canceled")
+        );
+        assert_eq!(parent.progress, Some((1, 1)));
+        assert_eq!(board.closed[0].id, "pi.2");
+    }
+
     /// The flat board: having a parent moves a flight nowhere. Every
-    /// generation files into the group its own status names, and the
-    /// family is a view over these same rows rather than a filter on
-    /// them.
+    /// generation files into the group its own status names — the
+    /// middle one Waiting, because its edge to the live leaf is what the
+    /// fold derives from — and the family is a view over these same
+    /// rows rather than a filter on them.
     #[test]
     fn a_sub_flight_lands_in_its_own_status_group_beside_its_parent() {
         let board = board(
@@ -1105,9 +1164,9 @@ mod tests {
             ["pi.1", "pi.3"],
             "the parent and the grandchild, filed order within the group"
         );
-        assert_eq!(ids(&board.ready), ["pi.2"], "the child on its own row");
+        assert_eq!(ids(&board.waiting), ["pi.2"], "the child on its own row");
         assert_eq!(
-            board.ready[0].subject, "top · middle",
+            board.waiting[0].subject, "top · middle",
             "the subject is the stored one — nothing is prefixed onto it"
         );
     }

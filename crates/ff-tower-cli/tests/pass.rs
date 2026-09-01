@@ -57,14 +57,14 @@ fn filed(subject: &str, status: &str, labels: &[&str]) -> Kind {
 }
 
 #[test]
-fn board_advances_a_satisfied_waiter_with_the_invokers_byline() {
+fn board_reads_a_satisfied_waiter_ready_with_the_closers_byline() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     Store::open(repo.path())
         .expect("open")
         .append(vec![
             filed("the dep", "ready", &[]),
-            filed("the waiter", "waiting", &[]),
+            filed("the waiter", "ready", &[]),
             Kind::Linked {
                 from: "pi.2".parse().expect("id"),
                 to: "pi.1".parse().expect("id"),
@@ -77,8 +77,8 @@ fn board_advances_a_satisfied_waiter_with_the_invokers_byline() {
         ])
         .expect("append");
 
-    // The verb's own fold sees the conclusion: this one invocation both
-    // advances the waiter and renders it advanced.
+    // Nothing to conclude: the fold derives the release, so this one
+    // invocation renders the waiter Ready with no event appended.
     let board = envelope(&ff_tower(repo.path(), &["board", "--json"]));
     let ready = board["data"]["ready"].as_array().expect("ready");
     let waiter = ready
@@ -86,22 +86,30 @@ fn board_advances_a_satisfied_waiter_with_the_invokers_byline() {
         .find(|flight| flight["id"] == serde_json::json!("pi.2"))
         .expect("the waiter is on the board");
     assert_eq!(waiter["status"], serde_json::json!("ready"));
+    assert_eq!(
+        waiter["status_reason"],
+        serde_json::json!("dependency pi.1 done")
+    );
 
-    // Attributed and explained: the advance is a status move by the
-    // invoker, on the record.
+    // Attributed and explained: the mark is the closer's, and the
+    // waiter's own history carries no move.
     let brief = envelope(&ff_tower(repo.path(), &["brief", "pi.2", "--json"]));
     assert_eq!(brief["data"]["status"], serde_json::json!("ready"));
     assert_eq!(
         brief["data"]["status_by"],
         serde_json::json!("tests@tower.invalid")
     );
+    assert_eq!(
+        brief["data"]["status_reason"],
+        serde_json::json!("dependency pi.1 done")
+    );
     let history = brief["data"]["history"].as_array().expect("history");
-    let advance = history
-        .iter()
-        .rev()
-        .find(|moment| moment["what"] == serde_json::json!("status"))
-        .expect("the advance is a moment");
-    assert_eq!(advance["by"], serde_json::json!("tests@tower.invalid"));
+    assert!(
+        history
+            .iter()
+            .all(|moment| moment["what"] != serde_json::json!("status")),
+        "no advance on the record: {history:?}"
+    );
 }
 
 #[test]

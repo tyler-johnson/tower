@@ -354,6 +354,7 @@ mod tests {
             blocks: Vec::new(),
             status: status.to_string(),
             status_by: None,
+            status_reason: None,
             status_at: None,
             assignee: None,
             priority: "none".to_string(),

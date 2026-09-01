@@ -8,6 +8,10 @@
 //!
 //! The question is checked before the reference: a hold with nothing to
 //! ask is refused whatever it names.
+//!
+//! Holding is stopping: the flight is no longer started, so the answer
+//! releases it to Ready or Waiting by the graph, never back In
+//! Progress — whoever pulls it next resumes in the warm bay.
 
 use serde::Serialize;
 

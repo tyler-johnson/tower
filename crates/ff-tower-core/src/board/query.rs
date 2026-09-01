@@ -1638,11 +1638,11 @@ mod tests {
         let events = [
             filed("pi.1", 10, "triage", "low", None, &[]),
             filed("pi.2", 20, "triage", "urgent", None, &[]),
-            filed("pi.3", 30, "waiting", "none", None, &[]),
+            filed("pi.3", 30, "ready", "none", None, &[]),
             filed("pi.4", 40, "ready", "high", Some("me"), &[]),
             filed("pi.5", 50, "ready", "medium", Some("agent"), &[]),
             filed("pi.6", 60, "in_progress", "none", Some("agent"), &[]),
-            filed("pi.7", 70, "held", "none", None, &[]),
+            filed("pi.7", 70, "ready", "none", None, &[]),
             filed("pi.8", 80, "triage", "none", None, &[]),
             filed("pi.9", 90, "triage", "none", None, &[]),
             filed("pi.10", 100, "triage", "none", None, &[]),
@@ -1652,6 +1652,24 @@ mod tests {
             moved("pi.14", NOW - 3_000, "pi.10", "canceled"),
             moved("pi.15", NOW - 2_000, "pi.11", "done"),
             filed("pi.16", 160, "done", "none", None, &[]),
+            // Waiting and held are derived: an edge to a live flight
+            // and an open question.
+            event(
+                "pi.17",
+                170,
+                Kind::Linked {
+                    from: "pi.3".parse().expect("id"),
+                    to: "pi.1".parse().expect("id"),
+                },
+            ),
+            event(
+                "pi.18",
+                180,
+                Kind::Held {
+                    flight: "pi.7".parse().expect("id"),
+                    question: "which?".to_string(),
+                },
+            ),
         ];
         let board = enrich(
             fold(&events),

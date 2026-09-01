@@ -160,13 +160,6 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         }
         for passed in &picks.passed {
             let reason = match &passed.reason {
-                Skip::Waiting { on } => format!(
-                    "waiting on {}",
-                    on.iter()
-                        .map(|dep| show(&fold, dep))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
                 Skip::Collides { with, paths } => format!(
                     "collides with {} on {}",
                     show(&fold, with),

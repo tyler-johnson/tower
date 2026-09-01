@@ -9,7 +9,10 @@
 use serde::{Deserialize, Serialize};
 
 /// Where a flight stands. The wire spelling is lowercase with
-/// `in_progress` — what `Status` events store and the board reads back.
+/// `in_progress` — what `Status` events store and the board derives
+/// back. Every word is a status the board can show; `waiting` and
+/// `held` are never words a verb writes, because the fold derives them
+/// from the edges and the question.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {

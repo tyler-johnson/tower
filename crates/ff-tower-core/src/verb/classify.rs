@@ -26,14 +26,15 @@ pub struct Fields {
 
 /// The mint batch for one definition. Under `Parent::Mint`, the head
 /// occupies `mint(0)`: a single-flight definition collapses onto it —
-/// one `filed`, born Ready, the definition's fields under the caller's
-/// flags — and a multi-flight one makes it a parent, born Waiting, that
-/// carries the caller's flags while the children carry the definition's.
-/// Under `Parent::Existing`, every minted event is a child of the id
-/// given. Children keep `"{subject} · {id}"` subjects, are born Ready
-/// with no `after` and Waiting with any, and ride `linked` edges — the
-/// parent's to each, then the `after` DAG — in the order the ids are
-/// read back out of.
+/// one `filed`, born cleared, the definition's fields under the caller's
+/// flags — and a multi-flight one makes it a parent that carries the
+/// caller's flags while the children carry the definition's. Under
+/// `Parent::Existing`, every minted event is a child of the id given.
+/// Children keep `"{subject} · {id}"` subjects and ride `linked` edges
+/// — the parent's to each, then the `after` DAG — in the order the ids
+/// are read back out of. Every row is filed `ready`, which is the
+/// cleared word: the edges say the rest, and the fold derives Waiting
+/// for the parent and for any child with an `after`.
 pub fn classify(
     definition: &Definition,
     subject: &str,
@@ -56,13 +57,13 @@ pub fn classify(
 
     let mut kinds = Vec::new();
     if matches!(parent, Parent::Mint) {
-        // The parent row: the caller's flags land here, and it waits on
-        // every child by edge, so it is born Waiting outright.
+        // The parent row: the caller's flags land here, born cleared —
+        // its edges to every child are what fold it Waiting.
         kinds.push(Kind::Filed {
             procedure: Some(definition.name.clone()),
             subject: subject.to_string(),
             body: fields.message.clone().unwrap_or_default(),
-            status: "waiting".to_string(),
+            status: "ready".to_string(),
             assignee: fields.assignee.clone(),
             priority: fields
                 .priority
@@ -79,17 +80,12 @@ pub fn classify(
     // Every row stands alone: `next` hands one to an agent with no parent
     // context attached, so the child's subject carries the parent's.
     kinds.extend(flights.iter().map(|flight| {
-        let born = if flight.after.is_empty() {
-            "ready"
-        } else {
-            "waiting"
-        };
         filed(
             definition,
             flight,
             format!("{subject} · {}", flight.id),
             String::new(),
-            born,
+            "ready",
             subject,
             None,
         )

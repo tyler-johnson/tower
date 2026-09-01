@@ -1,13 +1,15 @@
-//! The lazy pass: the board's two automated transitions, run whenever
+//! The lazy pass: the board's one automated transition, run whenever
 //! anyone asks for anything.
 //!
-//! DESIGN.md promises exactly two moves without a hand on them, both
+//! DESIGN.md promises exactly one move without a hand on it,
 //! deterministic, attributed, and explained in the history: a match rule
-//! routing an arrival out of Triage, and the Waiting → Ready advance
-//! when a flight's last live dependency closes. Both run here — any
-//! invocation, and each of serve's refolds, calls [`pass`], which
-//! examines what the rules cover and appends what it concludes — so the
-//! board catches up with no standing process.
+//! routing an arrival out of Triage. It runs here — any invocation, and
+//! each of serve's refolds, calls [`pass`], which examines what the
+//! rules cover and appends what it concludes — so the board catches up
+//! with no standing process. The Waiting → Ready advance that once ran
+//! beside it is gone because Waiting and Ready were never separate
+//! facts: the fold derives both from the edges, so a dependency closing
+//! releases its dependents with nothing appended.
 //!
 //! [`conclusions`] is the pure half: what the pass would do, off a fold
 //! and the installed registry alone. [`pass`] decides *outside* the
@@ -18,10 +20,10 @@
 //! the conclusions from a fresh read: a lost CAS re-runs the plan, and a
 //! concurrent pass may already have concluded the same things.
 //!
-//! No fixpoint is needed. Routing closes nothing, so it cannot enable an
-//! advance; an advance routes nothing. One batch settles the board, and
-//! a second pass concludes nothing — the idempotence that terminates
-//! serve's watcher loop.
+//! No fixpoint is needed. Routing moves a flight out of Triage, and the
+//! pass covers Triage alone, so one batch settles the board and a second
+//! pass concludes nothing — the idempotence that terminates serve's
+//! watcher loop.
 
 use crate::board::{self, Flight, Fold};
 use crate::log::{self, EventId, Kind, Store};
@@ -39,16 +41,11 @@ pub enum Conclusion {
         rule: String,
         because: String,
     },
-    /// A Waiting flight whose every declared dependency is done.
-    Advance { flight: EventId, reason: String },
 }
 
-/// What the pass would conclude, pure: routes first — each Triage flight
-/// in filed order, procedures in registry (name) order, rules in
-/// declaration order, first match wins, one conclusion per flight — then
-/// advances, for each Waiting flight whose dependency list is non-empty
-/// and entirely done. A hand-parked Waiting flight with no edges is left
-/// alone: advancing it would fight the person's gesture every pass.
+/// What the pass would conclude, pure: each Triage flight in filed
+/// order, procedures in registry (name) order, rules in declaration
+/// order, first match wins, one conclusion per flight.
 pub fn conclusions(fold: &Fold, installed: &Registry) -> Vec<Conclusion> {
     let mut concluded = Vec::new();
 
@@ -68,27 +65,6 @@ pub fn conclusions(fold: &Fold, installed: &Registry) -> Vec<Conclusion> {
                     break 'flight;
                 }
             }
-        }
-    }
-
-    for flight in &fold.flights {
-        if flight.status != "waiting" || flight.depends_on.is_empty() {
-            continue;
-        }
-        // Done exactly, `pick`'s belt rule: a canceled dependency does
-        // not satisfy its waiters — the flight stays Waiting, and the
-        // canceled part surfaces on the brief's per-dependency status.
-        let all_done = flight.depends_on.iter().all(|dep| {
-            fold.flights
-                .iter()
-                .find(|other| &other.id == dep)
-                .is_some_and(|other| other.status == "done")
-        });
-        if all_done {
-            concluded.push(Conclusion::Advance {
-                flight: flight.id.clone(),
-                reason: reason(&flight.depends_on),
-            });
         }
     }
 
@@ -140,19 +116,8 @@ fn because(rule: &Match) -> String {
     format!("matched {}", phrases.join(", "))
 }
 
-/// The advance's stored explanation, naming the closed dependencies.
-fn reason(deps: &[EventId]) -> String {
-    let named: Vec<String> = deps.iter().map(ToString::to_string).collect();
-    if named.len() == 1 {
-        format!("dependency {} done", named[0])
-    } else {
-        format!("dependencies {} done", named.join(", "))
-    }
-}
-
-/// The conclusions as one append batch: routing kinds first, then
-/// advances — `conclusions` already builds them in that order, and the
-/// order is load-bearing only for the mint offsets `classify` hands out.
+/// The conclusions as one append batch, in `conclusions`' order — which
+/// is load-bearing only for the mint offsets `classify` hands out.
 fn kinds(
     fold: &Fold,
     installed: &Registry,
@@ -209,17 +174,18 @@ fn kinds(
                         branch: branch(definition, flight),
                     });
                 } else {
-                    // Multi-flight: the flight becomes the parent, born
-                    // Waiting with no field overlay — the caller-flags
-                    // rule, a parent keeps its own fields — and the
-                    // children with their edges ride the same batch,
-                    // their mint indices shifted by what is queued.
+                    // Multi-flight: the flight becomes the parent,
+                    // cleared with no field overlay — the caller-flags
+                    // rule, a parent keeps its own fields; the fold
+                    // derives Waiting from the edges — and the children
+                    // with their edges ride the same batch, their mint
+                    // indices shifted by what is queued.
                     kinds.push(Kind::Routed {
                         flight: flight.id.clone(),
                         procedure: procedure.clone(),
                         rule: rule.clone(),
                         because: because.clone(),
-                        status: Some("waiting".to_string()),
+                        status: Some("ready".to_string()),
                         assignee: None,
                         priority: None,
                         labels: None,
@@ -238,13 +204,6 @@ fn kinds(
                     ));
                 }
             }
-            // The existing status vocabulary, zero new fold surface:
-            // attributed to the invoker, explained by the reason.
-            Conclusion::Advance { flight, reason } => kinds.push(Kind::Status {
-                flight: flight.clone(),
-                status: "ready".to_string(),
-                reason: Some(reason.clone()),
-            }),
         }
     }
     kinds
@@ -474,64 +433,16 @@ assignee = "me"
     }
 
     #[test]
-    fn an_all_done_dependency_list_advances_with_the_reason() {
+    fn a_satisfied_waiter_concludes_nothing_because_the_fold_released_it() {
+        // The advance is gone: the closing alone makes the waiter Ready
+        // at the next fold, so there is nothing for the pass to append.
         let fold = folded(&[
-            stored("pi.1", 10, "dep a", "ready", &[]),
-            stored("pi.2", 20, "dep b", "ready", &[]),
-            stored("pi.3", 30, "waiter", "waiting", &[]),
-            linked("pi.4", 40, "pi.3", "pi.1"),
-            linked("pi.5", 50, "pi.3", "pi.2"),
-            moved("pi.6", 60, "pi.1", "done"),
-            moved("pi.7", 70, "pi.2", "done"),
-        ]);
-        assert_eq!(
-            conclusions(&fold, &Registry::default()),
-            [Conclusion::Advance {
-                flight: "pi.3".parse().expect("id"),
-                reason: "dependencies pi.1, pi.2 done".to_string(),
-            }]
-        );
-    }
-
-    #[test]
-    fn a_canceled_or_live_dependency_concludes_nothing() {
-        let canceled = folded(&[
             stored("pi.1", 10, "dep", "ready", &[]),
-            stored("pi.2", 20, "waiter", "waiting", &[]),
+            stored("pi.2", 20, "waiter", "ready", &[]),
             linked("pi.3", 30, "pi.2", "pi.1"),
-            moved("pi.4", 40, "pi.1", "canceled"),
+            moved("pi.4", 40, "pi.1", "done"),
         ]);
-        assert!(conclusions(&canceled, &Registry::default()).is_empty());
-
-        let mixed = folded(&[
-            stored("pi.1", 10, "dep a", "ready", &[]),
-            stored("pi.2", 20, "dep b", "ready", &[]),
-            stored("pi.3", 30, "waiter", "waiting", &[]),
-            linked("pi.4", 40, "pi.3", "pi.1"),
-            linked("pi.5", 50, "pi.3", "pi.2"),
-            moved("pi.6", 60, "pi.1", "done"),
-        ]);
-        assert!(conclusions(&mixed, &Registry::default()).is_empty());
-    }
-
-    #[test]
-    fn a_hand_parked_waiting_flight_with_no_edges_is_left_alone() {
-        let fold = folded(&[stored("pi.1", 10, "parked", "waiting", &[])]);
-        assert!(conclusions(&fold, &Registry::default()).is_empty());
-    }
-
-    #[test]
-    fn held_triage_and_ready_flights_are_never_advanced() {
-        let fold = folded(&[
-            stored("pi.1", 10, "dep", "ready", &[]),
-            stored("pi.2", 20, "held", "held", &[]),
-            stored("pi.3", 30, "triage", "triage", &[]),
-            stored("pi.4", 40, "ready", "ready", &[]),
-            linked("pi.5", 50, "pi.2", "pi.1"),
-            linked("pi.6", 60, "pi.3", "pi.1"),
-            linked("pi.7", 70, "pi.4", "pi.1"),
-            moved("pi.8", 80, "pi.1", "done"),
-        ]);
+        assert_eq!(fold.flights[1].status, "ready");
         assert!(conclusions(&fold, &Registry::default()).is_empty());
     }
 
@@ -614,14 +525,16 @@ after    = ["pass"]
         });
         // One routed parent, two children, the parent's two edges, and
         // the after edge — with every link naming the batch-relative
-        // mints shifted past the routed kind.
+        // mints shifted past the routed kind. Every row is filed
+        // cleared; the edges are what make the parent and the verdict
+        // Waiting once folded.
         assert_eq!(batch.len(), 6);
         let Kind::Routed { status, .. } = &batch[0] else {
             panic!("the routing leads the batch");
         };
-        assert_eq!(status.as_deref(), Some("waiting"));
+        assert_eq!(status.as_deref(), Some("ready"));
         assert!(matches!(&batch[1], Kind::Filed { status, .. } if status == "ready"));
-        assert!(matches!(&batch[2], Kind::Filed { status, .. } if status == "waiting"));
+        assert!(matches!(&batch[2], Kind::Filed { status, .. } if status == "ready"));
         let edge = |kind: &Kind| match kind {
             Kind::Linked { from, to } => (from.to_string(), to.to_string()),
             other => panic!("expected an edge, got {other:?}"),
@@ -640,16 +553,10 @@ after    = ["pass"]
         // one pass's batch, re-fold, and the next pass concludes
         // nothing.
         let installed = registry(&[CHORES]);
-        let mut events = vec![
-            filed("pi.1", 10, "sweep the logs", &["chore"]),
-            stored("pi.2", 20, "dep", "ready", &[]),
-            stored("pi.3", 30, "waiter", "waiting", &[]),
-            linked("pi.4", 40, "pi.3", "pi.2"),
-            moved("pi.5", 50, "pi.2", "done"),
-        ];
+        let mut events = vec![filed("pi.1", 10, "sweep the logs", &["chore"])];
         let fold = folded(&events);
         let concluded = conclusions(&fold, &installed);
-        assert_eq!(concluded.len(), 2, "one route and one advance");
+        assert_eq!(concluded.len(), 1, "one route");
         let batch = kinds(&fold, &installed, &concluded, &|offset| EventId {
             writer: "pi".to_string(),
             seq: 100 + offset as u64,

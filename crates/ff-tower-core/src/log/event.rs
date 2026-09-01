@@ -87,14 +87,18 @@ impl<'de> Deserialize<'de> for EventId {
 #[derive(Debug, Clone)]
 pub enum Kind {
     /// Mints a flight; the flight's id is this event's id. Every stored
-    /// field is seeded here — status included, so a filing says outright
-    /// where the flight was born.
+    /// field is seeded here — the status word included, so a filing
+    /// says outright which facts the flight was born with.
     Filed {
         /// Provenance only: the procedure this filing was minted under,
         /// when there was one. Nothing derives from it after the mint.
         procedure: Option<String>,
         subject: String,
         body: String,
+        /// A status word: `triage`, `ready` (cleared), `in_progress`,
+        /// `done`, `canceled`. The word assigns the fold's facts and the
+        /// fold derives the status; `waiting` and `held` in an old log
+        /// read as cleared.
         status: String,
         assignee: Option<String>,
         priority: String,
@@ -107,10 +111,11 @@ pub enum Kind {
         /// once, so a later `next` reads this rather than the registry.
         branch: Option<String>,
     },
-    /// Moves a flight: status overwritten last-wins, the byline the
-    /// mover. Done and Canceled ride here like every other move, and
-    /// `next`'s pull appends one per pick in a single batch — the append
-    /// is the exclusivity, the byline the pilot.
+    /// Moves a flight: the word assigns the fold's facts last-wins —
+    /// in triage, started, closed — and the fold derives the status, the
+    /// byline the mover. Done and Canceled ride here like every other
+    /// move, and `next`'s pull appends one per pick in a single batch —
+    /// the append is the exclusivity, the byline the pilot.
     Status {
         flight: EventId,
         status: String,
@@ -143,18 +148,21 @@ pub enum Kind {
     },
     /// `from` depends on `to` — a declared dependency, stored intent.
     Linked { from: EventId, to: EventId },
-    /// Stops the flight with a question — status held, waiting on you
-    /// until answered.
+    /// Stops the flight with a question — the fold derives Held while
+    /// it stands, waiting on you until answered — and clears started:
+    /// holding is stopping.
     Held { flight: EventId, question: String },
-    /// Answers the open question and releases the flight to ready.
+    /// Answers the open question. No status rides it: the fold derives
+    /// Ready or Waiting from the facts and the edges beneath.
     Answered { flight: EventId, answer: String },
     /// The lazy pass routing a Triage flight under a procedure — the one
-    /// automated stamp besides the Waiting → Ready advance. Self-contained
-    /// on `Filed`'s discipline: the definition is read at pass time and
-    /// the resolved overlay copied in, so the fold never reads config.
-    /// `status` moves the flight (`ready` on a collapsed single-flight
-    /// definition, `waiting` on a multi-flight parent); the field options
-    /// overlay where `Some` and leave the standing value where `None`.
+    /// automated stamp. Self-contained on `Filed`'s discipline: the
+    /// definition is read at pass time and the resolved overlay copied
+    /// in, so the fold never reads config. `status` is a word assigning
+    /// the facts like a `Status` event's — `ready`, cleared, whether the
+    /// routing collapsed onto the flight or made it a parent whose edges
+    /// fold it Waiting; the field options overlay where `Some` and leave
+    /// the standing value where `None`.
     Routed {
         flight: EventId,
         procedure: String,

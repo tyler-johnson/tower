@@ -4,14 +4,17 @@
 //! walk runs over a [`Fold`], a [`Reads`], and a [`Verdicts`] the caller
 //! already fetched, so admission is unit-testable with hand-built rows.
 //!
-//! The pool is every Ready flight in the agent lane: the stored status
-//! and assignee, read off the fold — never the registry (principle 11).
-//! The gate is `Flight::pullable`, the one the brief reads too: exact
-//! string compares, so an unknown status or lane never rounds down into
-//! the pool. An open question or a fufu hold takes a flight out on top
-//! of it. Ready flights *not* in the agent lane are counted in `yours`,
-//! the number behind `next`'s exit 3; the flights themselves are silent
-//! here because the board is their surface, not this one's.
+//! The pool is every Ready flight in the agent lane: the derived status
+//! and the stored assignee, read off the fold — never the registry
+//! (principle 11). The gate is `Flight::pullable`, the one the brief
+//! reads too: exact string compares, so an unknown status or lane never
+//! rounds down into the pool. Ready is derived, so a pool candidate has
+//! no live dependency by construction — a dependent sits in Waiting
+//! until its last dependency closes, done or canceled, and never
+//! reaches the walk. An open question or a fufu hold takes a flight out
+//! on top of it. Ready flights *not* in the agent lane are counted in
+//! `yours`, the number behind `next`'s exit 3; the flights themselves
+//! are silent here because the board is their surface, not this one's.
 //!
 //! Every live flight *not* in the pool keeps its branch on the gate —
 //! waiting and holding flights included, because a warm bay holds real
@@ -58,17 +61,11 @@ pub struct Passed {
     pub reason: Skip,
 }
 
-/// Why a candidate lost.
+/// Why a candidate lost. Readiness is not a reason: a flight with a
+/// live dependency is Waiting, and Waiting is not in the pool.
 #[derive(Debug, Serialize)]
 #[serde(tag = "reason", rename_all = "kebab-case")]
 pub enum Skip {
-    /// Declared dependencies not yet done — all of them. The belt under
-    /// the stored Waiting status: the pass's advance normally moves a
-    /// satisfied waiter to Ready first, and this stays as the backstop
-    /// under hand-moves and `answered`'s unconditional ready. A canceled
-    /// dependency does not satisfy it — an abandoned part is a reason to
-    /// reconsider the dependent, not a green light.
-    Waiting { on: Vec<String> },
     /// A collide against a flying flight or an already-picked candidate;
     /// the first hit wins.
     Collides { with: String, paths: Vec<String> },
@@ -121,29 +118,6 @@ pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Pic
     for (flight, id, branch) in candidates {
         if picked.len() == want {
             break;
-        }
-        // Readiness first: every declared dependency must be done —
-        // done exactly, because a canceled dependency does not satisfy
-        // its waiters. Dep ids always resolve — the fold routes
-        // unresolvable links to `unrouted` — so a missing lookup is
-        // simply not-done.
-        let waiting: Vec<String> = flight
-            .depends_on
-            .iter()
-            .filter(|dep| {
-                fold.flights
-                    .iter()
-                    .find(|other| &other.id == *dep)
-                    .is_none_or(|other| other.status != "done")
-            })
-            .map(ToString::to_string)
-            .collect();
-        if !waiting.is_empty() {
-            passed.push(Passed {
-                flight: id,
-                reason: Skip::Waiting { on: waiting },
-            });
-            continue;
         }
         // Admission, only when the candidate has a tree to conflict:
         // clear against the gate and everything already admitted, in
@@ -347,7 +321,9 @@ mod tests {
     }
 
     #[test]
-    fn an_unclosed_dependency_passes_with_waiting_naming_it() {
+    fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
+        // The fold derives the dependent Waiting, so it is neither
+        // picked nor passed — it was never a candidate.
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -356,15 +332,13 @@ mod tests {
             ]),
             &reads(Vec::new(), Vec::new()),
             &Verdicts::default(),
-            1,
+            2,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.2");
         assert_eq!(picks.picked[0].number, 2);
-        match reasons(&picks).as_slice() {
-            [("pi.1", Skip::Waiting { on })] => assert_eq!(on, &["pi.2"]),
-            other => panic!("expected one waiting row, got {other:?}"),
-        }
+        assert!(picks.passed.is_empty(), "waiting is not a walk outcome");
+        assert_eq!(picks.yours, 0, "waiting is not yours either");
     }
 
     #[test]
@@ -385,10 +359,9 @@ mod tests {
     }
 
     #[test]
-    fn a_canceled_dependency_does_not_satisfy_its_waiter() {
-        // DESIGN.md's rule: an abandoned part is a reason to reconsider
-        // the dependent, not a green light — the flight stays waiting,
-        // naming the canceled dependency.
+    fn a_canceled_dependency_releases_its_dependent() {
+        // Closed is closed: a canceled part still shows on the parent's
+        // brief, and the dependent is Ready for whoever reconsiders it.
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -400,11 +373,8 @@ mod tests {
             &Verdicts::default(),
             1,
         );
-        assert!(picks.picked.is_empty());
-        match reasons(&picks).as_slice() {
-            [("pi.1", Skip::Waiting { on })] => assert_eq!(on, &["pi.2"]),
-            other => panic!("expected one waiting row, got {other:?}"),
-        }
+        assert_eq!(picks.picked[0].flight, "pi.1");
+        assert!(picks.passed.is_empty());
     }
 
     #[test]
@@ -564,7 +534,8 @@ mod tests {
                 stored("pi.3", 30, "ready", Some("pair")),
                 stored("pi.4", 40, "ready", Some("agent")),
                 stored("pi.5", 50, "triage", Some("agent")),
-                stored("pi.6", 60, "waiting", Some("agent")),
+                stored("pi.6", 60, "ready", Some("agent")),
+                linked("pi.7", 70, "pi.6", "pi.5"),
             ]),
             &reads(Vec::new(), Vec::new()),
             &Verdicts::default(),

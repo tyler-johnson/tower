@@ -224,7 +224,7 @@ fn a_piped_render_is_plain_text_and_names_its_groups() {
     );
     assert!(
         out.contains("triage\n"),
-        "the group header is the stored status: {out}"
+        "the group header is the derived status: {out}"
     );
     assert!(out.contains("#1"));
     assert!(out.contains("write the doctor verb"));
@@ -232,13 +232,15 @@ fn a_piped_render_is_plain_text_and_names_its_groups() {
 }
 
 #[test]
-fn the_groups_are_the_stored_statuses_in_lifecycle_order() {
+fn the_groups_are_the_derived_statuses_in_lifecycle_order() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     for subject in ["one", "two", "three", "four"] {
         stdout(&ff_tower(repo.path(), &["file", subject]));
     }
-    stdout(&ff_tower(repo.path(), &["status", "2", "waiting"]));
+    // Waiting is derived: a cleared flight with a live dependency.
+    stdout(&ff_tower(repo.path(), &["status", "2", "ready"]));
+    stdout(&ff_tower(repo.path(), &["link", "2", "1"]));
     stdout(&ff_tower(repo.path(), &["status", "3", "ready"]));
     stdout(&ff_tower(repo.path(), &["status", "4", "in_progress"]));
 
@@ -512,7 +514,8 @@ fn a_decomposed_parent_carries_its_familys_progress_and_the_children_are_rows() 
 
 /// The flat board: a sub-flight files into the group its own status
 /// names whether or not it needs anyone, and it carries the subject it
-/// was filed with — nothing is prefixed onto it.
+/// was filed with — nothing is prefixed onto it. The parts are born
+/// cleared, so they are Ready beside their parent's Triage.
 #[test]
 fn a_sub_flight_is_a_row_in_its_own_status_group() {
     let repo = Repo::new();
@@ -523,7 +526,6 @@ fn a_sub_flight_is_a_row_in_its_own_status_group() {
         &["decompose", "1", "part one", "part two"],
     ));
     stdout(&ff_tower(repo.path(), &["assign", "2", "agent"]));
-    stdout(&ff_tower(repo.path(), &["status", "2", "ready"]));
 
     let out = stdout(&ff_tower(repo.path(), &[]));
     assert!(out.contains("part one"), "{out}");
@@ -543,7 +545,7 @@ fn a_sub_flight_is_a_row_in_its_own_status_group() {
         serde_json::json!("a broad task")
     );
     assert_eq!(
-        envelope["data"]["triage"][1]["subject"],
+        envelope["data"]["ready"][1]["subject"],
         serde_json::json!("part two")
     );
 }
