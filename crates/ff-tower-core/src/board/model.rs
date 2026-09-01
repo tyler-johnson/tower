@@ -1,12 +1,13 @@
 //! The board: the fold's flights, enriched with the repository's answer
-//! to "where is each one" and grouped by the status a person set.
+//! to "where is each one" and grouped by the status each record derives.
 //!
 //! `enrich` is pure — it runs over a [`Reads`] the caller already
 //! gathered, plus the two scalars it refuses to read for itself: `now`,
-//! and the threshold behind the stale line. Grouping is the stored model
-//! made visible. A flight sits in the group its own `status` field
-//! names and nothing derived moves it; `held`/`resolving` stay fufu's
-//! branch verdicts, printed on the row, deciding no section.
+//! and the threshold behind the stale line. A flight sits in the group
+//! its derived status names — the projection the fold already made over
+//! the stored facts, the open question and the edges — and `enrich`
+//! moves it nowhere further; `held`/`resolving` stay fufu's branch
+//! verdicts, printed on the row, deciding no section.
 //!
 //! What the repository knows lands beside the fields as two independent
 //! facts, never joined under one word: a flight In Progress that its
@@ -80,8 +81,8 @@ pub fn parse_closed(raw: &str) -> Option<ClosedWindow> {
     raw.parse().ok().map(ClosedWindow::Count)
 }
 
-/// The stored model as an envelope: the inbox, then one group per status
-/// in lifecycle order, then what the fold could not route.
+/// The derived model as an envelope: the inbox, then one group per
+/// status in lifecycle order, then what the fold could not route.
 ///
 /// A flight appears in exactly one status group — the one its `status`
 /// field names — and a status string this binary has never heard of

@@ -578,7 +578,9 @@ impl Query {
     /// `status` deals rows into the board's own sections — `done` and
     /// `canceled` together under `closed` — and a status this binary has
     /// never heard of routes nowhere, exactly as
-    /// [`enrich`](super::enrich) has it.
+    /// [`enrich`](super::enrich) has it. A `status` filter takes the
+    /// same `closed`, so a column's key can be handed straight back as
+    /// the value that selects it.
     ///
     /// `now` arrives from the caller, like everywhere else in this
     /// module: a relative filter and a span window both need a clock,
@@ -994,9 +996,13 @@ fn window(flights: Vec<FlightView>, closed: ClosedWindow, now: i64) -> (Vec<Flig
 /// Whether one filter holds of one row. A field the row does not carry
 /// — no assignee, no branch, never moved — fails `is` and passes `not`,
 /// which is what "the value is not one of these" has to mean.
+///
+/// `status` is the one field with its own predicate, because it is the
+/// one field grouping renames: it takes `closed` for the pair grouping
+/// deals under that key, so a column header round-trips as a filter.
 fn holds(filter: &Filter, view: &FlightView, now: i64) -> bool {
     match filter.field {
-        Field::Status => one(filter, Some(view.status.as_str())),
+        Field::Status => status_holds(filter, &view.status),
         Field::Priority => one(filter, Some(view.priority.as_str())),
         Field::Assignee => one(filter, view.assignee.as_deref()),
         Field::Skill => one(filter, view.skill.as_deref()),
@@ -1027,6 +1033,23 @@ fn one(filter: &Filter, held: Option<&str>) -> bool {
         return false;
     };
     let hit = held.is_some_and(|held| words.iter().any(|word| word == held));
+    match filter.op {
+        Op::Is => hit,
+        Op::IsNot => !hit,
+        _ => false,
+    }
+}
+
+/// Whether a status filter holds. `closed` is the word grouping deals
+/// `done` and `canceled` into, so it filters as that pair too: a column
+/// key round-trips as a filter value, and `not:closed` is every live
+/// row. Any other word compares as itself, unknown ones included.
+fn status_holds(filter: &Filter, status: &str) -> bool {
+    let Value::Words(words) = &filter.value else {
+        return false;
+    };
+    let hit = words.iter().any(|word| word == status)
+        || section(status).is_some_and(|name| words.iter().any(|word| word == name));
     match filter.op {
         Op::Is => hit,
         Op::IsNot => !hit,
@@ -1506,6 +1529,81 @@ mod tests {
             NOW,
         );
         assert_eq!(folded.filtered, 0);
+    }
+
+    /// The fixture the closed-column tests share: five live rows, one
+    /// done and one canceled.
+    fn closed_and_live() -> Vec<FlightView> {
+        flights(&[
+            filed("pi.1", 10, "triage", "none", None, &[]),
+            filed("pi.2", 20, "ready", "none", None, &[]),
+            filed("pi.3", 30, "in_progress", "none", None, &[]),
+            filed("pi.4", 40, "ready", "none", None, &[]),
+            filed("pi.5", 50, "in_progress", "none", None, &[]),
+            filed("pi.6", 60, "triage", "none", None, &[]),
+            filed("pi.7", 70, "ready", "none", None, &[]),
+            moved("pi.8", NOW - 200, "pi.6", "done"),
+            moved("pi.9", NOW - 100, "pi.7", "canceled"),
+        ])
+    }
+
+    /// What one query keeps, as ids in a stable order — the question
+    /// these tests ask is membership, not the ordering axis.
+    fn kept(raw: &str) -> Vec<String> {
+        let folded = Query::parse(raw).expect(raw).fold(closed_and_live(), NOW);
+        let mut ids: Vec<String> = folded
+            .groups
+            .iter()
+            .flat_map(|group| group.rows.iter())
+            .map(|view| view.id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn the_closed_column_key_filters_as_a_value() {
+        // The word grouping deals the pair under selects the pair.
+        assert_eq!(kept("status=closed&closed=all"), ["pi.6", "pi.7"]);
+
+        // Its negation is every live row, and nothing else.
+        assert_eq!(
+            kept("status=not:closed&closed=all"),
+            ["pi.1", "pi.2", "pi.3", "pi.4", "pi.5"]
+        );
+
+        // And the words the pair is made of still compare as themselves.
+        assert_eq!(kept("status=done&closed=all"), ["pi.6"]);
+
+        // The value survives the codec, which is what a saved view and a
+        // browser URL both hold.
+        let query = Query::parse("status=closed").expect("parses");
+        assert_eq!(query.render(), "status=closed");
+    }
+
+    #[test]
+    fn a_column_key_fed_back_selects_that_column() {
+        // The gesture a kanban header makes: group, take a key, ask for
+        // it, and get the same rows back.
+        let grouped = Query::parse("group=status&closed=all")
+            .expect("parses")
+            .fold(closed_and_live(), NOW);
+        assert_eq!(
+            grouped
+                .groups
+                .iter()
+                .filter_map(|group| group.key.as_deref())
+                .collect::<Vec<&str>>(),
+            ["triage", "ready", "in_progress", "closed"],
+            "every section the fixture reaches stands"
+        );
+
+        for group in &grouped.groups {
+            let key = group.key.as_deref().expect("a status column is keyed");
+            let mut here: Vec<String> = ids(&group.rows).iter().map(|id| id.to_string()).collect();
+            here.sort();
+            assert_eq!(kept(&format!("status={key}&closed=all")), here, "{key}");
+        }
     }
 
     #[test]
