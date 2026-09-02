@@ -1,10 +1,15 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import FlightRow from './FlightRow.svelte';
+	import { template } from './columns';
 	import { feed } from './feed.svelte';
-	import { buildRefs, groupTitle, inbox, type FlightView, type Group } from './tower';
+	import { DEFAULT_SHOW } from './query';
+	import { query } from './query.svelte';
+	import { buildRefs, groupTitle, inbox, type FlightView } from './tower';
 
 	let b = $derived(feed.board);
+	let q = $derived(query.parsed);
+	let show = $derived(q?.show ?? DEFAULT_SHOW);
 	let built = $derived(b ? buildRefs(b) : { refs: new Map<string, string>(), flights: 0 });
 	let refs = $derived(built.refs);
 	let flights = $derived(built.flights);
@@ -23,77 +28,89 @@
 			['yours', box.yours]
 		] as [string, FlightView[]][];
 	});
-	// Then the wire's groups in wire order: the board draws only what
-	// came back, keyed on whatever the query grouped by. The closed group
-	// is the render's memory of the week rather than work on the board,
-	// so it collapses.
-	let groups = $derived(b ? b.groups.filter((group) => group.key !== 'closed') : []);
-	let closed = $derived(b?.groups.find((group) => group.key === 'closed') ?? null);
+
+	const heading = 'font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60';
 </script>
 
+<!--
+	The list. It draws what the fold sent, keyed on whatever the query
+	grouped by, in wire order: every group is a details with its name and
+	its count on the summary, so a group collapses on its own, and the
+	closed group of a status fold starts collapsed because it is the
+	render's memory of the week rather than work on the board. Rows lay
+	out from the query's `show`, one grid per body so a section's columns
+	align down its height.
+-->
+
 {#snippet rows(views: FlightView[])}
-	{#each views as view (view.id)}
-		<FlightRow {view} {refs} now={feed.now} open={view.id === open} />
-	{/each}
+	<div class="grid gap-x-2" style:grid-template-columns={template(show)}>
+		{#each views as view (view.id)}
+			<FlightRow {view} {refs} {show} now={feed.now} open={view.id === open} />
+		{/each}
+	</div>
 {/snippet}
 
 {#each pinned as [title, views] (title)}
 	{#if views.length > 0}
 		<section class="flex flex-col gap-1">
-			<h2
-				class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
-			>
-				{title}
-			</h2>
+			<h2 class={heading}>{title}</h2>
 			{@render rows(views)}
 		</section>
 	{/if}
 {/each}
 
-{#each groups as group (group.key)}
-	<section class="flex flex-col gap-1">
-		<h2
-			class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
-		>
-			{groupTitle(group.key)}
-		</h2>
-		{#if group.subgroups.length > 0}
-			{#each group.subgroups as sub (sub.key)}
-				<section class="flex flex-col gap-1 pt-1">
-					<h3
-						class="font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
-					>
-						{groupTitle(sub.key)}
-					</h3>
-					{@render rows(sub.rows)}
-				</section>
-			{/each}
-		{:else}
-			{@render rows(group.rows)}
-		{/if}
-	</section>
-{/each}
-
-{#if closed && closed.count > 0}
-	<details class="flex flex-col gap-1">
-		<summary
-			class="cursor-pointer font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
-		>
-			closed {closed.count}
-		</summary>
-		<div class="flex flex-col gap-1 pt-1">
-			{@render rows(closed.rows)}
-		</div>
-	</details>
-{/if}
-
 {#if b}
-	<footer class="text-sm text-base-content/60">
+	{#each b.groups as group (group.key)}
+		<details class="flex flex-col gap-1" open={group.key !== 'closed'}>
+			<summary class="cursor-pointer {heading}">
+				{groupTitle(group.key)}
+				<span class="text-base-content/40">{group.count}</span>
+			</summary>
+			{#if group.subgroups.length > 0}
+				{#each group.subgroups as sub (sub.key)}
+					<details class="flex flex-col gap-1 pt-1" open>
+						<summary class="cursor-pointer {heading}">
+							{groupTitle(sub.key)}
+							<span class="text-base-content/40">{sub.count}</span>
+						</summary>
+						{@render rows(sub.rows)}
+					</details>
+				{/each}
+			{:else}
+				{@render rows(group.rows)}
+			{/if}
+		</details>
+	{/each}
+
+	<footer class="flex flex-wrap items-center gap-2 text-sm text-base-content/60">
 		{#if flights === 0}
-			nothing on the board · ff tower file to add one
+			<span>nothing on the board · ff tower file to add one</span>
 		{:else}
-			{flights}
-			{flights === 1 ? 'flight' : 'flights'} · ff tower file to add one
+			<span>{flights} {flights === 1 ? 'flight' : 'flights'} · ff tower file to add one</span>
+		{/if}
+		{#if b.filtered > 0}
+			<span>·</span>
+			<span>{b.filtered} filtered out</span>
+			<button
+				class="btn btn-ghost btn-xs"
+				onclick={() => {
+					if (q) query.replace({ ...q, filters: [] });
+				}}
+			>
+				clear
+			</button>
+		{/if}
+		{#if b.hidden > 0}
+			<span>·</span>
+			<span>{b.hidden} closed hidden</span>
+			<button
+				class="btn btn-ghost btn-xs"
+				onclick={() => {
+					if (q) query.replace({ ...q, closed: 'all' });
+				}}
+			>
+				show all
+			</button>
 		{/if}
 	</footer>
 {/if}

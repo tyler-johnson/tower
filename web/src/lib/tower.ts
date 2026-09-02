@@ -45,11 +45,46 @@ export function rowsOf(folded: Folded, key: string | null): FlightView[] {
 	return folded.groups.find((group) => group.key === key)?.rows ?? [];
 }
 
-/// Every row outside `closed`, flattened: the live board under the
-/// default query, where a closed flight is on the record rather than on
-/// the board.
+/// Every row the fold has: every group's rows and every subgroup's,
+/// walked to the bottom, flattened and deduped by id, because grouping by
+/// label deals one flight into several groups.
+export function foldRows(folded: Folded): FlightView[] {
+	const seen = new Map<string, FlightView>();
+	const walk = (groups: Group[]) => {
+		for (const group of groups) {
+			for (const row of group.rows) if (!seen.has(row.id)) seen.set(row.id, row);
+			walk(group.subgroups);
+		}
+	};
+	walk(folded.groups);
+	return [...seen.values()];
+}
+
+/// The board's own sections, core's `section()`: the five words as
+/// themselves, `done` and `canceled` as `closed`, and a status this
+/// build has never heard of names no section at all.
+export function section(status: string): string | null {
+	switch (status) {
+		case 'triage':
+		case 'waiting':
+		case 'ready':
+		case 'in_progress':
+		case 'held':
+			return status;
+		case 'done':
+		case 'canceled':
+			return 'closed';
+		default:
+			return null;
+	}
+}
+
+/// Every live row, once: the fold walked and deduped, then each row kept
+/// or dropped by its own status rather than by the group it stands in,
+/// so the live board is the same set under any grouping. A closed flight
+/// is on the record rather than on the board.
 export function liveRows(folded: Folded): FlightView[] {
-	return folded.groups.filter((group) => group.key !== 'closed').flatMap((group) => group.rows);
+	return foldRows(folded).filter((row) => section(row.status) !== 'closed');
 }
 
 /// The inbox, derived here the way core's `enrich` derives it: live rows
@@ -249,14 +284,13 @@ export function subjectColumn(view: FlightView): string {
 	return `${view.subject} (${view.progress[0]}/${view.progress[1]})`;
 }
 
-/// Wire id to display form, over every group at once: a verdict partner
-/// is always a live flight, so the map answers for `collides` and
-/// `unanswered` entries too. Also the live flight count, for the footer —
-/// every row outside `closed`, which on a flat board is every live flight
-/// exactly once; a closed flight is on the record rather than on the
-/// board.
+/// Wire id to display form, over every row of the fold at once — the
+/// walk reaches the subgroups, so a sub-grouped fold names every row —
+/// and a verdict partner is always a live flight, so the map answers for
+/// `collides` and `unanswered` entries too. Also the live flight count,
+/// for the footer: every live row once, however the fold dealt it.
 export function buildRefs(folded: Folded): { refs: Map<string, string>; flights: number } {
-	const views = folded.groups.flatMap((group) => group.rows);
+	const views = foldRows(folded);
 	const short = shortIds(views.map((view) => view.id));
 	const refs = new Map(
 		views.map((view) => [view.id, flightRef(writerOf(view.id), view.number, short)])

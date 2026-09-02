@@ -4,45 +4,11 @@
 // the chip removed for an edit — and the picker never asks for its own.
 
 import type { Field } from './query';
-import type { FlightView, Folded, Group } from './tower';
-
-/// Every row the fold has: every group's rows and every subgroup's,
-/// flattened and deduped by id, because grouping by label deals one
-/// flight into several columns.
-export function foldRows(folded: Folded): FlightView[] {
-	const seen = new Map<string, FlightView>();
-	const walk = (groups: Group[]) => {
-		for (const group of groups) {
-			for (const row of group.rows) if (!seen.has(row.id)) seen.set(row.id, row);
-			walk(group.subgroups);
-		}
-	};
-	walk(folded.groups);
-	return [...seen.values()];
-}
+import { section, type FlightView } from './tower';
 
 export interface Facet {
 	value: string;
 	count: number;
-}
-
-/// The board's own sections, core's `section()`: the five words as
-/// themselves, `done` and `canceled` as `closed`, and a status this
-/// build has never heard of names no section at all.
-export function section(status: string): string | null {
-	switch (status) {
-		case 'triage':
-		case 'waiting':
-		case 'ready':
-		case 'in_progress':
-		case 'held':
-			return status;
-		case 'done':
-		case 'canceled':
-			return 'closed';
-		default:
-			return null;
-	}
 }
 
 const SECTIONS = ['triage', 'waiting', 'ready', 'in_progress', 'held', 'closed'];

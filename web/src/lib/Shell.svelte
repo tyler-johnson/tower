@@ -1,7 +1,6 @@
 <script lang="ts">
 	import Funnel from '@lucide/svelte/icons/funnel';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
-	import { foldRows } from './facets';
 	import DisplayMenu from './DisplayMenu.svelte';
 	import FilterBar from './FilterBar.svelte';
 	import FilterMenu from './FilterMenu.svelte';
@@ -9,7 +8,7 @@
 	import { dismiss } from './menu';
 	import { query } from './query.svelte';
 	import { defaultQuery, type Filter } from './query';
-	import { age, refusalLines } from './tower';
+	import { age, foldRows, refusalLines } from './tower';
 
 	let filtersOpen = $state(false);
 	let displayOpen = $state(false);

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
-	import { foldRows } from './facets';
+	import { foldRows } from './tower';
 	import FilterChip from './FilterChip.svelte';
 	import FilterMenu from './FilterMenu.svelte';
 	import { feed } from './feed.svelte';

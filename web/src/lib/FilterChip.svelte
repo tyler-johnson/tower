@@ -2,7 +2,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import { untrack } from 'svelte';
 	import { get } from './api';
-	import { foldRows } from './facets';
+	import { foldRows } from './tower';
 	import FilterMenu from './FilterMenu.svelte';
 	import { feed } from './feed.svelte';
 	import { dismiss } from './menu';

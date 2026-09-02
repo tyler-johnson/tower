@@ -1,59 +1,74 @@
 <script lang="ts">
-	import {
-		ageColumn,
-		notePhrases,
-		priorityGlyph,
-		statusDot,
-		subjectColumn,
-		type FlightView
-	} from './tower';
+	import { cell, noteStart } from './columns';
+	import { fieldLabel, type Field } from './query';
 	import { query } from './query.svelte';
+	import { notePhrases, statusDot, type FlightView } from './tower';
 
 	let {
 		view,
 		refs,
 		now,
-		open
+		open,
+		show
 	}: {
 		view: FlightView;
 		refs: Map<string, string>;
 		now: number;
 		open: boolean;
+		show: Field[];
 	} = $props();
 
 	let phrases = $derived(notePhrases(view, refs));
 </script>
 
 <!--
-	The recognizable anatomy, one row: priority glyph, flight ref, status
-	dot, subject with its progress mark, label chips, assignee, and the age
-	right-aligned. The phrases only this tracker can print — the audits,
-	the collisions — go underneath, warn ones in the warn tone.
+	One row of the list. The columns come from `show`, one cell per field
+	drawn by its kind — the default seven are the recognizable anatomy:
+	priority glyph, flight ref, status dot, subject with its progress
+	mark, label chips, assignee, and the age right-aligned. The row is a
+	subgrid line of the section's grid, so its columns align with the
+	rows above and below. The phrases only this tracker can print — the
+	audits, the collisions — go underneath from the subject's column,
+	warn ones in the warn tone.
 -->
 <a
 	href={query.href(`/f/${view.id}`)}
-	class="grid grid-cols-[1ch_max-content_1ch_1fr_max-content] items-baseline gap-x-2 rounded-field px-1 hover:bg-base-200 {open
+	class="col-span-full grid grid-cols-subgrid items-baseline gap-x-2 rounded-field px-1 hover:bg-base-200 {open
 		? 'bg-base-200'
 		: ''}"
 >
-	<span class="text-base-content/60" title="priority {view.priority}">
-		{priorityGlyph(view.priority)}
-	</span>
-	<span class="font-mono text-primary">{refs.get(view.id)}</span>
-	<span class="status {statusDot(view.status)}" title={view.status}></span>
-	<span class="truncate">{subjectColumn(view)}</span>
-	<span class="flex items-baseline gap-2">
-		{#each view.labels as label (label)}
-			<span class="badge badge-ghost badge-sm">{label}</span>
-		{/each}
-		{#if view.assignee !== null}
-			<span class="badge badge-ghost badge-sm">{view.assignee}</span>
+	{#each show as field (field)}
+		{@const c = cell(field, view, refs, now)}
+		{#if c.kind === 'glyph'}
+			<span class="text-base-content/60" title={c.title}>{c.text}</span>
+		{:else if c.kind === 'ref'}
+			<span class="font-mono text-primary">{c.text}</span>
+		{:else if c.kind === 'dot'}
+			<span class="status {statusDot(c.status)}" title={c.status}></span>
+		{:else if c.kind === 'subject'}
+			<span class="truncate">{c.text}</span>
+		{:else if c.kind === 'chips'}
+			<span class="flex items-baseline gap-2">
+				{#each c.words as word (word)}
+					<span class="badge badge-ghost badge-sm">{word}</span>
+				{/each}
+			</span>
+		{:else if c.kind === 'dim'}
+			<span
+				class="text-sm text-base-content/40 {field === 'age' ? 'text-right' : ''}"
+				title={fieldLabel(field)}
+			>
+				{c.text}
+			</span>
+		{:else if c.kind === 'flag'}
+			<span class="text-sm {c.on ? 'text-warning' : ''}" title={fieldLabel(field)}>
+				{c.on ? c.text : ''}
+			</span>
 		{/if}
-		<span class="text-sm text-base-content/40">{ageColumn(view, now)}</span>
-	</span>
+	{/each}
 
 	{#if phrases.length > 0}
-		<span class="col-span-2 col-start-4 text-sm text-base-content/40">
+		<span class="text-sm text-base-content/40" style:grid-column="{noteStart(show)} / -1">
 			{#each phrases as phrase, i (i)}
 				{#if i > 0}<span> · </span>{/if}
 				<span class={phrase.tone === 'warn' ? 'text-warning' : ''}>{phrase.text}</span>
