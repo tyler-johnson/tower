@@ -351,13 +351,21 @@ fn the_history_lists_every_gesture_in_log_order() {
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
     // The filing leads, and each row is the wire id, the kind's own
-    // name, the author, and the age.
+    // name and the words it took, the author, and the age.
     assert!(
         text.contains("history\n  pi.1 · filed · tests@tower.invalid · "),
         "{text}"
     );
     assert!(
-        text.contains("pi.7 · edited · tests@tower.invalid · "),
+        text.contains("pi.3 · status in_progress · tests@tower.invalid · "),
+        "{text}"
+    );
+    assert!(
+        text.contains("pi.6 · edited subject · tests@tower.invalid · "),
+        "{text}"
+    );
+    assert!(
+        text.contains("pi.7 · edited comment pi.2 · tests@tower.invalid · "),
         "{text}"
     );
 
@@ -383,6 +391,85 @@ fn the_history_lists_every_gesture_in_log_order() {
     assert_eq!(history[0]["id"], serde_json::json!("pi.1"));
     assert_eq!(history[0]["by"], serde_json::json!("tests@tower.invalid"));
     assert!(history[0]["at"].is_i64(), "{data}");
+    // The words sit flat beside `what`, only where the kind carries them.
+    assert_eq!(history[2]["status"], serde_json::json!("in_progress"));
+    assert_eq!(history[5]["fields"], serde_json::json!(["subject"]));
+    assert_eq!(history[6]["fields"], serde_json::json!(["body"]));
+    assert_eq!(history[6]["comment"], serde_json::json!("pi.2"));
+    let filing = history[0].as_object().expect("an object");
+    for key in ["status", "fields", "from"] {
+        assert!(!filing.contains_key(key), "a filing carries no `{key}`");
+    }
+}
+
+#[test]
+fn the_history_says_the_lane_and_the_edge() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the dependent"]));
+    stdout(&ff_tower(repo.path(), &["file", "the dependency"]));
+    stdout(&ff_tower(repo.path(), &["assign", "1", "agent"]));
+    stdout(&ff_tower(repo.path(), &["assign", "1", "none"]));
+    stdout(&ff_tower(repo.path(), &["link", "1", "2"]));
+    stdout(&ff_tower(repo.path(), &["unlink", "1", "2"]));
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    assert!(text.contains("pi.3 · assigned agent · "), "{text}");
+    assert!(text.contains("pi.4 · assigned none · "), "{text}");
+    assert!(text.contains("pi.5 · linked depends on #2 · "), "{text}");
+    assert!(text.contains("pi.6 · unlinked depends on #2 · "), "{text}");
+
+    // The same edge, read from the other end.
+    let text = stdout(&ff_tower(repo.path(), &["brief", "2"]));
+    assert!(text.contains("pi.5 · linked blocks #1 · "), "{text}");
+
+    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let history = envelope(&out)["data"]["history"]
+        .as_array()
+        .expect("a history")
+        .clone();
+    // The second filing is not on this flight's record, so the rows are
+    // the filing, the two lanes, the link, and the unlink.
+    assert_eq!(history.len(), 5);
+    assert_eq!(history[1]["assignee"], serde_json::json!("agent"));
+    let cleared = history[2].as_object().expect("an object");
+    assert!(cleared.contains_key("assignee"), "{}", history[2]);
+    assert!(cleared["assignee"].is_null(), "{}", history[2]);
+    assert_eq!(history[3]["from"], serde_json::json!("pi.1"));
+    assert_eq!(history[3]["to"], serde_json::json!("pi.2"));
+    assert_eq!(history[4]["from"], serde_json::json!("pi.1"));
+    assert_eq!(history[4]["to"], serde_json::json!("pi.2"));
+}
+
+#[test]
+fn a_cancel_reason_rides_its_moment() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "the work"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+    stdout(&ff_tower(repo.path(), &["cancel", "1", "-m", "superseded"]));
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    assert!(text.contains("pi.2 · status ready · "), "{text}");
+    assert!(
+        text.contains("pi.3 · status canceled · tests@tower.invalid · "),
+        "{text}"
+    );
+    // The reason follows on its own indented line, the comments' grammar.
+    let row = text
+        .lines()
+        .position(|line| line.starts_with("  pi.3 · status canceled"))
+        .expect("the cancel row");
+    assert_eq!(text.lines().nth(row + 1), Some("    superseded"), "{text}");
+
+    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let history = envelope(&out)["data"]["history"]
+        .as_array()
+        .expect("a history")
+        .clone();
+    assert_eq!(history[2]["status"], serde_json::json!("canceled"));
+    assert_eq!(history[2]["reason"], serde_json::json!("superseded"));
+    let plain = history[1].as_object().expect("an object");
+    assert_eq!(plain["status"], serde_json::json!("ready"));
+    assert!(!plain.contains_key("reason"), "{}", history[1]);
 }
 
 #[test]
@@ -414,6 +501,15 @@ fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
         .clone();
     assert_eq!(history.len(), 2);
     assert_eq!(history[1]["what"], serde_json::json!("promoted"));
+    // Its words are unknowable, so the row is the four keys alone.
+    let mut keys: Vec<&str> = history[1]
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["at", "by", "id", "what"]);
 
     // A body naming some other flight stays off this one's history.
     Store::open(repo.path())

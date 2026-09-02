@@ -309,13 +309,63 @@ export interface CommentView {
 	text: string;
 }
 
-/// One gesture on the record: who did what, when. Deliberately thin — the
-/// words behind a gesture already sit elsewhere on the brief.
+/// One gesture on the record: who did what, when, and the words the verb
+/// took, flat beside `what` and present only where the kind carries them.
+/// Deliberately thin — the subject, the body, the question, and a comment's
+/// text already sit elsewhere on the brief.
 export interface Moment {
 	id: string;
 	at: number;
 	by: string;
 	what: string;
+	/// `status`: the word used, verbatim; `reason` a cancel's `-m`.
+	status?: string;
+	reason?: string;
+	/// `assigned`: the lane; `null` is the clearing.
+	assignee?: string | null;
+	/// `edited`: the fields touched; `comment` the comment's event id when
+	/// the target was a comment rather than the flight.
+	fields?: string[];
+	comment?: string;
+	/// `linked` and `unlinked`: both ends, wire ids, `from` depends on `to`.
+	from?: string;
+	to?: string;
+	/// `routed`: which procedure and rule fired, and why.
+	procedure?: string;
+	rule?: string;
+	because?: string;
+}
+
+/// The words after a moment's verb — a leading space and the words, or
+/// `''` when the kind carries none — and the free text that follows on its
+/// own line: a move's reason, a routing's because. Link endpoints print as
+/// wire ids: the panel has no number map.
+export function momentPhrase(moment: Moment, briefId: string): { line: string; note?: string } {
+	switch (moment.what) {
+		case 'status':
+			return moment.status === undefined
+				? { line: '' }
+				: { line: ` ${moment.status}`, note: moment.reason };
+		case 'assigned':
+			return moment.assignee === undefined
+				? { line: '' }
+				: { line: ` ${moment.assignee ?? 'none'}` };
+		case 'edited':
+			if (moment.comment !== undefined) return { line: ` comment ${moment.comment}` };
+			return moment.fields === undefined ? { line: '' } : { line: ` ${moment.fields.join(', ')}` };
+		case 'linked':
+		case 'unlinked':
+			if (moment.from === undefined || moment.to === undefined) return { line: '' };
+			return moment.from === briefId
+				? { line: ` depends on ${moment.to}` }
+				: { line: ` blocks ${moment.from}` };
+		case 'routed':
+			return moment.procedure === undefined
+				? { line: '' }
+				: { line: ` ${moment.procedure}`, note: moment.because || undefined };
+		default:
+			return { line: '' };
+	}
 }
 
 /// One examined-and-skipped flight from `next`'s walk, `Skip` flattened

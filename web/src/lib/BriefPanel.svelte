@@ -11,6 +11,7 @@
 		buildRefs,
 		fieldsLine,
 		flightRef,
+		momentPhrase,
 		refusalLines,
 		statusDot,
 		statusWord,
@@ -188,9 +189,15 @@
 						history
 					</h3>
 					{#each brief.history as moment (moment.id)}
+						{@const phrase = momentPhrase(moment, brief.id)}
 						<p class="font-mono text-xs text-base-content/40">
-							{moment.id} · {moment.what} · {moment.by} · {age(now, moment.at)}
+							{moment.id} · {moment.what}{phrase.line} · {moment.by} · {age(now, moment.at)}
 						</p>
+						{#if phrase.note}
+							<p class="pl-4 font-mono text-xs whitespace-pre-wrap text-base-content/40">
+								{phrase.note}
+							</p>
+						{/if}
 					{/each}
 				</section>
 			{/if}

@@ -104,7 +104,9 @@ order, each link with the linked flight's subject and status, the
 open question, and the reads' facts — branch, tip, holds, whether the
 branch is yours.
 The standing says where the flight sits on `ff tower next`'s walk and
-what it beat.
+what it beat. The history lists every gesture on the record in log
+order, and each row carries the words the verb took: the status word,
+the lane, the fields an edit touched, the other end of the edge.
 
 Collide probes ride it only where a verdict can change the answer, so
 a brief stays instant, and a done or branchless flight briefs with

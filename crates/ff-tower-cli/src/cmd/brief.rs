@@ -13,7 +13,7 @@
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, Brief, Fold, Skip, Standing, Verdicts};
+use ff_tower_core::board::{self, Brief, Detail, Fold, Moment, Skip, Standing, Verdicts};
 use ff_tower_core::config::{self, Config};
 
 pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
@@ -154,27 +154,34 @@ fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
     }
 
     // What happened, in the comments' grammar and their reading order.
-    // One dim line per moment and nothing more: the words behind a
-    // gesture — the question, the comment's text — are already printed
-    // above, and repeating them here would make the section a second,
-    // staler copy of the page.
+    // One dim line per moment: the verb and the words it took — the
+    // status word, the lane, the fields, the other end of the edge —
+    // then, for a reason or a routing's because, the text indented under
+    // it. The words a gesture only points at — the question, the
+    // comment's text — are already printed above, and repeating them
+    // here would make the section a second, staler copy of the page.
     if !brief.history.is_empty() {
         out.push('\n');
         out.push_str("history\n");
         for moment in &brief.history {
+            let (words, follow) = phrase(fold, &brief.id, moment);
             out.push_str(&format!(
                 "  {}\n",
                 render::paint_dim(
                     &format!(
-                        "{} · {} · {} · {}",
+                        "{} · {}{} · {} · {}",
                         moment.id,
                         moment.what,
+                        words,
                         moment.by,
                         render::age(now, moment.at)
                     ),
                     colored
                 )
             ));
+            for line in follow.into_iter().flat_map(str::lines) {
+                out.push_str(&format!("    {}\n", render::paint_dim(line, colored)));
+            }
         }
     }
 
@@ -305,6 +312,52 @@ fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
         )),
     }
     phrases.join(&render::paint_dim(" · ", colored))
+}
+
+/// The words a moment's verb took, as a phrase after the verb — a leading
+/// space and the words, or nothing when the kind carries none — and the
+/// free text that follows on its own line: a move's reason, a routing's
+/// because.
+fn phrase<'a>(fold: &Fold, brief_id: &str, moment: &'a Moment) -> (String, Option<&'a str>) {
+    match &moment.detail {
+        Some(Detail::Status { status, reason }) => (format!(" {status}"), reason.as_deref()),
+        Some(Detail::Assigned { assignee }) => {
+            (format!(" {}", assignee.as_deref().unwrap_or("none")), None)
+        }
+        Some(Detail::Edited { fields, comment }) => match comment {
+            Some(comment) => (format!(" comment {comment}"), None),
+            None => (format!(" {}", fields.join(", ")), None),
+        },
+        Some(Detail::Edge { from, to }) => {
+            // `from` depends on `to`: seen from `from` the edge is a
+            // dependency, seen from `to` it is what this flight blocks.
+            let words = if from == brief_id {
+                format!(" depends on {}", endpoint(fold, to))
+            } else {
+                format!(" blocks {}", endpoint(fold, from))
+            };
+            (words, None)
+        }
+        Some(Detail::Routed {
+            procedure, because, ..
+        }) => (
+            format!(" {procedure}"),
+            (!because.is_empty()).then_some(because.as_str()),
+        ),
+        None => (String::new(), None),
+    }
+}
+
+/// An edge's other end in the board's display form when the fold knows
+/// it, and the wire id when it does not — an unlinked flight from another
+/// writer's log may never have been filed here.
+fn endpoint(fold: &Fold, id: &str) -> String {
+    match id.parse() {
+        Ok(parsed) if fold.flights.iter().any(|flight| flight.id == parsed) => {
+            super::display(fold, &parsed)
+        }
+        _ => id.to_string(),
+    }
 }
 
 /// A wire id from the brief, in the board's display form. Infallible —

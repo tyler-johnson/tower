@@ -141,11 +141,16 @@ fn a_repo_layer_rule_routes_a_hand_filed_labeled_flight_on_the_next_verb() {
     assert_eq!(brief["data"]["procedure"], serde_json::json!("chores"));
     assert_eq!(brief["data"]["skill"], serde_json::json!("tidy"));
     let history = brief["data"]["history"].as_array().expect("history");
+    let routed = history
+        .iter()
+        .find(|moment| moment["what"] == serde_json::json!("routed"))
+        .unwrap_or_else(|| panic!("the routing is on the record: {history:?}"));
+    assert_eq!(routed["procedure"], serde_json::json!("chores"));
     assert!(
-        history
-            .iter()
-            .any(|moment| moment["what"] == serde_json::json!("routed")),
-        "the routing is on the record: {history:?}"
+        routed["because"]
+            .as_str()
+            .is_some_and(|because| !because.is_empty()),
+        "the routing says why: {routed}"
     );
 }
 
