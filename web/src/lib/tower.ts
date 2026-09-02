@@ -18,27 +18,53 @@ export interface TowerError {
 	exits: string[];
 }
 
-export interface Board {
-	waiting_on_you: WaitingOnYou;
-	triage: FlightView[];
-	waiting: FlightView[];
-	ready: FlightView[];
-	in_progress: FlightView[];
-	held: FlightView[];
-	/// Done and canceled, newest first, the three newest. The CLI's
-	/// `--closed` widens that for one render; the server always sends the
-	/// default.
-	closed: FlightView[];
-	unrouted: TowerEvent[];
-	/// Kinds tower retired — carried, and never warned about.
-	retired: TowerEvent[];
+/// A query's answer: `/api/board?<query>` and every feed frame. The
+/// groups are keyed on whatever the query grouped by — status under the
+/// default query, so the keys are the six status words — and the two
+/// counts are disjoint: `hidden` is what the closed window cut, `filtered`
+/// what the filters rejected.
+export interface Folded {
+	groups: Group[];
+	hidden: number;
+	filtered: number;
 }
 
-/// Pinned above the status groups: what needs a person now. A view of the
-/// same rows — a flight here still appears in its status group.
-export interface WaitingOnYou {
-	questions: FlightView[];
-	yours: FlightView[];
+/// One group of rows, and the groups nested inside it. A group holds
+/// rows or subgroups, never both; `null` keys the rows carrying no value
+/// for the grouped field, and the single group of an ungrouped fold.
+export interface Group {
+	key: string | null;
+	count: number;
+	rows: FlightView[];
+	subgroups: Group[];
+}
+
+/// The rows of the group keyed `key`, or none when the fold has no such
+/// group — an empty status group is dropped from the wire.
+export function rowsOf(folded: Folded, key: string | null): FlightView[] {
+	return folded.groups.find((group) => group.key === key)?.rows ?? [];
+}
+
+/// Every row outside `closed`, flattened: the live board under the
+/// default query, where a closed flight is on the record rather than on
+/// the board.
+export function liveRows(folded: Folded): FlightView[] {
+	return folded.groups.filter((group) => group.key !== 'closed').flatMap((group) => group.rows);
+}
+
+/// The inbox, derived here the way core's `enrich` derives it: live rows
+/// with an open question, oldest ask first, and live rows Ready in the
+/// `me` lane — the todo list. A view of the same rows, so a flight here
+/// still stands in its status group.
+export function inbox(folded: Folded): { questions: FlightView[]; yours: FlightView[] } {
+	const live = liveRows(folded);
+	const questions = live
+		.filter((row) => row.question !== null)
+		.sort((a, b) => (a.asked_at ?? 0) - (b.asked_at ?? 0));
+	const yours = live.filter(
+		(row) => row.question === null && row.status === 'ready' && row.assignee === 'me'
+	);
+	return { questions, yours };
 }
 
 export interface FlightView {
@@ -87,17 +113,6 @@ export interface FlightView {
 export interface CollideView {
 	with: string;
 	paths: string[];
-}
-
-// The unrouted and retired rows are raw log events; the board renders only
-// the unrouted count, so the shape stays loose. Named TowerEvent to avoid
-// the DOM's Event.
-export interface TowerEvent {
-	writer: string;
-	author: string;
-	time: number;
-	id: string;
-	kind: unknown;
 }
 
 /// The staleness threshold's rendering, `config::DEFAULT_STALE_FLIGHT`
@@ -213,25 +228,19 @@ export function subjectColumn(view: FlightView): string {
 	return `${view.subject} (${view.progress[0]}/${view.progress[1]})`;
 }
 
-/// Wire id to display form, over every section at once: a verdict partner
+/// Wire id to display form, over every group at once: a verdict partner
 /// is always a live flight, so the map answers for `collides` and
 /// `unanswered` entries too. Also the live flight count, for the footer —
-/// the five status groups, which on a flat board is every live flight
-/// exactly once; the inbox is a second view of rows they already carry,
-/// and a closed flight is on the record rather than on the board.
-export function buildRefs(board: Board): { refs: Map<string, string>; flights: number } {
-	const live = [board.triage, board.waiting, board.ready, board.in_progress, board.held];
-	const views = [
-		board.waiting_on_you.questions,
-		board.waiting_on_you.yours,
-		...live,
-		board.closed
-	].flat();
+/// every row outside `closed`, which on a flat board is every live flight
+/// exactly once; a closed flight is on the record rather than on the
+/// board.
+export function buildRefs(folded: Folded): { refs: Map<string, string>; flights: number } {
+	const views = folded.groups.flatMap((group) => group.rows);
 	const short = shortIds(views.map((view) => view.id));
 	const refs = new Map(
 		views.map((view) => [view.id, flightRef(writerOf(view.id), view.number, short)])
 	);
-	return { refs, flights: live.reduce((sum, group) => sum + group.length, 0) };
+	return { refs, flights: liveRows(folded).length };
 }
 
 export interface NotePhrase {

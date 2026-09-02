@@ -28,7 +28,10 @@
 //! front door to one flight. [`Query`] is the second fold over the same
 //! rows — filters, grouping, ordering and the display window as one
 //! type, parsed once from a param string and shared by every surface,
-//! where [`enrich`] stays the board's own fixed sectioning. [`views`] is
+//! where [`enrich`] stays the board's own fixed sectioning. [`answer`]
+//! is the query's wiring the way [`assemble`] is the board's: the same
+//! fold, gather, and probe, with [`rows`] and [`Query::fold`] in place
+//! of [`enrich`]. [`views`] is
 //! the saved-view set the fold minted from the log's `view_saved`
 //! events, filtered to what one viewer sees.
 
@@ -83,6 +86,27 @@ pub fn assemble(
     let reads = gather(ff)?;
     let verdicts = probe(ff, &fold, &reads)?;
     Ok(enrich(fold, &reads, &verdicts, now, stale_after, closed))
+}
+
+/// One query's answer: fold the log, gather the reads, probe the pairs,
+/// enrich every flight into a row, and fold the rows through the query.
+///
+/// The same arguments as [`assemble`] with the query in place of the
+/// closed window, which the query carries itself. `now` reaches both
+/// the rows and the query's fold, so a relative filter and a row's age
+/// read one clock.
+pub fn answer(
+    ff: &Ff,
+    events: &[Event],
+    now: i64,
+    stale_after: i64,
+    query: &Query,
+) -> ff::Result<Folded> {
+    let fold = fold(events);
+    let reads = gather(ff)?;
+    let verdicts = probe(ff, &fold, &reads)?;
+    let rows = rows(fold, &reads, &verdicts, now, stale_after);
+    Ok(query.fold(rows.flights, now))
 }
 
 /// Wall-clock seconds, taken once per invocation — the `now` every

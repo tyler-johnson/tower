@@ -1,12 +1,20 @@
-//! The change feed: the loop that refolds the board when the repository
-//! moves and publishes the envelope to every SSE stream.
+//! The change feed: the loop that settles the log when the repository
+//! moves and stamps motion for every SSE stream to fold against.
 //!
 //! The rule this module exists to keep: all board updates flow through
 //! this loop, whoever wrote — GUI, CLI, MCP, adapters, agents in bays.
-//! The only publisher is the refold below, and its only triggers are the
+//! The only stamp is the loop below, and its only triggers are the
 //! repository moving; a POST handler publishes nothing directly, so its
 //! write reaches the feed through the same watcher every other writer's
 //! does, and the browser can never see a board the log does not back.
+//!
+//! The channel carries a stamp and not a board. Every subscriber holds
+//! its own query, so there is no one envelope to broadcast: on each
+//! stamp a subscriber folds its own frame against its own query, one
+//! fold per subscriber per motion — the trade the query surface names,
+//! a fold being a handful of local ff spawns. The loop's own work per
+//! motion is the lazy pass, run once here so every subscriber's fold
+//! reads a settled log.
 //!
 //! Two motion sources, one dirty flag. A filesystem watcher covers
 //! tower's own store — loose refs under `refs/tower/log`, and
@@ -37,15 +45,15 @@ const QUIET: Duration = Duration::from_millis(150);
 /// How long a dead watch child stays dead before the respawn.
 const RESPAWN: Duration = Duration::from_secs(1);
 
-/// What the feed's channel carries.
+/// What the feed's channel carries: a motion stamp.
 #[derive(Clone)]
 pub(crate) enum Latest {
-    /// The seed value before the first fold lands. Streams skip it.
+    /// The seed value before the first stamp lands. Streams wait on it.
     Pending,
-    /// The board envelope — the bytes `GET /api/board` answers, minus
-    /// its trailing newline, because that newline is `println!` framing
-    /// and SSE frames itself.
-    Board(String),
+    /// The repository moved and the log is settled. It carries nothing:
+    /// the fold is the arbiter of what changed, and each subscriber runs
+    /// its own.
+    Moved,
     /// Shutdown: every stream ends, so graceful shutdown can drain
     /// connections an SSE stream would otherwise hold open forever.
     Closing,
@@ -178,10 +186,10 @@ async fn watch_child(repo: PathBuf, dirty: Arc<Notify>) {
     }
 }
 
-/// The one publisher. It owns the watcher — dropping a
+/// The one stamper. It owns the watcher — dropping a
 /// `RecommendedWatcher` uninstalls it, so it lives exactly as long as
-/// the loop does — seeds the channel with the first fold, and then
-/// alternates settling and publishing forever.
+/// the loop does — seeds the channel with the first stamp, and then
+/// alternates settling and stamping forever.
 async fn refold_loop(
     repo: PathBuf,
     tx: Arc<watch::Sender<Latest>>,
@@ -189,10 +197,10 @@ async fn refold_loop(
     watcher: notify::RecommendedWatcher,
 ) {
     let _watcher = watcher;
-    publish(&repo, &tx).await;
+    stamp(&repo, &tx).await;
     loop {
         settle(&dirty).await;
-        publish(&repo, &tx).await;
+        stamp(&repo, &tx).await;
     }
 }
 
@@ -210,25 +218,26 @@ async fn settle(dirty: &Notify) {
     }
 }
 
-/// One refold, published. The fold runs on a blocking thread for the
-/// reason every handler's does — it spawns ff processes and `Store` is
-/// not `Sync` — and through the exact pipeline `GET /api/board` runs, so
-/// a pushed board and a pulled one can only be the same bytes. A fold
-/// that fails, panic included, says one stderr line and leaves the last
-/// board standing; the loop lives.
-async fn publish(repo: &Path, tx: &watch::Sender<Latest>) {
+/// One motion, stamped. The lazy pass runs first, on a blocking thread
+/// for the reason every handler's does — it spawns ff processes and
+/// `Store` is not `Sync` — so every subscriber's fold reads a settled
+/// log, the same pass `GET /api/board` runs ahead of its read. The
+/// pass's own append re-trips the watcher, the next pass concludes
+/// nothing, and the loop stamps once more and stops. A pass that fails,
+/// panic included, says one stderr line and the stamp still lands; the
+/// loop lives.
+async fn stamp(repo: &Path, tx: &watch::Sender<Latest>) {
     let repo = repo.to_path_buf();
-    match tokio::task::spawn_blocking(move || crate::api::board_envelope(&repo)).await {
-        Ok(Ok(envelope)) => {
-            let _ = tx.send(Latest::Board(envelope));
-        }
+    match tokio::task::spawn_blocking(move || crate::api::pass(&repo)).await {
+        Ok(Ok(())) => {}
         Ok(Err(err)) => {
-            eprintln!("the feed's refold failed; the last board stands: {err}");
+            eprintln!("the feed's pass did not run: {err}");
         }
         Err(_panicked) => {
-            eprintln!("the feed's refold failed; the last board stands: the fold panicked");
+            eprintln!("the feed's pass did not run: the pass panicked");
         }
     }
+    let _ = tx.send(Latest::Moved);
 }
 
 #[cfg(test)]

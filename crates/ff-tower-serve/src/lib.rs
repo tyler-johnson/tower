@@ -13,8 +13,9 @@
 //! Node at runtime. The API is every GET a fresh fold answering the
 //! CLI's own `--json` envelope, the verb API — POSTs appending to the
 //! log and answering the same way — and the change feed: `GET
-//! /api/feed`, one SSE stream pushing the full board envelope whenever
-//! the repository moves, whoever moved it.
+//! /api/feed?<query>`, one SSE stream per query, each subscriber
+//! folding its own board envelope whenever the repository moves,
+//! whoever moved it.
 //!
 //! # Shape
 //!
@@ -158,8 +159,8 @@ pub fn run(repo: &Path, host: IpAddr, port: u16) -> Result<Bound> {
         source,
     })?;
 
-    // Seeded `Pending`, which no stream forwards: the first thing a
-    // subscriber can see is the first fold.
+    // Seeded `Pending`, which no stream folds on: the first thing a
+    // subscriber can see is a fold after the first stamp.
     let (tx, rx) = watch::channel(Latest::Pending);
 
     Ok(Bound {

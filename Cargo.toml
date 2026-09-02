@@ -82,8 +82,8 @@ tokio = { version = "1", default-features = false, features = [
 notify = { version = "8", default-features = false, features = [
     "macos_fsevent",
 ] }
-# `WatchStream` alone: the adapter that turns the feed's watch channel
-# into the stream axum's SSE response wants.
+# `ReceiverStream` alone: the adapter that turns a feed subscriber's
+# frame channel into the stream axum's SSE response wants.
 tokio-stream = { version = "0.1", default-features = false, features = [
     "sync",
 ] }

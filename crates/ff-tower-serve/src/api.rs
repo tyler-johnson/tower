@@ -1,9 +1,13 @@
 //! The API: the CLI's `--json` surface, re-exposed over HTTP.
 //!
 //! Two halves, one contract. The read half is five resources over six
-//! GET routes, every one answering the exact envelope the matching verb
-//! emits under `--json` — same fold, same serializer, same bytes,
-//! trailing newline included. The write half is the verb API: twelve
+//! GET routes, every one answering the envelope the matching verb emits
+//! under `--json` — same fold, same serializer, same bytes, trailing
+//! newline included. The board route is the one that takes an argument:
+//! `/api/board?<query>` folds the rows through the query string `ff
+//! tower`'s views store and answers the groups and the two counts,
+//! `Query::default()` when the string is empty — the CLI board's rows
+//! under the CLI board's grouping. The write half is the verb API: twelve
 //! POST routes — file, assign, status, hold, answer, done, cancel,
 //! comment, decompose, and the three under `/api/views` — each taking
 //! the verb's arguments as a small JSON body, appending to the log, and
@@ -24,11 +28,13 @@
 //! promised. The state is the repository path and the feed's receiving
 //! end, and only `/api/feed` reads the channel: every GET stays a fresh
 //! fold, so serving stale data on the pull side is impossible by
-//! construction. The feed itself is one SSE stream pushing the full
-//! board envelope — the bytes `/api/board` answers, minus the trailing
-//! newline — whenever the repository moves, and a POST appends and
-//! answers without publishing anything: the board it changed arrives on
-//! the feed through the watcher, the way every writer's does.
+//! construction. The feed is one SSE stream per query: `/api/feed?
+//! <query>` folds its own frame against its own query on connect and
+//! again whenever the channel stamps motion, and the frame is
+//! `/api/board?<same query>`'s body minus the trailing newline. A
+//! different query is a new subscription. A POST appends and answers
+//! without publishing anything: the board it changed arrives on the
+//! feed through the watcher, the way every writer's does.
 //!
 //! # Non-goals
 //!
@@ -49,11 +55,12 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Path as RoutePath, State};
+use axum::extract::{Path as RoutePath, RawQuery, State};
 use axum::http::{HeaderName, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use ff_tower_core::board::{self, ResolveError, Verdicts};
+use ff_tower_core::board::{self, Query, ResolveError, Verdicts};
 use ff_tower_core::config;
 use ff_tower_core::ff::{self, Ff};
 use ff_tower_core::log::{self, Store};
@@ -61,16 +68,16 @@ use ff_tower_core::machine;
 use ff_tower_core::{procedure, verb};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use tokio::sync::watch;
-use tokio_stream::wrappers::WatchStream;
-use tokio_stream::{Stream, StreamExt};
+use tokio::sync::{mpsc, watch};
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::feed::Latest;
 
 /// What every route shares: the repository path the handlers fold from,
-/// and the feed channel's receiving end — read by `/api/feed` alone, so
-/// the state stays structurally incapable of serving a GET a cached
-/// fold.
+/// and the feed channel's receiving end — the motion stamp, read by
+/// `/api/feed` alone and carrying no board, so the state stays
+/// structurally incapable of serving a GET a cached fold.
 pub(crate) struct AppState {
     repo: PathBuf,
     feed: watch::Receiver<Latest>,
@@ -174,16 +181,6 @@ fn reply(status: StatusCode, line: String) -> Reply {
     )
 }
 
-/// The board's envelope, folded fresh. Shared verbatim between the
-/// `/api/board` handler and the feed's refold loop, so a pushed board
-/// and a pulled one can only ever be the same bytes.
-///
-/// The lazy pass runs first, before the read, so a GET serves a settled
-/// board — and so the feed's byte-equality holds: the pass's own append
-/// re-trips the watcher, the next refold concludes nothing, and the loop
-/// publishes identical bytes and stops. Best-effort: a pass that cannot
-/// run is one stderr line, and the board still folds; a lost race
-/// (`log/contended`) is another pass having concluded the same things.
 /// The board audit's threshold for this repository — the CLI's read,
 /// made once per request so a served board says the same thing a typed
 /// one does. A repository whose config will not open gets the compiled
@@ -195,8 +192,16 @@ fn stale_after(repo: &Path) -> i64 {
         .unwrap_or(config::DEFAULT_STALE_FLIGHT)
 }
 
-pub(crate) fn board_envelope(repo: &Path) -> Result<String, ApiError> {
-    let ff = Ff::at(repo).env_program();
+/// The lazy pass, run ahead of a read so it serves a settled board. The
+/// `/api/board` handler runs it before its fold, and the feed loop runs
+/// it once per motion ahead of every subscriber's fold — so the pass's
+/// own append re-trips the watcher, the next pass concludes nothing,
+/// and the loop stamps once more and stops. Best-effort: a pass that
+/// cannot run is one stderr line, and the board still folds; a lost
+/// race (`log/contended`) is another pass having concluded the same
+/// things. The error is the store not opening, which is the fold's
+/// failure too.
+pub(crate) fn pass(repo: &Path) -> Result<(), ApiError> {
     let store = Store::open(repo)?;
     match procedure::registry(store.main_worktree().as_deref()) {
         Ok(installed) => match verb::pass(&store, &installed) {
@@ -205,44 +210,111 @@ pub(crate) fn board_envelope(repo: &Path) -> Result<String, ApiError> {
         },
         Err(err) => eprintln!("ff-tower-serve: the pass did not run: {err}"),
     }
+    Ok(())
+}
+
+/// The board's envelope for one query, folded fresh. Shared verbatim
+/// between the `/api/board` handler and every feed subscriber, so a
+/// pushed frame and a pulled body under one query can only ever be the
+/// same bytes.
+pub(crate) fn board_envelope(repo: &Path, query: &Query) -> Result<String, ApiError> {
+    let ff = Ff::at(repo).env_program();
+    let store = Store::open(repo)?;
     let events = store.read_all()?;
-    // The default window, always: `--closed` is the CLI's per-render
-    // override, and the browser board keeps the parity `/api/board` and
-    // `ff tower --json` are asserted to have.
-    let board = board::assemble(
-        &ff,
-        &events,
-        board::now(),
-        stale_after(repo),
-        board::ClosedWindow::default(),
-    )?;
-    Ok(machine::emit("board", &board))
+    let folded = board::answer(&ff, &events, board::now(), stale_after(repo), query)?;
+    Ok(machine::emit("board", &folded))
 }
 
-async fn board(State(state): State<Arc<AppState>>) -> Reply {
-    respond("board", state, board_envelope).await
+/// The query string, parsed before any thread is spawned — the way
+/// `act` parses a body first. `Query::parse` takes the empty string as
+/// the default query, so a bare `/api/board` is the CLI board's rows.
+fn parse_query(raw: Option<String>) -> Result<Query, ApiError> {
+    Ok(Query::parse(raw.as_deref().unwrap_or_default())?)
 }
 
-/// The feed: one SSE stream over the watch channel. `WatchStream` hands
-/// a new subscriber the current value — the initial board on connect —
-/// and laggards skip intermediates, which is right for a full-board
-/// broadcast. `Pending` is skipped, `Closing` ends the stream so
-/// graceful shutdown can drain, and the default `message` event type
-/// stays: the envelope's `cmd` is the contract, the route is only the
-/// door.
-async fn feed_route(
-    State(state): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = WatchStream::new(state.feed.clone())
-        .map_while(|latest| match latest {
-            Latest::Closing => None,
-            live => Some(live),
-        })
-        .filter_map(|latest| match latest {
-            Latest::Board(envelope) => Some(Ok(Event::default().data(envelope))),
-            _ => None,
-        });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+async fn board(State(state): State<Arc<AppState>>, RawQuery(raw): RawQuery) -> Reply {
+    match parse_query(raw) {
+        Ok(query) => {
+            respond("board", state, move |repo| {
+                pass(repo)?;
+                board_envelope(repo, &query)
+            })
+            .await
+        }
+        Err(err) => refusal("board", &err),
+    }
+}
+
+/// The feed: one SSE stream per query. The query parses first, and a
+/// failure is the same 400 the board route answers. Otherwise one task
+/// per subscriber holds the watch receiver and the query, folds a frame
+/// on every stamp, and sends it down a channel of one: a slow client
+/// backpressures its own task, and the watch coalesces the stamps it
+/// missed — the laggard behavior a broadcast has, with the fold per
+/// subscriber. `Pending` waits, `Closing` ends the stream so graceful
+/// shutdown can drain, and the default `message` event type stays: the
+/// envelope's `cmd` is the contract, the route is only the door.
+async fn feed_route(State(state): State<Arc<AppState>>, RawQuery(raw): RawQuery) -> Response {
+    let query = match parse_query(raw) {
+        Ok(query) => query,
+        Err(err) => return refusal("board", &err).into_response(),
+    };
+    let (frames, rx) = mpsc::channel::<String>(1);
+    tokio::spawn(subscribe(
+        state.feed.clone(),
+        state.repo.clone(),
+        query,
+        frames,
+    ));
+    let stream =
+        ReceiverStream::new(rx).map(|data| Ok::<_, Infallible>(Event::default().data(data)));
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+/// One subscriber's loop: fold on the current stamp, wait for the next.
+/// A frame that will not send is the client gone, and the task ends
+/// with it; a fold that fails, panic included, says one stderr line
+/// and sends nothing, so the last frame stands.
+async fn subscribe(
+    mut rx: watch::Receiver<Latest>,
+    repo: PathBuf,
+    query: Query,
+    frames: mpsc::Sender<String>,
+) {
+    loop {
+        let latest = rx.borrow_and_update().clone();
+        match latest {
+            Latest::Pending => {}
+            Latest::Moved => {
+                let fold = {
+                    let repo = repo.clone();
+                    let query = query.clone();
+                    tokio::task::spawn_blocking(move || board_envelope(&repo, &query)).await
+                };
+                match fold {
+                    Ok(Ok(frame)) => {
+                        if frames.send(frame).await.is_err() {
+                            return;
+                        }
+                    }
+                    Ok(Err(err)) => {
+                        eprintln!("a feed subscriber's fold failed; its last frame stands: {err}");
+                    }
+                    Err(_panicked) => {
+                        eprintln!(
+                            "a feed subscriber's fold failed; its last frame stands: the fold panicked"
+                        );
+                    }
+                }
+            }
+            Latest::Closing => return,
+        }
+        if rx.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<String>) -> Reply {
@@ -564,6 +636,11 @@ pub(crate) enum ApiError {
     /// A write verb refusing its input — core's table, the CLI's words.
     #[error(transparent)]
     Verb(#[from] verb::Error),
+    /// A query string the codec declined — the board and feed routes'
+    /// argument, under the ids the CLI's views verbs raise for the same
+    /// text.
+    #[error(transparent)]
+    Query(#[from] board::QueryError),
     /// A POST body that does not parse as the verb's arguments — the one
     /// refusal only this surface can raise, since the CLI has clap where
     /// the server has JSON.
@@ -579,6 +656,7 @@ impl ApiError {
             ApiError::Ff(err) => err.id(),
             ApiError::Procedure(err) => err.id(),
             ApiError::Verb(err) => err.id(),
+            ApiError::Query(err) => err.id(),
             ApiError::Body { .. } => "usage/bad-body",
         }
     }
@@ -598,6 +676,7 @@ impl ApiError {
             ApiError::Ff(err) => err.exits(),
             ApiError::Procedure(err) => err.exits(),
             ApiError::Verb(err) => err.exits(),
+            ApiError::Query(err) => err.exits(),
             ApiError::Body { .. } => Vec::new(),
         };
         if own.is_empty() {
@@ -676,5 +755,14 @@ mod tests {
         }));
         assert_eq!(misspelled.id(), "usage/unknown-field");
         assert_eq!(misspelled.status(), StatusCode::BAD_REQUEST);
+
+        // The same text on a board or feed URL arrives as the direct
+        // variant: the same id, the same 400, and the query's own exit.
+        let on_the_url = ApiError::Query(board::QueryError::UnknownField {
+            text: "bogus".to_string(),
+        });
+        assert_eq!(on_the_url.id(), "usage/unknown-field");
+        assert_eq!(on_the_url.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(on_the_url.exits(), vec!["ff tower".to_string()]);
     }
 }

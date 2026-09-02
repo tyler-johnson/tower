@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import FlightRow from './FlightRow.svelte';
 	import { feed } from './feed.svelte';
-	import { age, buildRefs, type FlightView } from './tower';
+	import { age, buildRefs, inbox, rowsOf, type FlightView } from './tower';
 
 	$effect(() => {
 		feed.connect();
@@ -19,20 +19,22 @@
 
 	// The inbox pinned on top, then the status groups in lifecycle order.
 	// A flight in the inbox still stands in its group below: the inbox is
-	// a view of the same rows, not a section that removes them.
-	let sections = $derived(
-		b
-			? ([
-					['questions', b.waiting_on_you.questions],
-					['yours', b.waiting_on_you.yours],
-					['triage', b.triage],
-					['waiting', b.waiting],
-					['ready', b.ready],
-					['in progress', b.in_progress],
-					['held', b.held]
-				] as [string, FlightView[]][])
-			: []
-	);
+	// a view of the same rows, not a section that removes them. The feed
+	// answers the default query, so the groups are keyed by status.
+	let sections = $derived.by(() => {
+		if (!b) return [] as [string, FlightView[]][];
+		const pinned = inbox(b);
+		return [
+			['questions', pinned.questions],
+			['yours', pinned.yours],
+			['triage', rowsOf(b, 'triage')],
+			['waiting', rowsOf(b, 'waiting')],
+			['ready', rowsOf(b, 'ready')],
+			['in progress', rowsOf(b, 'in_progress')],
+			['held', rowsOf(b, 'held')]
+		] as [string, FlightView[]][];
+	});
+	let closed = $derived(b ? rowsOf(b, 'closed') : []);
 </script>
 
 <svelte:head>
@@ -81,28 +83,19 @@
 		on the board, so it is collapsed: there when a reader wants it, and
 		costing no height when they do not.
 	-->
-	{#if b && b.closed.length > 0}
+	{#if closed.length > 0}
 		<details class="flex flex-col gap-1">
 			<summary
 				class="cursor-pointer font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60"
 			>
-				closed {b.closed.length}
+				closed {closed.length}
 			</summary>
 			<div class="flex flex-col gap-1 pt-1">
-				{#each b.closed as view (view.id)}
+				{#each closed as view (view.id)}
 					<FlightRow {view} {refs} now={feed.now} open={view.id === open} />
 				{/each}
 			</div>
 		</details>
-	{/if}
-
-	{#if b && b.unrouted.length > 0}
-		<p class="text-sm text-warning">
-			{b.unrouted.length}
-			{b.unrouted.length === 1 ? 'event' : 'events'} in the log
-			{b.unrouted.length === 1 ? 'is' : 'are'} not on the board — run `ff tower doctor` to see which and
-			why
-		</p>
 	{/if}
 
 	{#if b}

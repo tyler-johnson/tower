@@ -17,7 +17,7 @@ use ff_tower_testsupport::Repo;
 use serde_json::json;
 
 mod support;
-use support::{Server, ff_tower, free_port, http, post};
+use support::{Server, ff_tower, free_port, http, matches_cli, post};
 
 fn served() -> (Repo, Server) {
     let repo = Repo::new();
@@ -275,14 +275,8 @@ fn the_board_after_a_save_is_unchanged_and_still_the_clis() {
     let (status, _, after) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{after}");
     assert_eq!(before, after, "a view is not a row");
-    let envelope: serde_json::Value = serde_json::from_str(&after).expect("an envelope");
-    assert_eq!(
-        envelope["data"]["unrouted"],
-        json!([]),
-        "a view event is routed, never warned about"
-    );
 
     let out = ff_tower(repo.path(), &["--json"]);
     assert!(out.status.success(), "the CLI board run failed");
-    assert_eq!(after, String::from_utf8_lossy(&out.stdout));
+    matches_cli(&after, &String::from_utf8_lossy(&out.stdout));
 }

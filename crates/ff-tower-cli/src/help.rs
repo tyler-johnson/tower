@@ -561,10 +561,15 @@ It serves the read API, the verb API, the change feed, and the board
 itself — the web app is embedded in the binary at build time, and
 every path outside /api answers a build file or the app shell.
 
-The read API is four GET routes — /api/board, /api/brief/<flight>,
-/api/bays, and /api/procedures, bare or /<name> — each answering the
-same envelope the matching verb emits under --json, folded fresh per
-request; nothing is cached. The verb API is nine POST routes —
+The read API is five GET routes — /api/board, /api/brief/<flight>,
+/api/bays, /api/procedures, bare or /<name>, and /api/views — each
+answering the same envelope the matching verb emits under --json,
+folded fresh per request; nothing is cached. /api/board takes the
+query string ff tower's views store, on its URL
+(/api/board?status=ready,in_progress&group=assignee&closed=7d), and
+answers the groups plus the two counts, hidden and filtered; no
+query is the board's own grouping, and a query it cannot parse is a
+400 under the query's own id. The verb API is nine POST routes —
 /api/file, /api/assign, /api/status, /api/hold, /api/answer,
 /api/done, /api/cancel, /api/comment, /api/decompose — each taking
 the verb's arguments as a small JSON body ({\"flight\": …} with an
@@ -578,12 +583,13 @@ or body that does not parse, 404 for a reference that names nothing,
 409 when the board's standing state refuses the write, 503 when the
 log is contended, 500 when the pipeline itself failed.
 
-The change feed is GET /api/feed, one SSE stream: the current board
-on connect, then an event whenever the repository moves, each
-event's data being the board envelope — the same bytes /api/board
-answers, minus the trailing newline. Updates arrive whoever wrote —
-this server's own POSTs, the CLI, an agent in a bay, a push landing
-— including writes that never touched this server.
+The change feed is GET /api/feed, one SSE stream per query: it
+takes the same query on its URL, folds the current board on connect,
+then an event whenever the repository moves, each subscriber's frame
+being /api/board?<query>'s body minus the trailing newline. A
+different query is a new subscription. Updates arrive whoever wrote
+— this server's own POSTs, the CLI, an agent in a bay, a push
+landing — including writes that never touched this server.
 
 It runs in the foreground the way `ff watch` does, and Ctrl-C ends
 it. It holds no state the log does not, decides nothing, and

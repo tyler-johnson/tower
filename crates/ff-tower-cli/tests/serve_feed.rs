@@ -1,11 +1,12 @@
 //! The change feed against the real binary.
 //!
 //! The suite's spine is the never-short-circuit rule: every board
-//! update rides the one refold loop, whoever wrote. The first event
+//! update rides the one stamp loop, whoever wrote. The first event
 //! equals the pulled board byte for byte, an out-of-process write
 //! reaches a stream that was already open, a POST verb's board arrives
-//! through the watcher rather than from its handler, and the server
-//! outlives its watch child — the filesystem lane alone still feeds.
+//! through the watcher rather than from its handler, a subscriber with
+//! a query gets its own fold, and the server outlives its watch child —
+//! the filesystem lane alone still feeds.
 //!
 //! The debounce itself is not pinned here: end to end it races the
 //! fold, so its honest test is the paused-clock unit test beside
@@ -18,7 +19,7 @@ use ff_tower_core::log::Store;
 use ff_tower_testsupport::{FakeFf, Repo};
 
 mod support;
-use support::{Server, Sse, command, free_port, http, post, sse};
+use support::{Server, Sse, command, free_port, http, matches_cli, post, sse};
 
 /// A repository with one filed flight on its log, and a server on it.
 fn served() -> (Repo, Server) {
@@ -72,15 +73,16 @@ fn the_feed_opens_with_the_current_board() {
     let mut feed = sse(&server.addr, "/api/feed");
     let event = feed.next_data();
 
-    // The event plus the trailing newline is the pulled board and the
-    // CLI's stdout, byte for byte: the newline is `println!` framing,
-    // and SSE frames itself. Folds are time-free, so equality holds.
+    // The event plus the trailing newline is the pulled board byte for
+    // byte — the newline is `println!` framing, and SSE frames itself —
+    // and its groups are the CLI's rows. Folds are time-free, so
+    // equality holds.
     let (status, _, body) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{body}");
     assert_eq!(format!("{event}\n"), body);
-    assert_eq!(
-        format!("{event}\n"),
-        stdout(&support::ff_tower(repo.path(), &["--json"]))
+    matches_cli(
+        &event,
+        &stdout(&support::ff_tower(repo.path(), &["--json"])),
     );
 }
 
@@ -134,17 +136,68 @@ fn a_status_move_posted_over_http_arrives_as_a_fresh_frame() {
 }
 
 /// One flight's status, read out of a board envelope wherever its
-/// section put it.
+/// group put it.
 fn flight_status(envelope: &serde_json::Value, id: &str) -> Option<String> {
-    let data = envelope["data"].as_object()?;
-    for section in data.values() {
-        for row in section.as_array().into_iter().flatten() {
+    let groups = envelope["data"]["groups"].as_array()?;
+    for group in groups {
+        for row in group["rows"].as_array().into_iter().flatten() {
             if row["id"] == serde_json::json!(id) {
                 return row["status"].as_str().map(str::to_string);
             }
         }
     }
     None
+}
+
+#[test]
+fn a_subscriber_with_a_query_gets_its_own_fold() {
+    let (repo, server) = served();
+    let mut high = sse(&server.addr, "/api/feed?priority=high");
+    let mut plain = sse(&server.addr, "/api/feed");
+    let _ = plain.next_data();
+    let first = high.next_data();
+    assert!(!first.contains("write the doctor verb"), "{first}");
+
+    stdout(&support::ff_tower(
+        repo.path(),
+        &["file", "the urgent one", "--priority", "high", "--json"],
+    ));
+    file(repo.path(), "the ordinary one");
+
+    // The plain feed carries both subjects.
+    let both = await_subject(&mut plain, "the ordinary one");
+    assert!(both.contains("the urgent one"), "{both}");
+
+    // The filtered feed carries the high one, never the bare one, and
+    // its filtered count reaches the fixture flight plus the bare one.
+    for _ in 0..20 {
+        let data = high.next_data();
+        assert!(!data.contains("the ordinary one"), "{data}");
+        let envelope: serde_json::Value = serde_json::from_str(&data).expect("an envelope");
+        if envelope["data"]["filtered"] == serde_json::json!(2) {
+            assert!(data.contains("the urgent one"), "{data}");
+            return;
+        }
+    }
+    panic!("the filtered feed never counted the bare flight out");
+}
+
+#[test]
+fn a_feed_query_that_does_not_parse_is_400() {
+    let (_repo, server) = served();
+    let (status, head, body) = http(&server.addr, "/api/feed?bogus=1");
+    assert_eq!(status, 400, "{body}");
+    assert!(
+        head.to_lowercase()
+            .contains("content-type: application/json"),
+        "{head}"
+    );
+    let envelope: serde_json::Value = serde_json::from_str(body.trim_end()).expect("an envelope");
+    assert_eq!(envelope["cmd"], serde_json::json!("board"));
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!("usage/unknown-field")
+    );
 }
 
 #[test]

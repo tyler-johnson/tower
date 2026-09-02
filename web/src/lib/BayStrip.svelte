@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { bays } from './bays.svelte';
 	import { feed } from './feed.svelte';
-	import { buildRefs, statusDot, type BayView, type Board } from './tower';
+	import { buildRefs, liveRows, statusDot, type BayView, type Folded } from './tower';
 
 	// The pool rides no SSE, so its liveness is this: touching the last
 	// frame's stamp subscribes the effect to the board, and `updatedAt`
@@ -27,17 +27,10 @@
 	/// groups, renders as held rather than free: the pool read and the
 	/// board frame are two reads, and rounding an unknown down to free
 	/// would invite a release on a bay somebody is sitting in.
-	function chip(bay: BayView, board: Board | null): { dot: string; title: string } {
+	function chip(bay: BayView, board: Folded | null): { dot: string; title: string } {
 		if (bay.flight === null) return { dot: 'status-neutral', title: 'free' };
 		if (board) {
-			const live = [
-				board.triage,
-				board.waiting,
-				board.ready,
-				board.in_progress,
-				board.held
-			].flat();
-			const view = live.find((row) => row.id === bay.flight);
+			const view = liveRows(board).find((row) => row.id === bay.flight);
 			if (view) return { dot: statusDot(view.status), title: view.status };
 		}
 		return { dot: 'status-error', title: 'occupied' };

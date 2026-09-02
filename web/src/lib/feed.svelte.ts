@@ -1,7 +1,8 @@
-// The live board: one EventSource on /api/feed, every frame a full board
-// envelope, replaced wholesale — no client diffing. Recovery is the
-// browser's own reconnect: a new subscriber immediately gets the current
-// board, so onerror never closes the source.
+// The live board: one EventSource on /api/feed — the default query, until
+// the shell carries one — every frame the query's full answer, replaced
+// wholesale — no client diffing. Recovery is the browser's own reconnect:
+// a new subscriber immediately gets the current board, so onerror never
+// closes the source.
 //
 // Named for what it exports rather than for the board, because
 // `board.svelte.ts` beside `Board.svelte` is one name on a
@@ -10,10 +11,10 @@
 // Windows while passing on Linux. Nothing here may take a component's
 // name in a different case.
 
-import type { Board, Envelope } from './tower';
+import type { Envelope, Folded } from './tower';
 
 class Feed {
-	board = $state<Board | null>(null);
+	board = $state<Folded | null>(null);
 	conn = $state<'connecting' | 'live' | 'reconnecting'>('connecting');
 	/// Last frame's arrival, in ms — the reconnecting status shows its age.
 	updatedAt = $state<number | null>(null);
@@ -27,7 +28,7 @@ class Feed {
 		if (this.#source) return;
 		this.#source = new EventSource('/api/feed');
 		this.#source.onmessage = (message) => {
-			const env: Envelope<Board> = JSON.parse(message.data);
+			const env: Envelope<Folded> = JSON.parse(message.data);
 			if (env.error || !env.data) return;
 			this.board = env.data;
 			this.updatedAt = Date.now();

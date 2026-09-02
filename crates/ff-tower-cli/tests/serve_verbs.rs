@@ -20,7 +20,7 @@ use ff_tower_testsupport::Repo;
 use serde_json::json;
 
 mod support;
-use support::{Server, ff_tower, free_port, http, post, refusal, request};
+use support::{Server, ff_tower, free_port, group, http, matches_cli, post, refusal, request};
 
 /// A repository with one filed flight on its log, and a server on it.
 fn served() -> (Repo, Server) {
@@ -91,14 +91,14 @@ fn ok(path: &str, status: u16, head: &str, body: &str, envelope: String) {
     assert_eq!(body, format!("{envelope}\n"), "{path}");
 }
 
-/// Read-after-write: the next board GET carries the write, and equals a
-/// fresh CLI run byte for byte.
+/// Read-after-write: the next board GET carries the write, and its
+/// groups hold a fresh CLI run's rows.
 fn read_after_write(server: &Server, repo: &Path) {
     let (status, _, board) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{board}");
     let out = ff_tower(repo, &["--json"]);
     assert!(out.status.success(), "the CLI board run failed");
-    assert_eq!(board, String::from_utf8_lossy(&out.stdout));
+    matches_cli(&board, &String::from_utf8_lossy(&out.stdout));
 }
 
 /// The refusal half: the status differs by design — the exit code's job
@@ -312,7 +312,7 @@ fn file_carries_the_field_flags_over_http() {
     let (status, _, board) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{board}");
     let board: serde_json::Value = serde_json::from_str(&board).expect("the board envelope");
-    let flights = board["data"]["triage"].as_array().expect("open");
+    let flights = group(&board, "triage");
     let filed = flights
         .iter()
         .find(|view| view["subject"] == json!("laned work"))

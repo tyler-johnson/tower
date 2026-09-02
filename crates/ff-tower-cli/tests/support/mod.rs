@@ -62,6 +62,54 @@ pub fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     envelope
 }
 
+/// The rows of the group keyed `key` in a served board envelope, empty
+/// when the fold dropped the group — an empty status group is not on
+/// the wire.
+pub fn group(envelope: &serde_json::Value, key: &str) -> Vec<serde_json::Value> {
+    envelope["data"]["groups"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|group| group["key"] == serde_json::json!(key))
+        .and_then(|group| group["rows"].as_array().cloned())
+        .unwrap_or_default()
+}
+
+/// The served board is the CLI's rows: for every status section the
+/// CLI's envelope carries, the served group keyed the same way holds
+/// the same rows in the same order — the default query being the board
+/// grouped by status — and the served `data` is exactly the query's
+/// answer: `groups`, `hidden`, `filtered`, nothing of the CLI board's
+/// inbox or unrouted rows.
+pub fn matches_cli(served: &str, cli: &str) {
+    let served: serde_json::Value =
+        serde_json::from_str(served.trim_end()).expect("the served envelope");
+    let cli: serde_json::Value = serde_json::from_str(cli.trim_end()).expect("the CLI envelope");
+    assert_eq!(served["cmd"], serde_json::json!("board"));
+    for key in [
+        "triage",
+        "waiting",
+        "ready",
+        "in_progress",
+        "held",
+        "closed",
+    ] {
+        let rows = cli["data"][key]
+            .as_array()
+            .cloned()
+            .unwrap_or_else(|| panic!("the CLI board carries `{key}`: {cli}"));
+        assert_eq!(group(&served, key), rows, "the `{key}` group");
+    }
+    let mut keys: Vec<&str> = served["data"]
+        .as_object()
+        .expect("the served data is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["filtered", "groups", "hidden"]);
+}
+
 /// A running server, killed on drop.
 pub struct Server {
     child: Child,
