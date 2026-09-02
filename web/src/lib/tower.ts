@@ -74,6 +74,7 @@ export interface FlightView {
 	/// pass routed it under.
 	procedure: string | null;
 	subject: string;
+	body: string;
 	filed_by: string;
 	filed_at: number;
 	comments: number;
@@ -89,6 +90,7 @@ export interface FlightView {
 	priority: string;
 	labels: string[];
 	skill: string | null;
+	bay: string | null;
 	branch: string | null;
 	tip: string | null;
 	/// The freshest session-tagged capture on this flight's branch — the

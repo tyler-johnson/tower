@@ -1,7 +1,27 @@
 <script lang="ts">
+	import Funnel from '@lucide/svelte/icons/funnel';
+	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
+	import { foldRows } from './facets';
+	import FilterBar from './FilterBar.svelte';
+	import FilterMenu from './FilterMenu.svelte';
 	import { feed } from './feed.svelte';
+	import { dismiss } from './menu';
 	import { query } from './query.svelte';
+	import { defaultQuery, type Filter } from './query';
 	import { age, refusalLines } from './tower';
+
+	let filtersOpen = $state(false);
+
+	// A new chip from the funnel. A refused query on the URL still opens
+	// it: `parsed` is null, so the chip starts from the default, and the
+	// write replaces the bad search — a second way out beside the clear
+	// link.
+	function add(filter: Filter | null) {
+		if (filter === null) return;
+		const parsed = query.parsed ?? defaultQuery();
+		query.replace({ ...parsed, filters: [...parsed.filters, filter] });
+		filtersOpen = false;
+	}
 </script>
 
 <svelte:head>
@@ -12,8 +32,8 @@
 	The chrome every view hangs in: the crumb back to the unfiltered
 	board, the view's name, the connection, and the two menus. Each menu
 	is a native details so open and close are keyboard-reachable with no
-	state of the shell's own; the filter bar and the display menu fill
-	the popovers.
+	state of the shell's own; the filter menu fills the funnel's popover,
+	and the display menu will fill the other.
 -->
 <header class="flex flex-col gap-2">
 	<div class="flex items-center gap-3">
@@ -41,45 +61,17 @@
 			</span>
 		{/if}
 		<div class="ml-auto flex items-center gap-1">
-			<details class="dropdown dropdown-end">
+			<details class="dropdown dropdown-end" bind:open={filtersOpen} {@attach dismiss()}>
 				<summary class="btn btn-ghost btn-sm btn-square" aria-label="filters">
-					<svg
-						class="size-4"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1.5"
-						viewBox="0 0 24 24"
-						aria-hidden="true"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"
-						/>
-					</svg>
+					<Funnel size={16} />
 				</summary>
-				<div
-					class="dropdown-content z-10 w-56 rounded-box border border-base-300 bg-base-100 p-3 shadow-sm"
-				>
-					<p class="text-sm text-base-content/40">filters</p>
-				</div>
+				{#if filtersOpen}
+					<FilterMenu rows={feed.board ? foldRows(feed.board) : null} onpick={add} />
+				{/if}
 			</details>
-			<details class="dropdown dropdown-end">
+			<details class="dropdown dropdown-end" {@attach dismiss()}>
 				<summary class="btn btn-ghost btn-sm btn-square" aria-label="display">
-					<svg
-						class="size-4"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1.5"
-						viewBox="0 0 24 24"
-						aria-hidden="true"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
-						/>
-					</svg>
+					<SlidersHorizontal size={16} />
 				</summary>
 				<div
 					class="dropdown-content z-10 w-56 rounded-box border border-base-300 bg-base-100 p-3 shadow-sm"
@@ -90,6 +82,7 @@
 		</div>
 	</div>
 	<!-- The view chips sit under the header row; nothing renders here yet. -->
+	<FilterBar />
 	{#if feed.error}
 		<!--
 			The query on the URL did not parse. Core's own words, the way a
