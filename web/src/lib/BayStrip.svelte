@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { bays } from './bays.svelte';
 	import { feed } from './feed.svelte';
+	import { query } from './query.svelte';
 	import { buildRefs, liveRows, statusDot, type BayView, type Folded } from './tower';
 
 	// The pool rides no SSE, so its liveness is this: touching the last
@@ -48,7 +49,7 @@
 	{#each bays.pool as bay (bay.id)}
 		{@const state = chip(bay, b)}
 		<a
-			href="/b/{encodeURIComponent(bay.id)}"
+			href={query.href(`/b/${encodeURIComponent(bay.id)}`)}
 			title={bay.path}
 			class="flex items-baseline gap-2 rounded-field px-2 hover:bg-base-200 {bay.id === here
 				? 'bg-base-200'

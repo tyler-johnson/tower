@@ -1,8 +1,15 @@
-// The live board: one EventSource on /api/feed — the default query, until
-// the shell carries one — every frame the query's full answer, replaced
-// wholesale — no client diffing. Recovery is the browser's own reconnect:
-// a new subscriber immediately gets the current board, so onerror never
-// closes the source.
+// The live board: one EventSource on /api/feed, carrying the query the
+// URL holds — every frame the query's full answer, replaced wholesale —
+// no client diffing. Recovery is the browser's own reconnect: a new
+// subscriber immediately gets the current board, so onerror never closes
+// the source.
+//
+// A non-default query is probed on /api/board before the source opens,
+// because an EventSource cannot read the 400 envelope a bad query
+// answers: it sees only a failed connection and retries forever. The
+// probe reads the refusal, and the source opens only on a query the
+// server accepted. The default query is `Query::default()` and cannot
+// refuse, so it skips the probe and the first load stays one fold.
 //
 // Named for what it exports rather than for the board, because
 // `board.svelte.ts` beside `Board.svelte` is one name on a
@@ -11,11 +18,15 @@
 // Windows while passing on Linux. Nothing here may take a component's
 // name in a different case.
 
-import type { Envelope, Folded } from './tower';
+import { get } from './api';
+import type { Envelope, Folded, TowerError } from './tower';
 
 class Feed {
 	board = $state<Folded | null>(null);
 	conn = $state<'connecting' | 'live' | 'reconnecting'>('connecting');
+	/// The refusal for the query on the URL, from the probe; `null` while
+	/// the query parses.
+	error = $state<TowerError | null>(null);
 	/// Last frame's arrival, in ms — the reconnecting status shows its age.
 	updatedAt = $state<number | null>(null);
 	/// Epoch seconds, ticked every 30s so ages stay honest between frames.
@@ -23,17 +34,30 @@ class Feed {
 
 	#source: EventSource | null = null;
 	#ticker: ReturnType<typeof setInterval> | null = null;
+	/// Bumped per connect; a probe that lost a race to a newer query
+	/// neither lands nor opens a source.
+	#latest = 0;
 
-	connect() {
-		if (this.#source) return;
-		this.#source = new EventSource('/api/feed');
+	async connect(search: string) {
+		this.close();
+		const token = ++this.#latest;
+		if (search !== '') {
+			this.board = null;
+			this.error = null;
+			this.conn = 'connecting';
+			const probe = await get<Folded>('/api/board?' + search);
+			if (token !== this.#latest) return;
+			if (probe.error || !probe.data) {
+				this.error = probe.error ?? null;
+				return;
+			}
+			this.land(probe.data);
+		}
+		this.#source = new EventSource(search === '' ? '/api/feed' : '/api/feed?' + search);
 		this.#source.onmessage = (message) => {
 			const env: Envelope<Folded> = JSON.parse(message.data);
 			if (env.error || !env.data) return;
-			this.board = env.data;
-			this.updatedAt = Date.now();
-			this.now = Math.floor(Date.now() / 1000);
-			this.conn = 'live';
+			this.land(env.data);
 		};
 		this.#source.onerror = () => {
 			this.conn = 'reconnecting';
@@ -48,6 +72,13 @@ class Feed {
 		this.#source = null;
 		if (this.#ticker !== null) clearInterval(this.#ticker);
 		this.#ticker = null;
+	}
+
+	private land(board: Folded) {
+		this.board = board;
+		this.updatedAt = Date.now();
+		this.now = Math.floor(Date.now() / 1000);
+		this.conn = 'live';
 	}
 }
 

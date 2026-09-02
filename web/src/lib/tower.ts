@@ -212,6 +212,25 @@ export function statusWord(status: string): string {
 	return status.replaceAll('_', ' ');
 }
 
+/// A group's heading. `null` keys the rows with no value for the grouped
+/// field; a status word reads as a person reads it. The wire does not say
+/// which field grouped, so the substitution stays limited to the six words
+/// the board's own sections use, and any other key prints verbatim.
+export function groupTitle(key: string | null): string {
+	if (key === null) return 'none';
+	switch (key) {
+		case 'triage':
+		case 'waiting':
+		case 'ready':
+		case 'in_progress':
+		case 'held':
+		case 'closed':
+			return statusWord(key);
+		default:
+			return key;
+	}
+}
+
 /// The right-aligned age column, on `note()`'s own precedence: the ask if
 /// there is one, else the branch's last change, else the filing.
 export function ageColumn(view: FlightView, now: number): string {

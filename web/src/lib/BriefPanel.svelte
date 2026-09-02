@@ -4,6 +4,7 @@
 	import { bays } from './bays.svelte';
 	import { feed } from './feed.svelte';
 	import { panel } from './panel.svelte';
+	import { query } from './query.svelte';
 	import {
 		age,
 		beatLine,
@@ -44,14 +45,14 @@
 	let other = $derived(brief ? unknownRows(brief) : []);
 
 	function escape(event: KeyboardEvent) {
-		if (event.key === 'Escape') goto('/');
+		if (event.key === 'Escape') goto(query.href('/'));
 	}
 </script>
 
 <svelte:window onkeydown={escape} />
 
 <!-- The board stays live behind it; the backdrop is the way back. -->
-<a href="/" aria-label="close the brief" class="fixed inset-0 z-40 bg-base-300/50"></a>
+<a href={query.href('/')} aria-label="close the brief" class="fixed inset-0 z-40 bg-base-300/50"></a>
 
 <aside
 	class="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-base-300 bg-base-100 sm:max-w-lg"
@@ -62,7 +63,7 @@
 				<div class="flex items-baseline gap-3">
 					<span class="font-mono text-primary">{ref}</span>
 					<h2 class="flex-1 font-medium">{subject}</h2>
-					<a href="/" class="btn btn-ghost btn-sm btn-square" aria-label="close">✕</a>
+					<a href={query.href('/')} class="btn btn-ghost btn-sm btn-square" aria-label="close">✕</a>
 				</div>
 				<p class="text-sm text-base-content/40">
 					{#each note as phrase, i (i)}
@@ -113,7 +114,7 @@
 					</h3>
 					{#each brief.blocks as link (link.flight)}
 						<a
-							href="/f/{link.flight}"
+							href={query.href(`/f/${link.flight}`)}
 							class="flex items-baseline gap-2 rounded-field px-1 hover:bg-base-200"
 						>
 							<span class="font-mono text-primary">
@@ -145,7 +146,7 @@
 					</p>
 					{#each brief.depends_on as link (link.flight)}
 						<a
-							href="/f/{link.flight}"
+							href={query.href(`/f/${link.flight}`)}
 							class="ml-4 flex items-baseline gap-2 rounded-field border-l border-base-300 px-1 pl-3 hover:bg-base-200"
 						>
 							<span class="font-mono text-primary">
@@ -228,7 +229,7 @@
 		<div class="flex flex-1 flex-col gap-4 p-4">
 			<div class="flex items-baseline gap-3">
 				<h2 class="flex-1 font-medium">no brief</h2>
-				<a href="/" class="btn btn-ghost btn-sm btn-square" aria-label="close">✕</a>
+				<a href={query.href('/')} class="btn btn-ghost btn-sm btn-square" aria-label="close">✕</a>
 			</div>
 			<div class="alert alert-error text-sm">
 				<span class="font-mono whitespace-pre-wrap"

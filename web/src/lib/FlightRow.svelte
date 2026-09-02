@@ -7,6 +7,7 @@
 		subjectColumn,
 		type FlightView
 	} from './tower';
+	import { query } from './query.svelte';
 
 	let {
 		view,
@@ -30,7 +31,7 @@
 	the collisions — go underneath, warn ones in the warn tone.
 -->
 <a
-	href="/f/{view.id}"
+	href={query.href(`/f/${view.id}`)}
 	class="grid grid-cols-[1ch_max-content_1ch_1fr_max-content] items-baseline gap-x-2 rounded-field px-1 hover:bg-base-200 {open
 		? 'bg-base-200'
 		: ''}"
