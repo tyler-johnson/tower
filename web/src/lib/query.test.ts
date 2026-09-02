@@ -3,7 +3,7 @@
 // hold here byte for byte.
 
 import { describe, expect, it } from 'vitest';
-import { defaultQuery, parse, render, type Query } from './query';
+import { DEFAULT_SHOW, defaultQuery, parse, render, withColumn, type Query } from './query';
 
 const DAY = 86_400;
 
@@ -111,5 +111,18 @@ describe('the query codec', () => {
 		// names refuse, values never do.
 		expect(parse('status=parked')).not.toBeNull();
 		expect(parse('priority=whenever')).not.toBeNull();
+	});
+
+	it('a column turns on where the layout puts it', () => {
+		const without = withColumn(DEFAULT_SHOW, 'status', false);
+		expect(without).toEqual(['priority', 'ref', 'subject', 'label', 'assignee', 'age']);
+		// Back on, it lands in its slot rather than at the end, so the
+		// default comes back and the show key leaves the URL.
+		expect(withColumn(without, 'status', true)).toEqual(DEFAULT_SHOW);
+		expect(withColumn(DEFAULT_SHOW, 'comments', true)).toEqual([...DEFAULT_SHOW, 'comments']);
+		// A show the URL holds in some other order is re-sorted by the
+		// first toggle.
+		expect(withColumn(['age', 'ref'], 'skill', true)).toEqual(['ref', 'age', 'skill']);
+		expect(withColumn(DEFAULT_SHOW, 'age', true)).toEqual(DEFAULT_SHOW);
 	});
 });

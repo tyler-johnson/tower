@@ -208,6 +208,23 @@ export function showable(field: Field): boolean {
 	return field !== 'body';
 }
 
+/// The columns in the order a row lays them out: the default seven in
+/// their order, then every other showable field in FIELDS order. The
+/// chips draw in this order, and a column turned on lands where this
+/// list puts it rather than at the end, so turning the seven on again
+/// gives the default back.
+export const COLUMNS: Field[] = [
+	...DEFAULT_SHOW,
+	...FIELDS.filter((field) => showable(field) && !DEFAULT_SHOW.includes(field))
+];
+
+/// `show` with `field` on or off, kept in COLUMNS order.
+export function withColumn(show: Field[], field: Field, on: boolean): Field[] {
+	const rest = show.filter((column) => column !== field);
+	if (!on) return rest;
+	return [...rest, field].sort((a, b) => COLUMNS.indexOf(a) - COLUMNS.indexOf(b));
+}
+
 export function accepts(field: Field, op: Op): boolean {
 	switch (shape(field)) {
 		case 'words':
@@ -519,6 +536,19 @@ export function renderWindow(closed: ClosedWindow): string {
 	if ('count' in closed) return `${closed.count}`;
 	return renderSpan(closed.span);
 }
+
+/// The closed window presets the select offers: the rendered spelling
+/// each stands for, and its words. A window compares through its
+/// spelling, so a URL's `closed=7d` matches `1w` here.
+export const WINDOWS: { value: string; label: string }[] = [
+	{ value: 'none', label: 'none' },
+	{ value: '3', label: 'newest 3' },
+	{ value: '10', label: 'newest 10' },
+	{ value: '1d', label: 'past day' },
+	{ value: '1w', label: 'past week' },
+	{ value: '4w', label: 'past four weeks' },
+	{ value: 'all', label: 'all' }
+];
 
 /// The unreserved set, plus `/` because branch names are full of it and
 /// a query string is where it is legal unescaped. Everything else is

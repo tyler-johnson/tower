@@ -2,6 +2,7 @@
 	import Funnel from '@lucide/svelte/icons/funnel';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import { foldRows } from './facets';
+	import DisplayMenu from './DisplayMenu.svelte';
 	import FilterBar from './FilterBar.svelte';
 	import FilterMenu from './FilterMenu.svelte';
 	import { feed } from './feed.svelte';
@@ -11,6 +12,7 @@
 	import { age, refusalLines } from './tower';
 
 	let filtersOpen = $state(false);
+	let displayOpen = $state(false);
 
 	// A new chip from the funnel. A refused query on the URL still opens
 	// it: `parsed` is null, so the chip starts from the default, and the
@@ -33,7 +35,7 @@
 	board, the view's name, the connection, and the two menus. Each menu
 	is a native details so open and close are keyboard-reachable with no
 	state of the shell's own; the filter menu fills the funnel's popover,
-	and the display menu will fill the other.
+	and the display menu fills the other.
 -->
 <header class="flex flex-col gap-2">
 	<div class="flex items-center gap-3">
@@ -69,15 +71,13 @@
 					<FilterMenu rows={feed.board ? foldRows(feed.board) : null} onpick={add} />
 				{/if}
 			</details>
-			<details class="dropdown dropdown-end" {@attach dismiss()}>
+			<details class="dropdown dropdown-end" bind:open={displayOpen} {@attach dismiss()}>
 				<summary class="btn btn-ghost btn-sm btn-square" aria-label="display">
 					<SlidersHorizontal size={16} />
 				</summary>
-				<div
-					class="dropdown-content z-10 w-56 rounded-box border border-base-300 bg-base-100 p-3 shadow-sm"
-				>
-					<p class="text-sm text-base-content/40">display</p>
-				</div>
+				{#if displayOpen}
+					<DisplayMenu />
+				{/if}
 			</details>
 		</div>
 	</div>
