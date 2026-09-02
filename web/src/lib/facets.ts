@@ -11,13 +11,13 @@ export interface Facet {
 	count: number;
 }
 
-const SECTIONS = ['triage', 'waiting', 'ready', 'in_progress', 'held', 'closed'];
+const SECTIONS = ['triage', 'waiting', 'ready', 'in_progress', 'held', 'done', 'canceled'];
 const PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'];
 const FLAGS = ['true', 'false'];
 
 /// The values a words-shaped field takes on these rows, with counts.
-/// `status` counts by section (`done` and `canceled` under `closed`) and
-/// lists the six section words in lifecycle order, zeros kept;
+/// `status` counts by section and lists the seven status words in
+/// lifecycle order, zeros kept;
 /// `priority` lists its five in rank order, zeros kept; the three flags
 /// list `true` then `false`; every other field lists what the rows
 /// carry, alphabetically, and nothing for a row with no value. An absent

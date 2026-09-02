@@ -88,7 +88,8 @@ pub fn parse_closed(raw: &str) -> Option<ClosedWindow> {
 /// field names — and a status string this binary has never heard of
 /// routes nowhere rather than being invented into a group. `closed`
 /// carries done and canceled for as much of the [`ClosedWindow`] the
-/// caller asked for; the log keeps the rest.
+/// caller asked for — one window's selection, which the render deals
+/// into two sections — and the log keeps the rest.
 #[derive(Debug, Serialize)]
 pub struct Board {
     pub waiting_on_you: WaitingOnYou,
@@ -97,7 +98,9 @@ pub struct Board {
     pub ready: Vec<FlightView>,
     pub in_progress: Vec<FlightView>,
     pub held: Vec<FlightView>,
-    /// Done and canceled, newest first, cut to the [`ClosedWindow`].
+    /// Done and canceled, newest first, cut to the [`ClosedWindow`]: one
+    /// window's selection, the JSON key `board --json` consumers read.
+    /// The render deals it into a done section and a canceled one.
     pub closed: Vec<FlightView>,
     pub unrouted: Vec<Event>,
     /// Kinds tower retired: carried for the machine envelope, and never

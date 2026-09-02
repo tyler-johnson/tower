@@ -36,8 +36,9 @@
 	The list. It draws what the fold sent, keyed on whatever the query
 	grouped by, in wire order: every group is a details with its name and
 	its count on the summary, so a group collapses on its own, and the
-	closed group of a status fold starts collapsed because it is the
-	render's memory of the week rather than work on the board. Rows lay
+	two closed groups of a status fold, done and canceled, start
+	collapsed because they are the render's memory of the week rather
+	than work on the board. Rows lay
 	out from the query's `show`, one grid per body so a section's columns
 	align down its height.
 -->
@@ -61,7 +62,7 @@
 
 {#if b}
 	{#each b.groups as group (group.key)}
-		<details class="flex flex-col gap-1" open={group.key !== 'closed'}>
+		<details class="flex flex-col gap-1" open={group.key !== 'done' && group.key !== 'canceled'}>
 			<summary class="cursor-pointer {heading}">
 				{groupTitle(group.key)}
 				<span class="text-base-content/40">{group.count}</span>

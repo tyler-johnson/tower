@@ -60,9 +60,9 @@ export function foldRows(folded: Folded): FlightView[] {
 	return [...seen.values()];
 }
 
-/// The board's own sections, core's `section()`: the five words as
-/// themselves, `done` and `canceled` as `closed`, and a status this
-/// build has never heard of names no section at all.
+/// The board's own sections, the seven status words core's grouping
+/// deals rows under, as themselves; a status this build has never heard
+/// of names no section at all.
 export function section(status: string): string | null {
 	switch (status) {
 		case 'triage':
@@ -70,13 +70,18 @@ export function section(status: string): string | null {
 		case 'ready':
 		case 'in_progress':
 		case 'held':
-			return status;
 		case 'done':
 		case 'canceled':
-			return 'closed';
+			return status;
 		default:
 			return null;
 	}
+}
+
+/// Whether a row is closed: `done` and `canceled` are two words for one
+/// end, and the record keeps both.
+export function closedRow(view: FlightView): boolean {
+	return view.status === 'done' || view.status === 'canceled';
 }
 
 /// Every live row, once: the fold walked and deduped, then each row kept
@@ -84,7 +89,7 @@ export function section(status: string): string | null {
 /// so the live board is the same set under any grouping. A closed flight
 /// is on the record rather than on the board.
 export function liveRows(folded: Folded): FlightView[] {
-	return foldRows(folded).filter((row) => section(row.status) !== 'closed');
+	return foldRows(folded).filter((row) => !closedRow(row));
 }
 
 /// The inbox, derived here the way core's `enrich` derives it: live rows
@@ -251,8 +256,9 @@ export function statusWord(status: string): string {
 
 /// A group's heading. `null` keys the rows with no value for the grouped
 /// field; a status word reads as a person reads it. The wire does not say
-/// which field grouped, so the substitution stays limited to the six words
-/// the board's own sections use, and any other key prints verbatim.
+/// which field grouped, so the substitution stays limited to the status
+/// words the board's own sections use — only `in_progress` is changed by
+/// it — and any other key prints verbatim.
 export function groupTitle(key: string | null): string {
 	if (key === null) return 'none';
 	switch (key) {
@@ -261,7 +267,8 @@ export function groupTitle(key: string | null): string {
 		case 'ready':
 		case 'in_progress':
 		case 'held':
-		case 'closed':
+		case 'done':
+		case 'canceled':
 			return statusWord(key);
 		default:
 			return key;

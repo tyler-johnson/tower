@@ -173,7 +173,10 @@ fn the_closed_flag_takes_a_count_a_word_or_the_whole_group() {
     assert!(closed_ids(&repo, &["--json", "--closed", "none"]).is_empty());
 
     let out = stdout(&ff_tower(repo.path(), &["--closed", "none"]));
-    assert!(!out.contains("closed\n"), "no group at all: {out}");
+    assert!(
+        !out.contains("done\n") && !out.contains("canceled\n"),
+        "no closed section at all: {out}"
+    );
 }
 
 #[test]
@@ -274,7 +277,8 @@ fn a_closed_flight_lands_in_the_closed_group_and_out_of_the_count() {
     stdout(&ff_tower(repo.path(), &["done", "1"]));
 
     let out = stdout(&ff_tower(repo.path(), &[]));
-    assert!(out.contains("closed\n"), "{out}");
+    assert!(out.contains("done\n"), "{out}");
+    assert!(!out.contains("canceled\n"), "nothing canceled: {out}");
     assert!(
         out.contains("1 flight · ff tower file to add one"),
         "closed is on the record, not in the count: {out}"

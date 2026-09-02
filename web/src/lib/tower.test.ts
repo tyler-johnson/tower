@@ -49,12 +49,13 @@ describe('the fold', () => {
 		const both = flight(1, 'ready', ['web', 'ui']);
 		const one = flight(2, 'in_progress', ['web']);
 		const done = flight(3, 'done', ['ui']);
+		const canceled = flight(4, 'canceled', ['web']);
 		const byLabel: Folded = {
-			groups: [group('web', [both, one]), group('ui', [both, done])],
+			groups: [group('web', [both, one, canceled]), group('ui', [both, done])],
 			hidden: 0,
 			filtered: 0
 		};
-		expect(foldRows(byLabel)).toHaveLength(3);
+		expect(foldRows(byLabel)).toHaveLength(4);
 		expect(liveRows(byLabel)).toHaveLength(2);
 		expect(buildRefs(byLabel).flights).toBe(2);
 		expect(buildRefs(byLabel).refs.get(done.id)).toBe('#3');
@@ -62,14 +63,14 @@ describe('the fold', () => {
 		const nested: Folded = {
 			groups: [
 				group('tyler', [], [group('high', [both]), group('none', [one])]),
-				group(null, [], [group('none', [done])])
+				group(null, [], [group('none', [done, canceled])])
 			],
 			hidden: 0,
 			filtered: 0
 		};
-		expect(foldRows(nested)).toHaveLength(3);
+		expect(foldRows(nested)).toHaveLength(4);
 		expect(liveRows(nested)).toHaveLength(2);
 		expect(buildRefs(nested).flights).toBe(2);
-		expect(buildRefs(nested).refs.size).toBe(3);
+		expect(buildRefs(nested).refs.size).toBe(4);
 	});
 });

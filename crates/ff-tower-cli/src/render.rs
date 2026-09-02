@@ -10,7 +10,8 @@
 //! The board is the inbox pinned above the status groups, and the groups
 //! are the stored model in lifecycle order. Glyphs carry the meaning
 //! independent of color: `?` a question stopped on you, `!` yours, `·`
-//! triage, `⋯` waiting, `○` ready, `▸` in progress, `‖` held, `▪` closed.
+//! triage, `⋯` waiting, `○` ready, `▸` in progress, `‖` held, `▪` done,
+//! `▫` canceled.
 //! A local vocabulary, not fufu's — `@ ● ✓ ✕` name git objects, not
 //! flight states.
 //!
@@ -231,18 +232,32 @@ fn note(
 ///
 /// The inbox first — a view of the same rows, so a flight in it prints
 /// twice — then the status groups in lifecycle order, empty ones skipped.
-/// The columns are measured across every group at once, so the board
-/// aligns down its whole height rather than per section.
+/// The board's one closed window is dealt into a done section and a
+/// canceled one, each keeping the window's newest-first order. The
+/// columns are measured across every group at once, so the board aligns
+/// down its whole height rather than per section.
 pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String {
-    let sections: [(&str, char, &[FlightView]); 8] = [
-        ("questions", '?', &board.waiting_on_you.questions),
-        ("yours", '!', &board.waiting_on_you.yours),
-        ("triage", '·', &board.triage),
-        ("waiting", '⋯', &board.waiting),
-        ("ready", '○', &board.ready),
-        ("in progress", '▸', &board.in_progress),
-        ("held", '‖', &board.held),
-        ("closed", '▪', &board.closed),
+    let closed = |status: &str| -> Vec<&FlightView> {
+        board
+            .closed
+            .iter()
+            .filter(|view| view.status == status)
+            .collect()
+    };
+    let sections: [(&str, char, Vec<&FlightView>); 9] = [
+        (
+            "questions",
+            '?',
+            board.waiting_on_you.questions.iter().collect(),
+        ),
+        ("yours", '!', board.waiting_on_you.yours.iter().collect()),
+        ("triage", '·', board.triage.iter().collect()),
+        ("waiting", '⋯', board.waiting.iter().collect()),
+        ("ready", '○', board.ready.iter().collect()),
+        ("in progress", '▸', board.in_progress.iter().collect()),
+        ("held", '‖', board.held.iter().collect()),
+        ("done", '▪', closed("done")),
+        ("canceled", '▫', closed("canceled")),
     ];
     // The footer counts live work: the inbox is a second view of rows the
     // groups already carry, and a closed flight is on the record rather
@@ -282,7 +297,7 @@ pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String
         .unwrap_or(0);
 
     let mut out = String::new();
-    for (title, glyph, views) in sections {
+    for (title, glyph, views) in &sections {
         if views.is_empty() {
             continue;
         }

@@ -75,29 +75,35 @@ pub fn group(envelope: &serde_json::Value, key: &str) -> Vec<serde_json::Value> 
         .unwrap_or_default()
 }
 
-/// The served board is the CLI's rows: for every status section the
-/// CLI's envelope carries, the served group keyed the same way holds
+/// The served board is the CLI's rows: for every live status section
+/// the CLI's envelope carries, the served group keyed the same way holds
 /// the same rows in the same order — the default query being the board
-/// grouped by status — and the served `data` is exactly the query's
-/// answer: `groups`, `hidden`, `filtered`, nothing of the CLI board's
-/// inbox or unrouted rows.
+/// grouped by status — the CLI's one `closed` window is the served
+/// `done` and `canceled` groups dealt by status, and the served `data`
+/// is exactly the query's answer: `groups`, `hidden`, `filtered`,
+/// nothing of the CLI board's inbox or unrouted rows.
 pub fn matches_cli(served: &str, cli: &str) {
     let served: serde_json::Value =
         serde_json::from_str(served.trim_end()).expect("the served envelope");
     let cli: serde_json::Value = serde_json::from_str(cli.trim_end()).expect("the CLI envelope");
     assert_eq!(served["cmd"], serde_json::json!("board"));
-    for key in [
-        "triage",
-        "waiting",
-        "ready",
-        "in_progress",
-        "held",
-        "closed",
-    ] {
+    for key in ["triage", "waiting", "ready", "in_progress", "held"] {
         let rows = cli["data"][key]
             .as_array()
             .cloned()
             .unwrap_or_else(|| panic!("the CLI board carries `{key}`: {cli}"));
+        assert_eq!(group(&served, key), rows, "the `{key}` group");
+    }
+    let closed = cli["data"]["closed"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("the CLI board carries `closed`: {cli}"));
+    for key in ["done", "canceled"] {
+        let rows: Vec<serde_json::Value> = closed
+            .iter()
+            .filter(|row| row["status"] == serde_json::json!(key))
+            .cloned()
+            .collect();
         assert_eq!(group(&served, key), rows, "the `{key}` group");
     }
     let mut keys: Vec<&str> = served["data"]

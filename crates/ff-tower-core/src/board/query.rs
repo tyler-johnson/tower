@@ -575,12 +575,11 @@ impl Query {
     ///
     /// Grouping by `label` puts a flight in every column it carries, and
     /// a flight carrying none lands in the `null` column. Grouping by
-    /// `status` deals rows into the board's own sections — `done` and
-    /// `canceled` together under `closed` — and a status this binary has
-    /// never heard of routes nowhere, exactly as
-    /// [`enrich`](super::enrich) has it. A `status` filter takes the
-    /// same `closed`, so a column's key can be handed straight back as
-    /// the value that selects it.
+    /// `status` deals rows under the seven status words, and a status
+    /// this binary has never heard of routes nowhere, exactly as
+    /// [`enrich`](super::enrich) has it. A column's key is a filter
+    /// value, so it can be handed straight back as the value that
+    /// selects it.
     ///
     /// `now` arrives from the caller, like everywhere else in this
     /// module: a relative filter and a span window both need a clock,
@@ -606,12 +605,12 @@ impl Query {
         };
 
         for group in &mut groups {
-            // The closed column keeps the window's own newest-first
+            // The two closed columns keep the window's own newest-first
             // order: the window selected by recency, and re-sorting what
             // it chose would answer a different question than the one it
             // was asked.
-            let newest_first =
-                self.group == Some(Field::Status) && group.key.as_deref() == Some("closed");
+            let newest_first = self.group == Some(Field::Status)
+                && matches!(group.key.as_deref(), Some("done" | "canceled"));
             sort(&mut group.rows, self.order, newest_first);
             if let (Some(_), Some(sub)) = (self.group, self.subgroup) {
                 let rows = std::mem::take(&mut group.rows);
@@ -1040,16 +1039,19 @@ fn one(filter: &Filter, held: Option<&str>) -> bool {
     }
 }
 
-/// Whether a status filter holds. `closed` is the word grouping deals
-/// `done` and `canceled` into, so it filters as that pair too: a column
-/// key round-trips as a filter value, and `not:closed` is every live
-/// row. Any other word compares as itself, unknown ones included.
+/// Whether a status filter holds. `closed` is an alias for the pair
+/// `done` and `canceled`, kept for the record: no column deals `closed`
+/// any more, but a saved view or a `not:closed` from before the split
+/// may still hold the word, and it still means every closed row. Any
+/// other word compares as itself, unknown ones included.
 fn status_holds(filter: &Filter, status: &str) -> bool {
     let Value::Words(words) = &filter.value else {
         return false;
     };
-    let hit = words.iter().any(|word| word == status)
-        || section(status).is_some_and(|name| words.iter().any(|word| word == name));
+    let closed = matches!(status, "done" | "canceled");
+    let hit = words
+        .iter()
+        .any(|word| word == status || (closed && word == "closed"));
     match filter.op {
         Op::Is => hit,
         Op::IsNot => !hit,
@@ -1105,37 +1107,27 @@ fn vocabulary(field: Field) -> &'static [&'static str] {
             "ready",
             "in_progress",
             "held",
-            "closed",
+            "done",
+            "canceled",
         ],
         Field::Priority => &["urgent", "high", "medium", "low", "none"],
         _ => &[],
     }
 }
 
-/// The board's own sections, which is what grouping by status means:
-/// `done` and `canceled` are one closed column, and a status this
-/// binary has never heard of names no column at all.
-fn section(status: &str) -> Option<&'static str> {
-    match status {
-        "triage" => Some("triage"),
-        "waiting" => Some("waiting"),
-        "ready" => Some("ready"),
-        "in_progress" => Some("in_progress"),
-        "held" => Some("held"),
-        "done" | "canceled" => Some("closed"),
-        _ => None,
-    }
-}
-
 /// Which columns a row belongs in. Usually one; `label` is every label
 /// it carries, and none at all drops the row — which only `status` does,
-/// for a word that names no section.
+/// for a word this binary has never heard of: such a status names no
+/// column, as now.
 fn keys(field: Field, view: &FlightView) -> Vec<Option<String>> {
     match field {
-        Field::Status => section(&view.status)
-            .map(|name| Some(name.to_string()))
-            .into_iter()
-            .collect(),
+        Field::Status => {
+            if lifecycle(&view.status) < 7 {
+                vec![Some(view.status.clone())]
+            } else {
+                Vec::new()
+            }
+        }
         Field::Priority => vec![Some(view.priority.clone())],
         Field::Assignee => vec![view.assignee.clone()],
         Field::Skill => vec![view.skill.clone()],
@@ -1562,8 +1554,9 @@ mod tests {
     }
 
     #[test]
-    fn the_closed_column_key_filters_as_a_value() {
-        // The word grouping deals the pair under selects the pair.
+    fn closed_filters_as_the_pair() {
+        // The alias no column deals any more still selects the pair, so
+        // a saved view from before the split keeps its meaning.
         assert_eq!(kept("status=closed&closed=all"), ["pi.6", "pi.7"]);
 
         // Its negation is every live row, and nothing else.
@@ -1594,8 +1587,8 @@ mod tests {
                 .iter()
                 .filter_map(|group| group.key.as_deref())
                 .collect::<Vec<&str>>(),
-            ["triage", "ready", "in_progress", "closed"],
-            "every section the fixture reaches stands"
+            ["triage", "ready", "in_progress", "done", "canceled"],
+            "every status the fixture reaches stands"
         );
 
         for group in &grouped.groups {
@@ -1685,7 +1678,8 @@ mod tests {
                 Some("ready"),
                 Some("in_progress"),
                 Some("held"),
-                Some("closed"),
+                Some("done"),
+                Some("canceled"),
             ],
             "the whole vocabulary, in lifecycle order"
         );
@@ -1779,6 +1773,16 @@ mod tests {
         );
         let folded = Query::default().fold(flights(&events), NOW);
 
+        // The board's one closed window, dealt by status: the render
+        // does the same split.
+        let closed = |status: &str| -> Vec<&str> {
+            board
+                .closed
+                .iter()
+                .filter(|view| view.status == status)
+                .map(|view| view.id.as_str())
+                .collect()
+        };
         assert_eq!(
             columns(&folded),
             [
@@ -1787,14 +1791,20 @@ mod tests {
                 (Some("ready"), ids(&board.ready)),
                 (Some("in_progress"), ids(&board.in_progress)),
                 (Some("held"), ids(&board.held)),
-                (Some("closed"), ids(&board.closed)),
+                (Some("done"), closed("done")),
+                (Some("canceled"), closed("canceled")),
             ],
             "the default query is today's board, section for section and row for row"
         );
         assert_eq!(
             ids(&board.closed),
             ["pi.11", "pi.10", "pi.9"],
-            "the closed column keeps the window's own newest-first order"
+            "the window's own newest-first order"
+        );
+        assert_eq!(
+            closed("done"),
+            ["pi.11", "pi.9"],
+            "the done column keeps the window's own newest-first order"
         );
         assert_eq!(
             folded.hidden, 1,

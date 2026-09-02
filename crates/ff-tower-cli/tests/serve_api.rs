@@ -166,7 +166,7 @@ fn a_query_on_the_board_route_folds_it() {
     let windowed = board(&server, "/api/board?closed=none");
     assert_eq!(windowed["data"]["hidden"], json!(1), "{windowed}");
     assert_eq!(windowed["data"]["filtered"], json!(0));
-    assert!(group(&windowed, "closed").is_empty());
+    assert!(group(&windowed, "done").is_empty());
 }
 
 #[test]
