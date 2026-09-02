@@ -19,7 +19,8 @@ const FLAGS = ['true', 'false'];
 /// `status` counts by section and lists the seven status words in
 /// lifecycle order, zeros kept;
 /// `priority` lists its five in rank order, zeros kept; the three flags
-/// list `true` then `false`; every other field lists what the rows
+/// list `true` then `false`; `for` offers `me` alone, zero kept; every
+/// other field lists what the rows
 /// carry, alphabetically, and nothing for a row with no value. An absent
 /// value has no filter — core's `one()` never matches `None` — so there
 /// is no "none" row to offer.
@@ -63,6 +64,11 @@ export function facets(field: Field, rows: FlightView[]): Facet[] {
 			case 'held':
 				hit(String(row.held));
 				break;
+			case 'for':
+				// The rows only a person can handle: an open question in
+				// any lane, or the `me` lane at any status.
+				if (row.question !== null || row.assignee === 'me') hit('me');
+				break;
 			default:
 				return [];
 		}
@@ -78,6 +84,8 @@ export function facets(field: Field, rows: FlightView[]): Facet[] {
 		case 'changed_since_ready':
 		case 'held':
 			return listed(FLAGS);
+		case 'for':
+			return listed(['me']);
 		default:
 			return listed([...counts.keys()].sort());
 	}

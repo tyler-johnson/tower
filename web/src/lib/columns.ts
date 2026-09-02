@@ -79,6 +79,7 @@ export function cell(field: Field, view: FlightView, refs: Map<string, string>, 
 		case 'held':
 			return { kind: 'flag', text: 'held', on: view.held };
 		case 'body':
+		case 'for':
 			// Not showable, and the switch needs a leg.
 			return { kind: 'dim', text: '' };
 	}

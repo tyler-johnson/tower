@@ -46,7 +46,8 @@ use super::model::{self, ClosedWindow, DEFAULT_CLOSED, FlightView, closed_at, ra
 /// tables below say what each one is allowed to be: a predicate, a
 /// grouping, an ordering, a column. `Ref`, `Age`, `Comments` and
 /// `Progress` are columns and never predicates — they are derivations a
-/// render prints, not stored facts to compare against.
+/// render prints, not stored facts to compare against. `For` is the one
+/// predicate-only field, derived from two facts and never a cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Field {
@@ -66,6 +67,7 @@ pub enum Field {
     Stale,
     ChangedSinceReady,
     Held,
+    For,
     Ref,
     Age,
     Comments,
@@ -73,7 +75,7 @@ pub enum Field {
 }
 
 /// Every field, in the order the refusals list them.
-pub const FIELDS: [Field; 20] = [
+pub const FIELDS: [Field; 21] = [
     Field::Status,
     Field::Assignee,
     Field::Priority,
@@ -90,6 +92,7 @@ pub const FIELDS: [Field; 20] = [
     Field::Stale,
     Field::ChangedSinceReady,
     Field::Held,
+    Field::For,
     Field::Ref,
     Field::Age,
     Field::Comments,
@@ -130,6 +133,7 @@ impl Field {
             Field::Stale => "stale",
             Field::ChangedSinceReady => "changed_since_ready",
             Field::Held => "held",
+            Field::For => "for",
             Field::Ref => "ref",
             Field::Age => "age",
             Field::Comments => "comments",
@@ -177,9 +181,10 @@ impl Field {
     }
 
     /// Whether a row can carry it as a column. Everything but the body,
-    /// which is a flight's prose — the single view's, never a list's.
+    /// which is a flight's prose — the single view's, never a list's —
+    /// and `for`, a predicate over two facts with no cell of its own.
     pub fn showable(&self) -> bool {
-        *self != Field::Body
+        !matches!(self, Field::Body | Field::For)
     }
 
     fn shape(&self) -> Shape {
@@ -194,7 +199,8 @@ impl Field {
             | Field::Branch
             | Field::Stale
             | Field::ChangedSinceReady
-            | Field::Held => Shape::Words,
+            | Field::Held
+            | Field::For => Shape::Words,
             Field::Subject | Field::Body => Shape::Text,
             Field::Filed | Field::Moved | Field::Changed => Shape::Time,
             Field::Ref | Field::Age | Field::Comments | Field::Progress => Shape::Column,
@@ -1012,6 +1018,7 @@ fn holds(filter: &Filter, view: &FlightView, now: i64) -> bool {
         Field::Stale => one(filter, Some(spelled(view.stale))),
         Field::ChangedSinceReady => one(filter, Some(spelled(view.changed_since_ready))),
         Field::Held => one(filter, Some(spelled(view.held))),
+        Field::For => for_holds(filter, view),
         Field::Subject => contains(filter, &view.subject),
         Field::Body => contains(filter, &view.body),
         Field::Filed => moment_holds(filter, Some(view.filed_at), now),
@@ -1032,6 +1039,23 @@ fn one(filter: &Filter, held: Option<&str>) -> bool {
         return false;
     };
     let hit = held.is_some_and(|held| words.iter().any(|word| word == held));
+    match filter.op {
+        Op::Is => hit,
+        Op::IsNot => !hit,
+        _ => false,
+    }
+}
+
+/// Whether `for` holds. `me` is the rows only a person can handle: an
+/// open question in any lane, or the `me` lane at any status — what the
+/// CLI's inbox pins, as one predicate. No other word names anyone, so
+/// it matches nothing, values being open as everywhere.
+fn for_holds(filter: &Filter, view: &FlightView) -> bool {
+    let Value::Words(words) = &filter.value else {
+        return false;
+    };
+    let mine = view.question.is_some() || view.assignee.as_deref() == Some("me");
+    let hit = mine && words.iter().any(|word| word == "me");
     match filter.op {
         Op::Is => hit,
         Op::IsNot => !hit,
@@ -1461,6 +1485,9 @@ mod tests {
             ("group=subject", "usage/not-groupable"),
             ("order=label", "usage/not-orderable"),
             ("show=body", "usage/not-showable"),
+            ("group=for", "usage/not-groupable"),
+            ("order=for", "usage/not-orderable"),
+            ("show=for", "usage/not-showable"),
             ("comments=3", "usage/not-filterable"),
             ("status=isnt:ready", "usage/unknown-operator"),
             ("filed=after:soon", "usage/bad-time"),
@@ -1551,6 +1578,41 @@ mod tests {
             .collect();
         ids.sort();
         ids
+    }
+
+    #[test]
+    fn for_me_is_the_rows_only_a_person_can_handle() {
+        // A question in any lane, and the `me` lane at any status: the
+        // inbox the CLI pins, as one predicate.
+        let views = flights(&[
+            filed("pi.1", 10, "in_progress", "none", Some("agent"), &[]),
+            filed("pi.2", 20, "ready", "none", Some("me"), &[]),
+            filed("pi.3", 30, "in_progress", "none", Some("me"), &[]),
+            filed("pi.4", 40, "ready", "none", Some("agent"), &[]),
+            filed("pi.5", 50, "triage", "none", None, &[]),
+            event(
+                "pi.6",
+                60,
+                Kind::Held {
+                    flight: "pi.1".parse().expect("id"),
+                    question: "which?".to_string(),
+                },
+            ),
+        ]);
+        let kept = |raw: &str| -> Vec<String> {
+            let folded = Query::parse(raw).expect(raw).fold(views.clone(), NOW);
+            let mut ids: Vec<String> = folded
+                .groups
+                .iter()
+                .flat_map(|group| group.rows.iter())
+                .map(|view| view.id.clone())
+                .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(kept("for=me"), ["pi.1", "pi.2", "pi.3"]);
+        assert_eq!(kept("for=not:me"), ["pi.4", "pi.5"]);
+        assert!(kept("for=you").is_empty(), "no other word names anyone");
     }
 
     #[test]

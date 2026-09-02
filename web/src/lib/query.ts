@@ -33,6 +33,7 @@ export type Field =
 	| 'stale'
 	| 'changed_since_ready'
 	| 'held'
+	| 'for'
 	| 'ref'
 	| 'age'
 	| 'comments'
@@ -56,6 +57,7 @@ export const FIELDS: Field[] = [
 	'stale',
 	'changed_since_ready',
 	'held',
+	'for',
 	'ref',
 	'age',
 	'comments',
@@ -150,6 +152,7 @@ export function shape(field: Field): Shape {
 		case 'stale':
 		case 'changed_since_ready':
 		case 'held':
+		case 'for':
 			return 'words';
 		case 'subject':
 		case 'body':
@@ -203,9 +206,10 @@ export function orderable(field: Field): boolean {
 	}
 }
 
-/// Whether a row can carry it as a column. Everything but the body.
+/// Whether a row can carry it as a column. Everything but the body and
+/// `for`, a predicate over two facts with no cell of its own.
 export function showable(field: Field): boolean {
-	return field !== 'body';
+	return field !== 'body' && field !== 'for';
 }
 
 /// The columns in the order a row lays them out: the default seven in

@@ -97,6 +97,7 @@ describe('the query codec', () => {
 			'group=subject',
 			'order=label',
 			'show=body',
+			'show=for',
 			'closed=soon',
 			'empty=maybe',
 			'mode=grid',
@@ -104,6 +105,14 @@ describe('the query codec', () => {
 		]) {
 			expect(parse(raw), raw).toBeNull();
 		}
+	});
+
+	it('for=me round trips as a filter alone', () => {
+		const query = parse('for=me');
+		expect(query).not.toBeNull();
+		if (query === null) return;
+		expect(query.filters).toEqual([{ field: 'for', op: 'is', value: { words: ['me'] } }]);
+		expect(render(query)).toBe('for=me');
 	});
 
 	it('an unknown value parses', () => {
