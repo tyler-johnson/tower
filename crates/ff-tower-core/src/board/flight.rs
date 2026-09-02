@@ -1,8 +1,8 @@
 //! The fold: the log's events, partitioned into flights, each carrying
 //! its dense per-writer number — the human name's numeric half.
 //!
-//! Pure by construction — this file imports the log's types and nothing
-//! else. No `crate::ff`, no `std::process`: the compiler is what keeps
+//! Pure by construction — this file imports the log's types, the view
+//! beside it, and nothing else. No `crate::ff`, no `std::process`: the compiler is what keeps
 //! principle 11 checkable rather than aspirational. Everything a flight
 //! needs from the repository arrives later, in `enrich`, over data the
 //! caller already fetched.
@@ -22,8 +22,9 @@
 //! appended. Old logs fold without migration — a hand `waiting` word
 //! reads as cleared, and the edges say the rest.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use super::view::View;
 use crate::log::{Event, EventId, Kind, RETIRED_KINDS};
 
 /// One flight, assembled from its `filed` event and everything that named
@@ -198,6 +199,10 @@ pub struct Comment {
 pub struct Fold {
     /// Filed order.
     pub flights: Vec<Flight>,
+    /// The saved views in minting order, deleted ones gone. Every
+    /// author's, personal included: [`views`](super::views) is the
+    /// viewer's cut.
+    pub views: Vec<View>,
     /// Comments and links naming a flight never filed, and kinds from
     /// ahead of this binary. Carried, never dropped, never an error — a
     /// fold that refused data it half-understood would flicker between
@@ -213,8 +218,9 @@ pub struct Fold {
 /// Fold the union into flights. Three passes, and that is load-bearing:
 /// the union orders by `(time, writer, seq)` and wall clocks disagree
 /// across machines, so a comment from a fast clock can sort *before* the
-/// filing it names. Pass 1 mints every flight; pass 2 attaches to flights
-/// that exist anywhere in the log, not merely earlier in it; pass 3
+/// filing it names. Pass 1 mints every flight and every view; pass 2
+/// attaches to flights and views that exist anywhere in the log, not
+/// merely earlier in it; pass 3
 /// applies edits after every comment exists, because an edit can name a
 /// comment and ride the same skew. A numbering post-pass then ranks each
 /// writer's filings by seq — by seq and not union order, so a clock step
@@ -225,61 +231,90 @@ pub struct Fold {
 pub fn fold(events: &[Event]) -> Fold {
     let mut flights: Vec<Flight> = Vec::new();
     let mut by_id: HashMap<&EventId, usize> = HashMap::new();
+    let mut views: Vec<View> = Vec::new();
+    let mut views_by_id: HashMap<&EventId, usize> = HashMap::new();
+    let mut deleted: HashSet<usize> = HashSet::new();
     let mut unrouted: Vec<Event> = Vec::new();
     let mut retired: Vec<Event> = Vec::new();
 
     for event in events {
-        if let Kind::Filed {
-            procedure,
-            subject,
-            body,
-            status,
-            assignee,
-            priority,
-            labels,
-            skill,
-            bay,
-            done,
-            branch,
-        } = &event.kind
-        {
-            // A duplicate filed id is unreachable by construction — ids
-            // are unique per writer, writers cannot collide — but a
-            // hand-edited log must not panic: first filing wins.
-            if by_id.contains_key(&event.id) {
-                unrouted.push(event.clone());
-                continue;
+        match &event.kind {
+            Kind::Filed {
+                procedure,
+                subject,
+                body,
+                status,
+                assignee,
+                priority,
+                labels,
+                skill,
+                bay,
+                done,
+                branch,
+            } => {
+                // A duplicate filed id is unreachable by construction —
+                // ids are unique per writer, writers cannot collide — but
+                // a hand-edited log must not panic: first filing wins.
+                if by_id.contains_key(&event.id) {
+                    unrouted.push(event.clone());
+                    continue;
+                }
+                by_id.insert(&event.id, flights.len());
+                let mut stand = Stand::default();
+                assign(&mut stand, status);
+                flights.push(Flight {
+                    id: event.id.clone(),
+                    number: 0,
+                    procedure: procedure.clone(),
+                    subject: subject.clone(),
+                    body: body.clone(),
+                    filed_by: event.author.clone(),
+                    filed_at: event.time,
+                    comments: Vec::new(),
+                    depends_on: Vec::new(),
+                    blocks: Vec::new(),
+                    stand,
+                    moved: None,
+                    answered: None,
+                    status: String::new(),
+                    status_mark: None,
+                    status_dep: None,
+                    assignee: assignee.clone(),
+                    priority: priority.clone(),
+                    labels: labels.clone(),
+                    skill: skill.clone(),
+                    bay: bay.clone(),
+                    done_kind: done.clone(),
+                    branch_stamp: branch.clone(),
+                    question: None,
+                    edited: None,
+                });
             }
-            by_id.insert(&event.id, flights.len());
-            let mut stand = Stand::default();
-            assign(&mut stand, status);
-            flights.push(Flight {
-                id: event.id.clone(),
-                number: 0,
-                procedure: procedure.clone(),
-                subject: subject.clone(),
-                body: body.clone(),
-                filed_by: event.author.clone(),
-                filed_at: event.time,
-                comments: Vec::new(),
-                depends_on: Vec::new(),
-                blocks: Vec::new(),
-                stand,
-                moved: None,
-                answered: None,
-                status: String::new(),
-                status_mark: None,
-                status_dep: None,
-                assignee: assignee.clone(),
-                priority: priority.clone(),
-                labels: labels.clone(),
-                skill: skill.clone(),
-                bay: bay.clone(),
-                done_kind: done.clone(),
-                branch_stamp: branch.clone(),
-                question: None,
-                edited: None,
-            });
+            // A view mints here beside the flights, so cross-writer clock
+            // skew cannot sort an edit before its mint. Same duplicate
+            // rule as a filing: first mint wins.
+            Kind::ViewSaved {
+                view: None,
+                name,
+                query,
+                shared,
+            } => {
+                if views_by_id.contains_key(&event.id) {
+                    unrouted.push(event.clone());
+                    continue;
+                }
+                views_by_id.insert(&event.id, views.len());
+                views.push(View {
+                    id: event.id.clone(),
+                    name: name.clone(),
+                    query: query.clone(),
+                    shared: *shared,
+                    author: event.author.clone(),
+                    saved_by: event.author.clone(),
+                    saved_at: event.time,
+                });
+            }
+            _ => {}
         }
     }
 
@@ -433,6 +468,35 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 None => unrouted.push(event.clone()),
             },
+            // Pass 1 took the mint.
+            Kind::ViewSaved { view: None, .. } => {}
+            // Wholesale: a view is three fields, so the last save is the
+            // view. A save naming a deleted view is a no-op, never a
+            // resurrection — a delete is final.
+            Kind::ViewSaved {
+                view: Some(id),
+                name,
+                query,
+                shared,
+            } => match views_by_id.get(id) {
+                Some(&at) if !deleted.contains(&at) => {
+                    let view = &mut views[at];
+                    view.name = name.clone();
+                    view.query = query.clone();
+                    view.shared = *shared;
+                    view.saved_by = event.author.clone();
+                    view.saved_at = event.time;
+                }
+                Some(_) => {}
+                None => unrouted.push(event.clone()),
+            },
+            // A second delete is a no-op, like an unlink of no edge.
+            Kind::ViewDeleted { view } => match views_by_id.get(view) {
+                Some(&at) => {
+                    deleted.insert(at);
+                }
+                None => unrouted.push(event.clone()),
+            },
             Kind::Unknown { kind, .. } if RETIRED_KINDS.contains(&kind.as_str()) => {
                 retired.push(event.clone())
             }
@@ -538,8 +602,16 @@ pub fn fold(events: &[Event]) -> Fold {
 
     derive(&mut flights, &by_id);
 
+    let views = views
+        .into_iter()
+        .enumerate()
+        .filter(|(at, _)| !deleted.contains(at))
+        .map(|(_, view)| view)
+        .collect();
+
     Fold {
         flights,
+        views,
         unrouted,
         retired,
     }
@@ -765,6 +837,42 @@ mod tests {
         status(id, time, flight, "done")
     }
 
+    fn saved(
+        id: &str,
+        time: i64,
+        view: Option<&str>,
+        name: &str,
+        query: &str,
+        shared: bool,
+    ) -> Event {
+        event(
+            id,
+            time,
+            Kind::ViewSaved {
+                view: view.map(|view| view.parse().expect("id")),
+                name: name.to_string(),
+                query: query.to_string(),
+                shared,
+            },
+        )
+    }
+
+    fn deleted(id: &str, time: i64, view: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::ViewDeleted {
+                view: view.parse().expect("id"),
+            },
+        )
+    }
+
+    /// The same event under another author — the cross-writer cases.
+    fn by(mut event: Event, author: &str) -> Event {
+        event.author = author.to_string();
+        event
+    }
+
     fn edited(
         id: &str,
         time: i64,
@@ -785,6 +893,115 @@ mod tests {
                 bay: None,
             },
         )
+    }
+
+    #[test]
+    fn a_view_save_mints_a_view_and_routes() {
+        let fold = fold(&[saved("pi.1", 10, None, "mine", "assignee=me", false)]);
+        assert!(fold.flights.is_empty(), "a view is not a flight");
+        assert!(fold.unrouted.is_empty(), "a well-formed view event routes");
+        let view = &fold.views[0];
+        assert_eq!(view.id.to_string(), "pi.1");
+        assert_eq!(view.name, "mine");
+        assert_eq!(view.query, "assignee=me");
+        assert!(!view.shared);
+        assert_eq!(view.author, "a@b.c");
+        assert_eq!(view.saved_by, "a@b.c");
+        assert_eq!(view.saved_at, 10);
+    }
+
+    #[test]
+    fn a_second_save_replaces_wholesale_and_moves_the_save_mark() {
+        let fold = fold(&[
+            saved("pi.1", 10, None, "mine", "assignee=me", false),
+            by(
+                saved("o.1", 20, Some("pi.1"), "ours", "", true),
+                "other@b.c",
+            ),
+        ]);
+        assert_eq!(fold.views.len(), 1);
+        let view = &fold.views[0];
+        assert_eq!(view.name, "ours");
+        assert_eq!(view.query, "", "the query is replaced, not overlaid");
+        assert!(view.shared);
+        assert_eq!(view.author, "a@b.c", "the owner is the minter");
+        assert_eq!(view.saved_by, "other@b.c");
+        assert_eq!(view.saved_at, 20);
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_delete_removes_the_view_and_a_second_delete_is_nothing() {
+        let fold = fold(&[
+            saved("pi.1", 10, None, "mine", "assignee=me", false),
+            saved("pi.2", 11, None, "kept", "", true),
+            deleted("pi.3", 12, "pi.1"),
+            deleted("pi.4", 13, "pi.1"),
+        ]);
+        assert_eq!(fold.views.len(), 1);
+        assert_eq!(fold.views[0].id.to_string(), "pi.2");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_save_after_a_delete_stays_gone() {
+        let fold = fold(&[
+            saved("pi.1", 10, None, "mine", "assignee=me", false),
+            deleted("pi.2", 11, "pi.1"),
+            saved("pi.3", 12, Some("pi.1"), "back?", "", true),
+        ]);
+        assert!(fold.views.is_empty(), "a delete is final");
+        assert!(
+            fold.unrouted.is_empty(),
+            "the late save is a no-op, not unrouted"
+        );
+    }
+
+    #[test]
+    fn a_view_event_naming_no_view_is_unrouted() {
+        let fold = fold(&[
+            saved("pi.1", 10, Some("pi.9"), "orphan", "", false),
+            deleted("pi.2", 11, "pi.9"),
+        ]);
+        assert!(fold.views.is_empty());
+        assert_eq!(fold.unrouted.len(), 2);
+    }
+
+    #[test]
+    fn a_skewed_edit_sorted_before_its_mint_still_applies() {
+        // A fast clock on another writer sorts the edit first; pass 1
+        // minted the view already, so pass 2 finds it.
+        let fold = fold(&[
+            by(
+                saved("o.1", 5, Some("pi.1"), "later", "", true),
+                "other@b.c",
+            ),
+            saved("pi.1", 10, None, "first", "assignee=me", false),
+        ]);
+        assert_eq!(fold.views.len(), 1);
+        assert_eq!(fold.views[0].name, "later");
+        assert_eq!(fold.views[0].author, "a@b.c");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn views_shows_shared_and_own_and_hides_anothers_personal() {
+        let fold = fold(&[
+            saved("pi.1", 10, None, "mine", "assignee=me", false),
+            by(saved("o.1", 11, None, "theirs", "", false), "other@b.c"),
+            by(saved("o.2", 12, None, "ours", "", true), "other@b.c"),
+        ]);
+        assert_eq!(fold.views.len(), 3, "the fold carries every author's");
+        let seen: Vec<String> = crate::board::views(&fold, "a@b.c")
+            .iter()
+            .map(|view| view.id.to_string())
+            .collect();
+        assert_eq!(seen, ["pi.1", "o.2"]);
+        let seen: Vec<String> = crate::board::views(&fold, "other@b.c")
+            .iter()
+            .map(|view| view.id.to_string())
+            .collect();
+        assert_eq!(seen, ["o.1", "o.2"]);
     }
 
     #[test]

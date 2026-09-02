@@ -1,12 +1,14 @@
 //! The API: the CLI's `--json` surface, re-exposed over HTTP.
 //!
-//! Two halves, one contract. The read half is four resources over five
+//! Two halves, one contract. The read half is five resources over six
 //! GET routes, every one answering the exact envelope the matching verb
 //! emits under `--json` — same fold, same serializer, same bytes,
-//! trailing newline included. The write half is the verb API: nine POST
-//! routes — file, assign, status, hold, answer, done, cancel, comment,
-//! decompose — each taking the verb's arguments as a small JSON body,
-//! appending to the log, and answering the verb's own data envelope.
+//! trailing newline included. The write half is the verb API: twelve
+//! POST routes — file, assign, status, hold, answer, done, cancel,
+//! comment, decompose, and the three under `/api/views` — each taking
+//! the verb's arguments as a small JSON body, appending to the log, and
+//! answering the verb's own data envelope. The views ride their own GET
+//! rather than the board envelope: a saved view is not a row.
 //! The arguments ride the body rather than the path on purpose: a flight
 //! reference can carry `#`, and `#` is a URL fragment. `cmd` on each
 //! envelope keeps the CLI's wire name (`/api/bays` answers `bay list`),
@@ -92,6 +94,10 @@ pub(crate) fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
         .route("/api/cancel", post(cancel))
         .route("/api/comment", post(comment))
         .route("/api/decompose", post(decompose))
+        .route("/api/views", get(views))
+        .route("/api/views/save", post(view_save))
+        .route("/api/views/edit", post(view_edit))
+        .route("/api/views/delete", post(view_delete))
         .with_state(Arc::new(AppState {
             repo: repo.to_path_buf(),
             feed,
@@ -369,6 +375,35 @@ struct MessageBody {
     message: Option<String>,
 }
 
+/// `view save`'s arguments: the name and the query are required, and
+/// `shared` defaults to personal.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ViewSaveBody {
+    name: String,
+    query: String,
+    #[serde(default)]
+    shared: bool,
+}
+
+/// `view edit`'s arguments: the view is required, the three fields
+/// optional so an all-absent body reaches core's `usage/needs-edit`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ViewEditBody {
+    view: String,
+    name: Option<String>,
+    query: Option<String>,
+    shared: Option<bool>,
+}
+
+/// `view delete`'s one argument.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ViewBody {
+    view: String,
+}
+
 /// `decompose`'s arguments: the parts are required, so an omitted list
 /// is `usage/bad-body` and an empty one reaches core's `usage/no-parts`
 /// — the refusal a caller who meant to split into nothing deserves.
@@ -475,6 +510,43 @@ async fn decompose(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     .await
 }
 
+/// The views this process's author sees — the store's git identity is
+/// the viewer, since no request carries one.
+async fn views(State(state): State<Arc<AppState>>) -> Reply {
+    respond("view list", state, |repo| {
+        let store = Store::open(repo)?;
+        Ok(machine::emit("view list", &verb::views(&store)?))
+    })
+    .await
+}
+
+async fn view_save(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("view save", state, body, |repo, body: ViewSaveBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::save(&store, &body.name, &body.query, body.shared)?;
+        Ok(machine::emit("view save", &outcome.payload))
+    })
+    .await
+}
+
+async fn view_edit(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("view edit", state, body, |repo, body: ViewEditBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::edit(&store, &body.view, body.name, body.query, body.shared)?;
+        Ok(machine::emit("view edit", &outcome.payload))
+    })
+    .await
+}
+
+async fn view_delete(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("view delete", state, body, |repo, body: ViewBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::delete(&store, &body.view)?;
+        Ok(machine::emit("view delete", &outcome.payload))
+    })
+    .await
+}
+
 /// What a route can fail with — the serve twin of the CLI's `CliError`,
 /// holding no table of its own beyond the one id only this surface can
 /// raise: everything else delegates id, message, and exits to the
@@ -549,7 +621,7 @@ impl ApiError {
             StatusCode::BAD_REQUEST
         } else if matches!(
             id,
-            "flight/not-found" | "flight/ambiguous" | "procedure/not-found"
+            "flight/not-found" | "flight/ambiguous" | "procedure/not-found" | "view/not-found"
         ) {
             StatusCode::NOT_FOUND
         } else if matches!(
@@ -591,5 +663,18 @@ mod tests {
         };
         assert_eq!(garbled.id(), "usage/bad-body");
         assert_eq!(garbled.status(), StatusCode::BAD_REQUEST);
+
+        // A view reference naming nothing visible is a 404 like a
+        // flight's, and a query the codec declined arrives through the
+        // verb under its own `usage/*` id.
+        let unseen = ApiError::Verb(verb::Error::ViewNotFound {
+            text: "pi.9".to_string(),
+        });
+        assert_eq!(unseen.status(), StatusCode::NOT_FOUND);
+        let misspelled = ApiError::Verb(verb::Error::Query(board::QueryError::UnknownField {
+            text: "bogus".to_string(),
+        }));
+        assert_eq!(misspelled.id(), "usage/unknown-field");
+        assert_eq!(misspelled.status(), StatusCode::BAD_REQUEST);
     }
 }

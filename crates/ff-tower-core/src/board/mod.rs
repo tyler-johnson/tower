@@ -28,7 +28,9 @@
 //! front door to one flight. [`Query`] is the second fold over the same
 //! rows — filters, grouping, ordering and the display window as one
 //! type, parsed once from a param string and shared by every surface,
-//! where [`enrich`] stays the board's own fixed sectioning.
+//! where [`enrich`] stays the board's own fixed sectioning. [`views`] is
+//! the saved-view set the fold minted from the log's `view_saved`
+//! events, filtered to what one viewer sees.
 
 mod bay;
 mod brief;
@@ -40,6 +42,7 @@ mod pick;
 mod query;
 mod reads;
 mod resolve;
+mod view;
 
 pub use bay::{BayView, Berth, Pool, assign, bays};
 pub use brief::{Brief, CommentView, LinkView, Standing, brief, wants_verdicts};
@@ -57,6 +60,7 @@ pub use query::{
 };
 pub use reads::{BranchPairing, Reads, Verdicts, gather, probe};
 pub use resolve::{FlightRef, ResolveError, count, display, flight, parse_ref, resolve};
+pub use view::{View, views};
 
 use crate::ff::{self, Ff};
 use crate::log::Event;

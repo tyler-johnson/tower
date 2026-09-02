@@ -151,6 +151,20 @@ pub enum Kind {
     /// Takes back a declared dependency: the edge `from` → `to` leaves
     /// the record.
     Unlinked { from: EventId, to: EventId },
+    /// Saves a view. `view` absent mints one — its id is this event's id,
+    /// its owner this event's author; `view` present replaces that view's
+    /// three fields wholesale, last-wins in log order. `query` is
+    /// `Query::render`'s text: a string on the wire, a struct only in
+    /// memory.
+    ViewSaved {
+        view: Option<EventId>,
+        name: String,
+        query: String,
+        shared: bool,
+    },
+    /// Removes a view from the set. Final: a later save naming it is a
+    /// no-op.
+    ViewDeleted { view: EventId },
     /// Stops the flight with a question — the fold derives Held while
     /// it stands, waiting on you until answered — and clears started:
     /// holding is stopping.
@@ -209,6 +223,8 @@ impl Kind {
             Kind::Edited { .. } => "edited",
             Kind::Linked { .. } => "linked",
             Kind::Unlinked { .. } => "unlinked",
+            Kind::ViewSaved { .. } => "view_saved",
+            Kind::ViewDeleted { .. } => "view_deleted",
             Kind::Held { .. } => "held",
             Kind::Answered { .. } => "answered",
             Kind::Routed { .. } => "routed",
@@ -329,6 +345,23 @@ struct LinkedBody {
     to: EventId,
 }
 
+/// `view` absent is the mint; `shared` is always written, so a saved
+/// view says outright whether it is personal.
+#[derive(Serialize, Deserialize)]
+struct ViewSavedBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    view: Option<EventId>,
+    name: String,
+    query: String,
+    #[serde(default)]
+    shared: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ViewDeletedBody {
+    view: EventId,
+}
+
 #[derive(Serialize, Deserialize)]
 struct HeldBody {
     flight: EventId,
@@ -442,6 +475,20 @@ impl Serialize for Event {
                     from: from.clone(),
                     to: to.clone(),
                 })
+            }
+            Kind::ViewSaved {
+                view,
+                name,
+                query,
+                shared,
+            } => serde_json::value::to_raw_value(&ViewSavedBody {
+                view: view.clone(),
+                name: name.clone(),
+                query: query.clone(),
+                shared: *shared,
+            }),
+            Kind::ViewDeleted { view } => {
+                serde_json::value::to_raw_value(&ViewDeletedBody { view: view.clone() })
             }
             Kind::Held { flight, question } => serde_json::value::to_raw_value(&HeldBody {
                 flight: flight.clone(),
@@ -579,6 +626,23 @@ impl<'de> Deserialize<'de> for Event {
             let LinkedBody { from, to } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Unlinked { from, to }
+        } else if kind == "view_saved" {
+            let ViewSavedBody {
+                view,
+                name,
+                query,
+                shared,
+            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::ViewSaved {
+                view,
+                name,
+                query,
+                shared,
+            }
+        } else if kind == "view_deleted" {
+            let ViewDeletedBody { view } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::ViewDeleted { view }
         } else if kind == "held" {
             let HeldBody { flight, question } =
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
@@ -1122,9 +1186,16 @@ mod tests {
                 to: "pi.9".parse().expect("id"),
             },
             Kind::Unlinked {
-                from: flight,
+                from: flight.clone(),
                 to: "pi.9".parse().expect("id"),
             },
+            Kind::ViewSaved {
+                view: Some(flight.clone()),
+                name: "mine".to_string(),
+                query: "assignee=me".to_string(),
+                shared: false,
+            },
+            Kind::ViewDeleted { view: flight },
         ];
         for (seq, kind) in kinds.into_iter().enumerate() {
             let event = Event {
@@ -1146,5 +1217,53 @@ mod tests {
                 "a lifecycle kind must parse as itself"
             );
         }
+    }
+
+    #[test]
+    fn a_view_save_with_no_view_key_is_the_mint() {
+        let minted = r#"{"id":"pi.3","author":"a@b.c","writer":"pi","time":7,"kind":"view_saved","body":{"name":"mine","query":"assignee=me","shared":true}}"#;
+        let event: Event = serde_json::from_str(minted).expect("parse");
+        let Kind::ViewSaved {
+            view,
+            name,
+            query,
+            shared,
+        } = event.kind
+        else {
+            panic!("a view save parses as one");
+        };
+        assert!(view.is_none(), "no `view` key is the mint");
+        assert_eq!(name, "mine");
+        assert_eq!(query, "assignee=me");
+        assert!(shared);
+        // `shared` defaults false when an older writer left it out.
+        let bare = r#"{"id":"pi.3","author":"a@b.c","writer":"pi","time":7,"kind":"view_saved","body":{"name":"mine","query":""}}"#;
+        let event: Event = serde_json::from_str(bare).expect("parse");
+        let Kind::ViewSaved { shared, .. } = event.kind else {
+            panic!("a view save parses as one");
+        };
+        assert!(!shared);
+    }
+
+    #[test]
+    fn a_minting_view_save_serializes_without_a_view_key() {
+        // The pinned byte shape: the mint leaves no `view` key, and
+        // `shared` is always written.
+        let event = Event {
+            id: "pi.3".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            kind: Kind::ViewSaved {
+                view: None,
+                name: "mine".to_string(),
+                query: "assignee=me&group=status".to_string(),
+                shared: false,
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&event).expect("serialize"),
+            r#"{"id":"pi.3","author":"a@b.c","writer":"pi","time":7,"kind":"view_saved","body":{"name":"mine","query":"assignee=me&group=status","shared":false}}"#
+        );
     }
 }

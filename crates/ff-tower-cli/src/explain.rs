@@ -123,7 +123,8 @@ pub static ENTRIES: &[Entry] = &[
         detail: "`edit` rewords through its flags — `-s` the subject, `-m` the body or a \
                  comment's text, `--priority`, `--label`, `--skill`, `--bay` the fields — and \
                  none was given, so there is no overlay to write. Any flag alone is a \
-                 complete edit; every other field stands unchanged.",
+                 complete edit; every other field stands unchanged. A view edit raises the \
+                 same id when its body names the view and none of its name, query, or shared.",
         exits: &[
             "ff tower edit <target> -s <subject>",
             "ff tower edit <target> -m <msg>",
@@ -228,12 +229,129 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         id: "usage/bad-value",
-        summary: "the value does not fit the setting",
+        summary: "the value does not fit the setting, or the filter",
         detail: "Every setting declares what shape its values take, and the value is validated \
                  against that shape before anything touches disk — a config file never holds a \
                  value tower cannot read back. The refusal names what the setting wants; asking \
-                 for the key alone shows its current value and default.",
+                 for the key alone shows its current value and default. A query filter raises \
+                 the same id when its value is the wrong shape for its operator — a moment \
+                 beside `is`, words beside `after` — and names the field and operator it was \
+                 checking.",
         exits: &["ff tower config <key>"],
+    },
+    Entry {
+        id: "usage/bad-query",
+        summary: "that is not a query parameter",
+        detail: "A query is `<name>=<value>` parts joined by `&`: a filter names a field, and \
+                 the seven axes — `group`, `sub`, `order`, `closed`, `empty`, `mode`, `show` — \
+                 shape the fold. A part with no `=` in it is neither. The board shows the \
+                 vocabulary a query is spelled in, as it is actually filed.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/unknown-field",
+        summary: "no field by that name",
+        detail: "A query key that is not one of the seven axes is a field name, and the refusal \
+                 lists every field the record has. Names are closed and values are open: \
+                 `status=bogus` parses and matches nothing, but a field the fold does not \
+                 answer to is refused, or a saved view could never be read back.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/unknown-operator",
+        summary: "no such operator",
+        detail: "A filter value may carry an operator before its `:` — `is`, `not`, `contains`, \
+                 `before`, `after` — and this one is none of them. Bare `field=value` is `is`, \
+                 and a value with a literal colon in it is percent-encoded so the colon does \
+                 not read as an operator.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/not-filterable",
+        summary: "that field is a column, never a predicate",
+        detail: "`ref`, `age`, `comments`, and `progress` are derivations a row shows and \
+                 nothing filters on — a query names them under `show` and nowhere else. Filter \
+                 on the stored facts and the audit's own answers instead.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/bad-operator",
+        summary: "the field takes no such operator",
+        detail: "Each field compares one way: words exactly (`is`, `not`), prose by substring \
+                 (`contains`), a moment by order (`before`, `after`). `before` on `subject` or \
+                 `contains` on `status` pairs a field with a comparison it has no answer to, \
+                 and the refusal names both.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/not-groupable",
+        summary: "the board cannot group by that field",
+        detail: "`group` and `sub` take the six fields a board sections by — status, assignee, \
+                 priority, label, skill, bay — each a word a flight carries. Free prose and \
+                 moments make no columns.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/not-orderable",
+        summary: "rows do not order along that field",
+        detail: "`order` takes a stored fact with a total order — status, assignee, priority, \
+                 subject, filed, moved, changed — with a leading `-` for descending. A \
+                 set-valued field like `label` has no order, and a derived column is not an \
+                 axis.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/not-showable",
+        summary: "a row cannot show that field",
+        detail: "`show` lists the columns a row carries, and every field is one except `body` — \
+                 a flight's prose belongs to the single view, never to a list.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/bad-time",
+        summary: "that is not a moment",
+        detail: "`before` and `after` take a span back from now — `3d`, `12h`, `2w` — or an \
+                 absolute epoch spelled `@<seconds>`. A span is what makes a saved view mean \
+                 *the last three days* every day it is opened.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/bad-window",
+        summary: "that is not a closed window",
+        detail: "`closed` takes what `--closed` does: a count of the newest closed flights, a \
+                 span like `7d`, `all`, or `none`. The default is the three newest.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/bad-flag",
+        summary: "that is not `true` or `false`",
+        detail: "`empty` is a flag: `true` keeps the groups no row fell into, `false` drops \
+                 them. Nothing else spells it.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/bad-mode",
+        summary: "that is not a display mode",
+        detail: "`mode` is `list` or `board` — a display property the fold ignores, carried in \
+                 the query so a saved view remembers how it was looked at.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "usage/empty-name",
+        summary: "the view has no name",
+        detail: "A saved view is named by what its chip shows, and a blank name would put a \
+                 chip with nothing on it on every board. The name is trimmed before it is \
+                 checked; the query beside it may be empty, since the empty query is the whole \
+                 board.",
+        exits: &[],
+    },
+    Entry {
+        id: "usage/bad-view",
+        summary: "that is not a view id",
+        detail: "A view is named by the full wire id of the event that minted it — \
+                 `<writer>.<seq>`, the `id` on every row `view list` answers. Views have no \
+                 flight numbers, so a bare number names nothing.",
+        exits: &[],
     },
     Entry {
         id: "usage/unknown-error-id",
@@ -251,6 +369,16 @@ pub static ENTRIES: &[Entry] = &[
                  same display form the reference grammar accepts. `edit` also takes a \
                  comment's event id, printed on the brief's comment rows; a full id matching \
                  neither a flight nor a comment is this same refusal.",
+        exits: &["ff tower"],
+    },
+    Entry {
+        id: "view/not-found",
+        summary: "no such view is visible to you",
+        detail: "The id parsed, but no view you can see carries it: it was never minted, it \
+                 was deleted — a delete is final, and a later save naming it folds as nothing \
+                 — or it is another author's personal view. Personal is a rendering rule and \
+                 not a permission, so the last case is this refusal and never a denial. `view \
+                 list` shows every view you see, with the ids to name them by.",
         exits: &["ff tower"],
     },
     Entry {
@@ -916,6 +1044,7 @@ mod tests {
             "ff-tower-cli/src/error.rs",
             "ff-tower-serve/src/api.rs",
             "ff-tower-serve/src/error.rs",
+            "ff-tower-core/src/board/query.rs",
             "ff-tower-core/src/board/resolve.rs",
             "ff-tower-core/src/config.rs",
             "ff-tower-core/src/verb/error.rs",

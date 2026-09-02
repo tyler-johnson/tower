@@ -24,6 +24,7 @@ mod file;
 mod hold;
 mod pass;
 mod status;
+mod view;
 
 pub use answer::{Answer, Answered, answer};
 pub use assign::{Assign, Assigned, assign};
@@ -35,6 +36,7 @@ pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
 pub use pass::{Conclusion, conclusions, pass};
 pub use status::{Move, Moved, cancel, done, status};
+pub use view::{Delete, Deleted, Save, Saved, Views, delete, edit, save, views};
 
 use crate::board::{Flight, Fold, display};
 use crate::log::{self, Event, EventId, Store};

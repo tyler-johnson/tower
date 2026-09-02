@@ -12,7 +12,7 @@
 //! registry to fall back on, and the fallback rule on both surfaces is
 //! "the site's exits when it has any."
 
-use crate::board::ResolveError;
+use crate::board::{QueryError, ResolveError};
 use crate::{log, procedure};
 
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +27,10 @@ pub enum Error {
     /// carried through.
     #[error(transparent)]
     Procedure(#[from] procedure::Error),
+    /// A query the codec declined — its own id and exits, carried
+    /// through.
+    #[error(transparent)]
+    Query(#[from] QueryError),
 
     #[error("the subject is empty")]
     EmptySubject,
@@ -73,6 +77,21 @@ pub enum Error {
     AlreadyHeld { display: String, question: String },
     #[error("`{display}` has no open question")]
     NotHeld { display: String },
+
+    /// `view save` with a blank name.
+    #[error("the view name is empty")]
+    EmptyName,
+    /// A view reference that is not a wire id.
+    #[error("`{text}` is not a view id — `<writer>.<seq>`")]
+    BadView { text: String },
+    /// A view id naming nothing this viewer sees — another author's
+    /// personal view lands here too, since personal is a rendering
+    /// rule and never a permission.
+    #[error("no view `{text}` is visible to you")]
+    ViewNotFound { text: String },
+    /// `view edit` with every field left unsaid.
+    #[error("the edit changes nothing — give a name, a query, or shared")]
+    NeedsViewEdit,
 }
 
 impl Error {
@@ -82,6 +101,7 @@ impl Error {
             Error::Resolve(err) => err.id(),
             Error::Log(err) => err.id(),
             Error::Procedure(err) => err.id(),
+            Error::Query(err) => err.id(),
             Error::EmptySubject => "usage/empty-subject",
             Error::NoParts => "usage/no-parts",
             Error::EmptyProcedure => "usage/empty-procedure",
@@ -94,6 +114,10 @@ impl Error {
             Error::StatusHeld { .. } => "status/held",
             Error::AlreadyHeld { .. } => "hold/exists",
             Error::NotHeld { .. } => "answer/not-held",
+            Error::EmptyName => "usage/empty-name",
+            Error::BadView { .. } => "usage/bad-view",
+            Error::ViewNotFound { .. } => "view/not-found",
+            Error::NeedsViewEdit => "usage/needs-edit",
         }
     }
 
@@ -104,7 +128,8 @@ impl Error {
             Error::Resolve(err) => return err.exits(),
             Error::Log(err) => return err.exits(),
             Error::Procedure(err) => return err.exits(),
-            Error::EmptySubject | Error::NoParts => &[],
+            Error::Query(err) => return err.exits(),
+            Error::EmptySubject | Error::NoParts | Error::EmptyName | Error::BadView { .. } => &[],
             Error::EmptyProcedure => &["ff tower procedures"],
             Error::NeedsQuestion | Error::StatusHold { .. } => {
                 &["ff tower hold <flight> -m <question>"]
@@ -114,9 +139,11 @@ impl Error {
                 &["ff tower answer <flight> -m <answer>"]
             }
             Error::NeedsNote => &["ff tower comment <flight> -m <note>"],
-            Error::FlightDone { .. } | Error::AlreadyDone { .. } | Error::NotHeld { .. } => {
-                &["ff tower"]
-            }
+            Error::FlightDone { .. }
+            | Error::AlreadyDone { .. }
+            | Error::NotHeld { .. }
+            | Error::ViewNotFound { .. }
+            | Error::NeedsViewEdit => &["ff tower"],
             Error::BadStatus { .. } | Error::BadAssignee { .. } => &[],
         };
         exits.iter().map(|exit| (*exit).to_string()).collect()

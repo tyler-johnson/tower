@@ -294,7 +294,15 @@ fn named(kind: &Kind) -> Vec<&EventId> {
         | Kind::Routed { flight, .. } => vec![flight],
         Kind::Edited { target, .. } => vec![target],
         Kind::Linked { from, to } | Kind::Unlinked { from, to } => vec![from, to],
-        Kind::Filed { .. } | Kind::Unknown { .. } => Vec::new(),
+        // A view event names a view, never a flight: the fold routes it
+        // by the view's id, so an unrouted one names a view never minted.
+        Kind::ViewSaved {
+            view: Some(view), ..
+        }
+        | Kind::ViewDeleted { view } => vec![view],
+        Kind::Filed { .. } | Kind::ViewSaved { view: None, .. } | Kind::Unknown { .. } => {
+            Vec::new()
+        }
     }
 }
 
