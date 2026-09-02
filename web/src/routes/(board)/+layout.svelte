@@ -13,6 +13,9 @@
 		feed.connect(query.search);
 		return () => feed.close();
 	});
+
+	// The columns need the width and the list does not.
+	let wide = $derived(query.parsed?.mode === 'board');
 </script>
 
 <!--
@@ -20,7 +23,7 @@
 	route renders over both while they are still live behind it, and the
 	feed is not torn down on navigation.
 -->
-<main class="mx-auto flex max-w-4xl flex-col gap-6 p-4">
+<main class="mx-auto flex flex-col gap-6 p-4 {wide ? 'max-w-7xl' : 'max-w-4xl'}">
 	<Shell />
 	<Board />
 </main>
