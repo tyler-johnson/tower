@@ -78,6 +78,28 @@ pub enum Error {
     #[error("`{display}` has no open question")]
     NotHeld { display: String },
 
+    /// `link a b` with both references resolving to one flight — a
+    /// cycle of length one, visible only after resolution.
+    #[error("`{display}` cannot depend on itself")]
+    SelfLink { display: String },
+    /// The identical edge declared twice.
+    #[error("`{from}` already depends on `{to}`")]
+    LinkExists { from: String, to: String },
+    /// `unlink` of an edge that is not on the record.
+    #[error("`{from}` does not depend on `{to}`")]
+    LinkMissing { from: String, to: String },
+    /// `edit` with every flag left unsaid.
+    #[error(
+        "nothing to change — `-s` rewords the subject, `-m` the body or comment text, and `--priority`, `--label`, `--skill`, `--bay` reset a field"
+    )]
+    NeedsEdit,
+    /// A field flag on a comment target — only flights carry fields.
+    #[error("a comment carries no fields — `-m` rewords its text")]
+    SubjectOnComment,
+    /// A full event id that is neither a flight nor a comment.
+    #[error("`{text}` names neither a flight nor a comment")]
+    EditTargetNotFound { text: String },
+
     /// `view save` with a blank name.
     #[error("the view name is empty")]
     EmptyName,
@@ -114,6 +136,12 @@ impl Error {
             Error::StatusHeld { .. } => "status/held",
             Error::AlreadyHeld { .. } => "hold/exists",
             Error::NotHeld { .. } => "answer/not-held",
+            Error::SelfLink { .. } => "usage/self-link",
+            Error::LinkExists { .. } => "link/exists",
+            Error::LinkMissing { .. } => "link/missing",
+            Error::NeedsEdit => "usage/needs-edit",
+            Error::SubjectOnComment => "usage/subject-on-comment",
+            Error::EditTargetNotFound { .. } => "flight/not-found",
             Error::EmptyName => "usage/empty-name",
             Error::BadView { .. } => "usage/bad-view",
             Error::ViewNotFound { .. } => "view/not-found",
@@ -129,7 +157,17 @@ impl Error {
             Error::Log(err) => return err.exits(),
             Error::Procedure(err) => return err.exits(),
             Error::Query(err) => return err.exits(),
-            Error::EmptySubject | Error::NoParts | Error::EmptyName | Error::BadView { .. } => &[],
+            Error::EmptySubject
+            | Error::NoParts
+            | Error::EmptyName
+            | Error::BadView { .. }
+            | Error::SelfLink { .. } => &[],
+            Error::LinkExists { .. } | Error::LinkMissing { .. } => &["ff tower brief <flight>"],
+            Error::NeedsEdit => &[
+                "ff tower edit <target> -s <subject>",
+                "ff tower edit <target> -m <msg>",
+            ],
+            Error::SubjectOnComment => &["ff tower edit <target> -m <msg>"],
             Error::EmptyProcedure => &["ff tower procedures"],
             Error::NeedsQuestion | Error::StatusHold { .. } => {
                 &["ff tower hold <flight> -m <question>"]
@@ -143,7 +181,8 @@ impl Error {
             | Error::AlreadyDone { .. }
             | Error::NotHeld { .. }
             | Error::ViewNotFound { .. }
-            | Error::NeedsViewEdit => &["ff tower"],
+            | Error::NeedsViewEdit
+            | Error::EditTargetNotFound { .. } => &["ff tower"],
             Error::BadStatus { .. } | Error::BadAssignee { .. } => &[],
         };
         exits.iter().map(|exit| (*exit).to_string()).collect()

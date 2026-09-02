@@ -290,7 +290,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         }) => cmd::edit::run(
             cli.json,
             target,
-            cmd::edit::Overlay {
+            ff_tower_core::verb::Overlay {
                 subject: subject.clone(),
                 message: message.clone(),
                 priority: priority.clone(),

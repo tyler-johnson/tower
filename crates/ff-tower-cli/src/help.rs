@@ -569,15 +569,19 @@ query string ff tower's views store, on its URL
 (/api/board?status=ready,in_progress&group=assignee&closed=7d), and
 answers the groups plus the two counts, hidden and filtered; no
 query is the board's own grouping, and a query it cannot parse is a
-400 under the query's own id. The verb API is nine POST routes —
+400 under the query's own id. The verb API is twelve POST routes —
 /api/file, /api/assign, /api/status, /api/hold, /api/answer,
-/api/done, /api/cancel, /api/comment, /api/decompose — each taking
-the verb's arguments as a small JSON body ({\"flight\": …} with an
-optional \"message\", file's {\"subject\": …}, assign's
+/api/done, /api/cancel, /api/comment, /api/decompose, /api/edit,
+/api/link, /api/unlink — plus the three under /api/views, each
+taking the verb's arguments as a small JSON body ({\"flight\": …}
+with an optional \"message\", file's {\"subject\": …}, assign's
 {\"assignee\": …}, status's {\"status\": …}, decompose's
-{\"parts\": […]}), appending to the log, and answering the verb's own
-data envelope; hold answers 200, its exit-3 outcome being the CLI's
-channel, and done requires the flight named.
+{\"parts\": […]}, edit's {\"target\": …} plus any of \"subject\",
+\"message\", \"priority\", \"labels\", \"skill\", \"bay\", and link's
+and unlink's {\"flight\": …, \"dependency\": …}), appending to the
+log, and answering the verb's own data envelope; hold answers 200,
+its exit-3 outcome being the CLI's channel, and done requires the
+flight named.
 A refusal is the same one-line error envelope: 400 for a reference
 or body that does not parse, 404 for a reference that names nothing,
 409 when the board's standing state refuses the write, 503 when the

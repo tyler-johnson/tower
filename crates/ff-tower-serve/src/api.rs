@@ -7,9 +7,10 @@
 //! `/api/board?<query>` folds the rows through the query string `ff
 //! tower`'s views store and answers the groups and the two counts,
 //! `Query::default()` when the string is empty — the CLI board's rows
-//! under the CLI board's grouping. The write half is the verb API: twelve
-//! POST routes — file, assign, status, hold, answer, done, cancel,
-//! comment, decompose, and the three under `/api/views` — each taking
+//! under the CLI board's grouping. The write half is the verb API:
+//! fifteen POST routes — file, assign, status, hold, answer, done,
+//! cancel, comment, decompose, edit, link, unlink, and the three under
+//! `/api/views` — each taking
 //! the verb's arguments as a small JSON body, appending to the log, and
 //! answering the verb's own data envelope. The views ride their own GET
 //! rather than the board envelope: a saved view is not a row.
@@ -101,6 +102,9 @@ pub(crate) fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
         .route("/api/cancel", post(cancel))
         .route("/api/comment", post(comment))
         .route("/api/decompose", post(decompose))
+        .route("/api/edit", post(edit))
+        .route("/api/link", post(link))
+        .route("/api/unlink", post(unlink))
         .route("/api/views", get(views))
         .route("/api/views/save", post(view_save))
         .route("/api/views/edit", post(view_edit))
@@ -486,6 +490,33 @@ struct DecomposeBody {
     parts: Vec<String>,
 }
 
+/// `edit`'s arguments: the target is required — a flight reference or
+/// a comment's full event id — and every field optional so an
+/// all-absent body reaches core's `usage/needs-edit`. An empty `labels`
+/// means unchanged, the CLI's rule: a body cannot clear the set, which
+/// the CLI cannot either.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditBody {
+    target: String,
+    subject: Option<String>,
+    message: Option<String>,
+    priority: Option<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    skill: Option<String>,
+    bay: Option<String>,
+}
+
+/// `link` and `unlink`'s arguments: `flight` depends on `dependency`,
+/// the flight under the key every other body uses for it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LinkBody {
+    flight: String,
+    dependency: String,
+}
+
 async fn file(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     act("file", state, body, |repo, body: FileBody| {
         let store = Store::open(repo)?;
@@ -582,12 +613,50 @@ async fn decompose(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     .await
 }
 
+async fn edit(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("edit", state, body, |repo, body: EditBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::edit(
+            &store,
+            &body.target,
+            verb::Overlay {
+                subject: body.subject,
+                message: body.message,
+                priority: body.priority,
+                labels: body.labels,
+                skill: body.skill,
+                bay: body.bay,
+            },
+        )?;
+        Ok(machine::emit("edit", &outcome.payload))
+    })
+    .await
+}
+
+async fn link(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("link", state, body, |repo, body: LinkBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::link(&store, &body.flight, &body.dependency)?;
+        Ok(machine::emit("link", &outcome.payload))
+    })
+    .await
+}
+
+async fn unlink(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
+    act("unlink", state, body, |repo, body: LinkBody| {
+        let store = Store::open(repo)?;
+        let outcome = verb::unlink(&store, &body.flight, &body.dependency)?;
+        Ok(machine::emit("unlink", &outcome.payload))
+    })
+    .await
+}
+
 /// The views this process's author sees — the store's git identity is
 /// the viewer, since no request carries one.
 async fn views(State(state): State<Arc<AppState>>) -> Reply {
     respond("view list", state, |repo| {
         let store = Store::open(repo)?;
-        Ok(machine::emit("view list", &verb::views(&store)?))
+        Ok(machine::emit("view list", &verb::view::views(&store)?))
     })
     .await
 }
@@ -595,7 +664,7 @@ async fn views(State(state): State<Arc<AppState>>) -> Reply {
 async fn view_save(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     act("view save", state, body, |repo, body: ViewSaveBody| {
         let store = Store::open(repo)?;
-        let outcome = verb::save(&store, &body.name, &body.query, body.shared)?;
+        let outcome = verb::view::save(&store, &body.name, &body.query, body.shared)?;
         Ok(machine::emit("view save", &outcome.payload))
     })
     .await
@@ -604,7 +673,7 @@ async fn view_save(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
 async fn view_edit(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     act("view edit", state, body, |repo, body: ViewEditBody| {
         let store = Store::open(repo)?;
-        let outcome = verb::edit(&store, &body.view, body.name, body.query, body.shared)?;
+        let outcome = verb::view::edit(&store, &body.view, body.name, body.query, body.shared)?;
         Ok(machine::emit("view edit", &outcome.payload))
     })
     .await
@@ -613,7 +682,7 @@ async fn view_edit(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
 async fn view_delete(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
     act("view delete", state, body, |repo, body: ViewBody| {
         let store = Store::open(repo)?;
-        let outcome = verb::delete(&store, &body.view)?;
+        let outcome = verb::view::delete(&store, &body.view)?;
         Ok(machine::emit("view delete", &outcome.payload))
     })
     .await
@@ -705,7 +774,12 @@ impl ApiError {
             StatusCode::NOT_FOUND
         } else if matches!(
             id,
-            "flight/done" | "hold/exists" | "answer/not-held" | "status/held"
+            "flight/done"
+                | "hold/exists"
+                | "answer/not-held"
+                | "status/held"
+                | "link/exists"
+                | "link/missing"
         ) {
             StatusCode::CONFLICT
         } else if id == "log/contended" {
@@ -736,6 +810,13 @@ mod tests {
             question: "which way?".to_string(),
         });
         assert_eq!(held.status(), StatusCode::CONFLICT);
+        // An edge already on the record is the same kind of conflict:
+        // with what an earlier write made true.
+        let declared = ApiError::Verb(verb::Error::LinkExists {
+            from: "#2".to_string(),
+            to: "#1".to_string(),
+        });
+        assert_eq!(declared.status(), StatusCode::CONFLICT);
 
         let garbled = ApiError::Body {
             detail: "expected value".to_string(),

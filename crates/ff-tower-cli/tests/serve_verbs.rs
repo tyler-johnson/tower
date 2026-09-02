@@ -396,6 +396,97 @@ fn decompose_under_a_procedure_mints_the_definitions_flights_over_http() {
 }
 
 #[test]
+fn edit_rewords_a_flight_and_a_comment_over_http() {
+    let (repo, server) = served();
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/edit",
+        r#"{"target":"1","subject":"the right subject","priority":"high","labels":["chore"]}"#,
+    );
+    let event = appended(repo.path(), |kind| matches!(kind, Kind::Edited { .. }));
+    ok(
+        "/api/edit",
+        status,
+        &head,
+        &body,
+        machine::emit("edit", &verb::Edited { edited: event }),
+    );
+    let (_, _, board) = http(&server.addr, "/api/board");
+    let board: serde_json::Value = serde_json::from_str(&board).expect("the board envelope");
+    let row = &group(&board, "triage")[0];
+    assert_eq!(row["subject"], json!("the right subject"));
+    assert_eq!(row["priority"], json!("high"));
+    assert_eq!(row["labels"], json!(["chore"]));
+
+    // A comment is reworded by its full event id, and the message is
+    // the only thing it takes.
+    let (status, _, _) = post(
+        &server.addr,
+        "/api/comment",
+        r#"{"flight":"1","message":"a note"}"#,
+    );
+    assert_eq!(status, 200);
+    let comment = appended(repo.path(), |kind| matches!(kind, Kind::Commented { .. })).id;
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/edit",
+        &format!(r#"{{"target":"{comment}","message":"reworded"}}"#),
+    );
+    let event = appended(
+        repo.path(),
+        |kind| matches!(kind, Kind::Edited { target, .. } if *target == comment),
+    );
+    ok(
+        "/api/edit",
+        status,
+        &head,
+        &body,
+        machine::emit("edit", &verb::Edited { edited: event }),
+    );
+    read_after_write(&server, repo.path());
+}
+
+#[test]
+fn link_and_unlink_declare_and_take_back_the_edge_over_http() {
+    let (repo, server) = served();
+    file(repo.path(), "the dependent");
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/link",
+        r#"{"flight":"2","dependency":"1"}"#,
+    );
+    let event = appended(repo.path(), |kind| matches!(kind, Kind::Linked { .. }));
+    ok(
+        "/api/link",
+        status,
+        &head,
+        &body,
+        machine::emit("link", &verb::Linked { linked: event }),
+    );
+    let (_, _, brief) = http(&server.addr, "/api/brief/2");
+    let brief: serde_json::Value = serde_json::from_str(&brief).expect("the brief envelope");
+    assert_eq!(brief["data"]["depends_on"][0]["flight"], json!("pi.1"));
+
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/unlink",
+        r#"{"flight":"2","dependency":"1"}"#,
+    );
+    let event = appended(repo.path(), |kind| matches!(kind, Kind::Unlinked { .. }));
+    ok(
+        "/api/unlink",
+        status,
+        &head,
+        &body,
+        machine::emit("unlink", &verb::Unlinked { unlinked: event }),
+    );
+    let (_, _, brief) = http(&server.addr, "/api/brief/2");
+    let brief: serde_json::Value = serde_json::from_str(&brief).expect("the brief envelope");
+    assert_eq!(brief["data"]["depends_on"], json!([]));
+    read_after_write(&server, repo.path());
+}
+
+#[test]
 fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
     let (repo, server) = served();
 
@@ -464,6 +555,34 @@ fn the_guard_refusals_are_conflicts_with_the_clis_envelope() {
         409,
         &["decompose", "1", "too late", "--json"],
         "flight/done",
+    );
+
+    // The edges: taking back one that is not on the record, and
+    // declaring one that already is.
+    file(repo.path(), "the dependent");
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/unlink",
+        r#"{"flight":"2","dependency":"1"}"#,
+        409,
+        &["unlink", "2", "1", "--json"],
+        "link/missing",
+    );
+    let (status, _, _) = post(
+        &server.addr,
+        "/api/link",
+        r#"{"flight":"2","dependency":"1"}"#,
+    );
+    assert_eq!(status, 200);
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/link",
+        r#"{"flight":"2","dependency":"1"}"#,
+        409,
+        &["link", "2", "1", "--json"],
+        "link/exists",
     );
 }
 
@@ -539,9 +658,60 @@ fn the_usage_refusals_are_four_hundreds_with_the_clis_envelope() {
         &["decompose", "1", "part one", "  ", "--json"],
         "usage/empty-subject",
     );
+    // A self-link is visible only after resolution, and refuses there
+    // on both surfaces.
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/link",
+        r#"{"flight":"1","dependency":"1"}"#,
+        400,
+        &["link", "1", "1", "--json"],
+        "usage/self-link",
+    );
+    // `edit` with nothing to change, and with a subject trimmed to
+    // nothing — the flags' guards, one table.
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/edit",
+        r#"{"target":"1"}"#,
+        400,
+        &["edit", "1", "--json"],
+        "usage/needs-edit",
+    );
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/edit",
+        r#"{"target":"1","subject":"  "}"#,
+        400,
+        &["edit", "1", "-s", "  ", "--json"],
+        "usage/empty-subject",
+    );
     // Every refusal above appended nothing: the seeded filing is still
     // the whole log.
     assert_eq!(chain(repo.path()).len(), 1);
+
+    // A field on a comment target: the one usage refusal that needs a
+    // comment on the record first.
+    let (status, _, _) = post(
+        &server.addr,
+        "/api/comment",
+        r#"{"flight":"1","message":"a note"}"#,
+    );
+    assert_eq!(status, 200);
+    let comment = appended(repo.path(), |kind| matches!(kind, Kind::Commented { .. })).id;
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/edit",
+        &format!(r#"{{"target":"{comment}","subject":"s"}}"#),
+        400,
+        &["edit", &comment.to_string(), "-s", "s", "--json"],
+        "usage/subject-on-comment",
+    );
+    assert_eq!(chain(repo.path()).len(), 2);
 }
 
 #[test]
@@ -565,6 +735,17 @@ fn a_reference_naming_nothing_is_a_four_oh_four() {
         &["file", "ghost", "a subject", "--json"],
         "procedure/not-found",
     );
+    // `edit`'s target resolves flights and comments, so its not-found
+    // names both.
+    error_parity(
+        &server,
+        repo.path(),
+        "/api/edit",
+        r#"{"target":"pi.99","subject":"s"}"#,
+        404,
+        &["edit", "pi.99", "-s", "s", "--json"],
+        "flight/not-found",
+    );
 }
 
 /// A body the verb cannot read is `usage/bad-body` — the one id only the
@@ -586,6 +767,9 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
         ("/api/done", r#"{}"#),
         ("/api/file", r#"{"flight":"1"}"#),
         ("/api/decompose", r#"{"flight":"1"}"#),
+        ("/api/link", r#"{"flight":"1"}"#),
+        ("/api/edit", r#"{}"#),
+        ("/api/edit", r#"{"target":"1","status":"ready"}"#),
     ] {
         let (status, _, answered) = post(&server.addr, path, body);
         assert_eq!(status, 400, "{path} {body}: {answered}");
@@ -611,4 +795,5 @@ fn a_read_method_on_a_write_route_is_405() {
     assert_eq!(request(&server.addr, "GET", "/api/assign").0, 405);
     assert_eq!(request(&server.addr, "GET", "/api/status").0, 405);
     assert_eq!(request(&server.addr, "GET", "/api/decompose").0, 405);
+    assert_eq!(request(&server.addr, "GET", "/api/link").0, 405);
 }

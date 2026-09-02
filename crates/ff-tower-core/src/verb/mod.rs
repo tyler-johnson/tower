@@ -12,31 +12,37 @@
 //! envelope's `data`, emitted identically by the CLI's stdout and the
 //! server's responses — plus the echo facts a human render needs, so
 //! neither surface re-derives what the verb already knew. The refusals
-//! live in [`Error`], one table beneath both surfaces.
+//! live in [`Error`], one table beneath both surfaces. The view verbs
+//! carry their noun as a module — `view::edit` beside `edit` — the way
+//! the CLI spells `view <verb>`.
 
 mod answer;
 mod assign;
 mod classify;
 mod comment;
 mod decompose;
+mod edit;
 mod error;
 mod file;
 mod hold;
+mod link;
 mod pass;
 mod status;
-mod view;
+pub mod view;
 
 pub use answer::{Answer, Answered, answer};
 pub use assign::{Assign, Assigned, assign};
 pub use classify::{Fields, Parent, classify};
 pub use comment::{Comment, Commented, comment};
 pub use decompose::{Decompose, Decomposed, decompose};
+pub use edit::{Edit, EditTarget, Edited, Overlay, edit};
 pub use error::Error;
 pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
+pub use link::{Link, Linked, Unlink, Unlinked, link, unlink};
 pub use pass::{Conclusion, conclusions, pass};
 pub use status::{Move, Moved, cancel, done, status};
-pub use view::{Delete, Deleted, Save, Saved, Views, delete, edit, save, views};
+pub use view::{Delete, Deleted, Save, Saved, Views};
 
 use crate::board::{Flight, Fold, display};
 use crate::log::{self, Event, EventId, Store};
