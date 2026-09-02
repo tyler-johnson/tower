@@ -118,13 +118,13 @@
 	class="dropdown-content z-10 flex w-64 flex-col gap-1 rounded-box border border-base-300 bg-base-100 p-2 shadow-sm"
 >
 	{#if level === 'field'}
-		<ul class="menu menu-sm max-h-80 w-full overflow-y-auto p-0">
+		<ul class="menu menu-sm max-h-80 w-full flex-nowrap overflow-y-auto p-0">
 			{#each FIELDS.filter(filterable) as field (field)}
 				<li><button onclick={() => pickField(field)}>{fieldLabel(field)}</button></li>
 			{/each}
 		</ul>
 	{:else}
-		<ul class="menu menu-sm max-h-80 w-full overflow-y-auto p-0">
+		<ul class="menu menu-sm max-h-80 w-full flex-nowrap overflow-y-auto p-0">
 			<li>
 				<button class="text-base-content/60" onclick={() => (level = 'field')}>
 					<ChevronLeft size={16} />
