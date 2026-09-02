@@ -22,7 +22,9 @@
 	The bar under the header row: one chip per filter, ANDed in order, a
 	+ for the next one, and clear. Nothing while the URL holds no filter
 	or a query the server refused — the alert has the words then. Save is
-	#76's slot, unrendered rather than drawn dead.
+	on the chip row above, not here: this bar renders nothing without a
+	filter, and a query worth saving may be a grouping or a mode with no
+	filter at all.
 -->
 {#if parsed !== null && parsed.filters.length > 0}
 	<div class="flex flex-wrap items-center gap-2">

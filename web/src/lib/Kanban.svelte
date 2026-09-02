@@ -158,7 +158,7 @@
 	columns and offers no drag. The write needs no refetch — the feed
 	refolds on the log's motion — and the board says why when a drop is
 	refused or a `ready` lands in waiting. No inbox: the inbox is the
-	list's.
+	For Me view.
 -->
 
 {#snippet body(column: Group, rows: FlightView[], lane: string | null)}

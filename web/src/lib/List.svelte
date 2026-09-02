@@ -5,7 +5,7 @@
 	import { feed } from './feed.svelte';
 	import { DEFAULT_SHOW } from './query';
 	import { query } from './query.svelte';
-	import { buildRefs, groupTitle, inbox, type FlightView } from './tower';
+	import { buildRefs, groupTitle, type FlightView } from './tower';
 
 	let b = $derived(feed.board);
 	let q = $derived(query.parsed);
@@ -15,24 +15,14 @@
 	// without holding any state of its own.
 	let open = $derived(page.params.flight ?? null);
 
-	// The inbox pinned on top. A flight in the inbox still stands in its
-	// group below: the inbox is a view of the same rows, not a section
-	// that removes them.
-	let pinned = $derived.by(() => {
-		if (!b) return [] as [string, FlightView[]][];
-		const box = inbox(b);
-		return [
-			['questions', box.questions],
-			['yours', box.yours]
-		] as [string, FlightView[]][];
-	});
-
 	const heading = 'font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60';
 </script>
 
 <!--
-	The list. It draws what the fold sent, keyed on whatever the query
-	grouped by, in wire order: every group is a details with its name and
+	The list: the fold's groups and nothing pinned. The inbox is the
+	built-in For Me view, a query like any other, so the list draws what
+	the fold sent, keyed on whatever the query grouped by, in wire order:
+	every group is a details with its name and
 	its count on the summary, so a group collapses on its own, and the
 	two closed groups of a status fold, done and canceled, start
 	collapsed because they are the render's memory of the week rather
@@ -47,15 +37,6 @@
 		{/each}
 	</div>
 {/snippet}
-
-{#each pinned as [title, views] (title)}
-	{#if views.length > 0}
-		<section class="flex flex-col gap-1">
-			<h2 class={heading}>{title}</h2>
-			{@render rows(views)}
-		</section>
-	{/if}
-{/each}
 
 {#if b}
 	{#each b.groups as group (group.key)}

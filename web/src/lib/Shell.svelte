@@ -4,6 +4,7 @@
 	import DisplayMenu from './DisplayMenu.svelte';
 	import FilterBar from './FilterBar.svelte';
 	import FilterMenu from './FilterMenu.svelte';
+	import ViewChips from './ViewChips.svelte';
 	import { feed } from './feed.svelte';
 	import { dismiss } from './menu';
 	import { query } from './query.svelte';
@@ -80,7 +81,7 @@
 			</details>
 		</div>
 	</div>
-	<!-- The view chips sit under the header row; nothing renders here yet. -->
+	<ViewChips />
 	<FilterBar />
 	{#if feed.error}
 		<!--

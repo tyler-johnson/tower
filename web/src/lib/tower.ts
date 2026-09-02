@@ -92,21 +92,6 @@ export function liveRows(folded: Folded): FlightView[] {
 	return foldRows(folded).filter((row) => !closedRow(row));
 }
 
-/// The inbox, derived here the way core's `enrich` derives it: live rows
-/// with an open question, oldest ask first, and live rows Ready in the
-/// `me` lane — the todo list. A view of the same rows, so a flight here
-/// still stands in its status group.
-export function inbox(folded: Folded): { questions: FlightView[]; yours: FlightView[] } {
-	const live = liveRows(folded);
-	const questions = live
-		.filter((row) => row.question !== null)
-		.sort((a, b) => (a.asked_at ?? 0) - (b.asked_at ?? 0));
-	const yours = live.filter(
-		(row) => row.question === null && row.status === 'ready' && row.assignee === 'me'
-	);
-	return { questions, yours };
-}
-
 export interface FlightView {
 	id: string;
 	number: number;
