@@ -2,7 +2,15 @@
 // under a subgroup, is still one flight to the ref map and the footer.
 
 import { describe, expect, it } from 'vitest';
-import { buildRefs, foldRows, liveRows, type FlightView, type Folded, type Group } from './tower';
+import {
+	buildRefs,
+	foldRows,
+	liveRows,
+	neighbors,
+	type FlightView,
+	type Folded,
+	type Group
+} from './tower';
 
 function flight(number: number, status: string, labels: string[] = []): FlightView {
 	return {
@@ -72,5 +80,26 @@ describe('the fold', () => {
 		expect(liveRows(nested)).toHaveLength(2);
 		expect(buildRefs(nested).flights).toBe(2);
 		expect(buildRefs(nested).refs.size).toBe(4);
+	});
+});
+
+describe('the neighbors', () => {
+	it('walks the render order, subgroups and all, and the ends take no arrow', () => {
+		const one = flight(1, 'ready');
+		const two = flight(2, 'in_progress');
+		const three = flight(3, 'done');
+		const nested: Folded = {
+			groups: [
+				group('tyler', [], [group('high', [one]), group('none', [two])]),
+				group(null, [three])
+			],
+			hidden: 0,
+			filtered: 0
+		};
+		expect(neighbors(nested, two.id)).toEqual({ prev: one.id, next: three.id });
+		expect(neighbors(nested, one.id)).toEqual({ prev: null, next: two.id });
+		expect(neighbors(nested, three.id)).toEqual({ prev: two.id, next: null });
+		// A flight the fold does not carry stands alone.
+		expect(neighbors(nested, 'pi-8c2e.9')).toEqual({ prev: null, next: null });
 	});
 });

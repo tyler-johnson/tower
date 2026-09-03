@@ -60,6 +60,24 @@ export function foldRows(folded: Folded): FlightView[] {
 	return [...seen.values()];
 }
 
+/// The flight before and the flight after `id` in the render's own order:
+/// `foldRows` is that order, since `walk` takes each group's rows then its
+/// subgroups and a group holds one or the other. A flight the fold does
+/// not carry — closed and past the closed window — has no neighbors, and
+/// the page offers no arrows.
+export function neighbors(
+	folded: Folded,
+	id: string
+): { prev: string | null; next: string | null } {
+	const rows = foldRows(folded);
+	const at = rows.findIndex((row) => row.id === id);
+	if (at === -1) return { prev: null, next: null };
+	return {
+		prev: at > 0 ? rows[at - 1].id : null,
+		next: at < rows.length - 1 ? rows[at + 1].id : null
+	};
+}
+
 /// The board's own sections, the seven status words core's grouping
 /// deals rows under, as themselves; a status this build has never heard
 /// of names no section at all.
@@ -367,8 +385,10 @@ export interface CommentView {
 
 /// One gesture on the record: who did what, when, and the words the verb
 /// took, flat beside `what` and present only where the kind carries them.
-/// Deliberately thin — the subject, the body, the question, and a comment's
-/// text already sit elsewhere on the brief.
+/// Deliberately thin — the subject, the body, and a comment's text already
+/// sit elsewhere on the brief. A hold and an answer are the exception: an
+/// open question sits flat on the brief, but a resolved one and the words
+/// that closed it sit nowhere else at all.
 export interface Moment {
 	id: string;
 	at: number;
@@ -386,6 +406,10 @@ export interface Moment {
 	/// `linked` and `unlinked`: both ends, wire ids, `from` depends on `to`.
 	from?: string;
 	to?: string;
+	/// `held` and `answered`: the words each carried — the only copy once
+	/// the hold is over.
+	question?: string;
+	answer?: string;
 	/// `routed`: which procedure and rule fired, and why.
 	procedure?: string;
 	rule?: string;
@@ -395,7 +419,13 @@ export interface Moment {
 /// The words after a moment's verb — a leading space and the words, or
 /// `''` when the kind carries none — and the free text that follows on its
 /// own line: a move's reason, a routing's because. Link endpoints print as
-/// wire ids: the panel has no number map.
+/// wire ids: the page has no number map.
+///
+/// The one divergence from `phrase()`: a hold and an answer render their
+/// words here as the note. The CLI's arms are inert because it prints the
+/// open question in the note line and keeps comments and history apart;
+/// the page blends the two into one stream, where a question with no words
+/// is a gap.
 export function momentPhrase(moment: Moment, briefId: string): { line: string; note?: string } {
 	switch (moment.what) {
 		case 'status':
@@ -415,6 +445,10 @@ export function momentPhrase(moment: Moment, briefId: string): { line: string; n
 			return moment.from === briefId
 				? { line: ` depends on ${moment.to}` }
 				: { line: ` blocks ${moment.from}` };
+		case 'held':
+			return moment.question === undefined ? { line: '' } : { line: '', note: moment.question };
+		case 'answered':
+			return moment.answer === undefined ? { line: '' } : { line: '', note: moment.answer };
 		case 'routed':
 			return moment.procedure === undefined
 				? { line: '' }
@@ -447,6 +481,9 @@ export interface Brief {
 	status: string;
 	status_by: string | null;
 	status_at: number | null;
+	/// A cancel's `-m`, or the closing of a dependency that moved this
+	/// flight — the words behind the move, which nothing else carries.
+	status_reason: string | null;
 	assignee: string | null;
 	priority: string;
 	labels: string[];
@@ -569,6 +606,7 @@ export function briefNote(brief: Brief, refs: Map<string, string>, now: number):
 			? `${status} — ${brief.status_by} ${age(now, brief.status_at)}`
 			: status
 	);
+	if (brief.status_reason !== null) dim(brief.status_reason);
 	if (brief.question !== null) warn(brief.question);
 	if (brief.held) warn('held');
 	if (brief.resolving) warn('resolving');
@@ -684,6 +722,7 @@ const KNOWN_BRIEF_KEYS = new Set([
 	'status',
 	'status_by',
 	'status_at',
+	'status_reason',
 	'assignee',
 	'priority',
 	'labels',

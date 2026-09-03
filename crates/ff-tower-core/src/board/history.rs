@@ -8,9 +8,15 @@
 //!
 //! Deliberately thin. A moment says who did what, when, and the words the
 //! verb took: the status word, the lane, the fields an edit touched, the
-//! other end of an edge. It does not repeat the subject, the body, the
-//! open question, or a comment's text, which sit flat on the
-//! [`Brief`](super::Brief) and would go stale here.
+//! other end of an edge. It does not repeat the subject, the body, or a
+//! comment's text, which sit flat on the [`Brief`](super::Brief) and would
+//! go stale here.
+//!
+//! A hold and an answer are the exception, and carry their own words. The
+//! *open* question sits flat on the brief and would go stale here the way
+//! the subject would — but a resolved one sits nowhere else at all, and
+//! neither does the answer that closed it. A moment is the only place they
+//! can be read once the hold is over.
 
 use serde::{Deserialize, Serialize};
 
@@ -60,6 +66,11 @@ pub enum Detail {
     /// Both ends, wire ids, `from` depends on `to`; the same shape under
     /// `linked` and `unlinked`.
     Edge { from: String, to: String },
+    /// The question a hold stopped on — its only home once the hold is
+    /// answered and the brief's flat `question` is gone.
+    Held { question: String },
+    /// The words that closed the hold, which nothing else carries.
+    Answered { answer: String },
     /// Which procedure and rule fired, and the render-ready `because`,
     /// which the brief does not carry. `rule` and `because` may be `""`
     /// on historic events; skipped when empty.
@@ -143,9 +154,9 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
     moments
 }
 
-/// The words a kind carries beyond its name. `filed`, `commented`,
-/// `held`, and `answered` carry `None`: their words sit flat on the brief.
-/// An unknown kind's words are unknowable.
+/// The words a kind carries beyond its name. `filed` and `commented`
+/// carry `None`: their words sit flat on the brief. An unknown kind's
+/// words are unknowable.
 fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
     match kind {
         Kind::Status { status, reason, .. } => Some(Detail::Status {
@@ -185,6 +196,12 @@ fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
             from: from.to_string(),
             to: to.to_string(),
         }),
+        Kind::Held { question, .. } => Some(Detail::Held {
+            question: question.clone(),
+        }),
+        Kind::Answered { answer, .. } => Some(Detail::Answered {
+            answer: answer.clone(),
+        }),
         Kind::Routed {
             procedure,
             rule,
@@ -197,8 +214,6 @@ fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
         }),
         Kind::Filed { .. }
         | Kind::Commented { .. }
-        | Kind::Held { .. }
-        | Kind::Answered { .. }
         | Kind::ViewSaved { .. }
         | Kind::ViewDeleted { .. }
         | Kind::Unknown { .. } => None,
@@ -320,5 +335,35 @@ mod tests {
         let lane = rows[1].as_object().expect("an object");
         assert!(lane.contains_key("assignee"), "{}", rows[1]);
         assert!(lane["assignee"].is_null(), "{}", rows[1]);
+    }
+
+    #[test]
+    fn a_hold_carries_its_question_and_an_answer_carries_its_answer() {
+        let flight: EventId = "pi.1".parse().expect("id");
+        let events = vec![
+            filed("pi.1", 1),
+            event(
+                "pi.2",
+                2,
+                Kind::Held {
+                    flight: flight.clone(),
+                    question: "which log?".to_string(),
+                },
+            ),
+            event(
+                "pi.3",
+                3,
+                Kind::Answered {
+                    flight: flight.clone(),
+                    answer: "the writer's own".to_string(),
+                },
+            ),
+        ];
+        let rows = json(&history(&events, &flight));
+        // Flat beside `what`, the way `status` and `assignee` are.
+        assert_eq!(rows[1]["what"], serde_json::json!("held"));
+        assert_eq!(rows[1]["question"], serde_json::json!("which log?"));
+        assert_eq!(rows[2]["what"], serde_json::json!("answered"));
+        assert_eq!(rows[2]["answer"], serde_json::json!("the writer's own"));
     }
 }

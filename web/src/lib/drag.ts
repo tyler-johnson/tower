@@ -4,28 +4,24 @@
 // rule — so `drop` answers the verb and the body a route takes, or null,
 // and the board offers nothing where it answers null.
 //
-// The verb is whichever one edits the grouped field: status is `status`
-// (with `done` and `cancel` on their own routes), assignee is `assign`,
-// and priority, label, skill and bay are `edit`. The guards the routes
-// hold are mirrored here where a drop would otherwise be offered and
-// refused every time: `waiting` and `held` are derived and take no
-// write, a closed flight refuses `status` and `assign`, and a flight
-// with an open question moves only to done or canceled.
+// The field-to-verb mapping is `write.ts`'s, shared with the flight
+// page's rail; what stays here is the drag's own — the label set
+// arithmetic, and the from/to rules. The guards the routes hold are
+// mirrored here where a drop would otherwise be offered and refused every
+// time: `waiting` and `held` are derived and take no write, a closed
+// flight refuses `status` and `assign`, and a flight with an open question
+// moves only to done or canceled.
 //
 // No runes, so it tests under vitest with no shims.
 
 import type { Field } from './query';
 import { closedRow, type FlightView } from './tower';
+import { write, type Write } from './write';
 
-/// The verb one drop writes, and the body the route takes.
-export type Drop =
-	| { verb: 'status'; body: { flight: string; status: string } }
-	| { verb: 'done' | 'cancel'; body: { flight: string } }
-	| { verb: 'assign'; body: { flight: string; assignee: string } }
-	| {
-			verb: 'edit';
-			body: { target: string; priority?: string; labels?: string[]; skill?: string; bay?: string };
-	  };
+/// The verb one drop writes, and the body the route takes: the shared
+/// table's, and the two closing verbs, which take a route of their own
+/// rather than a field's value.
+export type Drop = Write | { verb: 'done' | 'cancel'; body: { flight: string } };
 
 const STATUSES = ['triage', 'waiting', 'ready', 'in_progress', 'held', 'done', 'canceled'];
 const PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'];
@@ -80,22 +76,19 @@ export function drop(
 		case 'status':
 			return statusDrop(view, to);
 		case 'assignee':
-			return { verb: 'assign', body: { flight, assignee: to ?? 'none' } };
 		case 'priority':
-			return to === null ? null : { verb: 'edit', body: { target: flight, priority: to } };
+		case 'skill':
+		case 'bay':
+			return write(field, flight, to);
 		case 'label': {
 			// The set the flight would carry: `from` out, `to` in, deduped.
-			// Empty cannot be written — an empty array means unchanged on
-			// the wire — and the same set is no edit at all.
+			// The same set is no edit at all; an empty one `write` refuses,
+			// since an empty array means unchanged on the wire.
 			const labels = view.labels.filter((label) => label !== from);
 			if (to !== null && !labels.includes(to)) labels.push(to);
-			if (labels.length === 0 || sameSet(labels, view.labels)) return null;
-			return { verb: 'edit', body: { target: flight, labels } };
+			if (sameSet(labels, view.labels)) return null;
+			return write('label', flight, labels);
 		}
-		case 'skill':
-			return to === null ? null : { verb: 'edit', body: { target: flight, skill: to } };
-		case 'bay':
-			return to === null ? null : { verb: 'edit', body: { target: flight, bay: to } };
 		default:
 			return null;
 	}
@@ -116,7 +109,7 @@ function statusDrop(view: FlightView, to: string | null): Drop | null {
 		case 'ready':
 		case 'in_progress':
 			if (view.question !== null) return null;
-			return { verb: 'status', body: { flight, status: to } };
+			return write('status', flight, to);
 		default:
 			return null;
 	}

@@ -38,15 +38,26 @@ class Panel {
 		this.brief = brief.data;
 	}
 
-	/// A verb, against the flight on screen. The refusal envelope is kept
-	/// as the answer it is; a success refolds, and the board behind the
-	/// panel refolds on its own through the feed.
+	/// A verb keyed on the flight on screen: the body is the verb's own
+	/// arguments, and `flight` is added here.
 	async run(verb: string, body: Record<string, unknown> = {}) {
+		const flight = this.#showing;
+		if (flight === null) return;
+		await this.write(verb, { flight, ...body });
+	}
+
+	/// A write whose body is complete, posted verbatim — `/api/edit` keys
+	/// the flight as `target`, and `deny_unknown_fields` rejects a `flight`
+	/// beside it, so a route's own shape is the caller's to build.
+	///
+	/// The refusal envelope is kept as the answer it is; a success refolds
+	/// the record, and the board refolds on its own through the feed.
+	async write(verb: string, body: Record<string, unknown>) {
 		const flight = this.#showing;
 		if (flight === null || this.busy) return;
 		this.busy = true;
 		this.error = null;
-		const answer = await post(`/api/${verb}`, { flight, ...body });
+		const answer = await post(`/api/${verb}`, body);
 		this.busy = false;
 		if (answer.error) {
 			this.error = answer.error;

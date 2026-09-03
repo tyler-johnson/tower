@@ -338,6 +338,12 @@ fn phrase<'a>(fold: &Fold, brief_id: &str, moment: &'a Moment) -> (String, Optio
             };
             (words, None)
         }
+        // The note above already prints an open question, and the CLI
+        // keeps comments and history as two sections rather than one
+        // stream — so these words ride the wire for the web's blended
+        // stream and this render does not move.
+        Some(Detail::Held { .. }) => (String::new(), None),
+        Some(Detail::Answered { .. }) => (String::new(), None),
         Some(Detail::Routed {
             procedure, because, ..
         }) => (
