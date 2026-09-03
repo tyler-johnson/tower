@@ -141,6 +141,13 @@
 	<label class="flex items-center justify-between gap-2">
 		<span>ordering</span>
 		<span class="flex items-center gap-1">
+			<button
+				class="btn btn-ghost btn-sm btn-square"
+				aria-label={q.order.descending ? 'descending' : 'ascending'}
+				onclick={flipOrder}
+			>
+				{#if q.order.descending}<ArrowDown size={16} />{:else}<ArrowUp size={16} />{/if}
+			</button>
 			<select
 				class="select select-sm w-28"
 				value={q.order.field}
@@ -150,13 +157,6 @@
 					<option value={option}>{fieldLabel(option)}</option>
 				{/each}
 			</select>
-			<button
-				class="btn btn-ghost btn-sm btn-square"
-				aria-label={q.order.descending ? 'descending' : 'ascending'}
-				onclick={flipOrder}
-			>
-				{#if q.order.descending}<ArrowDown size={16} />{:else}<ArrowUp size={16} />{/if}
-			</button>
 		</span>
 	</label>
 
