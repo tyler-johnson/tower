@@ -18,16 +18,22 @@ const [all, forMe] = BUILTINS;
 
 describe('the views', () => {
 	it('a hand-typed default is All Flights', () => {
-		expect(canonical('?closed=3')).toBe('');
-		expect(isActive(all, '?closed=3')).toBe(true);
-		expect(isActive(forMe, '?closed=3')).toBe(false);
-		expect(unsaved('?closed=3', [mine])).toBe(false);
+		expect(canonical('?closed=1d')).toBe('');
+		expect(isActive(all, '?closed=1d')).toBe(true);
+		expect(isActive(forMe, '?closed=1d')).toBe(false);
+		expect(unsaved('?closed=1d', [mine])).toBe(false);
+	});
+
+	it("the CLI's three newest is a choice, not the default", () => {
+		expect(canonical('closed=3')).toBe('closed=3');
+		expect(isActive(all, 'closed=3')).toBe(false);
+		expect(unsaved('closed=3', [mine])).toBe(true);
 	});
 
 	it('for=me is For Me whatever else is default', () => {
-		expect(isActive(forMe, 'for=me&closed=3')).toBe(true);
-		expect(isActive(all, 'for=me&closed=3')).toBe(false);
-		expect(unsaved('for=me&closed=3', [])).toBe(false);
+		expect(isActive(forMe, 'for=me&closed=1d')).toBe(true);
+		expect(isActive(all, 'for=me&closed=1d')).toBe(false);
+		expect(unsaved('for=me&closed=1d', [])).toBe(false);
 	});
 
 	it('a custom view holds its query and nothing else', () => {

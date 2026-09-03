@@ -101,6 +101,8 @@ export interface Query {
 	group: Field | null;
 	subgroup: Field | null;
 	order: Order;
+	/// The web's default is the past day, not core's three newest: the
+	/// two surfaces differ on purpose, see `defaultQuery`.
 	closed: ClosedWindow;
 	emptyGroups: boolean;
 	mode: Mode;
@@ -120,15 +122,18 @@ export const DEFAULT_SHOW: Field[] = [
 ];
 
 /// `Query::default`: today's board — grouped by status, ordered priority
-/// then age, the compiled-in closed window, empty groups dropped, list
-/// mode, and the columns a row renders now.
+/// then age, the past day of closed flights, empty groups dropped, list
+/// mode, and the columns a row renders now. The closed window is where
+/// the web parts from core: the CLI keeps the three newest, a count that
+/// holds its size on a quiet Monday, and the web opens on the past day.
+/// The fork is by surface and on purpose.
 export function defaultQuery(): Query {
 	return {
 		filters: [],
 		group: 'status',
 		subgroup: null,
 		order: { field: 'priority', descending: false },
-		closed: { count: 3 },
+		closed: { span: 86_400 },
 		emptyGroups: false,
 		mode: 'list',
 		show: [...DEFAULT_SHOW]
@@ -365,6 +370,16 @@ export function render(query: Query): string {
 	if (query.mode !== base.mode) parts.push(`mode=${query.mode}`);
 	if (!sameList(query.show, base.show)) parts.push(`show=${query.show.join(',')}`);
 	return parts.join('&');
+}
+
+/// The search as the wire has to carry it. Serve's default closed window
+/// is the CLI's three newest, and `render` elides the web's own default,
+/// so a URL silent on `closed` would fold under the CLI's window unless
+/// the wire says `closed=1d` itself. A search that already names a
+/// window is returned as it is.
+export function withDefaultWindow(search: string): string {
+	if (search.split('&').some((part) => part.startsWith('closed='))) return search;
+	return search === '' ? 'closed=1d' : `${search}&closed=1d`;
 }
 
 function sameList(a: Field[], b: Field[]): boolean {

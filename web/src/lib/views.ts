@@ -27,7 +27,7 @@ export const BUILTINS: readonly { name: string; query: string }[] = [
 ];
 
 /// The URL's query in the form a view stores, or null while the server
-/// refuses it. A hand-typed `?closed=3` is the default board.
+/// refuses it. A hand-typed `?closed=1d` is the default board.
 export function canonical(search: string): string | null {
 	const parsed = parse(search);
 	return parsed === null ? null : render(parsed);

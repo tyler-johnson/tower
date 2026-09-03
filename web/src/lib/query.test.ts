@@ -3,7 +3,15 @@
 // hold here byte for byte.
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SHOW, defaultQuery, parse, render, withColumn, type Query } from './query';
+import {
+	DEFAULT_SHOW,
+	defaultQuery,
+	parse,
+	render,
+	withColumn,
+	withDefaultWindow,
+	type Query
+} from './query';
 
 const DAY = 86_400;
 
@@ -120,6 +128,26 @@ describe('the query codec', () => {
 		// names refuse, values never do.
 		expect(parse('status=parked')).not.toBeNull();
 		expect(parse('priority=whenever')).not.toBeNull();
+	});
+
+	it('the closed window defaults to the past day', () => {
+		expect(defaultQuery().closed).toEqual({ span: DAY });
+		// The default is elided, so the past day never reaches the URL
+		// and the CLI's three newest is an explicit choice.
+		expect(render({ ...defaultQuery(), closed: { span: DAY } })).toBe('');
+		expect(render({ ...defaultQuery(), closed: { count: 3 } })).toBe('closed=3');
+		const day = parse('closed=1d');
+		expect(day).not.toBeNull();
+		if (day === null) return;
+		expect(day.closed).toEqual(defaultQuery().closed);
+		expect(render(day)).toBe('');
+	});
+
+	it('the wire states the window the URL elides', () => {
+		expect(withDefaultWindow('')).toBe('closed=1d');
+		expect(withDefaultWindow('status=ready')).toBe('status=ready&closed=1d');
+		expect(withDefaultWindow('closed=all')).toBe('closed=all');
+		expect(withDefaultWindow('status=ready&closed=3')).toBe('status=ready&closed=3');
 	});
 
 	it('a column turns on where the layout puts it', () => {

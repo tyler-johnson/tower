@@ -11,6 +11,10 @@
 // server accepted. The default query is `Query::default()` and cannot
 // refuse, so it skips the probe and the first load stays one fold.
 //
+// The wire carries the web's closed window when the URL is silent:
+// serve's default is the CLI's three newest, the URL elides the web's
+// past day, so `withDefaultWindow` states it before either request.
+//
 // Named for what it exports rather than for the board, because
 // `board.svelte.ts` beside `Board.svelte` is one name on a
 // case-insensitive filesystem: the component's own `./board.svelte`
@@ -19,6 +23,7 @@
 // name in a different case.
 
 import { get } from './api';
+import { withDefaultWindow } from './query';
 import type { Envelope, Folded, TowerError } from './tower';
 
 class Feed {
@@ -41,11 +46,12 @@ class Feed {
 	async connect(search: string) {
 		this.close();
 		const token = ++this.#latest;
+		const wire = withDefaultWindow(search);
 		if (search !== '') {
 			this.board = null;
 			this.error = null;
 			this.conn = 'connecting';
-			const probe = await get<Folded>('/api/board?' + search);
+			const probe = await get<Folded>('/api/board?' + wire);
 			if (token !== this.#latest) return;
 			if (probe.error || !probe.data) {
 				this.error = probe.error ?? null;
@@ -53,7 +59,7 @@ class Feed {
 			}
 			this.land(probe.data);
 		}
-		this.#source = new EventSource(search === '' ? '/api/feed' : '/api/feed?' + search);
+		this.#source = new EventSource('/api/feed?' + wire);
 		this.#source.onmessage = (message) => {
 			const env: Envelope<Folded> = JSON.parse(message.data);
 			if (env.error || !env.data) return;
