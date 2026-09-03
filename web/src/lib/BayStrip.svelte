@@ -36,10 +36,6 @@
 		}
 		return { dot: 'status-error', title: 'occupied' };
 	}
-
-	// The strip follows the main's width rule, so the two stay aligned:
-	// wide under the kanban, the reading width under the list.
-	let wide = $derived(query.parsed?.mode === 'board');
 </script>
 
 <!--
@@ -49,11 +45,7 @@
 	placeholder row, the way the board draws no sections until a board
 	exists.
 -->
-<nav
-	class="mx-auto flex w-full flex-wrap items-baseline gap-2 px-4 pt-4 {wide
-		? 'max-w-7xl'
-		: 'max-w-4xl'}"
->
+<nav class="mx-auto flex w-full max-w-7xl flex-wrap items-baseline gap-2 px-4 pt-4">
 	{#each bays.pool as bay (bay.id)}
 		{@const state = chip(bay, b)}
 		<a
