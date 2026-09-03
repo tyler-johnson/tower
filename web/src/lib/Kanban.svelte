@@ -41,15 +41,13 @@
 	});
 
 	// The lanes: the union of subgroup keys across the columns, in the
-	// order first seen, each with its total across the row.
+	// order first seen. Each column stacks them, so a lane's count is
+	// the column's own, read off its subgroup where it is drawn.
 	let lanes = $derived.by(() => {
 		if (sub === null) return null;
 		const keys: (string | null)[] = [];
 		for (const c of columns) for (const s of c.subgroups) if (!keys.includes(s.key)) keys.push(s.key);
-		return keys.map((key) => ({
-			key,
-			count: columns.reduce((n, c) => n + (c.subgroups.find((s) => s.key === key)?.count ?? 0), 0)
-		}));
+		return keys.map((key) => ({ key }));
 	});
 
 	function cellRows(column: Group, lane: string | null): FlightView[] {
@@ -158,13 +156,16 @@
 	columns and offers no drag. The write needs no refetch — the feed
 	refolds on the log's motion — and the board says why when a drop is
 	refused or a `ready` lands in waiting. No inbox: the inbox is the
-	For Me view.
+	For Me view. The headings are the grid's first row and the bodies
+	its second, each body its own scroll, and under a sub-grouping a
+	column stacks its lanes inside one scroll, so the lane heading
+	repeats per column.
 -->
 
 {#snippet body(column: Group, rows: FlightView[], lane: string | null)}
 	<div
 		role="list"
-		class="flex min-h-24 flex-col gap-2 rounded-box bg-base-200/50 p-2 {isOver(column.key, lane)
+		class="flex min-h-24 flex-col gap-2 overflow-y-auto rounded-box bg-base-200/50 p-2 {isOver(column.key, lane)
 			? 'ring-1 ring-primary'
 			: ''}"
 		ondragover={(event) => dragover(event, column.key, lane)}
@@ -206,10 +207,11 @@
 {/if}
 
 {#if b}
-	<div class="overflow-x-auto">
+	<div class="min-h-0 flex-1 overflow-x-auto">
 		<div
-			class="grid gap-3"
+			class="grid h-full gap-3"
 			style:grid-template-columns="repeat({columns.length}, 16rem)"
+			style:grid-template-rows="auto minmax(0, 1fr)"
 		>
 			{#each columns as column (column.key)}
 				<h2
@@ -227,14 +229,17 @@
 					{@render body(column, column.rows, null)}
 				{/each}
 			{:else}
-				{#each lanes as lane (lane.key)}
-					<h3 class="col-span-full pt-2 {heading}">
-						{groupTitle(lane.key)}
-						<span class="text-base-content/40">{lane.count}</span>
-					</h3>
-					{#each columns as column (column.key)}
-						{@render body(column, cellRows(column, lane.key), lane.key)}
-					{/each}
+				{#each columns as column (column.key)}
+					<div class="flex min-h-0 flex-col gap-2 overflow-y-auto">
+						{#each lanes as lane (lane.key)}
+							{@const count = column.subgroups.find((s) => s.key === lane.key)?.count ?? 0}
+							<h3 class={heading}>
+								{groupTitle(lane.key)}
+								<span class="text-base-content/40">{count}</span>
+							</h3>
+							{@render body(column, cellRows(column, lane.key), lane.key)}
+						{/each}
+					</div>
 				{/each}
 			{/if}
 		</div>

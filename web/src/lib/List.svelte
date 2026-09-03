@@ -27,7 +27,9 @@
 	two closed groups of a status fold, done and canceled, start
 	collapsed because they are the render's memory of the week rather
 	than work on the board. Rows lay out from the query's `show`, one
-	grid per body so a section's columns align down its height.
+	grid per body so a section's columns align down its height. The
+	list is one scroll region so the header and footer stay put; a
+	scroll per group would fight the collapse.
 -->
 
 {#snippet rows(views: FlightView[])}
@@ -39,28 +41,30 @@
 {/snippet}
 
 {#if b}
-	{#each b.groups as group (group.key)}
-		<details
-			class="flex flex-col gap-1"
-			open={group.key !== 'done' && group.key !== 'canceled'}
-		>
-			<summary class="cursor-pointer {heading}">
-				{groupTitle(group.key)}
-				<span class="text-base-content/40">{group.count}</span>
-			</summary>
-			{#if group.subgroups.length > 0}
-				{#each group.subgroups as sub (sub.key)}
-					<details class="flex flex-col gap-1 pt-1" open>
-						<summary class="cursor-pointer {heading}">
-							{groupTitle(sub.key)}
-							<span class="text-base-content/40">{sub.count}</span>
-						</summary>
-						{@render rows(sub.rows)}
-					</details>
-				{/each}
-			{:else}
-				{@render rows(group.rows)}
-			{/if}
-		</details>
-	{/each}
+	<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
+		{#each b.groups as group (group.key)}
+			<details
+				class="flex flex-col gap-1"
+				open={group.key !== 'done' && group.key !== 'canceled'}
+			>
+				<summary class="cursor-pointer {heading}">
+					{groupTitle(group.key)}
+					<span class="text-base-content/40">{group.count}</span>
+				</summary>
+				{#if group.subgroups.length > 0}
+					{#each group.subgroups as sub (sub.key)}
+						<details class="flex flex-col gap-1 pt-1" open>
+							<summary class="cursor-pointer {heading}">
+								{groupTitle(sub.key)}
+								<span class="text-base-content/40">{sub.count}</span>
+							</summary>
+							{@render rows(sub.rows)}
+						</details>
+					{/each}
+				{:else}
+					{@render rows(group.rows)}
+				{/if}
+			</details>
+		{/each}
+	</div>
 {/if}

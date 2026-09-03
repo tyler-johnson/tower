@@ -16,14 +16,18 @@
 	or the kanban, and both read the same frame the feed holds, so a
 	switch between them is a URL change and never a second request. The
 	footer is shared — the live count and the two disjoint counts the
-	fold reports — because it is the fold's, not either render's.
+	fold reports — because it is the fold's, not either render's. The
+	region takes what the header and footer leave and scrolls inside
+	itself.
 -->
 
-{#if mode === 'board'}
-	<Kanban />
-{:else}
-	<List />
-{/if}
+<div class="flex min-h-0 flex-1 flex-col gap-3">
+	{#if mode === 'board'}
+		<Kanban />
+	{:else}
+		<List />
+	{/if}
+</div>
 
 {#if b}
 	<footer class="flex flex-wrap items-center gap-2 text-sm text-base-content/60">

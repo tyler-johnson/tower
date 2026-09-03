@@ -9,8 +9,10 @@
 	The shell and the board are the group's layout, not a page: the bay
 	drawer renders over both while they are still live behind it. The
 	flight page is outside the group, so no board renders behind it.
+	The main is the window's height, so the board scrolls inside it and
+	the footer stays in view.
 -->
-<main class="mx-auto flex max-w-7xl flex-col gap-6 p-4">
+<main class="mx-auto flex h-dvh w-full max-w-7xl min-h-0 flex-col gap-6 p-4">
 	<Shell />
 	<Board />
 </main>
