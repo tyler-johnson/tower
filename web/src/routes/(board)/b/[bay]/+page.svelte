@@ -4,7 +4,7 @@
 
 <!--
 	The URL is the state, exactly as for a flight. No effect and no fetch:
-	the strip in the layout keeps the pool live, so the panel derives its
-	row and follows the board on its own.
+	the root layout keeps the pool live, so the panel derives its row and
+	follows the board on its own.
 -->
 <BayPanel />

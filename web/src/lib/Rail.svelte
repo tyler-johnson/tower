@@ -12,8 +12,8 @@
 	let verbs = $derived(allowedVerbs(brief));
 	let note = $derived(briefNote(brief, refs, now));
 	let other = $derived(unknownRows(brief));
-	// The bay flying it, off the shared pool the strip keeps live: one
-	// fewer request per open, and the line moves with the strip.
+	// The bay flying it, off the shared pool the root layout keeps live:
+	// one fewer request per open, and the line moves with every frame.
 	let bay = $derived(bays.pool.find((row) => row.flight === brief.id) ?? null);
 	// A closed flight refuses every move and every re-laning — `ensure_active`
 	// — and takes an edit, which is why the other four stay live.

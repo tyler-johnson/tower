@@ -4,7 +4,7 @@
 //
 // The list rides no SSE — the feed carries the board envelope and nothing
 // else — so liveness is a re-GET on the feed's stamp, which `ViewChips`
-// drives from the last frame the way the strip re-reads the pool. A save
+// drives from the last frame the way the root layout re-reads the pool. A save
 // is log motion, so a frame follows it; the re-read after a write is only
 // so the chip does not wait for one.
 

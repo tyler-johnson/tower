@@ -2,9 +2,9 @@
 // whether a verb is in the air. One instance, because one flight is open
 // at a time — the route is what says which.
 //
-// The bay flying it is not here: the pool is a shared store the strip
-// keeps live, so the panel's bay line derives from it rather than costing
-// a second request per open.
+// The bay flying it is not here: the pool is a shared store the root
+// layout keeps live, so the panel's bay line derives from it rather than
+// costing a second request per open.
 
 import { get, post } from './api';
 import type { Brief, TowerError } from './tower';

@@ -6,9 +6,9 @@
 	import { query } from './query.svelte';
 	import { buildRefs } from './tower';
 
-	// Nothing is fetched here: the pool is already live from the strip's
-	// effect, so the row derives by id and follows every board frame for
-	// free.
+	// Nothing is fetched here: the pool is already live from the root
+	// layout's effect, so the row derives by id and follows every board
+	// frame for free.
 	let id = $derived(page.params.bay ?? null);
 	let bay = $derived(bays.pool.find((row) => row.id === id) ?? null);
 	let b = $derived(feed.board);
