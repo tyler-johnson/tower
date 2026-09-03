@@ -382,6 +382,23 @@ export function withDefaultWindow(search: string): string {
 	return search === '' ? 'closed=1d' : `${search}&closed=1d`;
 }
 
+/// Whether the filters can still admit a closed row. The closed window
+/// runs before the filters, so on a query whose status filter rejects
+/// both `done` and `canceled` the window is a control over nothing, and
+/// the display menu hides it. A filter on any other field, or none at
+/// all, admits closed rows.
+export function admitsClosed(filters: Filter[]): boolean {
+	for (const filter of filters) {
+		if (filter.field !== 'status' || !('words' in filter.value)) continue;
+		const words = filter.value.words;
+		const done = words.includes('done');
+		const canceled = words.includes('canceled');
+		if (filter.op === 'is' && !done && !canceled) return false;
+		if (filter.op === 'not' && done && canceled) return false;
+	}
+	return true;
+}
+
 function sameList(a: Field[], b: Field[]): boolean {
 	return a.length === b.length && a.every((field, i) => field === b[i]);
 }

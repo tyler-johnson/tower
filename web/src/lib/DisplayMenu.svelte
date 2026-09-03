@@ -6,6 +6,7 @@
 		COLUMNS,
 		FIELDS,
 		WINDOWS,
+		admitsClosed,
 		defaultQuery,
 		fieldLabel,
 		groupable,
@@ -87,7 +88,8 @@
 	menu holds no state of its own. The selects take `value` and
 	`onchange` rather than `bind:value`: a write is a goto, and nothing
 	here should keep a copy that could disagree with the URL between the
-	change and the navigation.
+	change and the navigation. The closed-flights row shows only while
+	the filters can admit a closed row.
 -->
 <div
 	class="dropdown-content z-10 flex w-72 flex-col gap-3 rounded-box border border-base-300 bg-base-100 p-3 text-sm shadow-sm"
@@ -171,21 +173,23 @@
 		/>
 	</label>
 
-	<label class="flex items-center justify-between gap-2">
-		<span>closed flights</span>
-		<select
-			class="select select-sm w-36"
-			value={closed}
-			onchange={(event) => setClosed(event.currentTarget.value)}
-		>
-			{#each WINDOWS as window (window.value)}
-				<option value={window.value}>{window.label}</option>
-			{/each}
-			{#if extraWindow !== null}
-				<option value={extraWindow}>{extraWindow}</option>
-			{/if}
-		</select>
-	</label>
+	{#if admitsClosed(q.filters)}
+		<label class="flex items-center justify-between gap-2">
+			<span>closed flights</span>
+			<select
+				class="select select-sm w-36"
+				value={closed}
+				onchange={(event) => setClosed(event.currentTarget.value)}
+			>
+				{#each WINDOWS as window (window.value)}
+					<option value={window.value}>{window.label}</option>
+				{/each}
+				{#if extraWindow !== null}
+					<option value={extraWindow}>{extraWindow}</option>
+				{/if}
+			</select>
+		</label>
+	{/if}
 
 	<div class="flex flex-col gap-2">
 		<span>display properties</span>

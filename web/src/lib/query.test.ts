@@ -5,11 +5,13 @@
 import { describe, expect, it } from 'vitest';
 import {
 	DEFAULT_SHOW,
+	admitsClosed,
 	defaultQuery,
 	parse,
 	render,
 	withColumn,
 	withDefaultWindow,
+	type Filter,
 	type Query
 } from './query';
 
@@ -161,5 +163,35 @@ describe('the query codec', () => {
 		// first toggle.
 		expect(withColumn(['age', 'ref'], 'skill', true)).toEqual(['ref', 'age', 'skill']);
 		expect(withColumn(DEFAULT_SHOW, 'age', true)).toEqual(DEFAULT_SHOW);
+	});
+});
+
+describe('admitsClosed', () => {
+	// The filters of a parsed search, so each case reads as the URL
+	// would spell it.
+	function filters(raw: string): Filter[] {
+		const query = parse(raw);
+		expect(query, raw).not.toBeNull();
+		return query?.filters ?? [];
+	}
+
+	it('no status filter admits closed rows', () => {
+		expect(admitsClosed([])).toBe(true);
+		expect(admitsClosed(filters('label=infra'))).toBe(true);
+	});
+
+	it('an is set admits them only when it names a closed status', () => {
+		expect(admitsClosed(filters('status=done'))).toBe(true);
+		expect(admitsClosed(filters('status=ready,done'))).toBe(true);
+		expect(admitsClosed(filters('status=ready,in_progress'))).toBe(false);
+	});
+
+	it('a not set rejects them only when it names both', () => {
+		expect(admitsClosed(filters('status=not:done,canceled'))).toBe(false);
+		expect(admitsClosed(filters('status=not:done'))).toBe(true);
+	});
+
+	it('one excluding filter is enough', () => {
+		expect(admitsClosed(filters('status=ready&label=infra'))).toBe(false);
 	});
 });
