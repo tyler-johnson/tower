@@ -95,13 +95,15 @@
 	<div class="join">
 		<button
 			class="btn btn-sm join-item flex-1"
-			class:btn-active={q.mode === 'list'}
+			class:btn-soft={q.mode === 'list'}
+			class:btn-primary={q.mode === 'list'}
 			aria-pressed={q.mode === 'list'}
 			onclick={() => setMode('list')}>list</button
 		>
 		<button
 			class="btn btn-sm join-item flex-1"
-			class:btn-active={q.mode === 'board'}
+			class:btn-soft={q.mode === 'board'}
+			class:btn-primary={q.mode === 'board'}
 			aria-pressed={q.mode === 'board'}
 			onclick={() => setMode('board')}>board</button
 		>
@@ -192,7 +194,9 @@
 				{@const on = q.show.includes(column)}
 				<button
 					class="btn btn-xs"
-					class:btn-active={on}
+					class:btn-soft={on}
+					class:btn-primary={on}
+					class:btn-ghost={!on}
 					aria-pressed={on}
 					onclick={() => toggleColumn(column)}>{fieldLabel(column)}</button
 				>
