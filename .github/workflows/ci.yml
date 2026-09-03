@@ -87,8 +87,13 @@ jobs:
           cargo install --git https://github.com/tyler-johnson/fufu --rev "$FUFU_REV" --locked ff-cli
           ff --version
 
+      # The web checks need the dependencies before cargo's build script would have installed them.
+      - if: runner.os == 'Linux'
+        run: pnpm --dir web install --frozen-lockfile
       - if: runner.os == 'Linux'
         run: cargo fmt --all --check
+      - if: runner.os == 'Linux'
+        run: pnpm --dir web format-check
       - if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

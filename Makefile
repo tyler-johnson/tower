@@ -15,9 +15,11 @@ test:
 
 fmt:
 	cargo fmt --all
+	pnpm --dir web format
 
 fmt-check:
 	cargo fmt --all --check
+	pnpm --dir web format-check
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
