@@ -1,21 +1,21 @@
 <script lang="ts">
-	import { page } from '$app/state';
-	import FlightRow from './FlightRow.svelte';
-	import { template } from './columns';
-	import { feed } from './feed.svelte';
-	import { DEFAULT_SHOW } from './query';
-	import { query } from './query.svelte';
-	import { buildRefs, groupTitle, type FlightView } from './tower';
+  import { page } from "$app/state";
+  import FlightRow from "./FlightRow.svelte";
+  import { template } from "./columns";
+  import { feed } from "./feed.svelte";
+  import { DEFAULT_SHOW } from "./query";
+  import { query } from "./query.svelte";
+  import { buildRefs, groupTitle, type FlightView } from "./tower";
 
-	let b = $derived(feed.board);
-	let q = $derived(query.parsed);
-	let show = $derived(q?.show ?? DEFAULT_SHOW);
-	let refs = $derived(b ? buildRefs(b).refs : new Map<string, string>());
-	// The open flight, straight off the path — the list marks its row
-	// without holding any state of its own.
-	let open = $derived(page.params.flight ?? null);
+  let b = $derived(feed.board);
+  let q = $derived(query.parsed);
+  let show = $derived(q?.show ?? DEFAULT_SHOW);
+  let refs = $derived(b ? buildRefs(b).refs : new Map<string, string>());
+  // The open flight, straight off the path — the list marks its row
+  // without holding any state of its own.
+  let open = $derived(page.params.flight ?? null);
 
-	const heading = 'font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60';
+  const heading = "font-mono text-xs font-medium tracking-[0.2em] uppercase text-base-content/60";
 </script>
 
 <!--
@@ -33,38 +33,35 @@
 -->
 
 {#snippet rows(views: FlightView[])}
-	<div class="grid gap-x-2" style:grid-template-columns={template(show)}>
-		{#each views as view (view.id)}
-			<FlightRow {view} {refs} {show} now={feed.now} open={view.id === open} />
-		{/each}
-	</div>
+  <div class="grid gap-x-2" style:grid-template-columns={template(show)}>
+    {#each views as view (view.id)}
+      <FlightRow {view} {refs} {show} now={feed.now} open={view.id === open} />
+    {/each}
+  </div>
 {/snippet}
 
 {#if b}
-	<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
-		{#each b.groups as group (group.key)}
-			<details
-				class="flex flex-col gap-1"
-				open={group.key !== 'done' && group.key !== 'canceled'}
-			>
-				<summary class="cursor-pointer {heading}">
-					{groupTitle(group.key)}
-					<span class="text-base-content/40">{group.count}</span>
-				</summary>
-				{#if group.subgroups.length > 0}
-					{#each group.subgroups as sub (sub.key)}
-						<details class="flex flex-col gap-1 pt-1" open>
-							<summary class="cursor-pointer {heading}">
-								{groupTitle(sub.key)}
-								<span class="text-base-content/40">{sub.count}</span>
-							</summary>
-							{@render rows(sub.rows)}
-						</details>
-					{/each}
-				{:else}
-					{@render rows(group.rows)}
-				{/if}
-			</details>
-		{/each}
-	</div>
+  <div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
+    {#each b.groups as group (group.key)}
+      <details class="flex flex-col gap-1" open={group.key !== "done" && group.key !== "canceled"}>
+        <summary class="cursor-pointer {heading}">
+          {groupTitle(group.key)}
+          <span class="text-base-content/40">{group.count}</span>
+        </summary>
+        {#if group.subgroups.length > 0}
+          {#each group.subgroups as sub (sub.key)}
+            <details class="flex flex-col gap-1 pt-1" open>
+              <summary class="cursor-pointer {heading}">
+                {groupTitle(sub.key)}
+                <span class="text-base-content/40">{sub.count}</span>
+              </summary>
+              {@render rows(sub.rows)}
+            </details>
+          {/each}
+        {:else}
+          {@render rows(group.rows)}
+        {/if}
+      </details>
+    {/each}
+  </div>
 {/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import BayPanel from '$lib/BayPanel.svelte';
+  import BayPanel from "$lib/BayPanel.svelte";
 </script>
 
 <!--

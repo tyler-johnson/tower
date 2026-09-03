@@ -1,8 +1,8 @@
 <script lang="ts">
-	import Board from '$lib/Board.svelte';
-	import Shell from '$lib/Shell.svelte';
+  import Board from "$lib/Board.svelte";
+  import Shell from "$lib/Shell.svelte";
 
-	let { children } = $props();
+  let { children } = $props();
 </script>
 
 <!--
@@ -12,8 +12,8 @@
 	The main is the window's height, so the board scrolls inside it and
 	the footer stays in view.
 -->
-<main class="mx-auto flex h-dvh w-full max-w-7xl min-h-0 flex-col gap-6 p-4">
-	<Shell />
-	<Board />
+<main class="mx-auto flex h-dvh min-h-0 w-full max-w-7xl flex-col gap-6 p-4">
+  <Shell />
+  <Board />
 </main>
 {@render children()}

@@ -12,18 +12,18 @@
 //
 // No runes, so it tests under vitest with no shims.
 
-import type { Field } from './query';
+import type { Field } from "./query";
 
 /// The verb one write takes, and the body the route takes. `status`,
 /// `assign` and the rest key the flight as `flight`; `edit` keys it as
 /// `target`, since an edit's target may be a comment.
 export type Write =
-	| { verb: 'status'; body: { flight: string; status: string; message?: string } }
-	| { verb: 'assign'; body: { flight: string; assignee: string } }
-	| {
-			verb: 'edit';
-			body: { target: string; priority?: string; labels?: string[]; skill?: string; bay?: string };
-	  };
+  | { verb: "status"; body: { flight: string; status: string; message?: string } }
+  | { verb: "assign"; body: { flight: string; assignee: string } }
+  | {
+      verb: "edit";
+      body: { target: string; priority?: string; labels?: string[]; skill?: string; bay?: string };
+    };
 
 /// What setting `field` on `target` to `value` writes, or null when the
 /// value is not one the field can take.
@@ -34,23 +34,23 @@ export type Write =
 /// the last label cannot be removed. Each of those answers null rather
 /// than sending a write the route would ignore.
 export function write(field: Field, target: string, value: string | string[] | null): Write | null {
-	if (field === 'label') {
-		const labels = Array.isArray(value) ? value : value === null ? [] : [value];
-		return labels.length === 0 ? null : { verb: 'edit', body: { target, labels } };
-	}
-	if (Array.isArray(value)) return null;
-	switch (field) {
-		case 'status':
-			return value === null ? null : { verb: 'status', body: { flight: target, status: value } };
-		case 'assignee':
-			return { verb: 'assign', body: { flight: target, assignee: value ?? 'none' } };
-		case 'priority':
-			return value === null ? null : { verb: 'edit', body: { target, priority: value } };
-		case 'skill':
-			return value === null ? null : { verb: 'edit', body: { target, skill: value } };
-		case 'bay':
-			return value === null ? null : { verb: 'edit', body: { target, bay: value } };
-		default:
-			return null;
-	}
+  if (field === "label") {
+    const labels = Array.isArray(value) ? value : value === null ? [] : [value];
+    return labels.length === 0 ? null : { verb: "edit", body: { target, labels } };
+  }
+  if (Array.isArray(value)) return null;
+  switch (field) {
+    case "status":
+      return value === null ? null : { verb: "status", body: { flight: target, status: value } };
+    case "assignee":
+      return { verb: "assign", body: { flight: target, assignee: value ?? "none" } };
+    case "priority":
+      return value === null ? null : { verb: "edit", body: { target, priority: value } };
+    case "skill":
+      return value === null ? null : { verb: "edit", body: { target, skill: value } };
+    case "bay":
+      return value === null ? null : { verb: "edit", body: { target, bay: value } };
+    default:
+      return null;
+  }
 }

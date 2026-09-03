@@ -1,4 +1,4 @@
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@lucide/svelte@1.39.0'
+  - "@lucide/svelte@1.39.0"
