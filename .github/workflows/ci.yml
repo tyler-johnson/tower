@@ -96,6 +96,8 @@ jobs:
         run: pnpm --dir web format-check
       - if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - if: runner.os == 'Linux'
+        run: pnpm --dir web lint
       - run: cargo test --workspace
 
       # The installers can't run in CI, but they can at least parse.

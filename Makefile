@@ -23,6 +23,7 @@ fmt-check:
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
+	pnpm --dir web lint
 
 # Point ~/.cargo/bin/ff-tower at the dogfood binary. That is the whole
 # install: fufu's `ff-<name>` dispatch searches PATH, so `ff tower` finds it
