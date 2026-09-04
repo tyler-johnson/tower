@@ -161,7 +161,7 @@ pub static ENTRIES: &[Entry] = &[
         id: "usage/empty-procedure",
         summary: "the procedure name is empty",
         detail: "A procedure argument was given but trims to nothing. File bare — one argument, \
-                 straight into Triage — or name one of the installed procedures.",
+                 no procedure — or name one of the installed procedures.",
         exits: &["ff tower procedures"],
     },
     Entry {
@@ -199,6 +199,17 @@ pub static ENTRIES: &[Entry] = &[
                  and what `answer` releases. A held word with nothing asked would be a hold \
                  nobody can answer, so the verb refuses it: hold with the question attached.",
         exits: &["ff tower hold <flight> -m <question>"],
+    },
+    Entry {
+        id: "usage/file-status",
+        summary: "that is not a status a flight can be filed with",
+        detail: "`--status` takes the words a filing can be born with — triage, ready, \
+                 in_progress — and the word given is not one of them. Waiting and held are \
+                 derived: the fold reads them off the edges and the open question, so they are \
+                 never written. Done and canceled are closed, and filing something closed is \
+                 not a filing. Without the flag the filing takes `tower.defaultFileStatus`, \
+                 ready unless set.",
+        exits: &[],
     },
     Entry {
         id: "usage/bad-assignee",
@@ -515,6 +526,17 @@ pub static ENTRIES: &[Entry] = &[
         detail: "Flight ids name edges: `after` says which flight precedes which, and a \
                  duplicated id makes that reference ambiguous. Rename one of the two; ids \
                  only need to be unique within their own procedure.",
+        exits: &["ff tower procedures"],
+    },
+    Entry {
+        id: "procedure/bad-status",
+        summary: "a flight declares a status it cannot be filed with",
+        detail: "A `[[flight]]`'s `status` is the word the flight is born with, and the only \
+                 words a filing can be born with are triage, ready, and in_progress — the \
+                 same list `--status` and `tower.defaultFileStatus` take. Waiting and held are \
+                 derived from the edges and the question, and done and canceled are closed. \
+                 The message names the file and the flight; leave `status` out to take the \
+                 setting's word.",
         exits: &["ff tower procedures"],
     },
     Entry {

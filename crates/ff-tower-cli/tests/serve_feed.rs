@@ -203,11 +203,12 @@ fn a_feed_query_that_does_not_parse_is_400() {
 #[test]
 fn a_concluding_repo_serves_a_settled_board_and_the_loop_terminates() {
     // A rule the pass will fire: the hand-filed labeled flight below
-    // sits in Triage when the server starts — `file`'s own preflight
-    // pass runs before its append — so the server's first refold is what
-    // routes it.
+    // sits in Triage when the server starts — the board parks its
+    // filings there, and `file`'s own preflight pass runs before its
+    // append — so the server's first refold is what routes it.
     let repo = Repo::new();
     repo.pin_writer("pi");
+    repo.git(&["config", "tower.defaultFileStatus", "triage"]);
     repo.write(
         ".tower/procedures/chores.toml",
         "name = \"chores\"\n\

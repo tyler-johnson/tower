@@ -200,6 +200,7 @@ fn kinds(
                         &flight.subject,
                         &Fields::default(),
                         Parent::Existing(flight.id.clone()),
+                        "ready",
                         &|offset| mint(base + offset),
                     ));
                 }

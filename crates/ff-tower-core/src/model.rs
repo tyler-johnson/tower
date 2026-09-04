@@ -65,6 +65,22 @@ impl Status {
         "done",
         "canceled",
     ];
+
+    /// The words a flight can be filed with: `--status`, the
+    /// `tower.defaultFileStatus` setting, and a procedure flight's own
+    /// `status` all read this one list, so the three cannot drift.
+    /// `waiting` and `held` are derived and never written; `done` and
+    /// `canceled` are closed, and filing something closed is not a
+    /// filing.
+    pub const FILEABLE: &'static [&'static str] = &["triage", "ready", "in_progress"];
+
+    /// The word back to the value, only for a word on [`Status::FILEABLE`].
+    pub fn fileable(text: &str) -> Option<Status> {
+        Status::FILEABLE
+            .contains(&text)
+            .then(|| Status::parse(text))
+            .flatten()
+    }
 }
 
 /// Whose queue a flight is in. Deliberately coarse — the routing
@@ -108,6 +124,23 @@ mod tests {
         }
         assert!(Status::parse("claimed").is_none());
         assert!(Status::parse("In Progress").is_none(), "wire form only");
+    }
+
+    #[test]
+    fn the_fileable_words_are_the_written_open_ones() {
+        for name in Status::FILEABLE {
+            let status = Status::fileable(name).expect("a fileable word parses");
+            assert_eq!(status.name(), *name);
+            assert!(Status::NAMES.contains(name), "fileable is a subset");
+        }
+        for derived in ["waiting", "held"] {
+            assert!(Status::parse(derived).is_some(), "a status");
+            assert!(Status::fileable(derived).is_none(), "but never filed");
+        }
+        for closed in ["done", "canceled"] {
+            assert!(Status::fileable(closed).is_none(), "closed is not filed");
+        }
+        assert!(Status::fileable("claimed").is_none());
     }
 
     #[test]

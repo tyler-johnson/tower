@@ -63,6 +63,10 @@ pub enum Error {
     /// A word the assignee vocabulary does not carry.
     #[error("`{word}` is not a lane — me, agent, or none")]
     BadAssignee { word: String },
+    /// `--status` with a word a flight cannot be filed with: not a
+    /// status at all, one the fold derives, or one that is closed.
+    #[error("`{word}` cannot be filed — triage, ready, or in_progress")]
+    FileStatus { word: String },
     /// A lifecycle verb reaching a flight that is already off the board.
     #[error("`{display}` is done — the log keeps its record")]
     FlightDone { display: String },
@@ -132,6 +136,7 @@ impl Error {
             Error::StatusWaiting { .. } => "usage/status-waiting",
             Error::StatusHold { .. } => "usage/status-held",
             Error::BadAssignee { .. } => "usage/bad-assignee",
+            Error::FileStatus { .. } => "usage/file-status",
             Error::FlightDone { .. } | Error::AlreadyDone { .. } => "flight/done",
             Error::StatusHeld { .. } => "status/held",
             Error::AlreadyHeld { .. } => "hold/exists",
@@ -183,7 +188,7 @@ impl Error {
             | Error::ViewNotFound { .. }
             | Error::NeedsViewEdit
             | Error::EditTargetNotFound { .. } => &["ff tower"],
-            Error::BadStatus { .. } | Error::BadAssignee { .. } => &[],
+            Error::BadStatus { .. } | Error::BadAssignee { .. } | Error::FileStatus { .. } => &[],
         };
         exits.iter().map(|exit| (*exit).to_string()).collect()
     }

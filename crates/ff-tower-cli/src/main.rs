@@ -263,6 +263,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             skill,
             assignee,
             bay,
+            status,
         }) => cmd::file::run(
             cli.json,
             first.as_deref(),
@@ -274,6 +275,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
                 skill: skill.clone(),
                 assignee: assignee.clone(),
                 bay: bay.clone(),
+                status: status.clone(),
             },
         )?,
         Some(Command::Comment { flight, message }) => {

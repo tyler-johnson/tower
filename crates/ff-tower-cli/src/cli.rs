@@ -120,8 +120,7 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
     },
-    /// File a flight onto the board — bare into Triage, or under a
-    /// procedure.
+    /// File a flight onto the board — bare, or under a procedure.
     #[command(long_about = help::FILE, after_long_help = help::FILE_EXAMPLES)]
     File {
         /// A procedure then a subject, or a subject alone — two words
@@ -150,6 +149,10 @@ pub enum Command {
         /// `warm` builds a tree ahead of whoever flies it.
         #[arg(long = "bay", value_name = "bay")]
         bay: Option<String>,
+        /// The status the flight is born with — triage, ready, or
+        /// in_progress; beats `tower.defaultFileStatus` for this filing.
+        #[arg(long = "status", value_name = "status")]
+        status: Option<String>,
     },
     /// A note on a flight's record.
     #[command(long_about = help::COMMENT, after_long_help = help::COMMENT_EXAMPLES)]

@@ -3,8 +3,8 @@
 //! walk — the JSON round-trip, the lazy probes, and the refusals.
 //!
 //! The pool fixtures share `next.rs`'s grammar: the pool is Ready
-//! flights in the agent lane, so bare filings — born Triage — are never
-//! candidates, and the pullable ones file under the two-flight
+//! flights in the agent lane, so bare filings — born Ready but laned to
+//! no one — are never candidates, and the pullable ones file under the two-flight
 //! `pipeline` procedure whose `pass` is agent-assigned and born Ready.
 //! Each filing mints six event seqs and three flight numbers, so the
 //! agent flights are `pi.2` (#2) and `pi.8` (#5).
@@ -246,7 +246,11 @@ fn json_round_trips_the_brief() {
         serde_json::json!("the dependency")
     );
     assert_eq!(data["depends_on"][0]["closed"], serde_json::json!(false));
-    assert_eq!(data["status"], serde_json::json!("triage"));
+    assert_eq!(
+        data["status"],
+        serde_json::json!("waiting"),
+        "born Ready, gated by the edge"
+    );
     // Absent facts are null, never missing keys.
     assert!(data["branch"].is_null(), "{data}");
     assert!(data["status_by"].is_null(), "{data}");
@@ -444,11 +448,11 @@ fn the_history_says_the_lane_and_the_edge() {
 fn a_cancel_reason_rides_its_moment() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "the work"]));
-    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
+    stdout(&ff_tower(repo.path(), &["status", "1", "in_progress"]));
     stdout(&ff_tower(repo.path(), &["cancel", "1", "-m", "superseded"]));
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
-    assert!(text.contains("pi.2 · status ready · "), "{text}");
+    assert!(text.contains("pi.2 · status in_progress · "), "{text}");
     assert!(
         text.contains("pi.3 · status canceled · tests@tower.invalid · "),
         "{text}"
@@ -468,7 +472,7 @@ fn a_cancel_reason_rides_its_moment() {
     assert_eq!(history[2]["status"], serde_json::json!("canceled"));
     assert_eq!(history[2]["reason"], serde_json::json!("superseded"));
     let plain = history[1].as_object().expect("an object");
-    assert_eq!(plain["status"], serde_json::json!("ready"));
+    assert_eq!(plain["status"], serde_json::json!("in_progress"));
     assert!(!plain.contains_key("reason"), "{}", history[1]);
 }
 
@@ -591,15 +595,15 @@ fn a_pulled_flights_beat_is_what_its_branch_blocks() {
 
 #[test]
 fn a_bare_filing_briefs_as_yours() {
-    // Bare `file` lands in Triage with no lane — the stored fields are
-    // what keep it out of the pool, and the brief says so.
+    // Bare `file` lands Ready with no lane — the lane is what keeps it
+    // out of the pool, and the brief says so.
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "needs a look"]));
 
     let out = ff_tower(repo.path(), &["brief", "1"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("triage"), "{text}");
+    assert!(text.contains("ready"), "{text}");
     assert!(text.contains("yours — unassigned"), "{text}");
 }
 
@@ -610,7 +614,6 @@ fn a_me_laned_ready_flight_briefs_as_yours_with_its_lane() {
         repo.path(),
         &["file", "needs a look", "--assignee", "me"],
     ));
-    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
 
     let out = ff_tower(repo.path(), &["brief", "1"]);
     assert_eq!(out.status.code(), Some(0));

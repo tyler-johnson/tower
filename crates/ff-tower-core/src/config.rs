@@ -27,6 +27,8 @@ use std::path::{Path, PathBuf};
 use gix::config::Source;
 use gix::config::source::Kind;
 
+use crate::model::Status;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -84,6 +86,9 @@ pub enum SettingKind {
     Bool,
     Port,
     Host,
+    /// One word off a closed list — the list is the validator and the
+    /// refusal's wording both.
+    Choice(&'static [&'static str]),
 }
 
 impl SettingKind {
@@ -95,6 +100,7 @@ impl SettingKind {
             SettingKind::Bool => "bool",
             SettingKind::Port => "port",
             SettingKind::Host => "host",
+            SettingKind::Choice(_) => "choice",
         }
     }
 }
@@ -130,6 +136,14 @@ pub const DEFAULT_PORT: u16 = 7420;
 /// it through [`parse_host`] like any other lane.
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 
+/// The status a bare `ff tower file` gives a flight when nothing else
+/// says otherwise, behind `--status`, a procedure flight's own `status`,
+/// and `tower.defaultFileStatus`. Ready, because most filings are work
+/// already decided on, and a second move typed to say so is a step for
+/// nothing. The registry row below spells it, and a test holds the two
+/// together.
+pub const DEFAULT_FILE_STATUS: &str = "ready";
+
 /// Every setting tower ships, in display order. `tower.writer` is
 /// deliberately absent: identity minted at first append, not a tunable —
 /// setting it to another machine's id forks that writer's chain.
@@ -144,6 +158,19 @@ pub fn registry() -> &'static [Setting] {
                 "The pool root bare `bay warm` mints bay-<n> slots under: absolute,",
                 "or relative to the main worktree. Unset, bare warm refuses and",
                 "asks for a path.",
+            ],
+        },
+        Setting {
+            name: "defaultFileStatus",
+            key: "tower.defaultFileStatus",
+            def: DEFAULT_FILE_STATUS,
+            kind: SettingKind::Choice(Status::FILEABLE),
+            desc: &[
+                "The status `ff tower file` gives a flight that says nothing else:",
+                "ready clears it for work at once, triage parks it for a person.",
+                "--status beats this for one filing, and a procedure flight that",
+                "declares its own status keeps it. Match rules only cover Triage,",
+                "so a board that routes on rules sets this to triage.",
             ],
         },
         Setting {
@@ -222,6 +249,22 @@ pub fn stale_flight_threshold(config: &Config) -> i64 {
     }
 }
 
+/// The status a bare filing is born with, decoded off the registry row:
+/// the configured word when it is one a flight can be filed with, the
+/// compiled default when nothing is set or the value would not parse —
+/// the same fallback the cadence reader takes. Every filing surface
+/// reads it here.
+pub fn default_file_status(config: &Config) -> &'static str {
+    let setting = lookup("defaultFileStatus").expect("defaultFileStatus is registered");
+    config
+        .read(setting)
+        .value
+        .as_deref()
+        .and_then(Status::fileable)
+        .map(|status| status.name())
+        .unwrap_or(DEFAULT_FILE_STATUS)
+}
+
 /// The setting a user's spelling names: case-insensitive, `tower.`
 /// prefix optional, so `bays`, `tower.bays`, and `BAYS` all answer.
 pub fn lookup(input: &str) -> Result<&'static Setting> {
@@ -256,6 +299,7 @@ pub fn validate(setting: &Setting, value: &str) -> Result<()> {
             parse_host(value).is_some(),
             "want an IP address like 127.0.0.1, 0.0.0.0, or ::1",
         ),
+        SettingKind::Choice(words) => (words.contains(&value.trim()), choice_want(words)),
     };
     if ok {
         Ok(())
@@ -265,6 +309,15 @@ pub fn validate(setting: &Setting, value: &str) -> Result<()> {
             want,
         })
     }
+}
+
+/// The refusal's wording for a `Choice` kind, built from the list itself
+/// so it can never name a word the validator would not take. Leaked:
+/// the message is `&'static` like every other kind's, and a refusal is
+/// raised once per `config` invocation, so the leak is one short string
+/// per bad value typed.
+fn choice_want(words: &[&str]) -> &'static str {
+    Box::leak(format!("want one of {}", words.join(", ")).into_boxed_str())
 }
 
 /// Parse a cadence string, fufu's shared value language: a bool
@@ -379,6 +432,12 @@ impl Config {
     pub fn open(path: &Path) -> Result<Config> {
         let repo = gix::discover(path).map_err(Error::repo)?;
         Ok(Config { repo })
+    }
+
+    /// The handle over a repository something else already opened — a
+    /// `Store`'s, so a verb reads settings without a second discovery.
+    pub fn from_repo(repo: gix::Repository) -> Config {
+        Config { repo }
     }
 
     /// The effective value across every scope.
@@ -611,6 +670,7 @@ mod tests {
                 SettingKind::Bool => "maybe",
                 SettingKind::Port => "70000",
                 SettingKind::Host => "localhost",
+                SettingKind::Choice(_) => "nope",
             };
             let err = validate(setting, bad).expect_err("a bad value refuses");
             assert_eq!(err.id(), "usage/bad-value");
@@ -634,6 +694,61 @@ mod tests {
         let setting = lookup("serveHost").expect("registered");
         assert_eq!(setting.def, DEFAULT_HOST);
         assert!(parse_host(setting.def).expect("parses").is_loopback());
+    }
+
+    #[test]
+    fn the_file_status_default_matches_its_registry_row() {
+        let setting = lookup("defaultFileStatus").expect("registered");
+        assert_eq!(setting.def, DEFAULT_FILE_STATUS);
+        assert_eq!(
+            Status::fileable(setting.def).map(|status| status.name()),
+            Some(DEFAULT_FILE_STATUS),
+            "the default is itself a fileable word"
+        );
+    }
+
+    #[test]
+    fn a_choice_refuses_off_the_list_and_names_the_list() {
+        let setting = lookup("defaultFileStatus").expect("registered");
+        for word in Status::FILEABLE {
+            validate(setting, word).expect("a listed word passes");
+        }
+        validate(setting, "  ready  ").expect("whitespace trims");
+        for word in ["waiting", "held", "done", "canceled", "Ready", ""] {
+            let err = validate(setting, word).expect_err("off the list");
+            assert_eq!(err.id(), "usage/bad-value");
+            assert_eq!(
+                err.to_string(),
+                "invalid value for defaultFileStatus: want one of triage, ready, in_progress"
+            );
+        }
+    }
+
+    #[test]
+    fn default_file_status_reads_the_key_and_falls_back() {
+        let fixture = ff_tower_testsupport::Repo::new();
+        let config = Config::open(fixture.path()).expect("open");
+        assert_eq!(
+            default_file_status(&config),
+            "ready",
+            "unset is the default"
+        );
+
+        fixture.git(&["config", "tower.defaultFileStatus", "triage"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(default_file_status(&config), "triage");
+
+        fixture.git(&["config", "tower.defaultFileStatus", "in_progress"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(default_file_status(&config), "in_progress");
+
+        // Garbage falls back like every other reader — and so does a
+        // real status a flight cannot be filed with.
+        for bad in ["bogus", "held", "done"] {
+            fixture.git(&["config", "tower.defaultFileStatus", bad]);
+            let config = Config::open(fixture.path()).expect("reopen");
+            assert_eq!(default_file_status(&config), "ready", "{bad} falls back");
+        }
     }
 
     #[test]

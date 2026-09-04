@@ -250,9 +250,54 @@ fn the_json_form_is_the_registry_as_data() {
             "bay": null,
             "priority": null,
             "labels": [],
+            "status": null,
         })
     );
     assert_eq!(flights[2]["after"], serde_json::json!(["pass", "smoke"]));
+}
+
+#[test]
+fn a_flight_with_an_unfileable_status_is_refused_naming_the_file_and_the_flight() {
+    let repo = repo();
+    let at = repo
+        .path()
+        .join(".tower")
+        .join("procedures")
+        .join("parked.toml");
+    repo.write(
+        ".tower/procedures/parked.toml",
+        "name = \"parked\"\n\n[[flight]]\nid       = \"wait\"\nassignee = \"me\"\nstatus   = \"held\"\n",
+    );
+
+    let out = ff_tower(repo.path(), &["procedures", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let refusal = envelope(&out);
+    assert_eq!(
+        refusal["error"]["id"],
+        serde_json::json!("procedure/bad-status")
+    );
+    assert_eq!(
+        refusal["error"]["message"],
+        serde_json::json!(format!(
+            "procedure `parked` ({}): flight `wait` declares status `held` — triage, ready, or in_progress",
+            at.display()
+        ))
+    );
+    assert_eq!(
+        refusal["error"]["exits"],
+        serde_json::json!(["ff tower procedures"])
+    );
+
+    // The fileable words load, and the detail shows the one declared.
+    repo.write(
+        ".tower/procedures/parked.toml",
+        "name = \"parked\"\n\n[[flight]]\nid       = \"wait\"\nassignee = \"me\"\nstatus   = \"triage\"\n",
+    );
+    let one = envelope(&ff_tower(repo.path(), &["procedures", "parked", "--json"]));
+    assert_eq!(
+        one["data"]["procedure"]["flights"][0]["status"],
+        serde_json::json!("triage")
+    );
 }
 
 #[test]

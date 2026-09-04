@@ -312,12 +312,12 @@ fn file_carries_the_field_flags_over_http() {
     let (status, _, board) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{board}");
     let board: serde_json::Value = serde_json::from_str(&board).expect("the board envelope");
-    let flights = group(&board, "triage");
+    let flights = group(&board, "ready");
     let filed = flights
         .iter()
         .find(|view| view["subject"] == json!("laned work"))
         .expect("the filing is on the board");
-    assert_eq!(filed["status"], json!("triage"));
+    assert_eq!(filed["status"], json!("ready"));
     assert_eq!(filed["priority"], json!("high"));
     assert_eq!(filed["labels"], json!(["chore"]));
     assert_eq!(filed["assignee"], json!("agent"));

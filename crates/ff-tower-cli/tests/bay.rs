@@ -135,7 +135,7 @@ fn a_bay_capture_occupies_the_list_and_the_board_sees_the_flight() {
     // the bay's branch on the flight's row.
     let out = ff_tower(repo.path(), &["--json"]);
     let board = envelope(&out);
-    let rows = board["data"]["triage"].as_array().expect("triage");
+    let rows = board["data"]["ready"].as_array().expect("ready");
     let flown = rows
         .iter()
         .find(|view| view["id"] == serde_json::json!("pi.1"))

@@ -13,7 +13,8 @@ pub enum Parent {
 
 /// The caller's field flags, overlaid where they apply: on the one
 /// flight of a collapsed mint, and on the parent of a multi-flight one.
-/// `assignee` arrives already validated — a lane name, or `None`.
+/// `assignee` and `status` arrive already validated — a lane name and a
+/// fileable word, or `None`.
 #[derive(Default)]
 pub struct Fields {
     pub message: Option<String>,
@@ -22,6 +23,7 @@ pub struct Fields {
     pub skill: Option<String>,
     pub assignee: Option<String>,
     pub bay: Option<String>,
+    pub status: Option<String>,
 }
 
 /// The mint batch for one definition. Under `Parent::Mint`, the head
@@ -32,14 +34,18 @@ pub struct Fields {
 /// `Parent::Existing`, every minted event is a child of the id given.
 /// Children keep `"{subject} · {id}"` subjects and ride `linked` edges
 /// — the parent's to each, then the `after` DAG — in the order the ids
-/// are read back out of. Every row is filed `ready`, which is the
-/// cleared word: the edges say the rest, and the fold derives Waiting
-/// for the parent and for any child with an `after`.
+/// are read back out of. A row's status is the caller's `--status`
+/// where the flags overlay, else the definition flight's own `status`,
+/// else `born` — the word for rows that declare nothing, which `file`
+/// reads off `tower.defaultFileStatus` and `decompose` and the pass fix
+/// at `ready`. The edges say the rest: the fold derives Waiting for the
+/// parent and for any child with an `after`.
 pub fn classify(
     definition: &Definition,
     subject: &str,
     fields: &Fields,
     parent: Parent,
+    born: &str,
     mint: &dyn Fn(usize) -> EventId,
 ) -> Vec<Kind> {
     let flights = &definition.flights;
@@ -49,7 +55,11 @@ pub fn classify(
             only,
             subject.to_string(),
             fields.message.clone().unwrap_or_default(),
-            "ready",
+            fields
+                .status
+                .as_deref()
+                .or(only.status.as_deref())
+                .unwrap_or(born),
             subject,
             Some(fields),
         )];
@@ -57,13 +67,13 @@ pub fn classify(
 
     let mut kinds = Vec::new();
     if matches!(parent, Parent::Mint) {
-        // The parent row: the caller's flags land here, born cleared —
-        // its edges to every child are what fold it Waiting.
+        // The parent row: the caller's flags land here — its edges to
+        // every child are what fold it Waiting.
         kinds.push(Kind::Filed {
             procedure: Some(definition.name.clone()),
             subject: subject.to_string(),
             body: fields.message.clone().unwrap_or_default(),
-            status: "ready".to_string(),
+            status: fields.status.clone().unwrap_or_else(|| born.to_string()),
             assignee: fields.assignee.clone(),
             priority: fields
                 .priority
@@ -85,7 +95,7 @@ pub fn classify(
             flight,
             format!("{subject} · {}", flight.id),
             String::new(),
-            "ready",
+            flight.status.as_deref().unwrap_or(born),
             subject,
             None,
         )

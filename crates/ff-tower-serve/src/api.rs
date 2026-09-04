@@ -414,6 +414,7 @@ struct FileBody {
     skill: Option<String>,
     assignee: Option<String>,
     bay: Option<String>,
+    status: Option<String>,
 }
 
 /// `assign`'s arguments: the lane is required — `none` clears it.
@@ -530,6 +531,7 @@ async fn file(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
                 skill: body.skill,
                 assignee: body.assignee,
                 bay: body.bay,
+                status: body.status,
             },
             body.procedure.as_deref(),
         )?;

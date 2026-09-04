@@ -122,32 +122,41 @@ Examples:
 
 pub const FILE: &str = "\
 Put work on the board. One argument is a bare filing: the subject is
-the flight's one line, and the flight lands in Triage — nothing
-clears work to Ready but a procedure or your own `status` move. Two
+the flight's one line, and the flight lands Ready — cleared for work
+at once, because most filings are work already decided on. Two
 arguments name a procedure first, then the subject; a name
 that is not installed is refused, and one word is never guessed as a
 procedure name.
 
 Every stored field is a flag: -m the body, -p the priority, --label
-(repeatable), --skill, --assignee (me or agent), --bay. A procedure
-is nothing more than those same fields saved across a graph of
-flights.
+(repeatable), --skill, --assignee (me or agent), --bay, --status
+(triage, ready, or in_progress). A procedure is nothing more than
+those same fields saved across a graph of flights.
+
+Where a filing lands is a setting: `ff tower config
+defaultFileStatus triage` parks every bare filing for a person
+instead, which is what a board routing on match rules wants, since
+the rules only cover Triage. --status beats the setting for one
+filing, and a procedure flight that declares its own status keeps
+it.
 
 A procedure's definition is read at filing and never again — each
 flight's fields are copied into the log, so editing a definition
-afterwards cannot disturb a flight already in the air. Statuses fall
-out of the edges at mint: no `after` is born Ready, dependencies are
-born Waiting, and the parent waits on them all. One flight collapses
-onto the filing — born Ready, your flags winning over the
-definition's fields — because saying one thing must not cost two
-flights. Two or more file a parent plus one flight each, on the same
-edges `decompose` writes, all in one append, so no flight is ever
-live, unlinked, and pullable.";
+afterwards cannot disturb a flight already in the air. Each flight
+is born with its own status or the setting's word, and the edges
+have the last say: dependencies fold Waiting, and the parent waits
+on them all. One flight collapses onto the filing — your flags,
+--status included, winning over the definition's fields — because
+saying one thing must not cost two flights. Two or more file a
+parent plus one flight each, on the same edges `decompose` writes,
+all in one append, so no flight is ever live, unlinked, and
+pullable.";
 
 pub const FILE_EXAMPLES: &str = "\
 Examples:
-  ff tower file \"fix the login redirect\"        one line, into Triage
+  ff tower file \"fix the login redirect\"        one line, born Ready
   ff tower file \"rotate the keys\" -m \"…\"        with a body
+  ff tower file \"decide later\" --status triage    parked for a person
   ff tower file review feather                  under a procedure
   ff tower file \"upgrade axum\" -p high --label chore --assignee agent   fields at filing
   ff tower procedures                           what there is to file under";
@@ -229,11 +238,11 @@ pub const DECOMPOSE: &str = "\
 Make a flight a parent. Exactly one argument that names an installed
 procedure mints the definition's flights beneath it. Anything else is
 the by-hand form: each argument files as one sub-flight. Either way
-the parts are born cleared, not in Triage — decomposing is your
-gesture — and the record derives Waiting for any part whose edges say
-so, the `after` of a procedure's flights included. A subject that
-happens to collide with a procedure name is spelled around by giving
-two subjects or renaming one.
+the parts are born Ready whatever defaultFileStatus says — decomposing
+is itself the clearing gesture — and the record derives Waiting for
+any part whose edges say so, the `after` of a procedure's flights
+included. A subject that happens to collide with a procedure name is
+spelled around by giving two subjects or renaming one.
 
 Either way the children ride ordinary link edges —
 `ff tower link <a> <b>` declares the same edge by hand, and every
@@ -255,8 +264,10 @@ What is installed: every procedure's name, the layer it came from,
 and the flights it stamps out with their lanes. A name is the detail
 page — the match rules by name with their predicates, which route
 what sits in Triage the next time anything runs (adapter-keyed ones
-stay inert until an adapter exists to fire them); every flight with
-assignee, skill, after, and done; and the file it was read from.
+stay inert until an adapter exists to fire them, and a bare filing
+only reaches Triage when defaultFileStatus or --status says so);
+every flight with assignee, skill, status, after, and done; and the
+file it was read from.
 
 Two layers, the most specific winning whole: user,
 ~/.config/tower/procedures/<name>.toml; repo,
@@ -451,19 +462,22 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: bays, tower.bays, and BAYS all name one
 setting.
 
-Five settings ship — bays, the pool root bare `ff tower bay warm`
-mints slots under; serveHost and servePort, the address and the port
-`ff tower serve` binds; updateCheck, how often the background release
-check runs; autoUpdate, whether a new release installs itself
-silently. This verb opens no store and spawns no fufu, so settings
-stay reachable on a half-configured machine, before an identity
-exists.";
+Seven settings ship — bays, the pool root bare `ff tower bay warm`
+mints slots under; defaultFileStatus, where a bare `ff tower file`
+lands; staleFlightThreshold, how long an In Progress flight sits
+quiet before the board says so; serveHost and servePort, the address
+and the port `ff tower serve` binds; updateCheck, how often the
+background release check runs; autoUpdate, whether a new release
+installs itself silently. This verb opens no store and spawns no
+fufu, so settings stay reachable on a half-configured machine, before
+an identity exists.";
 
 pub const CONFIG_EXAMPLES: &str = "\
 Examples:
   ff tower config                every setting, defaults marked
   ff tower config bays           what the pool root is
   ff tower config bays ../bays   set it, this repo
+  ff tower config defaultFileStatus triage   bare filings park for a person
   ff tower config --global autoUpdate false   set it, every repo
   ff tower config --unset bays   back to the default";
 

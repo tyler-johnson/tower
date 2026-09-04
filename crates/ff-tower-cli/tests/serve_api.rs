@@ -136,7 +136,7 @@ fn a_query_on_the_board_route_folds_it() {
     let filtered = board(&server, "/api/board?priority=high");
     let groups = filtered["data"]["groups"].as_array().expect("groups");
     assert_eq!(groups.len(), 1, "{filtered}");
-    assert_eq!(groups[0]["key"], json!("triage"));
+    assert_eq!(groups[0]["key"], json!("ready"));
     assert_eq!(groups[0]["rows"].as_array().expect("rows").len(), 1);
     assert_eq!(groups[0]["rows"][0]["subject"], json!("the labeled one"));
     assert_eq!(filtered["data"]["filtered"], json!(1));

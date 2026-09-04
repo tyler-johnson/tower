@@ -288,9 +288,10 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
         // The second: Ready, and the branch moved *after* it was set
         // Ready. After, not merely at all — the answer that releases a
         // hold is the Ready mark, so every resumed hold carries a full
-        // branch and a flat check would be pure noise.
+        // branch and a flat check would be pure noise. A flight born
+        // Ready has no mark: the filing is the moment.
         let changed_since_ready = flight.status == "ready"
-            && matches!((last_change, status_at), (Some(change), Some(set)) if change > set);
+            && last_change.is_some_and(|change| change > status_at.unwrap_or(flight.filed_at));
 
         let mut collides = Vec::new();
         let mut unanswered = Vec::new();
@@ -1094,6 +1095,33 @@ mod tests {
             ),
         );
         assert!(board.ready[0].changed_since_ready);
+    }
+
+    #[test]
+    fn a_flight_born_ready_takes_the_filing_as_its_mark() {
+        // No status mark at all — `file`'s default — so the filing is
+        // the moment: a change after it is news, a change before it (a
+        // branch that already existed) is not.
+        let after = board(
+            &[filed_as("pi.1", 100, "ready", "none", None)],
+            &reads(
+                vec![op("pi.1", Some("work"), 200)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+        );
+        assert!(after.ready[0].status_at.is_none());
+        assert!(after.ready[0].changed_since_ready);
+
+        let before = board(
+            &[filed_as("pi.1", 300, "ready", "none", None)],
+            &reads(
+                vec![op("pi.1", Some("work"), 200)],
+                vec![branch("work", false, false)],
+                None,
+            ),
+        );
+        assert!(!before.ready[0].changed_since_ready);
     }
 
     #[test]

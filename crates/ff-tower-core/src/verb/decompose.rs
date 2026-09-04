@@ -4,10 +4,11 @@
 //! Two forms, told apart by the arguments: exactly one argument that
 //! names an installed procedure mints the definition's flights beneath
 //! the parent; anything else is the by-hand form, one subject per
-//! argument. Either way the parts are born cleared — the person
-//! decomposing is the person clearing them, and a bare `file` alone
-//! lands in Triage — and the fold derives Waiting for any part whose
-//! edges say so. Either way the children ride ordinary
+//! argument. Either way the parts are born Ready, whatever
+//! `tower.defaultFileStatus` says for a bare `file` — the person
+//! decomposing is the person clearing them — and the fold derives
+//! Waiting for any part whose edges say so. Either way the children
+//! ride ordinary
 //! `linked` edges, so a sub-flight is indistinguishable from a
 //! hand-declared dependency, and the filings and the edges land in one
 //! `append_with` — two appends would leave a window where the parent is
@@ -72,6 +73,7 @@ pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decomp
                 &subject,
                 &Fields::default(),
                 Parent::Existing(parent.clone()),
+                "ready",
                 mint,
             )
         })?;

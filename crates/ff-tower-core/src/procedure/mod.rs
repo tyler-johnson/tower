@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 
 pub use crate::model::Assignee;
+use crate::model::Status;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -143,6 +144,12 @@ pub struct FlightDef {
     pub priority: Option<String>,
     #[serde(default)]
     pub labels: Vec<String>,
+    /// The status the flight is born with, one of the fileable words —
+    /// triage, ready, in_progress. Unsaid, the flight takes the word
+    /// `file` resolves for rows that declare nothing. Validated at load
+    /// against the closed list, since a filed word is what the log keeps.
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 /// What finishing a part means. Closed on purpose: four values cannot
@@ -413,11 +420,12 @@ struct Wire {
     flights: Vec<FlightDef>,
 }
 
-/// Six refusals, in the order it is cheapest to be sure of them: no
+/// Seven refusals, in the order it is cheapest to be sure of them: no
 /// flights, a rule with no predicates, two rules under one name, a
-/// duplicate id, an `after` naming nothing, and a cycle. The human end is
-/// not among them: [`Definition::no_human_end`] is a warning the surfaces
-/// raise, because the file is personal.
+/// duplicate id, a status a flight cannot be filed with, an `after`
+/// naming nothing, and a cycle. The human end is not among them:
+/// [`Definition::no_human_end`] is a warning the surfaces raise, because
+/// the file is personal.
 fn validate(definition: &Definition, at: &str) -> Result<()> {
     let name = definition.name.clone();
     let at = at.to_string();
@@ -451,6 +459,16 @@ fn validate(definition: &Definition, at: &str) -> Result<()> {
                 name,
                 at,
                 part: flight.id.clone(),
+            });
+        }
+        if let Some(word) = &flight.status
+            && Status::fileable(word).is_none()
+        {
+            return Err(Error::BadStatus {
+                name,
+                at,
+                part: flight.id.clone(),
+                word: word.clone(),
             });
         }
     }
@@ -584,6 +602,18 @@ pub enum Error {
         part: String,
     },
 
+    /// A status a flight cannot be filed with: not a word at all, one
+    /// the fold derives, or one that is closed.
+    #[error(
+        "procedure `{name}` ({at}): flight `{part}` declares status `{word}` — triage, ready, or in_progress"
+    )]
+    BadStatus {
+        name: String,
+        at: String,
+        part: String,
+        word: String,
+    },
+
     /// An edge to a flight that does not exist — a typo, every time.
     #[error("procedure `{name}` ({at}): flight `{part}` waits on `{after}`, which is not a flight")]
     UnknownAfter {
@@ -628,6 +658,7 @@ impl Error {
             Error::EmptyRule { .. } => "procedure/empty-rule",
             Error::DuplicateRule { .. } => "procedure/duplicate-rule",
             Error::DuplicatePart { .. } => "procedure/duplicate-part",
+            Error::BadStatus { .. } => "procedure/bad-status",
             Error::UnknownAfter { .. } => "procedure/unknown-after",
             Error::Cyclic { .. } => "procedure/cyclic",
             Error::NotFound { .. } => "procedure/not-found",

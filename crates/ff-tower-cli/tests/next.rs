@@ -2,7 +2,7 @@
 //! peek, the lane gate, and the exits — 1 drained, 3 needs-you.
 //!
 //! The pool is Ready flights in the agent lane, so bare filings — born
-//! Triage — are never handed out, and every pullable fixture files under
+//! Ready but laned to no one — are never handed out, and every pullable fixture files under
 //! a two-flight repo-layer procedure whose `pass` is agent-assigned and
 //! born Ready; the flight `next` hands out is that one, and the parent
 //! and `verdict` fold Waiting by their edges. The fold derives the
@@ -131,9 +131,8 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
 #[test]
 fn a_ready_flight_off_the_agent_lane_is_the_exit_3_needs_you() {
     let repo = repo();
+    // Born Ready, but never assigned to the lane.
     stdout(&ff_tower(repo.path(), &["file", "needs a look"]));
-    // Born Triage — cleared by hand, but never assigned to the lane.
-    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
 
     let out = ff_tower(repo.path(), &["next", "--json"]);
     assert_eq!(out.status.code(), Some(3));
@@ -154,7 +153,10 @@ fn a_ready_flight_off_the_agent_lane_is_the_exit_3_needs_you() {
 #[test]
 fn a_triage_filing_is_never_pulled_and_the_board_drains_to_1() {
     let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "unclassified work"]));
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "unclassified work", "--status", "triage"],
+    ));
     // Even in the agent lane: Triage is not Ready, and nothing leaves
     // Triage but a person's gesture.
     stdout(&ff_tower(repo.path(), &["assign", "1", "agent"]));

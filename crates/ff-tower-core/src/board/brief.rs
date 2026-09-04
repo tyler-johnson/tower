@@ -209,7 +209,7 @@ pub fn brief(
         && stale_after > 0
         && now - last_change.or(status_at).unwrap_or(flight.filed_at) >= stale_after;
     let changed_since_ready = flight.status == "ready"
-        && matches!((last_change, status_at), (Some(change), Some(set)) if change > set);
+        && last_change.is_some_and(|change| change > status_at.unwrap_or(flight.filed_at));
     let branch = op.and_then(|op| op.branch.clone());
     let current = match (branch.as_deref(), reads.current_branch.as_deref()) {
         (Some(mine), Some(here)) => mine == here,

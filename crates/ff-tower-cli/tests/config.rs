@@ -68,12 +68,13 @@ fn list_shows_every_setting_with_defaults_and_the_trailer() {
     let text = stdout(&ff_tower(repo.path(), &["config"]));
 
     assert!(text.contains("bays"), "{text}");
+    assert!(text.contains("defaultFileStatus  ready"), "{text}");
     assert!(text.contains("staleFlightThreshold  2d"), "{text}");
     assert!(text.contains("serveHost  127.0.0.1"), "{text}");
     assert!(text.contains("servePort  7420"), "{text}");
     assert!(text.contains("updateCheck  1d"), "{text}");
     assert!(text.contains("autoUpdate  true"), "{text}");
-    assert_eq!(text.matches("(default)").count(), 6, "{text}");
+    assert_eq!(text.matches("(default)").count(), 7, "{text}");
     assert!(
         text.contains("Set with:     ff tower config <key> <value>   (--global: every repo)"),
         "{text}"
@@ -98,7 +99,7 @@ fn list_json_pins_the_registry() {
     let settings = envelope["data"]["settings"]
         .as_array()
         .expect("a settings array");
-    assert_eq!(settings.len(), 6, "{envelope}");
+    assert_eq!(settings.len(), 7, "{envelope}");
     let keys: Vec<&str> = settings
         .iter()
         .map(|entry| entry["key"].as_str().expect("a key"))
@@ -107,6 +108,7 @@ fn list_json_pins_the_registry() {
         keys,
         [
             "bays",
+            "defaultFileStatus",
             "staleFlightThreshold",
             "serveHost",
             "servePort",
@@ -118,7 +120,18 @@ fn list_json_pins_the_registry() {
         .iter()
         .map(|entry| entry["kind"].as_str().expect("a kind"))
         .collect();
-    assert_eq!(kinds, ["dir", "cadence", "host", "port", "cadence", "bool"]);
+    assert_eq!(
+        kinds,
+        [
+            "dir", "choice", "cadence", "host", "port", "cadence", "bool"
+        ]
+    );
+    let file_status = &settings[1];
+    assert_eq!(file_status["value"], serde_json::json!("ready"));
+    assert_eq!(
+        file_status["git_key"],
+        serde_json::json!("tower.defaultFileStatus")
+    );
     for entry in settings {
         assert_eq!(entry["source"], serde_json::Value::Null, "{entry}");
         assert_eq!(entry["default"], serde_json::json!(true), "{entry}");
@@ -208,10 +221,43 @@ fn invalid_values_exit_2_and_write_nothing() {
         serde_json::json!("invalid value for autoUpdate: want true or false")
     );
 
-    // Nothing touched disk on either refusal.
+    // The choice kind: the refusal names the list itself.
+    let out = ff_tower(
+        repo.path(),
+        &["config", "--json", "defaultFileStatus", "nope"],
+    );
+    let envelope = refusal(&out, 2, "usage/bad-value");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!(
+            "invalid value for defaultFileStatus: want one of triage, ready, in_progress"
+        )
+    );
+    // A real status that cannot be filed is off the list too.
+    let out = ff_tower(
+        repo.path(),
+        &["config", "--json", "defaultFileStatus", "held"],
+    );
+    refusal(&out, 2, "usage/bad-value");
+
+    // Nothing touched disk on any refusal.
     let listed = repo.git(&["config", "--local", "-l"]);
     assert!(!listed.contains("tower.updatecheck"), "{listed}");
     assert!(!listed.contains("tower.autoupdate"), "{listed}");
+    assert!(!listed.contains("tower.defaultfilestatus"), "{listed}");
+
+    // The listed words set, and read back.
+    for word in ["triage", "ready", "in_progress"] {
+        let text = stdout(&ff_tower(
+            repo.path(),
+            &["config", "defaultFileStatus", word],
+        ));
+        assert_eq!(text, format!("defaultFileStatus = {word} (this repo)\n"));
+        assert_eq!(
+            stdout(&ff_tower(repo.path(), &["config", "defaultFileStatus"])),
+            format!("{word}\n")
+        );
+    }
 }
 
 #[test]
@@ -232,7 +278,7 @@ fn global_set_creates_home_gitconfig_and_the_list_reports_global() {
 
     let out = ff_tower(repo.path(), &["config", "--json"]);
     let envelope = envelope(&out);
-    let entry = &envelope["data"]["settings"][4];
+    let entry = &envelope["data"]["settings"][5];
     assert_eq!(entry["key"], serde_json::json!("updateCheck"));
     assert_eq!(entry["value"], serde_json::json!("12h"));
     assert_eq!(entry["source"], serde_json::json!("global"));

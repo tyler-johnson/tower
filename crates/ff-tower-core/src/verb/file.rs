@@ -1,31 +1,38 @@
 //! `file [<procedure>] <subject> [flags]` — put work on the board.
 //!
-//! A bare filing carries no procedure and mints one flight in **Triage**
-//! — nothing clears work to Ready but a procedure or a person's own
-//! `status` move. Every stored field is a flag: `-m` the body, priority,
-//! labels, skill, assignee, bay, copied onto the filing as given.
+//! A bare filing carries no procedure and mints one flight where
+//! `tower.defaultFileStatus` says — **Ready** unless the setting says
+//! otherwise, because most filings are work already decided on. `triage`
+//! parks it for a person instead, and the lazy pass routes only what
+//! sits there. `--status` overrides the setting for one filing; the
+//! words it takes are the ones a flight can be filed with — triage,
+//! ready, in_progress — never the derived or closed ones. Every stored
+//! field is a flag: `-m` the body, priority, labels, skill, assignee,
+//! bay, copied onto the filing as given.
 //!
 //! Under a procedure, the named definition is looked up in the registry,
 //! refused when it is not installed, and its flights are minted with it.
 //! The definition is read here and never again — each flight's fields
 //! are copied into the log, so editing a definition afterwards cannot
-//! disturb a flight already in the air. Statuses fall out of the edges
-//! at mint: no `after` is born Ready, dependencies are born Waiting, and
-//! the parent waits on them all. **One flight** collapses onto the
-//! filing itself — born Ready, the definition's fields under the
-//! caller's flags — because `ff tower file "fix the typo"` must not cost
-//! two flights to say one thing. **Two or more** file a parent plus one
-//! flight each, on the same `linked` edges `decompose` writes. All of it
-//! in one `append_with`: two appends would leave a window where the
-//! parent is live, unlinked, and pullable.
+//! disturb a flight already in the air. A flight's status is what its
+//! definition declares, the setting's word when it declares nothing, and
+//! then the edges have their say: dependencies fold Waiting, and the
+//! parent waits on them all. **One flight** collapses onto the filing
+//! itself — the definition's fields under the caller's flags, `--status`
+//! included — because `ff tower file "fix the typo"` must not cost two
+//! flights to say one thing. **Two or more** file a parent plus one
+//! flight each, on the same `linked` edges `decompose` writes; `--status`
+//! lands on the parent. All of it in one `append_with`: two appends would
+//! leave a window where the parent is live, unlinked, and pullable.
 //!
 //! Still no fufu spawn. The registry's repository layer resolves through
 //! `Store::main_worktree`, which reads the common dir and runs nothing.
 
 use serde::Serialize;
 
+use crate::config;
 use crate::log::{Event, EventId, Kind, Store};
-use crate::model::Assignee;
+use crate::model::{Assignee, Status};
 use crate::procedure;
 
 use super::{Error, Fields, Parent, appended, appended_all, classify};
@@ -61,16 +68,21 @@ pub fn file(
     }
     let fields = Fields {
         assignee: lane(fields.assignee)?,
+        status: born(fields.status)?,
         ..fields
     };
+    // Read once, ahead of the branch: the bare filing and a procedure's
+    // undeclared rows take the same word.
+    let default = config::default_file_status(&store.config());
 
     let Some(name) = procedure else {
-        // The bare filing: no procedure, one flight, Triage.
+        // The bare filing: no procedure, one flight, the setting's word
+        // unless `--status` said one.
         let ids = store.append(vec![Kind::Filed {
             procedure: None,
             subject: subject.to_string(),
             body: fields.message.clone().unwrap_or_default(),
-            status: "triage".to_string(),
+            status: fields.status.clone().unwrap_or_else(|| default.to_string()),
             assignee: fields.assignee.clone(),
             priority: fields
                 .priority
@@ -101,8 +113,8 @@ pub fn file(
     let installed = procedure::registry(store.main_worktree().as_deref())?;
     let definition = installed.require(name)?;
 
-    let ids =
-        store.append_with(|mint| classify(definition, subject, &fields, Parent::Mint, mint))?;
+    let ids = store
+        .append_with(|mint| classify(definition, subject, &fields, Parent::Mint, default, mint))?;
     let (parent, rest) = ids.split_first().expect("the parent is the first event");
     let parts = if definition.flights.len() == 1 {
         0
@@ -120,6 +132,22 @@ pub fn file(
         parent: parent.clone(),
         part_ids: filed.to_vec(),
     })
+}
+
+/// The caller's `--status`, validated: a word a flight can be filed
+/// with passes through, anything else refuses — a word that is not a
+/// status, one the fold derives, or one that is closed, all by the same
+/// rule, so the log never learns a word this binary would not write.
+fn born(status: Option<String>) -> Result<Option<String>, Error> {
+    match status.as_deref() {
+        None => Ok(None),
+        Some(word) => match Status::fileable(word) {
+            Some(status) => Ok(Some(status.name().to_string())),
+            None => Err(Error::FileStatus {
+                word: word.to_string(),
+            }),
+        },
+    }
 }
 
 /// The caller's `--assignee`, validated: a lane name passes through,
@@ -148,6 +176,14 @@ mod tests {
         repo.pin_writer("pi");
         let store = Store::open(repo.path()).expect("open");
         (repo, store)
+    }
+
+    /// Set `tower.defaultFileStatus` and reopen: a store reads config at
+    /// open, the way every process does, so a change lands on the next
+    /// one.
+    fn with_default(repo: &Repo, word: &str) -> Store {
+        repo.git(&["config", "tower.defaultFileStatus", word]);
+        Store::open(repo.path()).expect("reopen")
     }
 
     /// The engine ships empty, so a filing under a procedure needs one
@@ -194,7 +230,7 @@ done     = "asserted"
     }
 
     #[test]
-    fn a_bare_filing_lands_in_triage_with_its_flags() {
+    fn a_bare_filing_lands_ready_with_its_flags() {
         let (_repo, store) = store();
         let outcome = file(
             &store,
@@ -206,6 +242,7 @@ done     = "asserted"
                 skill: Some("debug".to_string()),
                 assignee: Some("agent".to_string()),
                 bay: Some("warm".to_string()),
+                status: None,
             },
             None,
         )
@@ -216,16 +253,169 @@ done     = "asserted"
         let fold = folded(&store);
         let flight = &fold.flights[0];
         assert!(flight.procedure.is_none(), "bare carries no procedure");
-        assert_eq!(flight.status, "triage", "only a procedure clears work");
+        assert_eq!(flight.status, "ready", "the default clears it at once");
         assert_eq!(flight.assignee.as_deref(), Some("agent"));
         assert_eq!(flight.priority, "high");
         assert_eq!(flight.labels, ["web"]);
         assert_eq!(flight.skill.as_deref(), Some("debug"));
         assert_eq!(flight.bay.as_deref(), Some("warm"));
         assert_eq!(flight.body, "the redirect loops");
+        assert!(flight.pullable(), "agent-laned and Ready — pullable");
+    }
+
+    #[test]
+    fn the_setting_moves_the_bare_default_and_the_flag_beats_it() {
+        let (repo, _) = store();
+        let store = with_default(&repo, "triage");
+        file(&store, "parked", Fields::default(), None).expect("files");
+        file(
+            &store,
+            "moving",
+            Fields {
+                status: Some("in_progress".to_string()),
+                ..Fields::default()
+            },
+            None,
+        )
+        .expect("files");
+
+        let fold = folded(&store);
+        assert_eq!(fold.flights[0].status, "triage", "the setting's word");
+        assert_eq!(fold.flights[1].status, "in_progress", "--status wins");
         assert!(
-            !flight.pullable(),
-            "agent-laned but Triage — the lane alone clears nothing"
+            !fold.flights[0].pullable(),
+            "Triage — the lane alone clears nothing"
+        );
+    }
+
+    #[test]
+    fn an_unfileable_status_refuses_before_the_store() {
+        let (_repo, store) = store();
+        for word in ["held", "waiting", "done", "canceled", "claimed"] {
+            let err = file(
+                &store,
+                "no",
+                Fields {
+                    status: Some(word.to_string()),
+                    ..Fields::default()
+                },
+                None,
+            )
+            .err()
+            .expect("cannot be filed");
+            assert_eq!(err.id(), "usage/file-status");
+            assert_eq!(
+                err.to_string(),
+                format!("`{word}` cannot be filed — triage, ready, or in_progress")
+            );
+        }
+        assert!(folded(&store).flights.is_empty(), "nothing was written");
+    }
+
+    #[test]
+    fn a_procedure_flight_declaring_a_status_keeps_it_and_siblings_take_the_default() {
+        let (repo, store) = store();
+        install(
+            &repo,
+            "staged",
+            r#"
+name = "staged"
+
+[[flight]]
+id       = "look"
+assignee = "me"
+status   = "triage"
+
+[[flight]]
+id       = "do"
+assignee = "agent"
+"#,
+        );
+        file(&store, "the thing", Fields::default(), Some("staged")).expect("files");
+
+        let fold = folded(&store);
+        let by_subject = |tail: &str| {
+            fold.flights
+                .iter()
+                .find(|flight| flight.subject.ends_with(tail))
+                .expect("minted")
+        };
+        assert_eq!(by_subject("· look").status, "triage", "declared, kept");
+        assert_eq!(
+            by_subject("· do").status,
+            "ready",
+            "undeclared, the default"
+        );
+
+        // Under `triage` as the default, the declared word still wins
+        // and the sibling follows the setting; `--status` lands on the
+        // parent, and In Progress is not a word the edges gate.
+        let store = with_default(&repo, "triage");
+        file(
+            &store,
+            "again",
+            Fields {
+                status: Some("in_progress".to_string()),
+                ..Fields::default()
+            },
+            Some("staged"),
+        )
+        .expect("files");
+        let fold = folded(&store);
+        let by_subject = |tail: &str| {
+            fold.flights
+                .iter()
+                .find(|flight| flight.subject == tail)
+                .expect("minted")
+        };
+        assert_eq!(by_subject("again · look").status, "triage");
+        assert_eq!(
+            by_subject("again · do").status,
+            "triage",
+            "the setting's word"
+        );
+        assert_eq!(
+            by_subject("again").status,
+            "in_progress",
+            "--status lands on the parent"
+        );
+    }
+
+    #[test]
+    fn the_collapse_takes_the_flag_over_the_definition_over_the_default() {
+        let (repo, store) = store();
+        install(
+            &repo,
+            "parked",
+            r#"
+name = "parked"
+
+[[flight]]
+id       = "work"
+assignee = "me"
+status   = "triage"
+"#,
+        );
+        file(&store, "declared", Fields::default(), Some("parked")).expect("files");
+        file(
+            &store,
+            "flagged",
+            Fields {
+                status: Some("ready".to_string()),
+                ..Fields::default()
+            },
+            Some("parked"),
+        )
+        .expect("files");
+        install(&repo, "ticket", TICKET);
+        file(&store, "defaulted", Fields::default(), Some("ticket")).expect("files");
+
+        let fold = folded(&store);
+        assert_eq!(fold.flights[0].status, "triage", "the definition's word");
+        assert_eq!(fold.flights[1].status, "ready", "--status beats it");
+        assert_eq!(
+            fold.flights[2].status, "ready",
+            "nothing declared — the default"
         );
     }
 

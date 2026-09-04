@@ -128,8 +128,10 @@ fn a_repo_layer_rule_routes_a_hand_filed_labeled_flight_on_the_next_verb() {
          skill    = \"tidy\"\n",
     );
 
-    // `file`'s own pass runs before its append, so the filing sits in
-    // Triage until the next invocation drains it.
+    // Rules cover Triage alone, so a board that routes on them parks its
+    // filings there. `file`'s own pass runs before its append, so the
+    // filing sits in Triage until the next invocation drains it.
+    repo.git(&["config", "tower.defaultFileStatus", "triage"]);
     stdout(&ff_tower(
         repo.path(),
         &["file", "sweep the logs", "--label", "chore", "--json"],

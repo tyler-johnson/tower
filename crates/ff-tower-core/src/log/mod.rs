@@ -31,6 +31,8 @@ use std::path::{Path, PathBuf};
 
 use gix::refs::transaction::PreviousValue;
 
+use crate::config::Config;
+
 pub use chain::{CHAIN_VERSION, TOWER_EMAIL, TOWER_NAME};
 pub use error::{Error, Result};
 pub use event::{Event, EventId, Kind, RETIRED_KINDS};
@@ -85,6 +87,14 @@ impl Store {
             .config_snapshot()
             .string("tower.bays")
             .map(|value| value.to_string())
+    }
+
+    /// The settings registry over this store's repository. Beside
+    /// `pool_root` and for its reason: core reads config, the CLI stays
+    /// gix-free. A verb that needs a setting reads it here rather than
+    /// discovering the repository a second time.
+    pub fn config(&self) -> Config {
+        Config::from_repo(self.repo.clone())
     }
 
     /// The main worktree's path — the parent of the common dir — or

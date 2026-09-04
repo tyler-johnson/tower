@@ -238,13 +238,15 @@ fn a_piped_render_is_plain_text_and_names_its_groups() {
 fn the_groups_are_the_derived_statuses_in_lifecycle_order() {
     let repo = Repo::new();
     repo.pin_writer("pi");
-    for subject in ["one", "two", "three", "four"] {
+    stdout(&ff_tower(
+        repo.path(),
+        &["file", "one", "--status", "triage"],
+    ));
+    for subject in ["two", "three", "four"] {
         stdout(&ff_tower(repo.path(), &["file", subject]));
     }
     // Waiting is derived: a cleared flight with a live dependency.
-    stdout(&ff_tower(repo.path(), &["status", "2", "ready"]));
     stdout(&ff_tower(repo.path(), &["link", "2", "1"]));
-    stdout(&ff_tower(repo.path(), &["status", "3", "ready"]));
     stdout(&ff_tower(repo.path(), &["status", "4", "in_progress"]));
 
     let out = stdout(&ff_tower(repo.path(), &[]));
@@ -294,7 +296,7 @@ fn a_closed_flight_lands_in_the_closed_group_and_out_of_the_count() {
         serde_json::json!("done")
     );
     assert_eq!(
-        envelope["data"]["triage"][0]["id"],
+        envelope["data"]["ready"][0]["id"],
         serde_json::json!("pi.2")
     );
 }
@@ -325,7 +327,6 @@ fn a_ready_flight_in_the_me_lane_is_the_inboxs_second_group() {
     repo.pin_writer("pi");
     stdout(&ff_tower(repo.path(), &["file", "mine to do"]));
     stdout(&ff_tower(repo.path(), &["assign", "1", "me"]));
-    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
 
     let out = stdout(&ff_tower(repo.path(), &[]));
     assert!(out.contains("yours\n"), "{out}");
@@ -424,7 +425,7 @@ fn colliding_flights_carry_the_warn_phrase_and_the_json_verdicts() {
 
     let out = stdout(&ff_tower(repo.path(), &["--json"]));
     let envelope: serde_json::Value = serde_json::from_str(&out).expect("an envelope");
-    let rows = envelope["data"]["triage"].as_array().expect("triage");
+    let rows = envelope["data"]["ready"].as_array().expect("ready");
     assert_eq!(rows.len(), 2);
     for view in rows {
         let other = if view["id"] == serde_json::json!("pi.1") {
@@ -448,12 +449,12 @@ fn a_ready_flight_whose_branch_moved_carries_the_audit_line() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     stdout(&ff_tower(repo.path(), &["file", "cleared work"]));
-    stdout(&ff_tower(repo.path(), &["status", "1", "ready"]));
 
-    // The capture has to land after the move, which is the whole test —
-    // a branch that moved *before* the flight was set Ready is the
-    // resumed hold, and says nothing. Epoch seconds are the log's
-    // granularity, so wait out the current one first.
+    // The capture has to land after the flight became Ready — the
+    // filing itself, born cleared — which is the whole test: a branch
+    // that moved *before* then is the resumed hold, and says nothing.
+    // Epoch seconds are the log's granularity, so wait out the current
+    // one first.
     next_second();
     repo.write("work.txt", "an agent was here\n");
     Ff::at(repo.path())
@@ -505,8 +506,9 @@ fn a_decomposed_parent_carries_its_familys_progress_and_the_children_are_rows() 
     assert!(out.contains("a broad task (1/2)"), "{out}");
 
     let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
+    // The parent is born Ready and its live child folds it Waiting.
     assert_eq!(
-        envelope["data"]["triage"][0]["progress"],
+        envelope["data"]["waiting"][0]["progress"],
         serde_json::json!([1, 2])
     );
     assert_eq!(
@@ -519,7 +521,8 @@ fn a_decomposed_parent_carries_its_familys_progress_and_the_children_are_rows() 
 /// The flat board: a sub-flight files into the group its own status
 /// names whether or not it needs anyone, and it carries the subject it
 /// was filed with — nothing is prefixed onto it. The parts are born
-/// cleared, so they are Ready beside their parent's Triage.
+/// cleared, so they are Ready beside their parent, which the edges fold
+/// Waiting.
 #[test]
 fn a_sub_flight_is_a_row_in_its_own_status_group() {
     let repo = Repo::new();
@@ -545,7 +548,7 @@ fn a_sub_flight_is_a_row_in_its_own_status_group() {
         serde_json::json!("part one")
     );
     assert_eq!(
-        envelope["data"]["triage"][0]["subject"],
+        envelope["data"]["waiting"][0]["subject"],
         serde_json::json!("a broad task")
     );
     assert_eq!(
