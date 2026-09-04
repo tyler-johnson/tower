@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { render } from "./markdown";
   import { panel } from "./panel.svelte";
   import { query } from "./query.svelte";
   import { stream } from "./stream";
@@ -11,10 +12,13 @@
   let entries = $derived(stream(brief));
 
   /// Which of the two texts is open, and the draft standing in for it.
-  /// One at a time: an inline edit is a click on the text, and a reader
-  /// clicks one thing.
+  /// One at a time: a reader edits one thing.
   let editing = $state<"subject" | "body" | null>(null);
   let draft = $state("");
+  /// Which face each of the two markdown boxes is showing. Both start on
+  /// the writing.
+  let bodyTab = $state<"write" | "preview">("write");
+  let noteTab = $state<"write" | "preview">("write");
   /// The comment box, which is always open — a note on a closed record
   /// is fine, and comment.rs is the one verb with no active guard.
   let note = $state("");
@@ -22,16 +26,18 @@
   function open(which: "subject" | "body") {
     editing = which;
     draft = which === "subject" ? brief.subject : brief.body;
+    if (which === "body") bodyTab = "write";
   }
 
-  /// Enter and Escape both end through the blur: Escape puts the record's
-  /// own words back first, so the commit that follows finds nothing
-  /// changed and writes nothing. A textarea's Enter is a newline — a body
-  /// is prose — so only the subject's input takes it as the commit.
+  /// The subject's Enter and Escape both end through the blur: Escape
+  /// puts the record's own words back first, so the commit that follows
+  /// finds nothing changed and writes nothing. The body's Escape does
+  /// the same by hand, since its form has no blur to commit on.
   function keydown(event: KeyboardEvent, which: "subject" | "body") {
     if (event.key === "Escape") {
       draft = which === "subject" ? brief.subject : brief.body;
-      (event.currentTarget as HTMLElement).blur();
+      if (which === "subject") (event.currentTarget as HTMLElement).blur();
+      else editing = null;
     } else if (event.key === "Enter" && which === "subject") {
       event.preventDefault();
       (event.currentTarget as HTMLElement).blur();
@@ -53,19 +59,28 @@
     );
   }
 
+  async function saveBody(event: SubmitEvent) {
+    event.preventDefault();
+    await commit("body");
+  }
+
   async function send(event: SubmitEvent) {
     event.preventDefault();
     if (note.trim() === "") return;
     await panel.run("comment", { message: note });
-    if (panel.error === null) note = "";
+    if (panel.error === null) {
+      note = "";
+      noteTab = "write";
+    }
   }
 </script>
 
 <article class="flex flex-col gap-6">
   <!--
-		The subject and the body are the record, and both are edits in
-		place: the text a reader reads is the text they type into, so
-		nothing about the page says which of the two it is.
+		The subject and the body are the record. The subject is one line
+		and edits in place — the text a reader reads is the text they type
+		into. The body is markdown, and rendered markdown cannot live
+		inside a button, so it opens from its own `edit` control instead.
 	-->
   <header class="flex flex-col gap-2">
     {#if editing === "subject"}
@@ -100,25 +115,75 @@
     </p>
   </header>
 
+  <!--
+		The body, written and read as markdown. Blur cannot commit it: the
+		tabs unmount the textarea, and an unmounted textarea never blurs.
+		So it is a form, saved and abandoned by its own two buttons, the
+		shape the rail's gestures already take.
+	-->
   {#if editing === "body"}
-    <!-- svelte-ignore a11y_autofocus -->
-    <textarea
-      class="textarea w-full text-sm"
-      rows="6"
-      aria-label="the body"
-      autofocus
-      bind:value={draft}
-      onkeydown={(event) => keydown(event, "body")}
-      onblur={() => commit("body")}></textarea>
+    <form class="flex flex-col gap-2" onsubmit={saveBody}>
+      <div class="tabs tabs-box tabs-xs w-fit">
+        <button
+          type="button"
+          class="tab {bodyTab === 'write' ? 'tab-active' : ''}"
+          onclick={() => (bodyTab = "write")}
+        >
+          write
+        </button>
+        <button
+          type="button"
+          class="tab {bodyTab === 'preview' ? 'tab-active' : ''}"
+          onclick={() => (bodyTab = "preview")}
+        >
+          preview
+        </button>
+      </div>
+      {#if bodyTab === "write"}
+        <!-- svelte-ignore a11y_autofocus -->
+        <textarea
+          class="textarea w-full text-sm"
+          rows="12"
+          aria-label="the body"
+          autofocus
+          bind:value={draft}
+          onkeydown={(event) => keydown(event, "body")}></textarea>
+      {:else}
+        <div class="prose border-base-300 rounded-box max-w-none border p-3">
+          {@html render(draft)}
+        </div>
+      {/if}
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-sm btn-primary" disabled={panel.busy}>save</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick={() => (editing = null)}>
+          never mind
+        </button>
+      </div>
+    </form>
+  {:else if brief.body}
+    <section class="flex flex-col gap-1">
+      <div class="flex items-baseline justify-between gap-2">
+        <h2 class="text-base-content/60 font-mono text-xs font-medium tracking-[0.2em] uppercase">
+          body
+        </h2>
+        <button
+          type="button"
+          class="text-base-content/40 hover:text-base-content font-mono text-xs"
+          onclick={() => open("body")}
+        >
+          edit
+        </button>
+      </div>
+      <div class="prose max-w-none">{@html render(brief.body)}</div>
+    </section>
   {:else}
+    <!-- Nothing to click through to, so the placeholder stays the control. -->
     <button
       type="button"
-      class="cursor-text text-left text-sm whitespace-pre-wrap {brief.body
-        ? ''
-        : 'text-base-content/40'}"
+      class="text-base-content/40 cursor-text text-left text-sm"
       onclick={() => open("body")}
     >
-      {brief.body || "no body"}
+      no body
     </button>
   {/if}
 
@@ -194,7 +259,7 @@
             <p class="text-base-content/40 font-mono text-xs">
               {entry.id} · {entry.by} · {age(now, entry.at)}
             </p>
-            <p class="text-sm whitespace-pre-wrap">{entry.text}</p>
+            <div class="prose max-w-none">{@html render(entry.text)}</div>
           </div>
         {:else}
           <div class="flex flex-col gap-1">
@@ -202,7 +267,7 @@
               {entry.id} · {entry.what}{entry.line} · {entry.by} · {age(now, entry.at)}
             </p>
             {#if entry.note}
-              <p class="text-base-content/60 pl-4 text-sm whitespace-pre-wrap">{entry.note}</p>
+              <div class="prose prose-dim max-w-none pl-4">{@html render(entry.note)}</div>
             {/if}
           </div>
         {/if}
@@ -210,10 +275,36 @@
     </section>
   {/if}
 
+  <!--
+		The comment box, markdown like the body. The draft is the state
+		either way, so a submit from the preview sends what is shown.
+	-->
   <form class="flex flex-col gap-2" onsubmit={send}>
     <label class="flex w-full flex-col gap-2">
       <span class="text-sm font-medium">comment</span>
-      <textarea class="textarea w-full" rows="2" bind:value={note}></textarea>
+      <div class="tabs tabs-box tabs-xs w-fit">
+        <button
+          type="button"
+          class="tab {noteTab === 'write' ? 'tab-active' : ''}"
+          onclick={() => (noteTab = "write")}
+        >
+          write
+        </button>
+        <button
+          type="button"
+          class="tab {noteTab === 'preview' ? 'tab-active' : ''}"
+          onclick={() => (noteTab = "preview")}
+        >
+          preview
+        </button>
+      </div>
+      {#if noteTab === "write"}
+        <textarea class="textarea w-full" rows="4" bind:value={note}></textarea>
+      {:else}
+        <div class="prose border-base-300 rounded-box max-w-none border p-3">
+          {@html render(note)}
+        </div>
+      {/if}
     </label>
     <div>
       <button type="submit" class="btn btn-sm" disabled={panel.busy || note.trim() === ""}>

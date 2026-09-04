@@ -233,7 +233,7 @@ The pull is one atomic append that sets the picked flights In Progress — the e
 
 `ff tower brief` is the read half of the handoff: `next` hands an agent a flight id and a subject, and the brief is what it reads next — everything the log and the repository know about one flight, in one read over the fold and the reads. No probes: verdicts stay the board's and `next`'s surfaces, and the brief stays instant. A closed flight briefs like any other, because the log keeps the record and reading it is never a lifecycle move.
 
-The brief is the record — subject, body, every field, the comments with any question and answer among them, the family tree, links carrying each linked flight's subject and status — plus the repository's facts: branch, tip, the last change on the branch, the audit lines, and whether the branch is the reader's own. The skill named on the flight is what the agent flies it with; the brief is what the agent flies it *from*, and it is why the asker of a held question does not need to be its resumer.
+The brief is the record — subject, body, every field, the comments with any question and answer among them, the family tree, links carrying each linked flight's subject and status — plus the repository's facts: branch, tip, the last change on the branch, the audit lines, and whether the branch is the reader's own. The skill named on the flight is what the agent flies it with; the brief is what the agent flies it *from*, and it is why the asker of a held question does not need to be its resumer. The body and the comments are authored prose, and the reader decides how it reads: the web board renders them as markdown, the terminal prints the source text.
 
 ### Decompose
 

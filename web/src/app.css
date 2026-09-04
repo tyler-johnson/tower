@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 @plugin "daisyui" {
   themes: false;
 }
@@ -73,4 +74,48 @@
 
 @theme {
   --font-mono: "B612 Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+/*
+	Rendered markdown: a body, a comment, a gesture's note. The render is
+	@tailwindcss/typography, and daisyUI already points every
+	--tw-prose-* variable at the theme's semantic colors, so both themes
+	come out right with no color block here. What is left is the page's
+	own hierarchy: prose sizes headings for an article, where a body's
+	`# heading` would outrank the record's own subject, so the top levels
+	come down to sit under it. Everything else is prose's, on purpose —
+	the body and the comments are the prose on this page.
+
+	Unlayered, and it has to be: the plugin writes its rules into
+	`@layer utilities` and daisyUI writes the prose variables into its
+	own, both of which outrank `@layer components` no matter how
+	specific the selector. Unlayered CSS beats every layer.
+*/
+.prose h1 {
+  font-size: 1.5rem;
+}
+
+.prose h2 {
+  font-size: 1.25rem;
+}
+
+.prose h3 {
+  font-size: 1.0625rem;
+}
+
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-size: 1rem;
+}
+
+/*
+	What a gesture's note takes: the whole block a step back, through the
+	variables prose takes its colors from, which daisyUI would otherwise
+	win.
+*/
+.prose-dim {
+  --tw-prose-body: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+  --tw-prose-headings: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+  --tw-prose-bold: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+  --tw-prose-code: color-mix(in oklch, var(--color-base-content) 60%, transparent);
 }

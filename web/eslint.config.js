@@ -15,6 +15,8 @@ export default ts.config(
   { languageOptions: { globals: { ...globals.browser, ...globals.node } } },
   // The app builds its hrefs by hand from the query state, so every link and goto() trips this rule.
   { rules: { "svelte/no-navigation-without-resolve": "off" } },
+  // The record's bodies and comments are markdown: the HTML is markdown-it's own output over a parser with `html: false`, so nothing a writer types reaches the page as markup.
+  { files: ["src/lib/Record.svelte"], rules: { "svelte/no-at-html-tags": "off" } },
   {
     files: ["**/*.svelte", "**/*.svelte.ts", "**/*.svelte.js"],
     languageOptions: {
