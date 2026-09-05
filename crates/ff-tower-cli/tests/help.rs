@@ -64,6 +64,17 @@ fn help_command_equals_the_long_flag() {
 }
 
 #[test]
+fn help_resolves_the_show_alias_to_brief() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let help_out = ff_tower(dir.path(), &["help", "show"]);
+    let flag_out = ff_tower(dir.path(), &["brief", "--help"]);
+    assert_eq!(
+        help_out.stdout, flag_out.stdout,
+        "ff tower help show != ff tower brief --help"
+    );
+}
+
+#[test]
 fn help_board_prints_the_root_page() {
     let dir = tempfile::TempDir::new().unwrap();
     let body = stdout(&ff_tower(dir.path(), &["help", "board"]));

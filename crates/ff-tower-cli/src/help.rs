@@ -107,6 +107,8 @@ The standing says where the flight sits on `ff tower next`'s walk and
 what it beat. The history lists every gesture on the record in log
 order, and each row carries the words the verb took: the status word,
 the lane, the fields an edit touched, the other end of the edge.
+`show` is the same verb under fufu's spelling for reading one thing,
+and the envelope says `brief` either way.
 
 Collide probes ride it only where a verdict can change the answer, so
 a brief stays instant, and a done or branchless flight briefs with
@@ -116,6 +118,7 @@ record, and reading is never a lifecycle move.";
 pub const BRIEF_EXAMPLES: &str = "\
 Examples:
   ff tower brief 17              one flight, in full
+  ff tower show 17               the same, spelled the way fufu reads one thing
   ff tower brief pi-8c2e#3       another writer's, named exactly
   ff tower brief 17 --json       the record as fields
   ff tower next                  where the flight id came from";

@@ -258,6 +258,20 @@ fn json_round_trips_the_brief() {
 }
 
 #[test]
+fn show_and_brief_agree_byte_for_byte() {
+    let repo = repo_with_a_record();
+    let brief = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    let show = stdout(&ff_tower(repo.path(), &["show", "1"]));
+    assert_eq!(show, brief);
+
+    // A spelling, not a verb: the envelope names `brief` under either.
+    let brief = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let show = ff_tower(repo.path(), &["show", "1", "--json"]);
+    assert_eq!(stdout(&show), stdout(&brief));
+    assert_eq!(envelope(&show)["cmd"], serde_json::json!("brief"));
+}
+
+#[test]
 fn a_session_tagged_flight_carries_its_branch_and_tip() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "branch work"]));

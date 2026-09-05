@@ -114,7 +114,14 @@ pub enum Command {
         peek: bool,
     },
     /// Everything known about one flight, for whoever picks it up.
-    #[command(long_about = help::BRIEF, after_long_help = help::BRIEF_EXAMPLES)]
+    // `show` is fufu's read-one verb, so it is the word a hand reaches
+    // for first; it is a second spelling, not a verb, and the envelope's
+    // `cmd` still says `brief`.
+    #[command(
+        visible_alias = "show",
+        long_about = help::BRIEF,
+        after_long_help = help::BRIEF_EXAMPLES
+    )]
     Brief {
         /// The flight to brief — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
