@@ -325,8 +325,8 @@ Set a flight's lane: me, agent, or none to clear it. The lane is the
 routing decision — whose queue this is in — and it is all the field
 carries: the queue draws only from Ready flights in the agent lane,
 so assigning is what opens or closes the gate. Which agent actually
-flies it needs no field — every event carries the byline of whoever
-wrote it, so the history shows the pilot.
+flies it needs no field — every event carries the byline and the
+session of whoever wrote it, so the history shows the pilot.
 
 A closed flight refuses; everything else re-lanes freely, and the
 move is on the record with your name on it.";

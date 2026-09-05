@@ -160,6 +160,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind: Kind::Filed {
                 procedure: None,
@@ -183,6 +184,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind: Kind::Status {
                 flight: flight.parse().expect("id"),

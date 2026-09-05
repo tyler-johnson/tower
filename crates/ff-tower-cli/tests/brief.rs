@@ -28,11 +28,25 @@ fn ff_tower_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
     command
         .args(args)
         .env("FF_REPO", repo)
-        .env("XDG_CONFIG_HOME", xdg(repo));
+        .env("XDG_CONFIG_HOME", xdg(repo))
+        // A developer's own fufu session must not tag the fixture's
+        // events: the bylines below assert the bare email.
+        .env_remove("FF_SESSION");
     if let Some(program) = program {
         command.env("TOWER_FF", program);
     }
     command.output().expect("spawn ff-tower")
+}
+
+/// The spawn under a fufu session tag, the way `ff mcp` hands one down.
+fn ff_tower_tagged(repo: &Path, args: &[&str], tag: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_ff-tower"))
+        .args(args)
+        .env("FF_REPO", repo)
+        .env("XDG_CONFIG_HOME", xdg(repo))
+        .env("FF_SESSION", tag)
+        .output()
+        .expect("spawn ff-tower")
 }
 
 /// The fixture's own config root, beside the repository inside the
@@ -345,6 +359,59 @@ fn a_closed_dependency_marks_its_link_row() {
 }
 
 #[test]
+fn the_byline_carries_the_session() {
+    // The wire keeps the full id, so it cross-references fufu's own
+    // `ff op log 'session(<id>)'`; the human row shortens a UUID to its
+    // first eight characters in brackets, and anything else renders
+    // verbatim. The author stays the email underneath.
+    let repo = repo();
+    let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
+    stdout(&ff_tower_tagged(repo.path(), &["file", "tagged"], uuid));
+    stdout(&ff_tower_tagged(
+        repo.path(),
+        &["status", "1", "in_progress"],
+        "hand-typed",
+    ));
+    stdout(&ff_tower(repo.path(), &["comment", "1", "-m", "a note"]));
+
+    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let data = &envelope(&out)["data"];
+    assert_eq!(data["filed_by"], serde_json::json!("tests@tower.invalid"));
+    assert_eq!(data["filed_session"], serde_json::json!(uuid));
+    assert_eq!(data["status_by"], serde_json::json!("tests@tower.invalid"));
+    assert_eq!(data["status_session"], serde_json::json!("hand-typed"));
+    let history = data["history"].as_array().expect("a history");
+    assert_eq!(history[0]["session"], serde_json::json!(uuid));
+    assert_eq!(history[1]["session"], serde_json::json!("hand-typed"));
+    assert!(history[2]["session"].is_null(), "{data}");
+    assert_eq!(
+        data["comments"][0]["author"],
+        serde_json::json!("tests@tower.invalid")
+    );
+    assert!(data["comments"][0]["session"].is_null(), "{data}");
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    assert!(text.contains("in progress — hand-typed "), "{text}");
+    assert!(
+        text.contains("history\n  pi.1 · filed · [95b36d9d] · "),
+        "{text}"
+    );
+    assert!(
+        text.contains("pi.2 · status in_progress · hand-typed · "),
+        "{text}"
+    );
+    assert!(
+        text.contains("pi.3 · commented · tests@tower.invalid · "),
+        "{text}"
+    );
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let flown = &board["data"]["in_progress"][0];
+    assert_eq!(flown["filed_session"], serde_json::json!(uuid));
+    assert_eq!(flown["status_session"], serde_json::json!("hand-typed"));
+}
+
+#[test]
 fn the_history_lists_every_gesture_in_log_order() {
     let repo = repo();
     stdout(&ff_tower(
@@ -408,6 +475,11 @@ fn the_history_lists_every_gesture_in_log_order() {
     );
     assert_eq!(history[0]["id"], serde_json::json!("pi.1"));
     assert_eq!(history[0]["by"], serde_json::json!("tests@tower.invalid"));
+    // No tag and no terminal under the runner: the session is null, and
+    // the key is on the row regardless.
+    let filing = history[0].as_object().expect("an object");
+    assert!(filing.contains_key("session"), "{data}");
+    assert!(history[0]["session"].is_null(), "{data}");
     assert!(history[0]["at"].is_i64(), "{data}");
     // The words sit flat beside `what`, only where the kind carries them.
     assert_eq!(history[2]["status"], serde_json::json!("in_progress"));
@@ -519,7 +591,7 @@ fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
         .clone();
     assert_eq!(history.len(), 2);
     assert_eq!(history[1]["what"], serde_json::json!("promoted"));
-    // Its words are unknowable, so the row is the four keys alone.
+    // Its words are unknowable, so the row is the five keys alone.
     let mut keys: Vec<&str> = history[1]
         .as_object()
         .expect("an object")
@@ -527,7 +599,7 @@ fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
         .map(String::as_str)
         .collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["at", "by", "id", "what"]);
+    assert_eq!(keys, ["at", "by", "id", "session", "what"]);
 
     // A body naming some other flight stays off this one's history.
     Store::open(repo.path())

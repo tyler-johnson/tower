@@ -173,7 +173,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
                         moment.id,
                         moment.what,
                         words,
-                        moment.by,
+                        render::byline(moment.session.as_deref(), &moment.by),
                         render::age(now, moment.at)
                     ),
                     colored
@@ -232,7 +232,11 @@ fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
     let status = brief.status.replace('_', " ");
     phrases.push(render::paint_dim(
         &match (brief.status_by.as_deref(), brief.status_at) {
-            (Some(by), Some(at)) => format!("{status} — {by} {}", render::age(now, at)),
+            (Some(by), Some(at)) => format!(
+                "{status} — {} {}",
+                render::byline(brief.status_session.as_deref(), by),
+                render::age(now, at)
+            ),
             _ => status,
         },
         colored,

@@ -15,6 +15,9 @@ fn ff_tower(repo: &Path, args: &[&str]) -> Output {
         .args(args)
         .env("FF_REPO", repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
+        // A developer's own fufu session must not tag the fixture's
+        // events: the bylines below assert the bare email.
+        .env_remove("FF_SESSION")
         .output()
         .expect("spawn ff-tower")
 }
@@ -824,6 +827,40 @@ fn a_status_move_puts_the_flight_in_progress_with_the_pilots_byline() {
     assert!(
         rendered.contains("in progress — tests@tower.invalid"),
         "got {rendered}"
+    );
+}
+
+#[test]
+fn the_pilot_line_names_the_session_over_the_email() {
+    // A move under fufu's tag: the row keeps the email as `status_by`
+    // and carries the full id as `status_session`; the pilot phrase
+    // renders the id's first eight characters in brackets.
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "take a pull"]));
+    let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
+    let out = Command::new(env!("CARGO_BIN_EXE_ff-tower"))
+        .args(["status", "1", "in_progress"])
+        .env("FF_REPO", repo.path())
+        .env("XDG_CONFIG_HOME", xdg(repo.path()))
+        .env("FF_SESSION", uuid)
+        .output()
+        .expect("spawn ff-tower");
+    stdout(&out);
+
+    let board = envelope(&ff_tower(repo.path(), &["--json"]));
+    let flown = &board["data"]["in_progress"][0];
+    assert_eq!(flown["status_by"], serde_json::json!("tests@tower.invalid"));
+    assert_eq!(flown["status_session"], serde_json::json!(uuid));
+    assert!(flown["filed_session"].is_null(), "{flown}");
+
+    let rendered = stdout(&ff_tower(repo.path(), &[]));
+    assert!(
+        rendered.contains("in progress — [95b36d9d]"),
+        "got {rendered}"
+    );
+    assert!(
+        !rendered.contains(uuid),
+        "the board never prints the full id"
     );
 }
 

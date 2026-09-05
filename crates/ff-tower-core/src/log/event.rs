@@ -113,9 +113,9 @@ pub enum Kind {
     },
     /// Moves a flight: the word assigns the fold's facts last-wins —
     /// in backlog, started, closed — and the fold derives the status, the
-    /// byline the mover. Done and Canceled ride here like every other
-    /// move, and `next`'s pull appends one per pick in a single batch, the
-    /// byline the pilot.
+    /// byline and its session the mover. Done and Canceled ride here like
+    /// every other move, and `next`'s pull appends one per pick in a
+    /// single batch, the byline and its session the pilot.
     Status {
         flight: EventId,
         status: String,
@@ -243,6 +243,10 @@ pub struct Event {
     pub author: String,
     pub writer: String,
     pub time: i64,
+    /// The session that appended it: fufu's tag when fufu handed one
+    /// down, the login name when a person typed the verb at a terminal,
+    /// else none. The author stays the email; this says which session.
+    pub session: Option<String>,
     pub kind: Kind,
 }
 
@@ -255,6 +259,10 @@ struct Wire {
     author: String,
     writer: String,
     time: i64,
+    /// Absent on a chain written before the field, and left off the
+    /// line when there is none, so the format is otherwise unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session: Option<String>,
     kind: String,
     body: Box<RawValue>,
 }
@@ -536,6 +544,7 @@ impl Serialize for Event {
             author: self.author.clone(),
             writer: self.writer.clone(),
             time: self.time,
+            session: self.session.clone(),
             kind: self.kind.name().to_string(),
             body,
         }
@@ -550,6 +559,7 @@ impl<'de> Deserialize<'de> for Event {
             author,
             writer,
             time,
+            session,
             kind,
             body,
         } = Wire::deserialize(deserializer)?;
@@ -691,6 +701,7 @@ impl<'de> Deserialize<'de> for Event {
             author,
             writer,
             time,
+            session,
             kind,
         })
     }
@@ -756,12 +767,43 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: plain_filed("s", "b"),
         };
         assert_eq!(
             serde_json::to_string(&event).expect("serialize"),
             r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"backlog","priority":"none","done":"asserted"}}"#
         );
+    }
+
+    #[test]
+    fn a_session_rides_the_wire_only_when_there_is_one() {
+        // `Some` round-trips in full — the whole id, so it cross-references
+        // fufu's own log — and `None` leaves no key, so a chain written
+        // with none is byte-identical to one written before the field.
+        let mut event = Event {
+            id: "pi.1".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            session: Some("95b36d9d-efdc-4564-9b06-91842f51ef6b".to_string()),
+            kind: plain_filed("s", "b"),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""session":"95b36d9d-efdc-4564-9b06-91842f51ef6b""#));
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        assert_eq!(back.session, event.session);
+
+        event.session = None;
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(!json.contains("session"), "{json}");
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        assert!(back.session.is_none());
+
+        // A line from before the field: no key, and it reads as none.
+        let old = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"ready"}}"#;
+        let event: Event = serde_json::from_str(old).expect("parse");
+        assert!(event.session.is_none());
     }
 
     #[test]
@@ -832,6 +874,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: Kind::Routed {
                 flight: "pi.1".parse().expect("id"),
                 procedure: "review".to_string(),
@@ -922,6 +965,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: Kind::Filed {
                 procedure: Some("review".to_string()),
                 subject: "the retry test · pass".to_string(),
@@ -1006,6 +1050,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: Kind::Status {
                 flight: "pi.1".parse().expect("id"),
                 status: "in_progress".to_string(),
@@ -1024,6 +1069,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 8,
+            session: None,
             kind: Kind::Status {
                 flight: "pi.1".parse().expect("id"),
                 status: "canceled".to_string(),
@@ -1046,6 +1092,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: Kind::Assigned {
                 flight: "pi.1".parse().expect("id"),
                 assignee: None,
@@ -1067,6 +1114,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 8,
+            session: None,
             kind: Kind::Assigned {
                 flight: "pi.1".parse().expect("id"),
                 assignee: Some("agent".to_string()),
@@ -1083,6 +1131,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: Kind::Edited {
                 target: "pi.1".parse().expect("id"),
                 subject: subject.map(str::to_string),
@@ -1135,6 +1184,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: Kind::Edited {
                 target: "pi.1".parse().expect("id"),
                 subject: None,
@@ -1222,6 +1272,7 @@ mod tests {
                 author: "a@b.c".to_string(),
                 writer: "pi".to_string(),
                 time: 7,
+                session: None,
                 kind,
             };
             let json = serde_json::to_string(&event).expect("serialize");
@@ -1270,6 +1321,7 @@ mod tests {
             author: "a@b.c".to_string(),
             writer: "pi".to_string(),
             time: 7,
+            session: None,
             kind: Kind::ViewSaved {
                 view: None,
                 name: "mine".to_string(),

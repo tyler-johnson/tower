@@ -27,6 +27,9 @@ fn ff_tower(repo: &Path, args: &[&str]) -> Output {
         .args(args)
         .env("FF_REPO", repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
+        // A developer's own fufu session must not tag the fixture's
+        // events: the bylines below assert the bare email.
+        .env_remove("FF_SESSION")
         .output()
         .expect("spawn ff-tower")
 }

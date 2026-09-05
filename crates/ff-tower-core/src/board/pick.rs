@@ -180,6 +180,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind: Kind::Filed {
                 procedure: Some("review".to_string()),
@@ -208,6 +209,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind,
         }

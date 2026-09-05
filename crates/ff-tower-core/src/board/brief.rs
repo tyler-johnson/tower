@@ -57,6 +57,8 @@ pub struct Brief {
     pub subject: String,
     pub body: String,
     pub filed_by: String,
+    /// The filer's session, when the filing carried one.
+    pub filed_session: Option<String>,
     pub filed_at: i64,
     /// The derived status — the brief is the read surface for one
     /// flight, so this is where the fields are meant to be read.
@@ -66,6 +68,8 @@ pub struct Brief {
     /// released it. `None` while the flight still stands where it was
     /// filed.
     pub status_by: Option<String>,
+    /// The mover's session, when that gesture carried one.
+    pub status_session: Option<String>,
     pub status_at: Option<i64>,
     /// Why the mark is someone else's gesture: "dependency <id> done"
     /// or "… canceled" when a dependency's closing is what made the
@@ -170,6 +174,7 @@ pub struct CommentView {
     /// The wire id — a comment's only name, and what `edit` takes.
     pub id: String,
     pub author: String,
+    pub session: Option<String>,
     pub at: i64,
     pub text: String,
 }
@@ -227,9 +232,14 @@ pub fn brief(
         subject: flight.subject.clone(),
         body: flight.body.clone(),
         filed_by: flight.filed_by.clone(),
+        filed_session: flight.filed_session.clone(),
         filed_at: flight.filed_at,
         status: flight.status.clone(),
         status_by: flight.status_mark.as_ref().map(|mark| mark.by.clone()),
+        status_session: flight
+            .status_mark
+            .as_ref()
+            .and_then(|mark| mark.session.clone()),
         status_at: flight.status_mark.as_ref().map(|mark| mark.at),
         status_reason: super::model::status_reason(fold, flight),
         assignee: flight.assignee.clone(),
@@ -259,6 +269,7 @@ pub fn brief(
             .map(|comment| CommentView {
                 id: comment.id.to_string(),
                 author: comment.author.clone(),
+                session: comment.session.clone(),
                 at: comment.at,
                 text: comment.text.clone(),
             })
@@ -398,6 +409,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "filer@b.c".to_string(),
             time,
+            session: None,
             id,
             kind: Kind::Filed {
                 procedure: Some("review".to_string()),
@@ -422,6 +434,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "filer@b.c".to_string(),
             time,
+            session: None,
             id,
             kind: Kind::Filed {
                 procedure: None,
@@ -450,6 +463,7 @@ mod tests {
             writer: id.writer.clone(),
             author: author.to_string(),
             time,
+            session: None,
             id,
             kind,
         }
@@ -671,6 +685,71 @@ mod tests {
         assert_eq!(brief.priority, "high");
         assert_eq!(brief.labels, ["chore"]);
         assert_eq!(brief.skill.as_deref(), Some("review"));
+    }
+
+    #[test]
+    fn the_session_rides_the_byline_to_the_brief() {
+        // The author stays the email; the session says which session
+        // typed it. A filing's lands beside `filed_by`, a move's beside
+        // `status_by`, a comment's on its view, and every gesture's on
+        // its history row — and an old chain with none reads as none.
+        let session = |mut event: Event, tag: Option<&str>| {
+            event.session = tag.map(str::to_string);
+            event
+        };
+        let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
+        let events = [
+            session(filed("pi.1", 10, "s", ""), Some(uuid)),
+            session(
+                lifecycle(
+                    "pi.2",
+                    "mover@b.c",
+                    20,
+                    Kind::Status {
+                        flight: id("pi.1"),
+                        status: "in_progress".to_string(),
+                        reason: None,
+                    },
+                ),
+                Some("tyler"),
+            ),
+            session(commented("pi.3", "one@b.c", 30, "pi.1", "note"), None),
+        ];
+        let brief = brief_of(
+            &events,
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert_eq!(brief.filed_by, "filer@b.c");
+        assert_eq!(brief.filed_session.as_deref(), Some(uuid));
+        assert_eq!(brief.status_by.as_deref(), Some("mover@b.c"));
+        assert_eq!(brief.status_session.as_deref(), Some("tyler"));
+        assert_eq!(brief.comments[0].author, "one@b.c");
+        assert!(brief.comments[0].session.is_none());
+        let sessions: Vec<Option<&str>> = brief
+            .history
+            .iter()
+            .map(|moment| moment.session.as_deref())
+            .collect();
+        assert_eq!(sessions, [Some(uuid), Some("tyler"), None]);
+
+        let untagged: Vec<Event> = events
+            .iter()
+            .cloned()
+            .map(|event| session(event, None))
+            .collect();
+        let brief = brief_of(
+            &untagged,
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert!(brief.filed_session.is_none());
+        assert!(brief.status_session.is_none());
+        assert!(brief.history.iter().all(|moment| moment.session.is_none()));
     }
 
     #[test]

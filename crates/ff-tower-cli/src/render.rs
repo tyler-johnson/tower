@@ -114,6 +114,28 @@ pub fn age(now: i64, then: i64) -> String {
     format!("{} ago", span(now - then))
 }
 
+/// The byline: the session when the event carries one, else the author.
+/// A session shaped like a UUID renders as its first eight characters in
+/// brackets, the short form fufu's capture summaries use; anything else
+/// — a login name, a hand-typed tag — renders verbatim.
+pub fn byline(session: Option<&str>, by: &str) -> String {
+    match session {
+        Some(session) if is_uuid(session) => format!("[{}]", &session[..8]),
+        Some(session) => session.to_string(),
+        None => by.to_string(),
+    }
+}
+
+/// The 8-4-4-4-12 shape: 36 characters, hyphens at the four joints, hex
+/// everywhere else.
+fn is_uuid(text: &str) -> bool {
+    text.len() == 36
+        && text.chars().enumerate().all(|(index, c)| match index {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_hexdigit(),
+        })
+}
+
 /// The tip column: the branch tip short, `—` for a flight with no tip, and
 /// the literal `(detached)` for `@detached` — printing the sentinel as a
 /// branch name would read as a real branch.
@@ -192,11 +214,15 @@ fn note(
         ));
     }
     // The pilot, ahead of the branch: the stored In Progress and who set
-    // it — the byline is the pilot, the field is the chip.
+    // it — the byline and its session are the pilot, the field is the
+    // chip.
     if view.status == "in_progress" {
         phrases.push(paint_dim(
             &match view.status_by.as_deref() {
-                Some(by) => format!("in progress — {by}"),
+                Some(by) => format!(
+                    "in progress — {}",
+                    byline(view.status_session.as_deref(), by)
+                ),
                 None => "in progress".to_string(),
             },
             colored,
@@ -363,12 +389,14 @@ mod tests {
             subject: subject.to_string(),
             body: String::new(),
             filed_by: "a@b.c".to_string(),
+            filed_session: None,
             filed_at: NOW - 60,
             comments: 0,
             depends_on: Vec::new(),
             blocks: Vec::new(),
             status: status.to_string(),
             status_by: None,
+            status_session: None,
             status_reason: None,
             status_at: None,
             assignee: None,
@@ -407,6 +435,23 @@ mod tests {
             unrouted: Vec::new(),
             retired: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_byline_is_the_session_over_the_author() {
+        assert_eq!(
+            byline(Some("95b36d9d-efdc-4564-9b06-91842f51ef6b"), "a@b.c"),
+            "[95b36d9d]",
+            "a UUID shortens to its first eight characters"
+        );
+        assert_eq!(byline(Some("tyler"), "a@b.c"), "tyler");
+        assert_eq!(byline(Some("hand-typed"), "a@b.c"), "hand-typed");
+        assert_eq!(byline(None, "a@b.c"), "a@b.c");
+        assert_eq!(
+            byline(Some("95b36d9d-efdc-4564-9b06-91842f51ef6"), "a@b.c"),
+            "95b36d9d-efdc-4564-9b06-91842f51ef6",
+            "one character short of the shape is not a UUID"
+        );
     }
 
     #[test]

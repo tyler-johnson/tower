@@ -3,7 +3,7 @@
   import { panel } from "./panel.svelte";
   import { query } from "./query.svelte";
   import { stream } from "./stream";
-  import { age, linkRefs, statusDot, type Brief } from "./tower";
+  import { age, byline, linkRefs, statusDot, type Brief } from "./tower";
   import { feed } from "./feed.svelte";
 
   let { brief, refs }: { brief: Brief; refs: Map<string, string> } = $props();
@@ -116,7 +116,7 @@
       </h1>
     {/if}
     <p class="text-base-content/40 font-mono text-xs">
-      filed by {brief.filed_by} · {age(now, brief.filed_at)}
+      filed by {byline(brief.filed_session, brief.filed_by)} · {age(now, brief.filed_at)}
     </p>
   </header>
 
@@ -262,14 +262,17 @@
 							name, and what `edit` takes.
 						-->
             <p class="text-base-content/40 font-mono text-xs">
-              {entry.id} · {entry.by} · {age(now, entry.at)}
+              {entry.id} · {byline(entry.session, entry.by)} · {age(now, entry.at)}
             </p>
             <div class="prose max-w-none">{@html render(entry.text)}</div>
           </div>
         {:else}
           <div class="flex flex-col gap-1">
             <p class="text-base-content/40 font-mono text-xs">
-              {entry.id} · {entry.what}{entry.line} · {entry.by} · {age(now, entry.at)}
+              {entry.id} · {entry.what}{entry.line} · {byline(entry.session, entry.by)} · {age(
+                now,
+                entry.at,
+              )}
             </p>
             {#if entry.note}
               <div class="prose prose-dim max-w-none pl-4">{@html render(entry.note)}</div>

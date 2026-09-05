@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRefs,
+  byline,
   foldRows,
   linkRefs,
   liveRows,
@@ -23,12 +24,14 @@ function flight(number: number, status: string, labels: string[] = []): FlightVi
     subject: `flight ${number}`,
     body: "",
     filed_by: "tyler",
+    filed_session: null,
     filed_at: 0,
     comments: 0,
     depends_on: [],
     blocks: [],
     status,
     status_by: null,
+    status_session: null,
     status_at: null,
     assignee: null,
     priority: "none",
@@ -80,6 +83,22 @@ function brief(number: number, depends_on: LinkView[], blocks: LinkView[] = []):
     beat: [],
   };
 }
+
+describe("the byline", () => {
+  it("shortens a UUID session to its first eight characters in brackets", () => {
+    expect(byline("95b36d9d-efdc-4564-9b06-91842f51ef6b", "a@b.c")).toBe("[95b36d9d]");
+  });
+  it("renders any other session verbatim", () => {
+    expect(byline("tyler", "a@b.c")).toBe("tyler");
+    expect(byline("hand-typed", "a@b.c")).toBe("hand-typed");
+    expect(byline("95b36d9d-efdc-4564-9b06-91842f51ef6", "a@b.c")).toBe(
+      "95b36d9d-efdc-4564-9b06-91842f51ef6",
+    );
+  });
+  it("falls back to the author with no session", () => {
+    expect(byline(null, "a@b.c")).toBe("a@b.c");
+  });
+});
 
 describe("the fold", () => {
   it("a fold is counted once however it is grouped", () => {

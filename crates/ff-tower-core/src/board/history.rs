@@ -30,6 +30,9 @@ pub struct Moment {
     pub at: i64,
     /// The event's author, verbatim — never assumed to be the reader.
     pub by: String,
+    /// The session behind the author, when the event carried one:
+    /// fufu's tag, or the login name at a terminal.
+    pub session: Option<String>,
     /// The kind's own name; an unknown kind carries its own string
     /// through.
     pub what: String,
@@ -146,6 +149,7 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
                 id: event.id.to_string(),
                 at: event.time,
                 by: event.author.clone(),
+                session: event.session.clone(),
                 what: event.kind.name().to_string(),
                 detail: detail(&event.kind, &comments),
             });
@@ -230,6 +234,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind,
         }
@@ -314,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn a_clearing_is_a_null_lane_and_a_filing_carries_the_four_keys_alone() {
+    fn a_clearing_is_a_null_lane_and_a_filing_carries_the_five_keys_alone() {
         let flight: EventId = "pi.1".parse().expect("id");
         let events = vec![
             filed("pi.1", 1),
@@ -330,7 +335,7 @@ mod tests {
         let rows = json(&history(&events, &flight));
         assert_eq!(
             rows[0],
-            serde_json::json!({"id": "pi.1", "at": 1, "by": "a@b.c", "what": "filed"})
+            serde_json::json!({"id": "pi.1", "at": 1, "by": "a@b.c", "session": null, "what": "filed"})
         );
         let lane = rows[1].as_object().expect("an object");
         assert!(lane.contains_key("assignee"), "{}", rows[1]);

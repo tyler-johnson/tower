@@ -46,6 +46,7 @@ pub struct Flight {
     pub subject: String,
     pub body: String,
     pub filed_by: String,
+    pub filed_session: Option<String>,
     pub filed_at: i64,
     /// Reading order — the union's order, which is the order a reader saw
     /// them arrive in.
@@ -163,6 +164,8 @@ fn assign(stand: &mut Stand, word: &str) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mark {
     pub by: String,
+    /// The session behind the byline, when the event carried one.
+    pub session: Option<String>,
     pub at: i64,
     /// The gesture's position in the union — what orders two marks that
     /// share a second, so the derivation follows the log and never a
@@ -182,6 +185,7 @@ impl Mark {
 #[derive(Debug, Clone)]
 pub struct Question {
     pub by: String,
+    pub session: Option<String>,
     pub at: i64,
     pub text: String,
 }
@@ -191,6 +195,7 @@ pub struct Question {
 pub struct Comment {
     pub id: EventId,
     pub author: String,
+    pub session: Option<String>,
     pub at: i64,
     pub text: String,
 }
@@ -271,6 +276,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     subject: subject.clone(),
                     body: body.clone(),
                     filed_by: event.author.clone(),
+                    filed_session: event.session.clone(),
                     filed_at: event.time,
                     comments: Vec::new(),
                     depends_on: Vec::new(),
@@ -364,6 +370,7 @@ pub fn fold(events: &[Event]) -> Fold {
                         assign(&mut flight.stand, status);
                         flight.moved = Some(Mark {
                             by: event.author.clone(),
+                            session: event.session.clone(),
                             at: event.time,
                             order,
                         });
@@ -387,6 +394,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     assign(&mut flight.stand, status);
                     flight.moved = Some(Mark {
                         by: event.author.clone(),
+                        session: event.session.clone(),
                         at: event.time,
                         order,
                     });
@@ -401,6 +409,7 @@ pub fn fold(events: &[Event]) -> Fold {
                 Some(&at) => flights[at].comments.push(Comment {
                     id: event.id.clone(),
                     author: event.author.clone(),
+                    session: event.session.clone(),
                     at: event.time,
                     text: text.clone(),
                 }),
@@ -437,12 +446,14 @@ pub fn fold(events: &[Event]) -> Fold {
                     let flight = &mut flights[at];
                     flight.question = Some(Question {
                         by: event.author.clone(),
+                        session: event.session.clone(),
                         at: event.time,
                         text: question.clone(),
                     });
                     flight.stand.started = false;
                     flight.moved = Some(Mark {
                         by: event.author.clone(),
+                        session: event.session.clone(),
                         at: event.time,
                         order,
                     });
@@ -461,6 +472,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     flight.question = None;
                     let mark = Mark {
                         by: event.author.clone(),
+                        session: event.session.clone(),
                         at: event.time,
                         order,
                     };
@@ -556,6 +568,7 @@ pub fn fold(events: &[Event]) -> Fold {
         };
         let mark = Mark {
             by: event.author.clone(),
+            session: event.session.clone(),
             at: event.time,
             order: 0,
         };
@@ -656,6 +669,7 @@ fn derive(flights: &mut [Flight], by_id: &HashMap<&EventId, usize>) {
                 "held".to_string(),
                 Some(Mark {
                     by: question.by.clone(),
+                    session: question.session.clone(),
                     at: question.at,
                     order: 0,
                 }),
@@ -710,6 +724,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind,
         }

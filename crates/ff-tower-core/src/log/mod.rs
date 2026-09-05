@@ -46,6 +46,7 @@ pub use event::{Event, EventId, Kind, RETIRED_KINDS};
 pub struct Store {
     repo: gix::Repository,
     author: String,
+    session: Option<String>,
     writer: std::cell::OnceCell<String>,
 }
 
@@ -54,6 +55,7 @@ impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         let repo = gix::discover(path).map_err(Error::repo)?;
         let author = resolve_author(&repo)?;
+        let session = session_from_environment(&repo);
         let writer = std::cell::OnceCell::new();
         if let Some(configured) = configured_writer(&repo) {
             validate_component("writer", &configured)?;
@@ -62,6 +64,7 @@ impl Store {
         Ok(Store {
             repo,
             author,
+            session,
             writer,
         })
     }
@@ -69,6 +72,12 @@ impl Store {
     /// Who events file under: git `user.email`.
     pub fn author(&self) -> &str {
         &self.author
+    }
+
+    /// The session every append is tagged with, when there is one: fufu's
+    /// tag, or the login name at a terminal.
+    pub fn session(&self) -> Option<&str> {
+        self.session.as_deref()
     }
 
     /// This machine's writer id, once one exists — `None` until the first
@@ -205,6 +214,7 @@ impl Store {
                     author: self.author.clone(),
                     writer: writer.clone(),
                     time: now,
+                    session: self.session.clone(),
                     kind,
                 })
                 .collect();
@@ -338,6 +348,58 @@ fn resolve_author(repo: &gix::Repository) -> Result<String> {
     let author = sig.email.to_string();
     validate_component("author", &author)?;
     Ok(author)
+}
+
+/// The session an append is tagged with, by three rules in order: fufu's
+/// tag when it handed one down, the login name when a person is at the
+/// terminal, else none.
+///
+/// `tag` is `FF_SESSION`, accepted under fufu's own rule: trimmed,
+/// non-empty, no control characters, at most 128 bytes. An unusable value
+/// is ignored rather than fatal — the session is a byline, not identity.
+/// `login` is the first set login variable, and `git_name` the committer's
+/// name, the fallback when a terminal has no login variable.
+pub(crate) fn resolve_session(
+    tag: Option<&str>,
+    interactive: bool,
+    login: Option<&str>,
+    git_name: Option<&str>,
+) -> Option<String> {
+    let usable = |value: &str| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty() && !trimmed.chars().any(char::is_control) && trimmed.len() <= 128)
+            .then(|| trimmed.to_string())
+    };
+    if let Some(tag) = tag.and_then(usable) {
+        return Some(tag);
+    }
+    if !interactive {
+        return None;
+    }
+    login.and_then(usable).or_else(|| git_name.and_then(usable))
+}
+
+/// [`resolve_session`] over the process: `FF_SESSION`, then fufu's own
+/// interactive rule — `FF_NONINTERACTIVE` unset or empty and stdin a
+/// terminal — with `USER`, `LOGNAME`, or `USERNAME` as the login name.
+fn session_from_environment(repo: &gix::Repository) -> Option<String> {
+    let tag = std::env::var("FF_SESSION").ok();
+    let forced_off = std::env::var_os("FF_NONINTERACTIVE").is_some_and(|value| !value.is_empty());
+    let interactive = !forced_off && std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let login = ["USER", "LOGNAME", "USERNAME"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.trim().is_empty());
+    let git_name = repo
+        .committer()
+        .and_then(|sig| sig.ok())
+        .map(|sig| sig.name.to_string());
+    resolve_session(
+        tag.as_deref(),
+        interactive,
+        login.as_deref(),
+        git_name.as_deref(),
+    )
 }
 
 /// `tower.writer` from config, when set. Local config lives in the common
@@ -538,6 +600,71 @@ mod tests {
         assert_eq!(
             paths.log.parent().and_then(Path::parent),
             Some(paths.refs.as_path())
+        );
+    }
+
+    /// The three rules in order: a tag beats everything, a terminal gives
+    /// the login name or the git name behind it, and a non-terminal with
+    /// no tag gives none. A tag fufu would refuse is ignored, not fatal.
+    #[test]
+    fn a_session_resolves_by_tag_then_terminal_then_none() {
+        struct Case {
+            tag: Option<&'static str>,
+            interactive: bool,
+            login: Option<&'static str>,
+            git_name: Option<&'static str>,
+            want: Option<&'static str>,
+        }
+        let case = |tag, interactive, login, git_name, want| Case {
+            tag,
+            interactive,
+            login,
+            git_name,
+            want,
+        };
+        let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
+        let cases = [
+            case(Some(uuid), true, Some("tyler"), Some("Tyler"), Some(uuid)),
+            case(Some(uuid), false, None, None, Some(uuid)),
+            case(
+                Some("  hand-typed  "),
+                false,
+                None,
+                None,
+                Some("hand-typed"),
+            ),
+            case(None, true, Some("tyler"), Some("Tyler"), Some("tyler")),
+            case(
+                None,
+                true,
+                None,
+                Some("Tyler Johnson"),
+                Some("Tyler Johnson"),
+            ),
+            case(None, true, None, None, None),
+            case(None, false, Some("tyler"), Some("Tyler"), None),
+            case(Some("   "), true, Some("tyler"), None, Some("tyler")),
+            case(Some("a\nb"), true, Some("tyler"), None, Some("tyler")),
+        ];
+        for Case {
+            tag,
+            interactive,
+            login,
+            git_name,
+            want,
+        } in cases
+        {
+            assert_eq!(
+                resolve_session(tag, interactive, login, git_name).as_deref(),
+                want,
+                "tag {tag:?}, interactive {interactive}, login {login:?}, git {git_name:?}"
+            );
+        }
+        let long = "x".repeat(129);
+        assert_eq!(
+            resolve_session(Some(&long), true, Some("tyler"), None).as_deref(),
+            Some("tyler"),
+            "a tag past 128 bytes is ignored"
         );
     }
 }

@@ -11,18 +11,27 @@
 //
 // No runes, so it tests under vitest with no shims.
 
-import { momentPhrase, type Brief } from "./tower";
+import { momentPhrase, type Brief, type CommentView } from "./tower";
 
 /// One row of the stream. A comment is a block with an author line; a
 /// gesture is one dim line, with the free text it carried under it — a
 /// cancel's reason, a routing's because, a hold's question.
 export type Entry =
-  | { kind: "comment"; id: string; at: number; by: string; text: string }
+  | {
+      kind: "comment";
+      id: string;
+      at: number;
+      by: string;
+      session: string | null;
+      text: string;
+    }
   | {
       kind: "gesture";
       id: string;
       at: number;
       by: string;
+      /// The session behind the byline, when the event carried one.
+      session: string | null;
       what: string;
       line: string;
       note: string | null;
@@ -38,7 +47,7 @@ export function stream(brief: Brief): Entry[] {
     const comment = moment.what === "commented" ? comments.get(moment.id) : undefined;
     if (comment) {
       paired.add(comment.id);
-      entries.push(note(comment.id, comment.at, comment.author, comment.text));
+      entries.push(note(comment));
       continue;
     }
     const phrase = momentPhrase(moment, brief.id);
@@ -47,6 +56,7 @@ export function stream(brief: Brief): Entry[] {
       id: moment.id,
       at: moment.at,
       by: moment.by,
+      session: moment.session,
       what: moment.what,
       line: phrase.line,
       note: phrase.note ?? null,
@@ -56,13 +66,20 @@ export function stream(brief: Brief): Entry[] {
   // dropping the words would be the worse answer.
   for (const comment of brief.comments) {
     if (paired.has(comment.id)) continue;
-    entries.push(note(comment.id, comment.at, comment.author, comment.text));
+    entries.push(note(comment));
   }
   // Stable, so moments sharing a second keep the log's order and only
   // the unpaired comments move to where they belong.
   return entries.sort((a, b) => a.at - b.at);
 }
 
-function note(id: string, at: number, by: string, text: string): Entry {
-  return { kind: "comment", id, at, by, text };
+function note(comment: CommentView): Entry {
+  return {
+    kind: "comment",
+    id: comment.id,
+    at: comment.at,
+    by: comment.author,
+    session: comment.session,
+    text: comment.text,
+  };
 }

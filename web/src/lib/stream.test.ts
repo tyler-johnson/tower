@@ -13,9 +13,11 @@ function brief(comments: CommentView[], history: Moment[]): Brief {
     subject: "the work",
     body: "",
     filed_by: "tyler",
+    filed_session: null,
     filed_at: 0,
     status: "ready",
     status_by: null,
+    status_session: null,
     status_at: null,
     status_reason: null,
     assignee: null,
@@ -50,11 +52,11 @@ describe("the stream", () => {
   it("a comment carries its text and a gesture its phrase, in the log order", () => {
     const rows = stream(
       brief(
-        [{ id: "pi-8c2e.2", author: "tyler", at: 2, text: "a note" }],
+        [{ id: "pi-8c2e.2", author: "tyler", session: null, at: 2, text: "a note" }],
         [
-          { id: "pi-8c2e.1", at: 1, by: "tyler", what: "filed" },
-          { id: "pi-8c2e.2", at: 2, by: "tyler", what: "commented" },
-          { id: "pi-8c2e.3", at: 3, by: "tyler", what: "status", status: "ready" },
+          { id: "pi-8c2e.1", at: 1, by: "tyler", session: null, what: "filed" },
+          { id: "pi-8c2e.2", at: 2, by: "tyler", session: null, what: "commented" },
+          { id: "pi-8c2e.3", at: 3, by: "tyler", session: null, what: "status", status: "ready" },
         ],
       ),
     );
@@ -64,6 +66,7 @@ describe("the stream", () => {
       id: "pi-8c2e.2",
       at: 2,
       by: "tyler",
+      session: null,
       text: "a note",
     });
     expect(rows[2]).toEqual({
@@ -71,10 +74,26 @@ describe("the stream", () => {
       id: "pi-8c2e.3",
       at: 3,
       by: "tyler",
+      session: null,
       what: "status",
       line: " ready",
       note: null,
     });
+  });
+
+  it("each row carries its event's session, a comment's from the comment", () => {
+    const uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
+    const rows = stream(
+      brief(
+        [{ id: "pi-8c2e.2", author: "tyler", session: "tyler", at: 2, text: "a note" }],
+        [
+          { id: "pi-8c2e.1", at: 1, by: "tyler", session: uuid, what: "filed" },
+          { id: "pi-8c2e.2", at: 2, by: "tyler", session: "tyler", what: "commented" },
+          { id: "pi-8c2e.3", at: 3, by: "tyler", session: null, what: "status", status: "ready" },
+        ],
+      ),
+    );
+    expect(rows.map((row) => row.session)).toEqual([uuid, "tyler", null]);
   });
 
   it("a hold and an answer carry their own words", () => {
@@ -82,8 +101,22 @@ describe("the stream", () => {
       brief(
         [],
         [
-          { id: "pi-8c2e.2", at: 2, by: "tyler", what: "held", question: "which log?" },
-          { id: "pi-8c2e.3", at: 3, by: "tyler", what: "answered", answer: "the writer's own" },
+          {
+            id: "pi-8c2e.2",
+            at: 2,
+            by: "tyler",
+            session: null,
+            what: "held",
+            question: "which log?",
+          },
+          {
+            id: "pi-8c2e.3",
+            at: 3,
+            by: "tyler",
+            session: null,
+            what: "answered",
+            answer: "the writer's own",
+          },
         ],
       ),
     );
@@ -96,10 +129,10 @@ describe("the stream", () => {
   it("a comment the history did not name still lands at its own time", () => {
     const rows = stream(
       brief(
-        [{ id: "pi-8c2e.2", author: "agent", at: 2, text: "from another log" }],
+        [{ id: "pi-8c2e.2", author: "agent", session: null, at: 2, text: "from another log" }],
         [
-          { id: "pi-8c2e.1", at: 1, by: "tyler", what: "filed" },
-          { id: "pi-8c2e.3", at: 3, by: "tyler", what: "done" },
+          { id: "pi-8c2e.1", at: 1, by: "tyler", session: null, what: "filed" },
+          { id: "pi-8c2e.3", at: 3, by: "tyler", session: null, what: "done" },
         ],
       ),
     );

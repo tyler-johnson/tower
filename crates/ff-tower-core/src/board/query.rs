@@ -1283,6 +1283,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind,
         }

@@ -138,6 +138,8 @@ pub struct FlightView {
     /// from a row that has no body — and never rendered as a column.
     pub body: String,
     pub filed_by: String,
+    /// The filer's session, when the filing carried one.
+    pub filed_session: Option<String>,
     /// Raw epoch; relative age is the render's concern.
     pub filed_at: i64,
     pub comments: usize,
@@ -151,6 +153,8 @@ pub struct FlightView {
     /// released it. `null` while the flight still stands where it was
     /// filed.
     pub status_by: Option<String>,
+    /// The mover's session, when that gesture carried one.
+    pub status_session: Option<String>,
     pub status_at: Option<i64>,
     /// Why the mark is someone else's gesture: "dependency <id> done"
     /// or "… canceled" when a dependency's closing made the flight
@@ -531,12 +535,17 @@ fn view(
         subject: flight.subject,
         body: flight.body,
         filed_by: flight.filed_by,
+        filed_session: flight.filed_session,
         filed_at: flight.filed_at,
         comments: flight.comments.len(),
         depends_on: flight.depends_on.iter().map(ToString::to_string).collect(),
         blocks: flight.blocks.iter().map(ToString::to_string).collect(),
         status: flight.status,
         status_by: flight.status_mark.as_ref().map(|mark| mark.by.clone()),
+        status_session: flight
+            .status_mark
+            .as_ref()
+            .and_then(|mark| mark.session.clone()),
         status_at: flight.status_mark.as_ref().map(|mark| mark.at),
         status_reason,
         assignee: flight.assignee,
@@ -596,6 +605,7 @@ mod tests {
             writer: id.writer.clone(),
             author: "a@b.c".to_string(),
             time,
+            session: None,
             id,
             kind,
         }
