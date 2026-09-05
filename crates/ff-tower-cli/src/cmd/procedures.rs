@@ -170,6 +170,9 @@ fn detail(definition: &Definition, colored: bool) -> String {
             if let Some(assignee) = rule.assignee.as_deref() {
                 phrases.push(format!("assignee {assignee}"));
             }
+            if let Some(status) = rule.status.as_deref() {
+                phrases.push(format!("status {status}"));
+            }
             if rule.source.is_some() || rule.event.is_some() {
                 phrases.push("inert until an adapter can fire it".to_string());
             }

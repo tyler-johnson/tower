@@ -235,6 +235,7 @@ fn the_json_form_is_the_registry_as_data() {
             "priority": null,
             "skill": null,
             "assignee": null,
+            "status": null,
         }])
     );
     let flights = review["flights"].as_array().expect("flights");

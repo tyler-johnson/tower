@@ -555,6 +555,7 @@ export interface ProcedureMatch {
   priority: string | null;
   skill: string | null;
   assignee: string | null;
+  status: string | null;
 }
 
 /// One flight a definition declares. `done` stays a free string: a newer

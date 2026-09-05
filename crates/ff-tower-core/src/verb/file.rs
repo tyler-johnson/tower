@@ -12,15 +12,16 @@
 //! **A bare filing is matched once, here.** The registry loads, and the
 //! first rule whose predicates all hold against the caller's fields —
 //! registry name order, declaration order within a definition — chooses
-//! its procedure: the filing is minted exactly as naming that procedure
-//! would mint it, and one `routed` event in the same batch records which
-//! rule chose it and why. A rule keyed on `source`/`event` is inert,
-//! because no adapter exists to carry provenance. The match runs on the
-//! filing machine against the procedures it has, so a pushed log never
-//! gets a teammate's flight restamped under rules only this machine
-//! holds; moving a flight to Backlog later, or editing a label on, never
-//! re-matches — `file <procedure>` by name, or `decompose`, is how a
-//! flight gets a shape later. A routed filing lands where the named
+//! its procedure; a `status` predicate matches the word the filing lands
+//! with, flag or setting. The filing is minted exactly as naming that
+//! procedure would mint it, and one `routed` event in the same batch
+//! records which rule chose it and why. A rule keyed on `source`/`event`
+//! is inert, because no adapter exists to carry provenance. The match
+//! runs on the filing machine against the procedures it has, so a pushed
+//! log never gets a teammate's flight restamped under rules only this
+//! machine holds; moving a flight to Backlog later, or editing a label
+//! on, never re-matches — `file <procedure>` by name, or `decompose`, is
+//! how a flight gets a shape later. A routed filing lands where the named
 //! filing would: Ready under the default setting, parked under `backlog`,
 //! because the rule decides the shape and the setting the clearance.
 //! Since every bare filing now reads the registry, a rule file that does
@@ -98,7 +99,7 @@ pub fn file(
 
     let Some(name) = procedure else {
         let installed = procedure::registry(store.main_worktree().as_deref())?;
-        if let Some((definition, rule)) = matched(&installed, &fields) {
+        if let Some((definition, rule)) = matched(&installed, &fields, default) {
             return minted(store, definition, subject, &fields, default, Some(rule));
         }
         // The bare filing: no rule covers it, one flight, the setting's
@@ -204,12 +205,16 @@ fn minted(
 
 /// The first rule that covers the filing, with its definition: registry
 /// name order, then declaration order, first match wins.
-fn matched<'a>(installed: &'a Registry, fields: &Fields) -> Option<(&'a Definition, &'a Match)> {
+fn matched<'a>(
+    installed: &'a Registry,
+    fields: &Fields,
+    default: &str,
+) -> Option<(&'a Definition, &'a Match)> {
     installed.definitions().find_map(|definition| {
         definition
             .matches
             .iter()
-            .find(|rule| covers(rule, fields))
+            .find(|rule| covers(rule, fields, default))
             .map(|rule| (definition, rule))
     })
 }
@@ -219,8 +224,9 @@ fn matched<'a>(installed: &'a Registry, fields: &Fields) -> Option<(&'a Definiti
 /// a filing carries no adapter provenance, so adapter rules stay
 /// honestly inert per-rule. A rule with no predicates matches nothing;
 /// the loader refuses one, but a hand-built rule must not cover the
-/// world. An unset priority is `none`, the word the filing stores.
-fn covers(rule: &Match, fields: &Fields) -> bool {
+/// world. An unset priority is `none`, and an unset status is the
+/// setting's word — the words the filing stores.
+fn covers(rule: &Match, fields: &Fields, default: &str) -> bool {
     if !rule.has_predicates() || rule.source.is_some() || rule.event.is_some() {
         return false;
     }
@@ -239,6 +245,10 @@ fn covers(rule: &Match, fields: &Fields) -> bool {
             .assignee
             .as_ref()
             .is_none_or(|assignee| fields.assignee.as_ref() == Some(assignee))
+        && rule
+            .status
+            .as_deref()
+            .is_none_or(|status| fields.status.as_deref().unwrap_or(default) == status)
 }
 
 /// The render-ready explanation the routing event stores — "matched
@@ -256,6 +266,9 @@ fn because(rule: &Match) -> String {
     }
     if let Some(assignee) = &rule.assignee {
         phrases.push(format!("assignee {assignee}"));
+    }
+    if let Some(status) = &rule.status {
+        phrases.push(format!("status {status}"));
     }
     format!("matched {}", phrases.join(", "))
 }
@@ -827,6 +840,98 @@ assignee = "me"
         let fold = folded(&store);
         assert!(fold.flights[0].procedure.is_none());
         assert_eq!(fold.flights[1].procedure.as_deref(), Some("narrow"));
+    }
+
+    /// A one-flight definition with a status rule: the parked case.
+    const PARKED: &str = r#"
+name = "parked"
+[[match]]
+name   = "parked"
+status = "backlog"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#;
+
+    fn parked(status: &str) -> Fields {
+        Fields {
+            status: Some(status.to_string()),
+            ..Fields::default()
+        }
+    }
+
+    #[test]
+    fn a_status_rule_reads_the_flag_over_the_setting() {
+        let (repo, store) = store();
+        install(&repo, "parked", PARKED);
+        // Under the default Ready, `--status backlog` is what the filing
+        // stores, so the rule covers it; a filing with no flag is bare.
+        let flagged = file(&store, "flagged", parked("backlog"), None).expect("files");
+        assert!(flagged.payload.routed.is_some());
+        let plain = file(&store, "plain", Fields::default(), None).expect("files");
+        assert!(plain.payload.routed.is_none());
+
+        let fold = folded(&store);
+        assert_eq!(fold.flights[0].procedure.as_deref(), Some("parked"));
+        assert_eq!(fold.flights[0].status, "backlog");
+        assert!(fold.flights[1].procedure.is_none());
+        assert_eq!(fold.flights[1].status, "ready");
+    }
+
+    #[test]
+    fn a_status_rule_reads_the_settings_word_when_no_flag_is_given() {
+        let (repo, _) = store();
+        install(&repo, "parked", PARKED);
+        let store = with_default(&repo, "backlog");
+        let plain = file(&store, "plain", Fields::default(), None).expect("files");
+        let routed = plain.payload.routed.as_ref().expect("a routed event");
+        let Kind::Routed { because, .. } = &routed.kind else {
+            panic!("expected a routing, got {:?}", routed.kind);
+        };
+        assert_eq!(because, "matched status backlog");
+        // `--status ready` beats the setting, so the same filing is bare.
+        let cleared = file(&store, "cleared", parked("ready"), None).expect("files");
+        assert!(cleared.payload.routed.is_none());
+
+        let fold = folded(&store);
+        assert_eq!(fold.flights[0].procedure.as_deref(), Some("parked"));
+        assert_eq!(fold.flights[0].status, "backlog", "lands parked");
+        assert!(fold.flights[1].procedure.is_none());
+        assert_eq!(fold.flights[1].status, "ready");
+    }
+
+    #[test]
+    fn a_status_rule_naming_an_unfileable_word_installs_and_never_matches() {
+        let (repo, store) = store();
+        for word in ["held", "waiting"] {
+            install(
+                &repo,
+                word,
+                &format!(
+                    r#"
+name   = "{word}"
+[[match]]
+name   = "{word}"
+status = "{word}"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#
+                ),
+            );
+        }
+        let ready = file(&store, "ready", Fields::default(), None).expect("files");
+        assert!(ready.payload.routed.is_none());
+        let store = with_default(&repo, "backlog");
+        let parked = file(&store, "parked", Fields::default(), None).expect("files");
+        assert!(parked.payload.routed.is_none());
+        assert!(
+            folded(&store)
+                .flights
+                .iter()
+                .all(|flight| flight.procedure.is_none()),
+            "no filing carries a word a rule cannot see"
+        );
     }
 
     #[test]

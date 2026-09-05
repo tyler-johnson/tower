@@ -85,7 +85,8 @@ impl Definition {
 /// fired — and the predicates, which all AND. `source`/`event` are
 /// adapter provenance, which no folded flight carries, so a rule keyed
 /// on them stays honestly inert until adapters exist; the field
-/// predicates match what a person files with fields already on it.
+/// predicates — label, priority, skill, assignee, status — match what a
+/// person files with fields already on it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Match {
@@ -104,6 +105,11 @@ pub struct Match {
     pub skill: Option<String>,
     #[serde(default)]
     pub assignee: Option<String>,
+    /// Equality against the status word the filing stores — the caller's
+    /// `--status`, else the setting's word — resolved the way `priority`
+    /// is. A word a flight cannot be filed with never matches.
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 impl Match {
@@ -116,6 +122,7 @@ impl Match {
             || self.priority.is_some()
             || self.skill.is_some()
             || self.assignee.is_some()
+            || self.status.is_some()
     }
 }
 
@@ -788,6 +795,12 @@ label = "chore"
 name     = "handoffs"
 priority = "high"
 assignee = "agent"
+[[match]]
+name   = "parked"
+status = "backlog"
+[[match]]
+name   = "never"
+status = "held"
 [[flight]]
 id       = "work"
 assignee = "me"
@@ -795,12 +808,16 @@ assignee = "me"
             at("chores.toml"),
         )
         .expect("loads");
-        assert_eq!(definition.matches.len(), 2);
+        assert_eq!(definition.matches.len(), 4);
         assert_eq!(definition.matches[0].name, "chore-label");
         assert_eq!(definition.matches[0].label.as_deref(), Some("chore"));
         assert!(definition.matches[0].source.is_none());
         assert_eq!(definition.matches[1].priority.as_deref(), Some("high"));
         assert_eq!(definition.matches[1].assignee.as_deref(), Some("agent"));
+        assert_eq!(definition.matches[2].status.as_deref(), Some("backlog"));
+        // An unfileable word loads and never matches; the loader does not
+        // refuse it.
+        assert_eq!(definition.matches[3].status.as_deref(), Some("held"));
 
         // A nameless rule refuses through serde — the `[[part]]`
         // precedent: the loader is where an old grammar fails loudly.

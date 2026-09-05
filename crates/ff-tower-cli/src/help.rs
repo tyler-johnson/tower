@@ -263,11 +263,13 @@ Examples:
 pub const PROCEDURES: &str = "\
 What is installed: every procedure's name, the layer it came from,
 and the flights it stamps out with their lanes. A name is the detail
-page — the match rules by name with their predicates, which a bare
-filing's fields are matched against at file time, first match
-winning (adapter-keyed ones stay inert until an adapter exists to
-fire them); every flight with assignee, skill, status, after, and
-done; and the file it was read from.
+page — the match rules by name with their predicates (label,
+priority, skill, assignee, and status, which matches the word the
+filing lands with, flag or setting), which a bare filing's fields
+are matched against at file time, first match winning (adapter-keyed
+ones stay inert until an adapter exists to fire them); every flight
+with assignee, skill, status, after, and done; and the file it was
+read from.
 
 Two layers, the most specific winning whole: user,
 ~/.config/tower/procedures/<name>.toml; repo,
