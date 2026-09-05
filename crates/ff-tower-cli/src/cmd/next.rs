@@ -1,6 +1,13 @@
 //! `ff tower next [-n <k>] [--peek]` — pull the next Ready flight from
-//! the agent lane, or a set of `k` that collide with neither each other
-//! nor anything already flying, and hand each one a tree to fly in.
+//! the agent lane, or the next `k` in filed order, and hand each one a
+//! tree to fly in. The pull is the Ready check and the In Progress move
+//! in one command: the pool is every Ready flight assigned to the agent
+//! lane, and unless `--peek` the picked set becomes one In Progress
+//! `status` event per flight in a single append, the byline the pilot.
+//! The collide gate is a courtesy: only a candidate that already has a
+//! branch — requeued or answered — is checked, through the board's
+//! probe, and a fresh flight is admitted unchecked. Deconfliction between
+//! fresh flights is the bay, one tree per flight.
 //!
 //! The one verb whose success code varies: 0 when anything was picked; on
 //! an empty pick, 3 when the crew gate is what emptied it — work exists
@@ -8,11 +15,8 @@
 //! DESIGN's loop contract: a loop runs until 1 or 3 and reports which. An
 //! empty pick rides the success path with a full data envelope and only
 //! the code says it, so `while ff tower next` terminates on the code
-//! alone. The pipeline is
-//! the board's — store, fold, gather, probe — with `pick` in place of
-//! `enrich`, and unless `--peek` the picked set becomes one In Progress
-//! `status` event per flight in a single atomic append — the append is
-//! the exclusivity, the byline the pilot.
+//! alone. The pipeline is the board's — store, fold, gather, probe — with
+//! `pick` in place of `enrich`.
 //!
 //! # The bay, and the branch
 //!

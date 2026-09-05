@@ -66,17 +66,19 @@ Examples:
 `ff tower help <command>` (or `ff tower <command> --help`) has the details.";
 
 pub const NEXT: &str = "\
-Pull the next Ready flight from the agent lane, or with -n <k> a set
-of k that collide with neither each other nor anything already
-flying. The pool is every Ready flight assigned to the agent lane;
-admission is greedy, in filed order, and a pairing fufu could not
-judge excludes — unknown never rounds down to clear.
-
-The pull sets each picked flight In Progress in one atomic append, so
-two agents pulling at once cannot take one flight — the append is the
-exclusivity, and the event's byline is the pilot. --peek is the same
+Pull the next Ready flight from the agent lane, or with -n <k> the
+next k. The pool is every Ready flight assigned to the agent lane,
+and the pick is filed order. The pull is the Ready check and the move
+in one command: each picked flight is set In Progress with your byline
+as the pilot, and it is handed a tree to fly in. --peek is the same
 computation with nothing written, and the envelope says which
 happened either way.
+
+A flight that already has a tree — one requeued or answered — is
+checked against every flying tree with `ff collide` before it is
+admitted, and a pairing fufu could not judge excludes. Collisions
+between fresh flights are what bays are for: one tree per flight, and
+the board reports the pair when two trees meet.
 
 An empty pick is an outcome riding a full data envelope, and only the
 exit code says which one: 3 when the lane emptied it — Ready work
@@ -84,16 +86,15 @@ exists and it needs you — and 1 when the board is truly drained,
 fufu's \"no.\" A loop over `ff tower next` terminates on the code
 alone.
 
-The passed rows are the explained ranking: each flight the walk
-examined and why it lost — collides, no-verdict — and nothing past
-where the walk stopped, so the output stays bounded by the ask rather
-than the board. A flight with a live dependency is Waiting, not in the
-pool, and never reaches the walk.";
+The passed rows are why a checked flight lost — collides, no-verdict —
+and nothing past where the walk stopped, so the output stays bounded
+by the ask rather than the board. A flight with a live dependency is
+Waiting, not in the pool, and never reaches the walk.";
 
 pub const NEXT_EXAMPLES: &str = "\
 Examples:
   ff tower next                  pull the next Ready flight
-  ff tower next -n 4             a set of four that cannot collide
+  ff tower next -n 4             the next four, in filed order
   ff tower next --peek           the same computation, nothing written
   ff tower status 17 in_progress          take one by hand instead";
 

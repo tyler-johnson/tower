@@ -225,9 +225,9 @@ The JSON carries the verdicts per flight — `collides`, each entry naming the o
 
 ### Next
 
-`ff tower next` is the agent queue's pull. The pool is every Ready flight assigned to the agent lane; admission is greedy, in filed order — a candidate joins the pick when its branch is clear against every flight already in the air and every candidate already admitted, since a maximum set would cost more than the answer is worth. Unknown excludes: a pairing fufu could not judge is a reason to leave a flight out of a fan-out set, never rounded down to clear.
+`ff tower next` is the agent queue's Ready check and the move in one command. The pool is every Ready flight assigned to the agent lane, and the pick is filed order. A candidate that already stands on a branch — requeued or answered — is checked with `ff collide` against every flying tree and every candidate already admitted, and unknown excludes: a pairing fufu could not judge leaves the flight out, never rounded down to clear. A fresh flight is not checked. Deconfliction is bays, one tree per flight, and the board's verdicts surface a collision when two trees meet.
 
-The pull is one atomic append that sets the picked flights In Progress — the exclusivity is the append itself, one winner per flight, and the byline on the event is the pilot. `--peek` is the same computation with no write, and the envelope says which happened. An empty pick is exit 1 over a full data envelope — fufu's "no," on the hold precedent: an outcome rides the success path and only the code says it, so `while ff tower next` terminates on the code alone. The passed rows are the explained ranking — each flight the walk examined and why it lost (`waiting`, `collides`, `no-verdict`), and nothing past where the walk stopped, so the output stays bounded by the ask rather than the board.
+Each picked flight is set In Progress in one append, and the byline on the event is the pilot. The append is not a claim: two writers can each pull the same flight, and the harness that fans out is the one keeping its pulls apart. `--peek` is the same computation with no write, and the envelope says which happened. An empty pick rides a full data envelope and only the exit code says which — 3 when the lane emptied it and 1 when the board is drained, fufu's "no," on the hold precedent: an outcome rides the success path and only the code says it, so `while ff tower next` terminates on the code alone. The passed rows are why a checked flight lost (`collides`, `no-verdict`), and nothing past where the walk stopped, so the output stays bounded by the ask rather than the board.
 
 ### Brief
 
@@ -248,7 +248,7 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | verb | what it does | caller |
 |---|---|---|
 | `ff tower` (alias `board`) | the board: what needs you, then the list by status | you |
-| `ff tower next [-n <k>]` | pull the next Ready flight from the agent lane, or a set of `k` that collide with neither each other nor anything already flying; the pull sets In Progress; `--peek` reads without pulling | an agent |
+| `ff tower next [-n <k>]` | pull the next Ready flight from the agent lane, or `k` of them in filed order; the pull sets In Progress; `--peek` reads without pulling | an agent |
 | `ff tower file [<procedure>] [<subject>]` | put work on the board — bare, or under a procedure; every field a procedure sets is a flag here (`-m`, `-p`, `--label`, `--skill`, `--assignee`, `--bay`, `--status`) | either |
 | `ff tower status <flight> <status>` | move a flight; the lifecycle verbs below are this verb carrying a payload | either |
 | `ff tower assign <flight> <me\|agent\|none>` | route the flight's queue | either |
@@ -354,7 +354,7 @@ ff tower skills work > .claude/skills/tower-work/SKILL.md
 
 Loop control is exit codes, fufu's own: **0** here is work, **1** nothing available, **3** work exists but it needs you. A loop runs until 1 or 3 and reports which. No timeout, no sentinel.
 
-Fan-out needs a set, not an item, because conflict-freedom is a property of the set: `ff tower next -n 3` returns three flights that collide with neither each other nor anything already flying, and the caller spawns one agent per bay. That is deconfliction as an API rather than a report, and it is the sharpest reason the design is worth building. The verdicts underneath are `ff collide`'s, one pair at a time; the set is tower's fold over them, filtered to what is Ready, and the fold, the filter and the pull are all tower's contribution.
+Fan-out is `ff tower next -n 3` handing out three flights and the harness putting each in its own bay. One tree per flight is the deconfliction, and `ff collide` reports on the board when two of them meet. The verdicts are fufu's, one pair at a time; the pull is tower's; and the check on a flight that already has a tree — requeued or answered — is the courtesy tower adds on the way out.
 
 An example skill stops short of the push boundary — committed on a branch, PR unopened — because principle 3 is easy to state and easy for an unattended loop to violate fourteen times before anyone looks. Where a person's fork draws that line is the person's call, and visibly theirs.
 

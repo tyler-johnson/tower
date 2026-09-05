@@ -114,8 +114,8 @@ pub enum Kind {
     /// Moves a flight: the word assigns the fold's facts last-wins —
     /// in backlog, started, closed — and the fold derives the status, the
     /// byline the mover. Done and Canceled ride here like every other
-    /// move, and `next`'s pull appends one per pick in a single batch —
-    /// the append is the exclusivity, the byline the pilot.
+    /// move, and `next`'s pull appends one per pick in a single batch, the
+    /// byline the pilot.
     Status {
         flight: EventId,
         status: String,
