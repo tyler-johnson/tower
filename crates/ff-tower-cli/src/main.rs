@@ -8,13 +8,12 @@
 //! which one is canonical.
 //!
 //! Exit codes follow the error id's namespace, fufu's derivation:
-//! `usage/*` exits 2, anything else 1. The 3s are not among them — an
-//! outcome, not an error, so they ride the success path below with a full
-//! data envelope, and the `held/*` error namespace stays unused: `hold`'s
-//! 3 says the flight stopped with a question, and `next`'s says the pool
-//! is empty while unclassified or you-crewed work waits. `doctor`'s 1 is
-//! the same kind of outcome as `next`'s: findings, reported in a full
-//! data envelope, fufu's doctor precedent.
+//! `usage/*` exits 2, anything else 1. `hold`'s 3 is not among them — an
+//! outcome, not an error, so it rides the success path below with a full
+//! data envelope on `ff sync`'s precedent, and the `held/*` error
+//! namespace stays unused. `next`'s 1 and `doctor`'s 1 are the verdict
+//! precedent: an empty pick and findings, each reported in a full data
+//! envelope, fufu's "no."
 //! Success is otherwise 0, an empty board included — a board render is
 //! never a yes/no question. Clap keeps its default 2 for a command line
 //! it refused itself.
@@ -203,8 +202,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
 
 /// Run the verb and pick the success exit code — 0 everywhere except
 /// `hold`, whose 3 says the flight stopped with a question, `next`,
-/// which picks its own — 1 is fufu's "no," a drained board, and 3 an
-/// empty pick with work that needs you — and `doctor`, whose 1 says the
+/// whose 1 is fufu's "no," an empty pick, and `doctor`, whose 1 says the
 /// checks found something.
 fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {

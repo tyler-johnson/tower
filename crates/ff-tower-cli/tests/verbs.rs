@@ -1051,6 +1051,8 @@ fn a_release_back_to_ready_rejoins_the_pool() {
 fn hold_exits_three_with_a_data_envelope() {
     // Never through the stdout() helper — 3 is a success this helper
     // would read as failure. The envelope is the data form, not an error.
+    // This is the one data-envelope 3 tower keeps, on `ff sync`'s
+    // precedent; `next`'s empty picks exit 1 and say why in `outcome`.
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "stuck"]));
     let out = ff_tower(

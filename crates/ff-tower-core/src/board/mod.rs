@@ -56,7 +56,7 @@ pub use model::{
     Board, ClosedWindow, CollideView, DEFAULT_CLOSED, FlightView, Rows, WaitingOnYou, enrich,
     parse_closed, rows,
 };
-pub use pick::{Passed, Pick, Picks, Skip, pick};
+pub use pick::{Outcome, Passed, Pick, Picks, Skip, pick};
 pub use query::{
     DEFAULT_SHOW, FIELDS, Field, Filter, Folded, Group, Mode, Op, Order, Query, QueryError, Value,
     When,

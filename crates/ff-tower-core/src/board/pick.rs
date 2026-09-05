@@ -13,7 +13,7 @@
 //! until its last dependency closes, done or canceled, and never
 //! reaches the walk. An open question or a fufu hold takes a flight out
 //! on top of it. Ready flights *not* in the agent lane are counted in
-//! `yours`, the number behind `next`'s exit 3; the flights themselves
+//! `yours`, the count behind the `yours` outcome; the flights themselves
 //! are silent here because the board is their surface, not this one's.
 //!
 //! Every live flight *not* in the pool keeps its branch on the gate —
@@ -40,6 +40,38 @@ pub struct Picks {
     /// Ready, unquestioned, not fufu-held — excluded from the pool by
     /// the lane alone. Work that exists and needs you.
     pub yours: usize,
+}
+
+/// Which of `next`'s three things happened. The word rides the envelope
+/// and the CLI's exit code is its rendering — `work` 0, the other two 1,
+/// fufu's "no" — so a server derives the same word from the same fold
+/// (principle 9) and a harness that needs to know *why* an empty pick
+/// was empty reads the field, not the status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Outcome {
+    /// Something was picked.
+    Work,
+    /// Nothing picked and nothing Ready off the lane either: the board
+    /// has nothing left.
+    Drained,
+    /// Nothing picked, but Ready work exists that the lane alone kept
+    /// out of the pool. It needs you.
+    Yours,
+}
+
+impl Picks {
+    /// The outcome the walk arrived at: a pick is `Work` whatever
+    /// `yours` says, and an empty pick is `Yours` or `Drained` by it.
+    pub fn outcome(&self) -> Outcome {
+        if !self.picked.is_empty() {
+            Outcome::Work
+        } else if self.yours > 0 {
+            Outcome::Yours
+        } else {
+            Outcome::Drained
+        }
+    }
 }
 
 /// One admitted flight, in wire form.
@@ -549,6 +581,52 @@ mod tests {
         assert_eq!(
             picks.yours, 3,
             "Ready off the agent lane counts; Backlog and Waiting do not"
+        );
+    }
+
+    #[test]
+    fn the_outcome_is_work_then_yours_then_drained() {
+        let work = pick(
+            &fold(&[
+                stored("pi.1", 10, "ready", Some("me")),
+                stored("pi.2", 20, "ready", Some("agent")),
+            ]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            1,
+        );
+        assert_eq!(work.picked.len(), 1);
+        assert_eq!(work.yours, 1);
+        assert_eq!(
+            work.outcome(),
+            Outcome::Work,
+            "a pick is work whatever `yours` counts"
+        );
+
+        let yours = pick(
+            &fold(&[stored("pi.1", 10, "ready", Some("me"))]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            1,
+        );
+        assert!(yours.picked.is_empty());
+        assert_eq!(yours.yours, 1);
+        assert_eq!(yours.outcome(), Outcome::Yours);
+
+        let drained = pick(
+            &fold(&[stored("pi.1", 10, "backlog", Some("agent"))]),
+            &reads(Vec::new(), Vec::new()),
+            &Verdicts::default(),
+            1,
+        );
+        assert!(drained.picked.is_empty());
+        assert_eq!(drained.yours, 0);
+        assert_eq!(drained.outcome(), Outcome::Drained);
+
+        assert_eq!(
+            serde_json::to_string(&Outcome::Yours).expect("serializes"),
+            "\"yours\"",
+            "the wire word is lowercase"
         );
     }
 

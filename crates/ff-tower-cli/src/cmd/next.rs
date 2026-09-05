@@ -9,14 +9,15 @@
 //! probe, and a fresh flight is admitted unchecked. Deconfliction between
 //! fresh flights is the bay, one tree per flight.
 //!
-//! The one verb whose success code varies: 0 when anything was picked; on
-//! an empty pick, 3 when the crew gate is what emptied it — work exists
-//! and it needs you — and 1 when the board is truly drained, fufu's "no."
-//! DESIGN's loop contract: a loop runs until 1 or 3 and reports which. An
-//! empty pick rides the success path with a full data envelope and only
-//! the code says it, so `while ff tower next` terminates on the code
-//! alone. The pipeline is the board's — store, fold, gather, probe — with
-//! `pick` in place of `enrich`.
+//! The verb's success code is 0 on a pick and 1 on an empty one, fufu's
+//! "no." An empty pick rides the success path with a full data envelope,
+//! and `outcome` on it says which empty pick it was — `drained`, a board
+//! with nothing left, or `yours`, Ready work the lane kept out of the
+//! pool that needs you. The code never says 3: 3 belongs to `held/*`,
+//! which an empty pool is not. `while ff tower next` terminates on the
+//! code alone; a harness that needs to know why reads the field, not the
+//! status. The pipeline is the board's — store, fold, gather, probe —
+//! with `pick` in place of `enrich`.
 //!
 //! # The bay, and the branch
 //!
@@ -42,7 +43,7 @@ use serde::Serialize;
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, Berth, Fold, Passed, Pick, Skip};
+use ff_tower_core::board::{self, Berth, Fold, Outcome, Passed, Pick, Skip};
 use ff_tower_core::ff::{self, Ff};
 use ff_tower_core::log::{Kind, Store};
 
@@ -50,11 +51,14 @@ use ff_tower_core::log::{Kind, Store};
 /// envelope never lies about whether the write happened.
 #[derive(Serialize)]
 struct Data<'a> {
+    /// Which of the three things happened; the exit code is its
+    /// rendering.
+    outcome: Outcome,
     picked: &'a [Row],
     pulled: bool,
     passed: &'a [Passed],
     /// Ready, kept out of the pool by the lane alone — the count behind
-    /// exit 3.
+    /// the `yours` outcome.
     yours: usize,
 }
 
@@ -101,6 +105,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     let verdicts = board::probe(&ff, &fold, &reads)?;
     let picks = board::pick(&fold, &reads, &verdicts, count);
     let berths = board::assign(&fold, &reads, &picks.picked);
+    let outcome = picks.outcome();
 
     let pulled = !peek && !picks.picked.is_empty();
     if pulled {
@@ -128,6 +133,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
             machine::emit(
                 "next",
                 &Data {
+                    outcome,
                     picked: &rows,
                     pulled,
                     passed: &picks.passed,
@@ -181,10 +187,9 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         }
         println!("{}", super::tail(colored));
     }
-    Ok(match (picks.picked.is_empty(), picks.yours) {
-        (false, _) => 0,
-        (true, 0) => 1,
-        (true, _) => 3,
+    Ok(match outcome {
+        Outcome::Work => 0,
+        Outcome::Drained | Outcome::Yours => 1,
     })
 }
 

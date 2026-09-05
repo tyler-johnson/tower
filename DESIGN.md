@@ -227,7 +227,7 @@ The JSON carries the verdicts per flight — `collides`, each entry naming the o
 
 `ff tower next` is the agent queue's Ready check and the move in one command. The pool is every Ready flight assigned to the agent lane, and the pick is filed order. A candidate that already stands on a branch — requeued or answered — is checked with `ff collide` against every flying tree and every candidate already admitted, and unknown excludes: a pairing fufu could not judge leaves the flight out, never rounded down to clear. A fresh flight is not checked. Deconfliction is bays, one tree per flight, and the board's verdicts surface a collision when two trees meet.
 
-Each picked flight is set In Progress in one append, and the byline on the event is the pilot. The append is not a claim: two writers can each pull the same flight, and the harness that fans out is the one keeping its pulls apart. `--peek` is the same computation with no write, and the envelope says which happened. An empty pick rides a full data envelope and only the exit code says which — 3 when the lane emptied it and 1 when the board is drained, fufu's "no," on the hold precedent: an outcome rides the success path and only the code says it, so `while ff tower next` terminates on the code alone. The passed rows are why a checked flight lost (`collides`, `no-verdict`), and nothing past where the walk stopped, so the output stays bounded by the ask rather than the board.
+Each picked flight is set In Progress in one append, and the byline on the event is the pilot. The append is not a claim: two writers can each pull the same flight, and the harness that fans out is the one keeping its pulls apart. `--peek` is the same computation with no write, and the envelope says which happened. An empty pick exits 1, fufu's "no," and `outcome` on the envelope says `drained` or `yours`; the code stops a shell loop and the word tells a harness why. The passed rows are why a checked flight lost (`collides`, `no-verdict`), and nothing past where the walk stopped, so the output stays bounded by the ask rather than the board.
 
 ### Brief
 
@@ -352,7 +352,7 @@ Like procedures, skills are personal and tower ships none. They layer the same w
 ff tower skills work > .claude/skills/tower-work/SKILL.md
 ```
 
-Loop control is exit codes, fufu's own: **0** here is work, **1** nothing available, **3** work exists but it needs you. A loop runs until 1 or 3 and reports which. No timeout, no sentinel.
+Loop control: 0 is work and nonzero stops the loop. `outcome` on the envelope — `work`, `drained`, `yours` — is what the loop reports, and the CLI's exit is that field's rendering. No timeout, no sentinel.
 
 Fan-out is `ff tower next -n 3` handing out three flights and the harness putting each in its own bay. One tree per flight is the deconfliction, and `ff collide` reports on the board when two of them meet. The verdicts are fufu's, one pair at a time; the pull is tower's; and the check on a flight that already has a tree — requeued or answered — is the courtesy tower adds on the way out.
 
@@ -416,6 +416,5 @@ Most of what tower reads exists today: the event log store, per-flight session t
 - **What a flight means after a rewrite** folds its snapshots into a commit — fufu's open session-boundary question, made urgent rather than theoretical.
 - **Bay relocation.** tower prints a path and cannot make a running agent honor it. How loudly should misplaced work be reported, and is there a consented way to move an agent?
 - **Sandboxing composes but is unaddressed.** A bay can be a worktree bind-mounted into a container without tower's model changing; whether that is tower's concern at all is open.
-- **What loop control is on MCP.** The exit codes are fufu's and they are right for a shell loop, but MCP returns a result and has no exit code to carry 0/1/3. Either the three states become a field the tool returns and the exit codes are the CLI's rendering of it, or the agent lane loops through the CLI and MCP is for reading. Principle 9 says one model, so the answer is probably the first, and it is not decided.
 - **How much orchestration belongs in a documented example skill** before it is a scheduler with extra steps and principle 2 has been defeated by paperwork.
 - **Naming.** `ff tower` against crates.io, npm, and Homebrew. Almost certainly taken; the metaphor is what matters, not the word.

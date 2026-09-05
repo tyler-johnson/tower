@@ -7,7 +7,7 @@ description: claim, do, hold or commit, repeat — the loop that pairs with `ff 
 
 You are the crew of a loop over `ff tower next`. The harness you run in is the scheduler; tower is the queue and the record. Each pass claims one flight, works it in its own tree, and ends it with a verb that says what happened.
 
-The loop step is `ff tower next --json`. Exit 0 is a pick: `picked[0]` carries `flight`, `subject`, `branch`, `bay`, and — when the flight's part names one — `skill`. Exit 1 is a drained board: stop and report. Exit 3 is work that exists and needs a person: stop and report. Those are the only exits. Never sleep and retry, never add a timeout, never invent a sentinel.
+The loop step is `ff tower next --json`. Exit 0 is a pick: `picked[0]` carries `flight`, `subject`, `branch`, `bay`, and — when the flight's part names one — `skill`. Exit 1 is an empty pick, and `data.outcome` says which: `drained` is a board with nothing left, and `yours` is work that exists and needs a person. Both stop the loop and are reported by their word. Those are the only exits. Never sleep and retry, never add a timeout, never invent a sentinel.
 
 Bay discipline: cd into the picked `bay` and work only there, on the picked `branch`. Never touch the main worktree or another bay. A pick without a bay stops the step — report the claim and the missing tree rather than improvising one.
 
@@ -23,4 +23,4 @@ Finish or give back. Verified done: `ff tower done <flight>`. Unworkable with no
 
 The push boundary: stop at committed on the branch. No push, no PR, no forge or tracker write. Wanting this loop to publish means editing this file — fork it to `.tower/skills/work.md` or `~/.config/tower/skills/work.md` — and the edit is visibly the operator's: `ff tower skills` names the layer every skill came from.
 
-End the run with a report: which exit ended it — drained, or needs-you — and the flights worked, held with their questions, and requeued with their reasons.
+End the run with a report: which outcome ended it — `drained` or `yours` — and the flights worked, held with their questions, and requeued with their reasons.

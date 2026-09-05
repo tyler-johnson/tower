@@ -80,11 +80,11 @@ admitted, and a pairing fufu could not judge excludes. Collisions
 between fresh flights are what bays are for: one tree per flight, and
 the board reports the pair when two trees meet.
 
-An empty pick is an outcome riding a full data envelope, and only the
-exit code says which one: 3 when the lane emptied it — Ready work
-exists and it needs you — and 1 when the board is truly drained,
-fufu's \"no.\" A loop over `ff tower next` terminates on the code
-alone.
+An empty pick exits 1 with a full data envelope, and `outcome` on it
+says which of `drained` and `yours` it was: `drained` is a board with
+nothing left, and `yours` is Ready work kept out of the pool by the
+lane alone — it needs you. A --json reader branches on the word; a
+shell loop stops on the code.
 
 The passed rows are why a checked flight lost — collides, no-verdict —
 and nothing past where the walk stopped, so the output stays bounded

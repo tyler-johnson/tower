@@ -1,5 +1,6 @@
 //! `ff tower next` against real repositories: the greedy admission, the
-//! peek, the lane gate, and the exits — 1 drained, 3 needs-you.
+//! peek, the lane gate, the outcomes — work, drained, yours — and the
+//! exit, 0 on a pick and 1 otherwise.
 //!
 //! The pool is Ready flights in the agent lane, so bare filings — born
 //! Ready but laned to no one — are never handed out, and every pullable fixture files under
@@ -7,8 +8,8 @@
 //! born Ready; the flight `next` hands out is that one, and the parent
 //! and `verdict` fold Waiting by their edges. The fold derives the
 //! release, so a Waiting flight whose dependencies close reads Ready on
-//! the following invocation — exit 3 when the released flight is off
-//! the agent lane, which in this shape it always is.
+//! the following invocation — the `yours` outcome when the released
+//! flight is off the agent lane, which in this shape it always is.
 //!
 //! The assignment half rides the same fixtures. Main is a bay and it is
 //! first in survey order, so the solo norm's single pick binds *there*;
@@ -124,7 +125,7 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
     assert!(brief.contains("on flight/pi.2"), "{brief}");
 
     // The pool is empty and the parent and `verdict` are born Waiting —
-    // no Ready work off the lane, so the drained code is 1, not 3.
+    // no Ready work off the lane, so the outcome is drained, not yours.
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stdout);
@@ -132,20 +133,21 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
 }
 
 #[test]
-fn a_ready_flight_off_the_agent_lane_is_the_exit_3_needs_you() {
+fn a_ready_flight_off_the_agent_lane_is_the_yours_outcome_at_exit_1() {
     let repo = repo();
     // Born Ready, but never assigned to the lane.
     stdout(&ff_tower(repo.path(), &["file", "needs a look"]));
 
     let out = ff_tower(repo.path(), &["next", "--json"]);
-    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(out.status.code(), Some(1));
     let envelope = envelope(&out);
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("yours"));
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
 
     let out = ff_tower(repo.path(), &["next"]);
-    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
         text.contains("nothing ready — one flight needs you"),
@@ -192,10 +194,11 @@ fn the_parent_is_never_pulled_and_the_fold_releases_a_satisfied_waiter() {
     stdout(&ff_tower(repo.path(), &["done", "2"]));
 
     // `verdict` waited on `pass`; this invocation's fold derives it
-    // Ready — off the agent lane, so exit 3, yours.
+    // Ready — off the agent lane, so exit 1 with the yours outcome.
     let out = ff_tower(repo.path(), &["next"]);
-    assert_eq!(out.status.code(), Some(3));
-    let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
+    assert_eq!(out.status.code(), Some(1));
+    let envelope = self::envelope(&ff_tower(repo.path(), &["next", "--json"]));
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("yours"));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
     stdout(&ff_tower(repo.path(), &["done", "3"]));
 
@@ -204,16 +207,19 @@ fn the_parent_is_never_pulled_and_the_fold_releases_a_satisfied_waiter() {
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(
         out.status.code(),
-        Some(3),
+        Some(1),
         "the parent is yours, never pulled"
     );
 
+    // The two empty picks share the code; the word is what diverges.
     stdout(&ff_tower(repo.path(), &["done", "1"]));
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(1), "drained at last");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("nothing ready\n"), "{text}");
     assert!(!text.contains("need you"), "{text}");
+    let envelope = self::envelope(&ff_tower(repo.path(), &["next", "--json"]));
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("drained"));
 }
 
 #[test]
@@ -237,6 +243,11 @@ fn peek_reads_without_pulling() {
     let out = ff_tower(repo.path(), &["next", "--peek", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
+    assert_eq!(
+        envelope["data"]["outcome"],
+        serde_json::json!("work"),
+        "a peek is still work — the outcome says what was found, `pulled` what was written"
+    );
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     assert_eq!(
         envelope["data"]["picked"][0]["flight"],
@@ -361,6 +372,7 @@ fn an_empty_pick_under_json_is_a_data_envelope_not_an_error() {
     let envelope = envelope(&out);
     assert_eq!(envelope["tower"], serde_json::json!(1));
     assert_eq!(envelope["cmd"], serde_json::json!("next"));
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("drained"));
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     assert_eq!(envelope["data"]["yours"], serde_json::json!(0));
@@ -368,6 +380,38 @@ fn an_empty_pick_under_json_is_a_data_envelope_not_an_error() {
         envelope.get("error").is_none(),
         "data and error, never both"
     );
+}
+
+#[test]
+fn next_never_exits_three() {
+    // fufu's served-extension contract reserves 3 for `held/*` error
+    // envelopes, and the MCP relay reads `isError` off the status alone.
+    // All three outcomes ride a data envelope at 0 or 1, and the word —
+    // not the code — says which empty pick it was.
+    let repo = repo();
+    file_pipeline(&repo, "the one flight");
+
+    let mut seen = Vec::new();
+    for expected in ["work", "yours", "drained"] {
+        if expected == "drained" {
+            // `verdict` was released Ready by the pull's `done`; close
+            // it and the parent so nothing Ready is left off the lane.
+            stdout(&ff_tower(repo.path(), &["done", "3"]));
+            stdout(&ff_tower(repo.path(), &["done", "1"]));
+        }
+        let out = ff_tower(repo.path(), &["next", "--json"]);
+        let code = out.status.code().expect("a code");
+        assert!(code == 0 || code == 1, "{expected}: exit {code}, never 3");
+        let envelope = envelope(&out);
+        assert!(envelope.get("error").is_none(), "{expected}: {envelope}");
+        assert_eq!(envelope["data"]["outcome"], serde_json::json!(expected));
+        seen.push((expected, code));
+        if expected == "work" {
+            assert_eq!(envelope["data"]["pulled"], serde_json::json!(true));
+            stdout(&ff_tower(repo.path(), &["done", "2"]));
+        }
+    }
+    assert_eq!(seen, [("work", 0), ("yours", 1), ("drained", 1)]);
 }
 
 /// A procedure whose subject resolves against a branch — `next` binds by
