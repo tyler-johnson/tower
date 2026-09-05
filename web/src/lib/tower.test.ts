@@ -5,11 +5,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildRefs,
   foldRows,
+  linkRefs,
   liveRows,
   neighbors,
+  type Brief,
   type FlightView,
   type Folded,
   type Group,
+  type LinkView,
 } from "./tower";
 
 function flight(number: number, status: string, labels: string[] = []): FlightView {
@@ -52,6 +55,32 @@ function group(key: string | null, rows: FlightView[], subgroups: Group[] = []):
   return { key, count: rows.length, rows, subgroups };
 }
 
+function link(id: string, number: number, closed = false): LinkView {
+  return {
+    flight: id,
+    number,
+    subject: `flight ${number}`,
+    status: closed ? "done" : "ready",
+    closed,
+  };
+}
+
+function brief(number: number, depends_on: LinkView[], blocks: LinkView[] = []): Brief {
+  return {
+    ...flight(number, "ready"),
+    status_reason: null,
+    edited_by: null,
+    edited_at: null,
+    asked_by: null,
+    depends_on,
+    blocks,
+    comments: [],
+    history: [],
+    standing: "ready",
+    beat: [],
+  };
+}
+
 describe("the fold", () => {
   it("a fold is counted once however it is grouped", () => {
     const both = flight(1, "ready", ["web", "ui"]);
@@ -80,6 +109,25 @@ describe("the fold", () => {
     expect(liveRows(nested)).toHaveLength(2);
     expect(buildRefs(nested).flights).toBe(2);
     expect(buildRefs(nested).refs.size).toBe(4);
+  });
+});
+
+describe("the link refs", () => {
+  it("a child gone from the board still takes its number", () => {
+    // The child closed past the board's window: no row in the fold, so
+    // the board's ref map has nothing for it, and the brief's number is
+    // the whole of what names it.
+    const ids = ["pi-8c2e.1", "pi-8c2e.2"];
+    const refs = linkRefs(ids, brief(1, [link("pi-8c2e.2", 2), link("pi-8c2e.7", 7, true)]));
+    expect(refs.get("pi-8c2e.2")).toBe("#2");
+    expect(refs.get("pi-8c2e.7")).toBe("#7");
+  });
+
+  it("a link from a second writer makes every ref long", () => {
+    const ids = ["pi-8c2e.1"];
+    const refs = linkRefs(ids, brief(1, [link("pi-8c2e.2", 2)], [link("mac-1f00.3", 3)]));
+    expect(refs.get("pi-8c2e.2")).toBe("pi-8c2e#2");
+    expect(refs.get("mac-1f00.3")).toBe("mac-1f00#3");
   });
 });
 

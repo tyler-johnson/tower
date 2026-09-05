@@ -308,6 +308,19 @@ export function buildRefs(folded: Folded): { refs: Map<string, string>; flights:
   return { refs, flights: liveRows(folded).length };
 }
 
+/// Link rows' display forms from the brief alone; `ids` is the board's
+/// flight ids, for the short decision only. `#n` when the board and the
+/// brief's family span one writer, `writer#n` otherwise. No board lookup:
+/// a linked flight may have aged past the closed window, and the brief
+/// carries its number.
+export function linkRefs(ids: string[], brief: Brief): Map<string, string> {
+  const links = [...brief.blocks, ...brief.depends_on];
+  const short = shortIds([...ids, ...links.map((link) => link.flight)]);
+  return new Map(
+    links.map((link) => [link.flight, flightRef(writerOf(link.flight), link.number, short)]),
+  );
+}
+
 export interface NotePhrase {
   text: string;
   tone: "warn" | "dim";
@@ -369,6 +382,7 @@ export type StandingTag =
 /// words for one end.
 export interface LinkView {
   flight: string;
+  number: number;
   subject: string;
   status: string;
   closed: boolean;

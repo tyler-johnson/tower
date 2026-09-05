@@ -3,10 +3,15 @@
   import { panel } from "./panel.svelte";
   import { query } from "./query.svelte";
   import { stream } from "./stream";
-  import { age, statusDot, type Brief } from "./tower";
+  import { age, linkRefs, statusDot, type Brief } from "./tower";
   import { feed } from "./feed.svelte";
 
   let { brief, refs }: { brief: Brief; refs: Map<string, string> } = $props();
+
+  // The link rows name themselves from the brief: a parent or child that
+  // closed past the board's window has no row in `refs`, and would
+  // otherwise print as its wire id.
+  let linkRef = $derived(linkRefs([...refs.keys()], brief));
 
   let now = $derived(feed.now);
   let entries = $derived(stream(brief));
@@ -202,7 +207,7 @@
           href={query.href(`/f/${link.flight}`)}
           class="rounded-field hover:bg-base-200 flex items-baseline gap-2 px-1"
         >
-          <span class="text-primary font-mono">{refs.get(link.flight) ?? link.flight}</span>
+          <span class="text-primary font-mono">{linkRef.get(link.flight)}</span>
           <span class="status {statusDot(link.status)}" title={link.status}></span>
           <span class="flex-1 truncate">{link.subject}</span>
         </a>
@@ -230,7 +235,7 @@
           href={query.href(`/f/${link.flight}`)}
           class="rounded-field border-base-300 hover:bg-base-200 ml-4 flex items-baseline gap-2 border-l px-1 pl-3"
         >
-          <span class="text-primary font-mono">{refs.get(link.flight) ?? link.flight}</span>
+          <span class="text-primary font-mono">{linkRef.get(link.flight)}</span>
           <span class="status {statusDot(link.status)}" title={link.status}></span>
           <span class="flex-1 truncate">{link.subject}</span>
           {#if link.closed}<span class="text-success">✓</span>{/if}

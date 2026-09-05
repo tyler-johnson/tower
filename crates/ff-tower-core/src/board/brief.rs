@@ -156,6 +156,9 @@ pub enum Standing {
 #[derive(Debug, Serialize)]
 pub struct LinkView {
     pub flight: String,
+    /// The dense per-writer flight number — the human name's numeric
+    /// half, beside the wire id.
+    pub number: u64,
     pub subject: String,
     pub status: String,
     pub closed: bool,
@@ -370,6 +373,7 @@ fn links(fold: &Fold, ids: &[EventId]) -> Vec<LinkView> {
                 .expect("the fold's links resolve");
             LinkView {
                 flight: other.id.to_string(),
+                number: other.number,
                 subject: other.subject.clone(),
                 status: other.status.clone(),
                 closed: other.closed(),
@@ -735,6 +739,7 @@ mod tests {
         let one = brief_of(&events, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
         assert_eq!(one.depends_on.len(), 1);
         assert_eq!(one.depends_on[0].flight, "pi.2");
+        assert_eq!(one.depends_on[0].number, 2);
         assert_eq!(one.depends_on[0].subject, "the dependency");
         assert_eq!(one.depends_on[0].status, "done");
         assert!(one.depends_on[0].closed);
@@ -743,6 +748,7 @@ mod tests {
         let two = brief_of(&events, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
         assert_eq!(two.blocks.len(), 1);
         assert_eq!(two.blocks[0].flight, "pi.1");
+        assert_eq!(two.blocks[0].number, 1);
         assert_eq!(two.blocks[0].subject, "the dependent");
         assert_eq!(two.blocks[0].status, "backlog");
         assert!(!two.blocks[0].closed);
@@ -1174,6 +1180,27 @@ mod tests {
         assert_eq!(json["status_by"], serde_json::json!("closer@b.c"));
         let text = serde_json::to_string(&brief).expect("serializes");
         assert_eq!(text.matches("\"status_by\"").count(), 1);
+    }
+
+    #[test]
+    fn a_link_row_carries_its_number_on_the_wire() {
+        // The web renders a link from the brief alone — a linked flight
+        // may have aged past the board's closed window — so the number
+        // rides beside the wire id.
+        let brief = brief_of(
+            &[
+                filed("pi.1", 10, "the dependent", ""),
+                filed("pi.2", 20, "the dependency", ""),
+                linked("pi.3", 30, "pi.1", "pi.2"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        let json = serde_json::to_value(&brief).expect("serializes");
+        assert_eq!(json["depends_on"][0]["flight"], serde_json::json!("pi.2"));
+        assert_eq!(json["depends_on"][0]["number"], serde_json::json!(2));
     }
 
     #[test]
