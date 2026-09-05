@@ -202,13 +202,11 @@ fn a_feed_query_that_does_not_parse_is_400() {
 
 #[test]
 fn a_concluding_repo_serves_a_settled_board_and_the_loop_terminates() {
-    // A rule the pass will fire: the hand-filed labeled flight below
-    // sits in Triage when the server starts — the board parks its
-    // filings there, and `file`'s own preflight pass runs before its
-    // append — so the server's first refold is what routes it.
+    // A rule that fires at `file`: the labeled filing below is routed
+    // under `chores` in its own append, before the server starts, so
+    // the server has nothing to add — it serves the log as it stands.
     let repo = Repo::new();
     repo.pin_writer("pi");
-    repo.git(&["config", "tower.defaultFileStatus", "triage"]);
     repo.write(
         ".tower/procedures/chores.toml",
         "name = \"chores\"\n\
@@ -225,18 +223,19 @@ fn a_concluding_repo_serves_a_settled_board_and_the_loop_terminates() {
     ));
     let server = Server::start(repo.path(), &["--port", &free_port().to_string()], &[]);
 
-    // The first pull is already settled: the pass ran ahead of the read.
+    // The first pull is the routed board: the filing landed Ready under
+    // its procedure, and the server appended nothing to get there.
     let (status, _, first) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{first}");
     let envelope: serde_json::Value = serde_json::from_str(first.trim_end()).expect("an envelope");
     assert_eq!(flight_status(&envelope, "pi.1").as_deref(), Some("ready"));
     assert!(first.contains(r#""procedure":"chores""#), "{first}");
 
-    // The pass's own append re-trips the watcher, the next refold
-    // concludes nothing, and the loop publishes identical bytes and
-    // stops — so a second pull and the feed's frame are the same board.
+    // Nothing on the server writes: a second pull and the feed's frame
+    // are the same bytes as the first, proving the refold loop stamps
+    // motion and appends nothing of its own.
     let (_, _, second) = http(&server.addr, "/api/board");
-    assert_eq!(first, second, "a second fold concludes nothing");
+    assert_eq!(first, second, "a second fold adds nothing");
     let mut feed = sse(&server.addr, "/api/feed");
     assert_eq!(format!("{}\n", feed.next_data()), second);
 }

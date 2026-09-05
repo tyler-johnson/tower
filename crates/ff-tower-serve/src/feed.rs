@@ -12,9 +12,9 @@
 //! its own query, so there is no one envelope to broadcast: on each
 //! stamp a subscriber folds its own frame against its own query, one
 //! fold per subscriber per motion — the trade the query surface names,
-//! a fold being a handful of local ff spawns. The loop's own work per
-//! motion is the lazy pass, run once here so every subscriber's fold
-//! reads a settled log.
+//! a fold being a handful of local ff spawns. The loop itself writes
+//! nothing: a stamp says the repository moved, and every judgment on
+//! the log was appended by whoever wrote it.
 //!
 //! Two motion sources, one dirty flag. A filesystem watcher covers
 //! tower's own store — loose refs under `refs/tower/log`, and
@@ -70,8 +70,8 @@ pub(crate) fn start(
 ) -> Result<(), notify::Error> {
     let dirty = Arc::new(Notify::new());
     let watcher = fs_watcher(&paths, Arc::clone(&dirty))?;
-    tokio::spawn(watch_child(repo.clone(), Arc::clone(&dirty)));
-    tokio::spawn(refold_loop(repo, tx, dirty, watcher));
+    tokio::spawn(watch_child(repo, Arc::clone(&dirty)));
+    tokio::spawn(refold_loop(tx, dirty, watcher));
     Ok(())
 }
 
@@ -191,16 +191,15 @@ async fn watch_child(repo: PathBuf, dirty: Arc<Notify>) {
 /// the loop does — seeds the channel with the first stamp, and then
 /// alternates settling and stamping forever.
 async fn refold_loop(
-    repo: PathBuf,
     tx: Arc<watch::Sender<Latest>>,
     dirty: Arc<Notify>,
     watcher: notify::RecommendedWatcher,
 ) {
     let _watcher = watcher;
-    stamp(&repo, &tx).await;
+    stamp(&tx);
     loop {
         settle(&dirty).await;
-        stamp(&repo, &tx).await;
+        stamp(&tx);
     }
 }
 
@@ -218,25 +217,11 @@ async fn settle(dirty: &Notify) {
     }
 }
 
-/// One motion, stamped. The lazy pass runs first, on a blocking thread
-/// for the reason every handler's does — it spawns ff processes and
-/// `Store` is not `Sync` — so every subscriber's fold reads a settled
-/// log, the same pass `GET /api/board` runs ahead of its read. The
-/// pass's own append re-trips the watcher, the next pass concludes
-/// nothing, and the loop stamps once more and stops. A pass that fails,
-/// panic included, says one stderr line and the stamp still lands; the
-/// loop lives.
-async fn stamp(repo: &Path, tx: &watch::Sender<Latest>) {
-    let repo = repo.to_path_buf();
-    match tokio::task::spawn_blocking(move || crate::api::pass(&repo)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            eprintln!("the feed's pass did not run: {err}");
-        }
-        Err(_panicked) => {
-            eprintln!("the feed's pass did not run: the pass panicked");
-        }
-    }
+/// One motion, stamped. Nothing runs ahead of it: the loop reads
+/// nothing and writes nothing, so every subscriber folds the log as the
+/// writers left it. A send with no receiver is a stream that has
+/// already gone.
+fn stamp(tx: &watch::Sender<Latest>) {
     let _ = tx.send(Latest::Moved);
 }
 

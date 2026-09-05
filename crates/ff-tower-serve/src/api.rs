@@ -196,27 +196,6 @@ fn stale_after(repo: &Path) -> i64 {
         .unwrap_or(config::DEFAULT_STALE_FLIGHT)
 }
 
-/// The lazy pass, run ahead of a read so it serves a settled board. The
-/// `/api/board` handler runs it before its fold, and the feed loop runs
-/// it once per motion ahead of every subscriber's fold — so the pass's
-/// own append re-trips the watcher, the next pass concludes nothing,
-/// and the loop stamps once more and stops. Best-effort: a pass that
-/// cannot run is one stderr line, and the board still folds; a lost
-/// race (`log/contended`) is another pass having concluded the same
-/// things. The error is the store not opening, which is the fold's
-/// failure too.
-pub(crate) fn pass(repo: &Path) -> Result<(), ApiError> {
-    let store = Store::open(repo)?;
-    match procedure::registry(store.main_worktree().as_deref()) {
-        Ok(installed) => match verb::pass(&store, &installed) {
-            Ok(_) | Err(log::Error::Contended { .. }) => {}
-            Err(err) => eprintln!("ff-tower-serve: the pass did not run: {err}"),
-        },
-        Err(err) => eprintln!("ff-tower-serve: the pass did not run: {err}"),
-    }
-    Ok(())
-}
-
 /// The board's envelope for one query, folded fresh. Shared verbatim
 /// between the `/api/board` handler and every feed subscriber, so a
 /// pushed frame and a pulled body under one query can only ever be the
@@ -238,13 +217,7 @@ fn parse_query(raw: Option<String>) -> Result<Query, ApiError> {
 
 async fn board(State(state): State<Arc<AppState>>, RawQuery(raw): RawQuery) -> Reply {
     match parse_query(raw) {
-        Ok(query) => {
-            respond("board", state, move |repo| {
-                pass(repo)?;
-                board_envelope(repo, &query)
-            })
-            .await
-        }
+        Ok(query) => respond("board", state, move |repo| board_envelope(repo, &query)).await,
         Err(err) => refusal("board", &err),
     }
 }

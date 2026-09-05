@@ -1,6 +1,6 @@
-//! The lazy pass riding the binary: every board-shaped verb runs it
-//! before its own fold, best-effort, and the conclusions land attributed
-//! to the invoker.
+//! Intake matching riding the binary: a bare filing a rule covers files
+//! under the rule's procedure on the same invocation, attributed to the
+//! invoker, and no verb walks the board afterwards.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -55,6 +55,15 @@ fn filed(subject: &str, status: &str, labels: &[&str]) -> Kind {
         branch: None,
     }
 }
+
+const CHORES: &str = "name = \"chores\"\n\
+     [[match]]\n\
+     name  = \"chore-label\"\n\
+     label = \"chore\"\n\
+     [[flight]]\n\
+     id       = \"work\"\n\
+     assignee = \"me\"\n\
+     skill    = \"tidy\"\n";
 
 #[test]
 fn board_reads_a_satisfied_waiter_ready_with_the_closers_byline() {
@@ -113,30 +122,19 @@ fn board_reads_a_satisfied_waiter_ready_with_the_closers_byline() {
 }
 
 #[test]
-fn a_repo_layer_rule_routes_a_hand_filed_labeled_flight_on_the_next_verb() {
+fn a_repo_layer_rule_routes_a_labeled_filing_on_the_same_invocation() {
     let repo = Repo::new();
     repo.pin_writer("pi");
-    repo.write(
-        ".tower/procedures/chores.toml",
-        "name = \"chores\"\n\
-         [[match]]\n\
-         name  = \"chore-label\"\n\
-         label = \"chore\"\n\
-         [[flight]]\n\
-         id       = \"work\"\n\
-         assignee = \"me\"\n\
-         skill    = \"tidy\"\n",
-    );
+    repo.write(".tower/procedures/chores.toml", CHORES);
 
-    // Rules cover Triage alone, so a board that routes on them parks its
-    // filings there. `file`'s own pass runs before its append, so the
-    // filing sits in Triage until the next invocation drains it.
-    repo.git(&["config", "tower.defaultFileStatus", "triage"]);
-    stdout(&ff_tower(
+    // No `defaultFileStatus` change: the rule decides the shape, and
+    // the default setting clears it. The envelope carries the routing
+    // beside the filing.
+    let file = envelope(&ff_tower(
         repo.path(),
         &["file", "sweep the logs", "--label", "chore", "--json"],
     ));
-    stdout(&ff_tower(repo.path(), &["board", "--json"]));
+    assert_eq!(file["data"]["routed"]["kind"], serde_json::json!("routed"));
 
     let brief = envelope(&ff_tower(repo.path(), &["brief", "1", "--json"]));
     assert_eq!(brief["data"]["status"], serde_json::json!("ready"));
@@ -157,26 +155,62 @@ fn a_repo_layer_rule_routes_a_hand_filed_labeled_flight_on_the_next_verb() {
 }
 
 #[test]
-fn a_broken_rule_file_leaves_board_running_and_procedures_refusing() {
+fn the_human_echo_says_which_rule_chose_the_procedure() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    repo.write(".tower/procedures/chores.toml", CHORES);
+
+    let out = stdout(&ff_tower(
+        repo.path(),
+        &["file", "sweep the logs", "--label", "chore"],
+    ));
+    assert!(
+        out.contains("under chores · matched label chore: sweep the logs"),
+        "stdout: {out}"
+    );
+
+    // A filing no rule covers echoes as it always did.
+    let out = stdout(&ff_tower(repo.path(), &["file", "plain"]));
+    assert!(out.contains("in ready: plain"), "stdout: {out}");
+}
+
+#[test]
+fn a_broken_rule_file_leaves_board_running_and_file_and_procedures_refusing() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     repo.write(".tower/procedures/broken.toml", "name = \"broken\"\n");
 
-    // Best-effort: the pass says one stderr line and the board renders.
+    // The board never touches the registry: it renders, with no stderr
+    // line about anything.
     let out = ff_tower(repo.path(), &["board", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("the pass did not run"), "stderr: {stderr}");
+    assert!(stderr.is_empty(), "stderr: {stderr}");
     let board = envelope(&out);
     assert_eq!(board["cmd"], serde_json::json!("board"));
 
-    // The registry's own surface still refuses loudly.
-    let out = ff_tower(repo.path(), &["procedures", "--json"]);
-    assert_eq!(out.status.code(), Some(1));
-    let refusal = envelope(&out);
-    assert_eq!(
-        refusal["error"]["id"],
-        serde_json::json!("procedure/no-parts")
+    // The surfaces that read a definition refuse loudly — a bare
+    // filing now among them.
+    for args in [
+        ["file", "x", "--json"].as_slice(),
+        ["procedures", "--json"].as_slice(),
+    ] {
+        let out = ff_tower(repo.path(), args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let refusal = envelope(&out);
+        assert_eq!(
+            refusal["error"]["id"],
+            serde_json::json!("procedure/no-parts"),
+            "{args:?}"
+        );
+    }
+    assert!(
+        Store::open(repo.path())
+            .expect("open")
+            .read_all()
+            .expect("read")
+            .is_empty(),
+        "the refused filing wrote nothing"
     );
 }
 

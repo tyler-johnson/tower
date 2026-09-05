@@ -1,12 +1,12 @@
 //! `ff tower procedures [<name>]` — what is installed, and where it
 //! came from.
 //!
-//! Read-only, and beside `file` and the pass one of the few surfaces
-//! that reads a definition. Bare is the list: every name, the layer it
-//! came from, and the flights it stamps out with their lanes. Named is
-//! the detail page: the match rules by name with their predicates —
-//! adapter-keyed ones marked inert, because no adapter exists to fire
-//! them, while field-keyed ones route Triage on the lazy pass — every
+//! Read-only, and beside `file` one of the two surfaces that reads a
+//! definition. Bare is the list: every name, the layer it came from,
+//! and the flights it stamps out with their lanes. Named is the detail
+//! page: the match rules by name with their predicates — adapter-keyed
+//! ones marked inert, because no adapter exists to fire them, while
+//! field-keyed ones match a bare filing's fields at file time — every
 //! flight with assignee, skill, `after`, and `done`, and the file it was
 //! read from.
 //!
@@ -125,8 +125,8 @@ fn list(installed: &Registry, repo_root: Option<&Path>, colored: bool) -> String
 
 /// One procedure in full. An adapter-keyed rule says outright that it
 /// cannot fire — a rule that looks live and never runs is the kind of
-/// thing you debug for an hour — while a field-keyed one is live on the
-/// pass and prints its predicates plain.
+/// thing you debug for an hour — while a field-keyed one is live at
+/// file time and prints its predicates plain.
 fn detail(definition: &Definition, colored: bool) -> String {
     let mut out = String::new();
     out.push_str(&format!(

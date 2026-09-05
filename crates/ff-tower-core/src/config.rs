@@ -169,8 +169,7 @@ pub fn registry() -> &'static [Setting] {
                 "The status `ff tower file` gives a flight that says nothing else:",
                 "ready clears it for work at once, triage parks it for a person.",
                 "--status beats this for one filing, and a procedure flight that",
-                "declares its own status keeps it. Match rules only cover Triage,",
-                "so a board that routes on rules sets this to triage.",
+                "declares its own status keeps it.",
             ],
         },
         Setting {

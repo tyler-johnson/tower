@@ -3,12 +3,29 @@
 //! A bare filing carries no procedure and mints one flight where
 //! `tower.defaultFileStatus` says — **Ready** unless the setting says
 //! otherwise, because most filings are work already decided on. `triage`
-//! parks it for a person instead, and the lazy pass routes only what
-//! sits there. `--status` overrides the setting for one filing; the
-//! words it takes are the ones a flight can be filed with — triage,
-//! ready, in_progress — never the derived or closed ones. Every stored
-//! field is a flag: `-m` the body, priority, labels, skill, assignee,
-//! bay, copied onto the filing as given.
+//! parks it for a person instead. `--status` overrides the setting for
+//! one filing; the words it takes are the ones a flight can be filed
+//! with — triage, ready, in_progress — never the derived or closed ones.
+//! Every stored field is a flag: `-m` the body, priority, labels, skill,
+//! assignee, bay, copied onto the filing as given.
+//!
+//! **A bare filing is matched once, here.** The registry loads, and the
+//! first rule whose predicates all hold against the caller's fields —
+//! registry name order, declaration order within a definition — chooses
+//! its procedure: the filing is minted exactly as naming that procedure
+//! would mint it, and one `routed` event in the same batch records which
+//! rule chose it and why. A rule keyed on `source`/`event` is inert,
+//! because no adapter exists to carry provenance. The match runs on the
+//! filing machine against the procedures it has, so a pushed log never
+//! gets a teammate's flight restamped under rules only this machine
+//! holds; moving a flight to Triage later, or editing a label on, never
+//! re-matches — `file <procedure>` by name, or `decompose`, is how a
+//! flight gets a shape later. A routed filing lands where the named
+//! filing would: Ready under the default setting, parked under `triage`,
+//! because the rule decides the shape and the setting the clearance.
+//! Since every bare filing now reads the registry, a rule file that does
+//! not parse refuses the filing by path, the way `procedures` and a
+//! named `file` already do.
 //!
 //! Under a procedure, the named definition is looked up in the registry,
 //! refused when it is not installed, and its flights are minted with it.
@@ -33,19 +50,23 @@ use serde::Serialize;
 use crate::config;
 use crate::log::{Event, EventId, Kind, Store};
 use crate::model::{Assignee, Status};
-use crate::procedure;
+use crate::procedure::{self, Definition, Match, Registry};
 
 use super::{Error, Fields, Parent, appended, appended_all, classify};
 
 /// The envelope's `data`. Struct fields serialize in declaration order,
 /// and this order — `filed, linked, parts` — is the alphabetical one the
 /// CLI's `json!` emitted before the payload moved here, so the bytes on
-/// the wire never changed.
+/// the wire never changed. `routed` is last and absent when no rule
+/// fired, so an unrouted filing's bytes never changed either.
 #[derive(Serialize)]
 pub struct Filed {
     pub filed: Event,
     pub linked: Vec<Event>,
     pub parts: Vec<Event>,
+    /// The `routed` event, when a match rule chose the procedure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routed: Option<Event>,
 }
 
 /// The outcome: the payload, plus the ids a human render echoes — it
@@ -76,8 +97,12 @@ pub fn file(
     let default = config::default_file_status(&store.config());
 
     let Some(name) = procedure else {
-        // The bare filing: no procedure, one flight, the setting's word
-        // unless `--status` said one.
+        let installed = procedure::registry(store.main_worktree().as_deref())?;
+        if let Some((definition, rule)) = matched(&installed, &fields) {
+            return minted(store, definition, subject, &fields, default, Some(rule));
+        }
+        // The bare filing: no rule covers it, one flight, the setting's
+        // word unless `--status` said one.
         let ids = store.append(vec![Kind::Filed {
             procedure: None,
             subject: subject.to_string(),
@@ -100,6 +125,7 @@ pub fn file(
                 filed: appended(store, &id)?,
                 linked: Vec::new(),
                 parts: Vec::new(),
+                routed: None,
             },
             parent: id,
             part_ids: Vec::new(),
@@ -112,10 +138,51 @@ pub fn file(
     }
     let installed = procedure::registry(store.main_worktree().as_deref())?;
     let definition = installed.require(name)?;
+    minted(store, definition, subject, &fields, default, None)
+}
 
-    let ids = store
-        .append_with(|mint| classify(definition, subject, &fields, Parent::Mint, default, mint))?;
-    let (parent, rest) = ids.split_first().expect("the parent is the first event");
+/// The mint under a definition, named or matched: `classify`'s batch in
+/// one `append_with`, and — when a rule chose the definition — one
+/// `routed` event on its tail naming the head mint, so the record of
+/// judgment lands in the same commit as the flights it explains. The
+/// event carries no overlay: the flights were minted with the
+/// definition's fields already on them.
+fn minted(
+    store: &Store,
+    definition: &Definition,
+    subject: &str,
+    fields: &Fields,
+    default: &str,
+    rule: Option<&Match>,
+) -> Result<File, Error> {
+    let ids = store.append_with(|mint| {
+        let mut kinds = classify(definition, subject, fields, Parent::Mint, default, mint);
+        if let Some(rule) = rule {
+            kinds.push(Kind::Routed {
+                flight: mint(0),
+                procedure: definition.name.clone(),
+                rule: rule.name.clone(),
+                because: because(rule),
+                status: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                skill: None,
+                bay: None,
+                done: None,
+                branch: None,
+            });
+        }
+        kinds
+    })?;
+    let (minted, routed) = match rule {
+        Some(_) => {
+            let (routed, minted) = ids.split_last().expect("the routing is the last event");
+            (minted, Some(routed))
+        }
+        None => (ids.as_slice(), None),
+    };
+    let (parent, rest) = minted.split_first().expect("the parent is the first event");
     let parts = if definition.flights.len() == 1 {
         0
     } else {
@@ -128,10 +195,69 @@ pub fn file(
             filed: appended(store, parent)?,
             linked: appended_all(store, linked)?,
             parts: appended_all(store, filed)?,
+            routed: routed.map(|id| appended(store, id)).transpose()?,
         },
         parent: parent.clone(),
         part_ids: filed.to_vec(),
     })
+}
+
+/// The first rule that covers the filing, with its definition: registry
+/// name order, then declaration order, first match wins.
+fn matched<'a>(installed: &'a Registry, fields: &Fields) -> Option<(&'a Definition, &'a Match)> {
+    installed.definitions().find_map(|definition| {
+        definition
+            .matches
+            .iter()
+            .find(|rule| covers(rule, fields))
+            .map(|rule| (definition, rule))
+    })
+}
+
+/// Whether one rule covers the caller's fields. Every present predicate
+/// must hold, and a rule keyed on `source`/`event` can never match —
+/// a filing carries no adapter provenance, so adapter rules stay
+/// honestly inert per-rule. A rule with no predicates matches nothing;
+/// the loader refuses one, but a hand-built rule must not cover the
+/// world. An unset priority is `none`, the word the filing stores.
+fn covers(rule: &Match, fields: &Fields) -> bool {
+    if !rule.has_predicates() || rule.source.is_some() || rule.event.is_some() {
+        return false;
+    }
+    rule.label
+        .as_ref()
+        .is_none_or(|label| fields.labels.contains(label))
+        && rule
+            .priority
+            .as_deref()
+            .is_none_or(|priority| fields.priority.as_deref().unwrap_or("none") == priority)
+        && rule
+            .skill
+            .as_ref()
+            .is_none_or(|skill| fields.skill.as_ref() == Some(skill))
+        && rule
+            .assignee
+            .as_ref()
+            .is_none_or(|assignee| fields.assignee.as_ref() == Some(assignee))
+}
+
+/// The render-ready explanation the routing event stores — "matched
+/// label chore", every present predicate named.
+fn because(rule: &Match) -> String {
+    let mut phrases = Vec::new();
+    if let Some(label) = &rule.label {
+        phrases.push(format!("label {label}"));
+    }
+    if let Some(priority) = &rule.priority {
+        phrases.push(format!("priority {priority}"));
+    }
+    if let Some(skill) = &rule.skill {
+        phrases.push(format!("skill {skill}"));
+    }
+    if let Some(assignee) = &rule.assignee {
+        phrases.push(format!("assignee {assignee}"));
+    }
+    format!("matched {}", phrases.join(", "))
 }
 
 /// The caller's `--status`, validated: a word a flight can be filed
@@ -225,8 +351,29 @@ assignee = "me"
 done     = "asserted"
 "#;
 
+    /// A one-flight definition with a label rule: the intake case.
+    const CHORES: &str = r#"
+name = "chores"
+[[match]]
+name  = "chore-label"
+label = "chore"
+[[flight]]
+id       = "work"
+assignee = "me"
+skill    = "tidy"
+priority = "low"
+done     = "committed"
+"#;
+
     fn folded(store: &Store) -> board::Fold {
         board::fold(&store.read_all().expect("read"))
+    }
+
+    fn labeled(label: &str) -> Fields {
+        Fields {
+            labels: vec![label.to_string()],
+            ..Fields::default()
+        }
     }
 
     #[test]
@@ -249,6 +396,7 @@ done     = "asserted"
         .expect("files");
         assert!(outcome.part_ids.is_empty());
         assert!(outcome.payload.linked.is_empty());
+        assert!(outcome.payload.routed.is_none());
 
         let fold = folded(&store);
         let flight = &fold.flights[0];
@@ -524,5 +672,219 @@ done     = "landed"
 
         let fold = folded(&store);
         assert_eq!(fold.flights[0].done_kind, "landed");
+    }
+
+    #[test]
+    fn a_label_rule_routes_a_bare_filing_as_the_named_filing_with_the_right_because() {
+        let (repo, store) = store();
+        install(&repo, "chores", CHORES);
+        let outcome = file(&store, "sweep the logs", labeled("chore"), None).expect("files");
+        assert!(outcome.part_ids.is_empty(), "one flight collapses");
+        let routed = outcome.payload.routed.as_ref().expect("a routed event");
+        let Kind::Routed {
+            flight,
+            procedure,
+            rule,
+            because,
+            status,
+            assignee,
+            priority,
+            labels,
+            skill,
+            bay,
+            done,
+            branch,
+        } = &routed.kind
+        else {
+            panic!("expected a routing, got {:?}", routed.kind);
+        };
+        assert_eq!(flight, &outcome.parent, "the routing names the filing");
+        assert_eq!(procedure, "chores");
+        assert_eq!(rule, "chore-label");
+        assert_eq!(because, "matched label chore");
+        assert!(
+            status.is_none()
+                && assignee.is_none()
+                && priority.is_none()
+                && labels.is_none()
+                && skill.is_none()
+                && bay.is_none()
+                && done.is_none()
+                && branch.is_none(),
+            "the event is the record of judgment alone"
+        );
+
+        // Minted exactly as `file chores "sweep the logs" --label chore`
+        // would be: the definition's fields under the caller's flags,
+        // born Ready under the default setting.
+        let fold = folded(&store);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.procedure.as_deref(), Some("chores"));
+        assert_eq!(flight.status, "ready");
+        assert_eq!(flight.assignee.as_deref(), Some("me"));
+        assert_eq!(flight.skill.as_deref(), Some("tidy"));
+        assert_eq!(flight.priority, "low");
+        assert_eq!(flight.labels, ["chore"], "the caller's label stays");
+        assert_eq!(flight.done_kind, "committed");
+        assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn a_routed_filing_parks_under_the_triage_setting_like_any_other() {
+        // The rule decides the shape, the setting decides the clearance:
+        // a matched filing lands where a named one would.
+        let (repo, _) = store();
+        install(&repo, "chores", CHORES);
+        let store = with_default(&repo, "triage");
+        file(&store, "sweep the logs", labeled("chore"), None).expect("files");
+        let fold = folded(&store);
+        assert_eq!(fold.flights[0].procedure.as_deref(), Some("chores"));
+        assert_eq!(fold.flights[0].status, "triage");
+    }
+
+    #[test]
+    fn a_filing_no_rule_covers_lands_bare_and_a_named_filing_is_never_matched() {
+        let (repo, store) = store();
+        install(&repo, "chores", CHORES);
+        install(&repo, "ticket", TICKET);
+        let plain = file(&store, "plain", labeled("ops"), None).expect("files");
+        assert!(plain.payload.routed.is_none());
+        let named = file(&store, "named", labeled("chore"), Some("ticket")).expect("files");
+        assert!(named.payload.routed.is_none(), "the name was typed");
+
+        let fold = folded(&store);
+        assert!(fold.flights[0].procedure.is_none());
+        assert_eq!(fold.flights[1].procedure.as_deref(), Some("ticket"));
+        assert_eq!(
+            fold.flights[1].labels,
+            ["chore"],
+            "the label rides, the rule does not fire"
+        );
+        assert!(
+            store
+                .read_all()
+                .expect("read")
+                .iter()
+                .all(|event| !matches!(event.kind, Kind::Routed { .. })),
+            "no routing on the record"
+        );
+    }
+
+    #[test]
+    fn an_adapter_keyed_rule_is_inert() {
+        let (repo, store) = store();
+        install(
+            &repo,
+            "review",
+            r#"
+name = "review"
+[[match]]
+name   = "github-reviews"
+source = "github"
+event  = "review_requested"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+        );
+        let outcome = file(&store, "s", labeled("chore"), None).expect("files");
+        assert!(outcome.payload.routed.is_none());
+        assert!(folded(&store).flights[0].procedure.is_none());
+    }
+
+    #[test]
+    fn predicates_all_and() {
+        let (repo, store) = store();
+        install(
+            &repo,
+            "narrow",
+            r#"
+name = "narrow"
+[[match]]
+name     = "labeled-high"
+label    = "chore"
+priority = "high"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+        );
+        // The label matches, the priority does not: bare.
+        let half = file(&store, "half", labeled("chore"), None).expect("files");
+        assert!(half.payload.routed.is_none());
+        // Both hold: routed.
+        let both = file(
+            &store,
+            "both",
+            Fields {
+                priority: Some("high".to_string()),
+                ..labeled("chore")
+            },
+            None,
+        )
+        .expect("files");
+        assert!(both.payload.routed.is_some());
+        let fold = folded(&store);
+        assert!(fold.flights[0].procedure.is_none());
+        assert_eq!(fold.flights[1].procedure.as_deref(), Some("narrow"));
+    }
+
+    #[test]
+    fn first_match_wins_within_and_across_definitions() {
+        let (repo, store) = store();
+        install(
+            &repo,
+            "alpha",
+            r#"
+name = "alpha"
+[[match]]
+name  = "first"
+label = "chore"
+[[match]]
+name  = "second"
+label = "chore"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+        );
+        install(
+            &repo,
+            "beta",
+            r#"
+name = "beta"
+[[match]]
+name  = "also"
+label = "chore"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#,
+        );
+        let outcome = file(&store, "s", labeled("chore"), None).expect("files");
+        // `alpha` sorts first in the registry, and its first rule beats
+        // its second.
+        let Some(Event {
+            kind: Kind::Routed {
+                procedure, rule, ..
+            },
+            ..
+        }) = &outcome.payload.routed
+        else {
+            panic!("expected a routing");
+        };
+        assert_eq!(procedure, "alpha");
+        assert_eq!(rule, "first");
+    }
+
+    #[test]
+    fn a_broken_rule_file_refuses_the_bare_filing_by_path() {
+        let (repo, store) = store();
+        install(&repo, "broken", "name = \"broken\"\n");
+        let err = file(&store, "anything", Fields::default(), None)
+            .err()
+            .expect("the registry refuses");
+        assert_eq!(err.id(), "procedure/no-parts");
+        assert!(folded(&store).flights.is_empty(), "nothing was written");
     }
 }

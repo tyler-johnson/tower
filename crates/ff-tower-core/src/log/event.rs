@@ -172,14 +172,16 @@ pub enum Kind {
     /// Answers the open question. No status rides it: the fold derives
     /// Ready or Waiting from the facts and the edges beneath.
     Answered { flight: EventId, answer: String },
-    /// The lazy pass routing a Triage flight under a procedure — the one
-    /// automated stamp. Self-contained on `Filed`'s discipline: the
-    /// definition is read at pass time and the resolved overlay copied
-    /// in, so the fold never reads config. `status` is a word assigning
-    /// the facts like a `Status` event's — `ready`, cleared, whether the
-    /// routing collapsed onto the flight or made it a parent whose edges
-    /// fold it Waiting; the field options overlay where `Some` and leave
-    /// the standing value where `None`.
+    /// The record of which match rule chose a bare filing's procedure at
+    /// file time — the one automated stamp, appended in the filing's own
+    /// batch and naming its head. Since #102 the event is the record of
+    /// judgment alone — procedure, rule, because — and every overlay
+    /// field is written `None`: the flights were minted with the
+    /// definition's fields already on them. Logs from before then carry
+    /// the overlay tower wrote when it routed later, and the fold still
+    /// applies it: `status` is a word assigning the facts like a
+    /// `Status` event's, and the field options overlay where `Some` and
+    /// leave the standing value where `None`.
     Routed {
         flight: EventId,
         procedure: String,
@@ -195,7 +197,8 @@ pub enum Kind {
         skill: Option<String>,
         bay: Option<String>,
         done: Option<String>,
-        /// A definition's `subject = "branch"`, resolved at pass time.
+        /// A definition's `subject = "branch"`, resolved at routing
+        /// time before #102; `None` since.
         branch: Option<String>,
     },
     /// A kind from a newer tower, preserved verbatim so the fold can carry

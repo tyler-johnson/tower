@@ -292,6 +292,7 @@ fn file_appends_the_whole_batch_and_answers_it() {
                 filed: filed.clone(),
                 linked: linked.to_vec(),
                 parts: parts.to_vec(),
+                routed: None,
             },
         ),
     );

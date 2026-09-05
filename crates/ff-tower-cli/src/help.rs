@@ -135,10 +135,10 @@ those same fields saved across a graph of flights.
 
 Where a filing lands is a setting: `ff tower config
 defaultFileStatus triage` parks every bare filing for a person
-instead, which is what a board routing on match rules wants, since
-the rules only cover Triage. --status beats the setting for one
-filing, and a procedure flight that declares its own status keeps
-it.
+instead. --status beats the setting for one filing, and a procedure
+flight that declares its own status keeps it. A bare filing whose
+fields a match rule covers files under that rule's procedure as if
+the name had been typed, and the record says which rule chose it.
 
 A procedure's definition is read at filing and never again — each
 flight's fields are copied into the log, so editing a definition
@@ -158,6 +158,7 @@ Examples:
   ff tower file \"rotate the keys\" -m \"…\"        with a body
   ff tower file \"decide later\" --status triage    parked for a person
   ff tower file review feather                  under a procedure
+  ff tower file \"upgrade axum\" --label chore     under whatever chore matches
   ff tower file \"upgrade axum\" -p high --label chore --assignee agent   fields at filing
   ff tower procedures                           what there is to file under";
 
@@ -262,12 +263,11 @@ Examples:
 pub const PROCEDURES: &str = "\
 What is installed: every procedure's name, the layer it came from,
 and the flights it stamps out with their lanes. A name is the detail
-page — the match rules by name with their predicates, which route
-what sits in Triage the next time anything runs (adapter-keyed ones
-stay inert until an adapter exists to fire them, and a bare filing
-only reaches Triage when defaultFileStatus or --status says so);
-every flight with assignee, skill, status, after, and done; and the
-file it was read from.
+page — the match rules by name with their predicates, which a bare
+filing's fields are matched against at file time, first match
+winning (adapter-keyed ones stay inert until an adapter exists to
+fire them); every flight with assignee, skill, status, after, and
+done; and the file it was read from.
 
 Two layers, the most specific winning whole: user,
 ~/.config/tower/procedures/<name>.toml; repo,

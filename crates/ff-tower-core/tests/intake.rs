@@ -1,27 +1,23 @@
-//! The lazy pass against a real store: what only a repository can prove.
+//! Intake matching against a real store: what only a repository can
+//! prove.
 //!
-//! The routing rule itself is pinned in `verb/pass.rs`'s unit tests
-//! over hand-built events; what runs here is the store seam — the quiet
-//! pass touching neither writer nor lock, a concluding batch landing as
-//! one commit, idempotence over real appends, and the release of a
-//! waiter being the fold's work rather than the pass's.
+//! The matcher itself is pinned in `verb/file.rs`'s unit tests; what
+//! runs here is the store seam — a routed filing landing as one commit
+//! of one `filed` plus one `routed`, a multi-flight rule's family and
+//! its routing in one commit, a filing no rule covers as one plain
+//! `filed`, a named filing never re-matched, and a broken rule file
+//! refusing the bare filing with the loader's own id — and, beside it,
+//! the release of a waiter being the fold's work with nothing appended.
 //!
-//! The registry is built through `procedure::layered` with the fixture's
-//! own directories rather than `procedure::registry`: environment is
-//! process-global, and the user layer must be the test's, not the
-//! machine's.
+//! `file` reads `procedure::registry`'s layers: the machine's user layer
+//! under the fixture's repository layer. Every rule under test lives in
+//! the repository layer, which wins whole by name, the same footing the
+//! named-procedure unit tests already stand on.
 
 use ff_tower_core::board;
 use ff_tower_core::log::{Event, Kind, Store};
-use ff_tower_core::procedure::{self, Registry};
-use ff_tower_core::verb;
+use ff_tower_core::verb::{self, Fields};
 use ff_tower_testsupport::Repo;
-
-/// The repository layer's registry alone — exactly what the production
-/// pass loads, minus the machine's user layer.
-fn registry(repo: &Repo) -> Registry {
-    procedure::layered(None, Some(&procedure::repo_dir(repo.path()))).expect("the registry loads")
-}
 
 fn filed(subject: &str, status: &str, labels: &[&str]) -> Kind {
     Kind::Filed {
@@ -54,8 +50,15 @@ fn linked(from: &str, to: &str) -> Kind {
     }
 }
 
+fn labeled(label: &str) -> Fields {
+    Fields {
+        labels: vec![label.to_string()],
+        ..Fields::default()
+    }
+}
+
 /// Commits on the pinned writer's chain — the count that proves a batch
-/// landed atomically.
+/// landed atomically. The ref must exist: read it after the first append.
 fn commits(repo: &Repo) -> usize {
     repo.git(&[
         "rev-list",
@@ -92,59 +95,27 @@ assignee = "me"
 after    = ["pass"]
 "#;
 
-#[test]
-fn a_quiet_pass_mints_no_writer_and_takes_no_lock() {
-    // The `append_with` regression: it mints the writer and takes the
-    // lock before its plan runs, so a pass that concludes nothing must
-    // return before reaching it.
-    let repo = Repo::new();
-    let store = Store::open(repo.path()).expect("open");
-    let appended = verb::pass(&store, &registry(&repo)).expect("pass");
-    assert!(appended.is_empty());
-    assert!(store.writer().is_none(), "no writer minted on this handle");
-
-    let reopened = Store::open(repo.path()).expect("open");
-    assert!(reopened.writer().is_none(), "no writer reached config");
-    assert!(reopened.read_all().expect("read").is_empty());
-}
+const TICKET: &str = r#"
+name = "ticket"
+[[flight]]
+id       = "work"
+assignee = "me"
+"#;
 
 #[test]
-fn a_board_no_rule_covers_passes_without_appending() {
-    let repo = Repo::new();
-    repo.pin_writer("pi");
-    let store = Store::open(repo.path()).expect("open");
-    // Triage with no matching rule, ready, and an old log's hand-set
-    // `waiting` word with no edges, which folds as cleared: nothing
-    // concludes.
-    store
-        .append(vec![
-            filed("unmatched", "triage", &["ops"]),
-            filed("cleared", "ready", &[]),
-            filed("parked", "waiting", &[]),
-        ])
-        .expect("append");
-    let appended = verb::pass(&store, &registry(&repo)).expect("pass");
-    assert!(appended.is_empty());
-    assert_eq!(store.read_all().expect("read").len(), 3);
-}
-
-#[test]
-fn a_single_flight_route_lands_in_one_commit_and_a_second_pass_appends_nothing() {
+fn a_routed_filing_lands_in_one_commit_as_one_filed_plus_one_routed() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     repo.write(".tower/procedures/chores.toml", CHORES);
     let store = Store::open(repo.path()).expect("open");
-    store
-        .append(vec![filed("sweep the logs", "triage", &["chore"])])
-        .expect("append");
-    let before = commits(&repo);
 
-    let installed = registry(&repo);
-    let appended = verb::pass(&store, &installed).expect("pass");
-    assert_eq!(appended.len(), 1, "one routed event");
-    assert_eq!(commits(&repo), before + 1, "one commit");
+    let outcome = verb::file(&store, "sweep the logs", labeled("chore"), None).expect("files");
+    assert_eq!(commits(&repo), 1, "one commit on a fresh chain");
+    assert!(outcome.payload.routed.is_some());
 
     let events = store.read_all().expect("read");
+    let kinds: Vec<&str> = events.iter().map(|event| event.kind.name()).collect();
+    assert_eq!(kinds, ["filed", "routed"]);
     let fold = board::fold(&events);
     let flight = &fold.flights[0];
     assert_eq!(flight.status, "ready", "the collapse is born Ready");
@@ -152,30 +123,23 @@ fn a_single_flight_route_lands_in_one_commit_and_a_second_pass_appends_nothing()
     assert_eq!(flight.assignee.as_deref(), Some("me"));
     assert_eq!(flight.skill.as_deref(), Some("tidy"));
     assert!(fold.unrouted.is_empty());
-
-    let again = verb::pass(&store, &installed).expect("pass");
-    assert!(again.is_empty(), "a second pass concludes nothing");
-    assert_eq!(commits(&repo), before + 1);
 }
 
 #[test]
-fn a_multi_flight_route_mints_the_family_in_one_commit() {
+fn a_multi_flight_rule_mints_the_family_and_the_routing_in_one_commit() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     repo.write(".tower/procedures/reviewish.toml", REVIEWISH);
     let store = Store::open(repo.path()).expect("open");
-    store
-        .append(vec![filed("feather", "triage", &["review"])])
-        .expect("append");
-    let before = commits(&repo);
 
-    let appended = verb::pass(&store, &registry(&repo)).expect("pass");
-    // One routed parent, two children, the parent's two edges, and the
-    // after edge.
-    assert_eq!(appended.len(), 6);
-    assert_eq!(commits(&repo), before + 1, "the family lands atomically");
+    let outcome = verb::file(&store, "feather", labeled("review"), None).expect("files");
+    assert_eq!(outcome.part_ids.len(), 2);
+    assert_eq!(commits(&repo), 1, "the family lands atomically");
 
+    // The parent, two children, the parent's two edges, the after edge,
+    // and the routing on the tail.
     let events = store.read_all().expect("read");
+    assert_eq!(events.len(), 7);
     let fold = board::fold(&events);
     let parent = &fold.flights[0];
     assert_eq!(parent.status, "waiting", "the parent waits on them all");
@@ -192,22 +156,80 @@ fn a_multi_flight_route_mints_the_family_in_one_commit() {
     assert_eq!(child("· verdict").status, "waiting");
     assert!(fold.unrouted.is_empty());
 
-    // The routing event itself carries which rule fired.
-    let routed = events
-        .iter()
-        .find(|event| matches!(event.kind, Kind::Routed { .. }))
-        .expect("a routed event");
-    let Kind::Routed { rule, because, .. } = &routed.kind else {
-        unreachable!()
+    // The routing names the parent and carries which rule fired.
+    let routed: &Event = events.last().expect("the routing");
+    let Kind::Routed {
+        flight,
+        rule,
+        because,
+        ..
+    } = &routed.kind
+    else {
+        panic!("the routing is the last event, got {:?}", routed.kind);
     };
+    assert_eq!(flight, &outcome.parent);
     assert_eq!(rule, "review-label");
     assert_eq!(because, "matched label review");
 }
 
 #[test]
+fn a_filing_no_rule_covers_is_one_plain_filed() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    repo.write(".tower/procedures/chores.toml", CHORES);
+    let store = Store::open(repo.path()).expect("open");
+
+    let outcome = verb::file(&store, "unmatched", labeled("ops"), None).expect("files");
+    assert!(outcome.payload.routed.is_none());
+    let events = store.read_all().expect("read");
+    assert_eq!(events.len(), 1);
+    let fold = board::fold(&events);
+    assert!(fold.flights[0].procedure.is_none());
+    assert_eq!(fold.flights[0].status, "ready");
+}
+
+#[test]
+fn a_named_procedure_is_never_re_matched() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    repo.write(".tower/procedures/chores.toml", CHORES);
+    repo.write(".tower/procedures/ticket.toml", TICKET);
+    let store = Store::open(repo.path()).expect("open");
+
+    let outcome = verb::file(&store, "typed", labeled("chore"), Some("ticket")).expect("files");
+    assert!(outcome.payload.routed.is_none(), "the name was typed");
+    let events = store.read_all().expect("read");
+    assert_eq!(events.len(), 1, "one filing, no routing");
+    let fold = board::fold(&events);
+    assert_eq!(fold.flights[0].procedure.as_deref(), Some("ticket"));
+    assert_eq!(fold.flights[0].labels, ["chore"]);
+}
+
+#[test]
+fn a_broken_rule_file_refuses_the_bare_filing_with_the_loaders_id() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    repo.write(".tower/procedures/broken.toml", "name = \"broken\"\n");
+    let store = Store::open(repo.path()).expect("open");
+
+    let err = verb::file(&store, "anything", Fields::default(), None)
+        .err()
+        .expect("the registry refuses");
+    assert_eq!(err.id(), "procedure/no-parts");
+    assert!(
+        err.to_string().contains("broken.toml"),
+        "named by path: {err}"
+    );
+    assert!(
+        store.read_all().expect("read").is_empty(),
+        "nothing written"
+    );
+}
+
+#[test]
 fn done_on_the_last_dependency_releases_the_waiter_with_no_event() {
-    // The fold's work, not the pass's: the closing is the waiter's Ready
-    // mark, and no history moment is minted for it.
+    // The fold's work: the closing is the waiter's Ready mark, and no
+    // history moment is minted for it.
     let repo = Repo::new();
     repo.pin_writer("pi");
     let store = Store::open(repo.path()).expect("open");
@@ -224,9 +246,6 @@ fn done_on_the_last_dependency_releases_the_waiter_with_no_event() {
         "the edge alone gates it"
     );
     store.append(vec![moved("pi.1", "done")]).expect("append");
-
-    let appended = verb::pass(&store, &registry(&repo)).expect("pass");
-    assert!(appended.is_empty(), "nothing to conclude");
 
     let events = store.read_all().expect("read");
     assert_eq!(events.len(), 4, "no advance on the record");
@@ -255,8 +274,6 @@ fn a_canceled_dependency_releases_its_waiter_too() {
         ])
         .expect("append");
 
-    let appended = verb::pass(&store, &registry(&repo)).expect("pass");
-    assert!(appended.is_empty());
     let fold = board::fold(&store.read_all().expect("read"));
     assert_eq!(fold.flights[1].status, "ready", "closed is closed");
 }

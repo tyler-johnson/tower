@@ -45,8 +45,9 @@ pub struct Definition {
     /// What the flight's subject resolves against later; `branch` on
     /// `review`. Nothing derives from it yet.
     pub subject: Option<String>,
-    /// Intake rules, run by the lazy pass over what sits in Triage;
-    /// first match wins, and the routing event stores which rule fired.
+    /// Intake rules, matched against a bare filing's fields at file
+    /// time; first match wins, and the routing event stores which rule
+    /// fired.
     pub matches: Vec<Match>,
     /// Declaration order — the order `file` mints the flights in.
     pub flights: Vec<FlightDef>,
@@ -275,9 +276,8 @@ impl Registry {
 
     /// Layered in: the same name replaces wholesale, never field by
     /// field. Half a definition from one layer and half from another
-    /// would be a shape nobody wrote down. `pub(crate)` for the pass's
-    /// unit tests, which need a registry over hand-loaded definitions.
-    pub(crate) fn insert(&mut self, definition: Definition) {
+    /// would be a shape nobody wrote down.
+    fn insert(&mut self, definition: Definition) {
         self.by_name.insert(definition.name.clone(), definition);
     }
 }

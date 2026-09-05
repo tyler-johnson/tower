@@ -130,7 +130,7 @@ pub struct FlightView {
     /// half, beside the wire id.
     pub number: u64,
     /// Provenance only: the procedure the filing was minted under, or
-    /// the pass routed it under.
+    /// a match rule chose at file time.
     pub procedure: Option<String>,
     pub subject: String,
     /// The filing's prose, verbatim. Carried on the row because the

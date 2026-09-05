@@ -37,8 +37,8 @@ pub struct Fields {
 /// are read back out of. A row's status is the caller's `--status`
 /// where the flags overlay, else the definition flight's own `status`,
 /// else `born` — the word for rows that declare nothing, which `file`
-/// reads off `tower.defaultFileStatus` and `decompose` and the pass fix
-/// at `ready`. The edges say the rest: the fold derives Waiting for the
+/// reads off `tower.defaultFileStatus` and `decompose` fixes at
+/// `ready`. The edges say the rest: the fold derives Waiting for the
 /// parent and for any child with an `after`.
 pub fn classify(
     definition: &Definition,

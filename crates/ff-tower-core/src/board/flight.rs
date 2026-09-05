@@ -41,7 +41,7 @@ pub struct Flight {
     /// monotonic, so a new filing can never renumber an earlier one.
     pub number: u64,
     /// Provenance only: the procedure the filing was minted under — or
-    /// the pass later routed it under. Nothing derives from it.
+    /// a match rule chose at file time. Nothing derives from it.
     pub procedure: Option<String>,
     pub subject: String,
     pub body: String,
@@ -1604,8 +1604,9 @@ mod tests {
         assert_eq!(mark.at, 40);
     }
 
-    /// A routing as the pass writes it for a collapsed single-flight
-    /// definition: status Ready and the definition's overlay.
+    /// A routing as tower wrote it before #102 for a collapsed
+    /// single-flight definition — status Ready and the definition's
+    /// overlay — the shape an old log still carries.
     fn routed(id: &str, time: i64, flight: &str) -> Event {
         event(
             id,

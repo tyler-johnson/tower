@@ -53,8 +53,13 @@ pub fn run(
         else {
             unreachable!("`file` files");
         };
+        // A routed filing says which rule chose the procedure, so the
+        // line reads `filed #3 under chores · matched label chore: …`.
         let landed = match procedure.as_deref() {
-            Some(name) => format!("under {name}"),
+            Some(name) => match outcome.payload.routed.as_ref().map(|event| &event.kind) {
+                Some(Kind::Routed { because, .. }) => format!("under {name} · {because}"),
+                _ => format!("under {name}"),
+            },
             None => format!("in {}", status.replace('_', " ")),
         };
         println!(

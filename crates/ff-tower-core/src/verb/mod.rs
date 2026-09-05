@@ -26,7 +26,6 @@ mod error;
 mod file;
 mod hold;
 mod link;
-mod pass;
 mod status;
 pub mod view;
 
@@ -40,7 +39,6 @@ pub use error::Error;
 pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
 pub use link::{Link, Linked, Unlink, Unlinked, link, unlink};
-pub use pass::{Conclusion, conclusions, pass};
 pub use status::{Move, Moved, cancel, done, status};
 pub use view::{Delete, Deleted, Save, Saved, Views};
 

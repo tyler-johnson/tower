@@ -113,8 +113,8 @@ export function liveRows(folded: Folded): FlightView[] {
 export interface FlightView {
   id: string;
   number: number;
-  /// Provenance only: the procedure the filing was minted under, or the
-  /// pass routed it under.
+  /// Provenance only: the procedure the filing was minted under, or a
+  /// match rule chose at file time.
   procedure: string | null;
   subject: string;
   body: string;
