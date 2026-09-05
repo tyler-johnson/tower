@@ -93,7 +93,7 @@ pub fn parse_closed(raw: &str) -> Option<ClosedWindow> {
 #[derive(Debug, Serialize)]
 pub struct Board {
     pub waiting_on_you: WaitingOnYou,
-    pub triage: Vec<FlightView>,
+    pub backlog: Vec<FlightView>,
     pub waiting: Vec<FlightView>,
     pub ready: Vec<FlightView>,
     pub in_progress: Vec<FlightView>,
@@ -370,7 +370,7 @@ pub fn enrich(
         questions: Vec::new(),
         yours: Vec::new(),
     };
-    let mut triage = Vec::new();
+    let mut backlog = Vec::new();
     let mut waiting = Vec::new();
     let mut ready = Vec::new();
     let mut in_progress = Vec::new();
@@ -389,7 +389,7 @@ pub fn enrich(
         }
 
         match view.status.as_str() {
-            "triage" => triage.push(view),
+            "backlog" => backlog.push(view),
             "waiting" => waiting.push(view),
             "ready" => ready.push(view),
             "in_progress" => in_progress.push(view),
@@ -405,7 +405,7 @@ pub fn enrich(
     inbox.questions.sort_by_key(|view| view.asked_at);
     order(&mut inbox.yours);
     for group in [
-        &mut triage,
+        &mut backlog,
         &mut waiting,
         &mut ready,
         &mut in_progress,
@@ -426,7 +426,7 @@ pub fn enrich(
 
     Board {
         waiting_on_you: inbox,
-        triage,
+        backlog,
         waiting,
         ready,
         in_progress,
@@ -605,7 +605,7 @@ mod tests {
         event(
             id,
             time,
-            filing("triage", "none", None, &format!("subject of {time}")),
+            filing("backlog", "none", None, &format!("subject of {time}")),
         )
     }
 
@@ -625,7 +625,7 @@ mod tests {
     }
 
     fn subjected(id: &str, time: i64, subject: &str) -> Event {
-        event(id, time, filing("triage", "none", None, subject))
+        event(id, time, filing("backlog", "none", None, subject))
     }
 
     fn lifecycle(id: &str, time: i64, kind: Kind) -> Event {
@@ -740,7 +740,7 @@ mod tests {
         // the question are what put a row in those groups.
         let board = board(
             &[
-                filed_as("pi.1", 10, "triage", "none", None),
+                filed_as("pi.1", 10, "backlog", "none", None),
                 filed_as("pi.2", 20, "ready", "none", None),
                 filed_as("pi.3", 30, "ready", "none", None),
                 filed_as("pi.4", 40, "in_progress", "none", None),
@@ -756,13 +756,30 @@ mod tests {
                 None,
             ),
         );
-        assert_eq!(ids(&board.triage), ["pi.1"]);
+        assert_eq!(ids(&board.backlog), ["pi.1"]);
         assert_eq!(ids(&board.waiting), ["pi.2"]);
         assert_eq!(ids(&board.ready), ["pi.3"]);
         assert_eq!(ids(&board.in_progress), ["pi.4"]);
         assert_eq!(ids(&board.held), ["pi.5"]);
         assert!(board.closed.is_empty());
-        assert!(board.triage[0].held && board.triage[0].resolving);
+        assert!(board.backlog[0].held && board.backlog[0].resolving);
+    }
+
+    #[test]
+    fn the_old_word_triage_lands_in_the_backlog_group() {
+        let board = board(
+            &[
+                filed_as("pi.1", 10, "triage", "none", None),
+                filed_as("pi.2", 20, "ready", "none", None),
+                moved("pi.3", 30, "pi.2", "triage"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert_eq!(ids(&board.backlog), ["pi.1", "pi.2"]);
+        assert!(
+            board.ready.is_empty(),
+            "the old word on a move parks the flight"
+        );
     }
 
     #[test]
@@ -771,7 +788,7 @@ mod tests {
             &[filed("pi.1", 10), moved("pi.2", 20, "pi.1", "parked")],
             &reads(Vec::new(), Vec::new(), None),
         );
-        assert!(board.triage.is_empty());
+        assert!(board.backlog.is_empty());
         assert!(board.waiting.is_empty());
         assert!(board.ready.is_empty());
         assert!(board.in_progress.is_empty());
@@ -783,17 +800,17 @@ mod tests {
     fn a_group_sorts_by_priority_then_oldest_first() {
         let board = board(
             &[
-                filed_as("pi.1", 10, "triage", "low", None),
-                filed_as("pi.2", 20, "triage", "urgent", None),
-                filed_as("pi.3", 30, "triage", "none", None),
-                filed_as("pi.4", 40, "triage", "high", None),
-                filed_as("pi.5", 50, "triage", "urgent", None),
-                filed_as("pi.6", 60, "triage", "medium", None),
+                filed_as("pi.1", 10, "backlog", "low", None),
+                filed_as("pi.2", 20, "backlog", "urgent", None),
+                filed_as("pi.3", 30, "backlog", "none", None),
+                filed_as("pi.4", 40, "backlog", "high", None),
+                filed_as("pi.5", 50, "backlog", "urgent", None),
+                filed_as("pi.6", 60, "backlog", "medium", None),
             ],
             &reads(Vec::new(), Vec::new(), None),
         );
         assert_eq!(
-            ids(&board.triage),
+            ids(&board.backlog),
             ["pi.2", "pi.5", "pi.4", "pi.6", "pi.1", "pi.3"],
             "urgent oldest-first, then high, medium, low, none"
         );
@@ -803,12 +820,12 @@ mod tests {
     fn an_unknown_priority_sorts_after_none() {
         let board = board(
             &[
-                filed_as("pi.1", 10, "triage", "blocker", None),
-                filed_as("pi.2", 20, "triage", "none", None),
+                filed_as("pi.1", 10, "backlog", "blocker", None),
+                filed_as("pi.2", 20, "backlog", "none", None),
             ],
             &reads(Vec::new(), Vec::new(), None),
         );
-        assert_eq!(ids(&board.triage), ["pi.2", "pi.1"]);
+        assert_eq!(ids(&board.backlog), ["pi.2", "pi.1"]);
     }
 
     #[test]
@@ -833,7 +850,7 @@ mod tests {
              minutes old though it is"
         );
         assert_eq!(board.closed[1].status, "canceled");
-        assert!(board.triage.is_empty(), "a closed flight leaves its group");
+        assert!(board.backlog.is_empty(), "a closed flight leaves its group");
     }
 
     #[test]
@@ -1192,7 +1209,7 @@ mod tests {
             &reads(Vec::new(), Vec::new(), None),
         );
         assert_eq!(
-            ids(&board.triage),
+            ids(&board.backlog),
             ["pi.1", "pi.3"],
             "the parent and the grandchild, filed order within the group"
         );
@@ -1219,10 +1236,10 @@ mod tests {
             ],
             &reads(Vec::new(), Vec::new(), None),
         );
-        assert_eq!(ids(&board.triage), ["pi.1", "pi.3"]);
-        assert_eq!(board.triage[0].progress, Some((1, 2)));
+        assert_eq!(ids(&board.backlog), ["pi.1", "pi.3"]);
+        assert_eq!(board.backlog[0].progress, Some((1, 2)));
         assert!(
-            board.triage[1].progress.is_none(),
+            board.backlog[1].progress.is_none(),
             "a child with no children of its own carries no mark"
         );
         assert_eq!(ids(&board.closed), ["pi.2"]);
@@ -1243,13 +1260,13 @@ mod tests {
         );
         assert_eq!(ids(&board.waiting_on_you.questions), ["pi.2"]);
         assert_eq!(ids(&board.held), ["pi.2"]);
-        assert_eq!(ids(&board.triage), ["pi.1"]);
+        assert_eq!(ids(&board.backlog), ["pi.1"]);
     }
 
     #[test]
     fn a_flight_with_no_children_carries_no_progress_mark() {
         let board = board(&[filed("pi.1", 10)], &reads(Vec::new(), Vec::new(), None));
-        assert!(board.triage[0].progress.is_none());
+        assert!(board.backlog[0].progress.is_none());
     }
 
     #[test]
@@ -1262,7 +1279,7 @@ mod tests {
                 Some("main"),
             ),
         );
-        let view = &board.triage[0];
+        let view = &board.backlog[0];
         assert_eq!(view.id, "pi.1");
         assert_eq!(view.number, 1);
         assert_eq!(view.branch.as_deref(), Some("main"));
@@ -1277,11 +1294,11 @@ mod tests {
             &[filed("pi.1", 10)],
             &reads(Vec::new(), Vec::new(), Some("main")),
         );
-        let view = &board.triage[0];
+        let view = &board.backlog[0];
         assert!(view.branch.is_none() && view.tip.is_none() && view.last_change.is_none());
         assert!(!view.held && !view.resolving && !view.current);
         assert!(!view.stale && !view.changed_since_ready);
-        assert_eq!(view.status, "triage");
+        assert_eq!(view.status, "backlog");
         assert!(view.status_by.is_none() && view.status_at.is_none());
         assert!(view.assignee.is_none());
         assert_eq!(view.priority, "none");
@@ -1302,7 +1319,7 @@ mod tests {
                 None,
             ),
         );
-        let view = &board.triage[0];
+        let view = &board.backlog[0];
         assert_eq!(view.branch.as_deref(), Some("@detached"));
         assert!(view.tip.is_none());
         assert!(!view.held && !view.resolving);
@@ -1318,8 +1335,8 @@ mod tests {
                 None,
             ),
         );
-        assert_eq!(board.triage[0].branch.as_deref(), Some("new"));
-        assert_eq!(board.triage[0].last_change, Some(60));
+        assert_eq!(board.backlog[0].branch.as_deref(), Some("new"));
+        assert_eq!(board.backlog[0].last_change, Some(60));
     }
 
     #[test]
@@ -1383,8 +1400,8 @@ mod tests {
                 pairs: vec![collide("left", "right", &["shared.txt"])],
             },
         );
-        let one = board.triage.iter().find(|v| v.id == "pi.1").unwrap();
-        let two = board.triage.iter().find(|v| v.id == "pi.2").unwrap();
+        let one = board.backlog.iter().find(|v| v.id == "pi.1").unwrap();
+        let two = board.backlog.iter().find(|v| v.id == "pi.2").unwrap();
         assert_eq!(one.collides.len(), 1);
         assert_eq!(one.collides[0].with, "pi.2");
         assert_eq!(one.collides[0].paths, ["shared.txt"]);
@@ -1412,11 +1429,11 @@ mod tests {
                 )],
             },
         );
-        for view in &board.triage {
+        for view in &board.backlog {
             assert!(view.collides.is_empty());
             assert_eq!(view.unanswered.len(), 1);
         }
-        let one = board.triage.iter().find(|v| v.id == "pi.1").unwrap();
+        let one = board.backlog.iter().find(|v| v.id == "pi.1").unwrap();
         assert_eq!(one.unanswered, ["pi.2"]);
     }
 
@@ -1442,7 +1459,7 @@ mod tests {
                 pairs: vec![pairing("a", "b", Pairing::Clear)],
             },
         );
-        for view in &board.triage {
+        for view in &board.backlog {
             assert!(view.collides.is_empty(), "{view:?}");
             assert!(view.unanswered.is_empty(), "{view:?}");
         }
@@ -1463,7 +1480,7 @@ mod tests {
                 pairs: vec![collide("work", "work", &["shared.txt"])],
             },
         );
-        for view in &board.triage {
+        for view in &board.backlog {
             assert!(view.collides.is_empty());
             assert!(view.unanswered.is_empty());
         }
@@ -1487,7 +1504,7 @@ mod tests {
             },
         );
         assert_eq!(board.waiting_on_you.questions[0].collides[0].with, "pi.2");
-        assert_eq!(board.triage[0].collides[0].with, "pi.1");
+        assert_eq!(board.backlog[0].collides[0].with, "pi.1");
     }
 
     #[test]
@@ -1509,7 +1526,7 @@ mod tests {
         );
         assert!(board.closed[0].collides.is_empty());
         assert!(
-            board.triage[0].collides.is_empty(),
+            board.backlog[0].collides.is_empty(),
             "a closed flight is not a live partner either"
         );
     }
@@ -1537,7 +1554,7 @@ mod tests {
                 pairs: vec![collide("c", "b", &["y.txt"]), collide("a", "b", &["x.txt"])],
             },
         );
-        let two = board.triage.iter().find(|v| v.id == "pi.2").unwrap();
+        let two = board.backlog.iter().find(|v| v.id == "pi.2").unwrap();
         let withs: Vec<&str> = two.collides.iter().map(|c| c.with.as_str()).collect();
         assert_eq!(withs, ["pi.1", "pi.3"]);
     }

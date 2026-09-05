@@ -149,7 +149,7 @@ pub enum Command {
         /// `warm` builds a tree ahead of whoever flies it.
         #[arg(long = "bay", value_name = "bay")]
         bay: Option<String>,
-        /// The status the flight is born with — triage, ready, or
+        /// The status the flight is born with — backlog, ready, or
         /// in_progress; beats `tower.defaultFileStatus` for this filing.
         #[arg(long = "status", value_name = "status")]
         status: Option<String>,
@@ -253,7 +253,7 @@ pub enum Command {
         /// The flight — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
-        /// Where it moves: triage, waiting, ready, in_progress, held,
+        /// Where it moves: backlog, waiting, ready, in_progress, held,
         /// done, or canceled.
         #[arg(value_name = "status")]
         status: String,

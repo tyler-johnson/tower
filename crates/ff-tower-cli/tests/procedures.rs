@@ -279,7 +279,7 @@ fn a_flight_with_an_unfileable_status_is_refused_naming_the_file_and_the_flight(
     assert_eq!(
         refusal["error"]["message"],
         serde_json::json!(format!(
-            "procedure `parked` ({}): flight `wait` declares status `held` — triage, ready, or in_progress",
+            "procedure `parked` ({}): flight `wait` declares status `held` — backlog, ready, or in_progress",
             at.display()
         ))
     );
@@ -291,12 +291,12 @@ fn a_flight_with_an_unfileable_status_is_refused_naming_the_file_and_the_flight(
     // The fileable words load, and the detail shows the one declared.
     repo.write(
         ".tower/procedures/parked.toml",
-        "name = \"parked\"\n\n[[flight]]\nid       = \"wait\"\nassignee = \"me\"\nstatus   = \"triage\"\n",
+        "name = \"parked\"\n\n[[flight]]\nid       = \"wait\"\nassignee = \"me\"\nstatus   = \"backlog\"\n",
     );
     let one = envelope(&ff_tower(repo.path(), &["procedures", "parked", "--json"]));
     assert_eq!(
         one["data"]["procedure"]["flights"][0]["status"],
-        serde_json::json!("triage")
+        serde_json::json!("backlog")
     );
 }
 

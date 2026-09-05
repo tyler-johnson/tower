@@ -10,7 +10,7 @@
 //! The board is the inbox pinned above the status groups, and the groups
 //! are the stored model in lifecycle order. Glyphs carry the meaning
 //! independent of color: `?` a question stopped on you, `!` yours, `·`
-//! triage, `⋯` waiting, `○` ready, `▸` in progress, `‖` held, `▪` done,
+//! backlog, `⋯` waiting, `○` ready, `▸` in progress, `‖` held, `▪` done,
 //! `▫` canceled.
 //! A local vocabulary, not fufu's — `@ ● ✓ ✕` name git objects, not
 //! flight states.
@@ -251,7 +251,7 @@ pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String
             board.waiting_on_you.questions.iter().collect(),
         ),
         ("yours", '!', board.waiting_on_you.yours.iter().collect()),
-        ("triage", '·', board.triage.iter().collect()),
+        ("backlog", '·', board.backlog.iter().collect()),
         ("waiting", '⋯', board.waiting.iter().collect()),
         ("ready", '○', board.ready.iter().collect()),
         ("in progress", '▸', board.in_progress.iter().collect()),
@@ -398,7 +398,7 @@ mod tests {
                 questions: Vec::new(),
                 yours: Vec::new(),
             },
-            triage: Vec::new(),
+            backlog: Vec::new(),
             waiting: Vec::new(),
             ready: Vec::new(),
             in_progress: Vec::new(),

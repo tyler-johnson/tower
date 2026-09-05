@@ -181,7 +181,7 @@ after    = ["pass", "smoke"]
                 procedure: Some("chore".to_string()),
                 subject: subject.to_string(),
                 body: String::new(),
-                status: "triage".to_string(),
+                status: "backlog".to_string(),
                 assignee: None,
                 priority: "none".to_string(),
                 labels: Vec::new(),
@@ -231,7 +231,7 @@ after    = ["pass", "smoke"]
         );
         let parent = child(&outcome.parent);
         assert_eq!(parent.depends_on.len(), 2);
-        assert_eq!(parent.status, "triage", "the mint never re-stamps");
+        assert_eq!(parent.status, "backlog", "the mint never re-stamps");
     }
 
     #[test]

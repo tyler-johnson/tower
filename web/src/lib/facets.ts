@@ -11,7 +11,7 @@ export interface Facet {
   count: number;
 }
 
-const SECTIONS = ["triage", "waiting", "ready", "in_progress", "held", "done", "canceled"];
+const SECTIONS = ["backlog", "waiting", "ready", "in_progress", "held", "done", "canceled"];
 const PRIORITIES = ["urgent", "high", "medium", "low", "none"];
 const FLAGS = ["true", "false"];
 

@@ -126,7 +126,7 @@ mod tests {
                 procedure: None,
                 subject: subject.to_string(),
                 body: String::new(),
-                status: "triage".to_string(),
+                status: "backlog".to_string(),
                 assignee: None,
                 priority: "none".to_string(),
                 labels: Vec::new(),

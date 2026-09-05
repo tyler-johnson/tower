@@ -230,7 +230,7 @@ fn invalid_values_exit_2_and_write_nothing() {
     assert_eq!(
         envelope["error"]["message"],
         serde_json::json!(
-            "invalid value for defaultFileStatus: want one of triage, ready, in_progress"
+            "invalid value for defaultFileStatus: want one of backlog, ready, in_progress"
         )
     );
     // A real status that cannot be filed is off the list too.
@@ -247,7 +247,7 @@ fn invalid_values_exit_2_and_write_nothing() {
     assert!(!listed.contains("tower.defaultfilestatus"), "{listed}");
 
     // The listed words set, and read back.
-    for word in ["triage", "ready", "in_progress"] {
+    for word in ["backlog", "ready", "in_progress"] {
         let text = stdout(&ff_tower(
             repo.path(),
             &["config", "defaultFileStatus", word],

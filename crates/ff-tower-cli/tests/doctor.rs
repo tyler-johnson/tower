@@ -314,3 +314,37 @@ fn a_procedure_that_ends_on_an_agent_is_a_finding() {
     );
     assert_eq!(findings, 0);
 }
+
+#[test]
+fn a_default_file_status_no_flight_can_be_filed_with_is_a_finding() {
+    // The word the status was called before the rename, left in git
+    // config: filings would silently land Ready, so doctor names it.
+    let repo = repo();
+    repo.git(&["config", "tower.defaultFileStatus", "triage"]);
+
+    let out = ff_tower(repo.path(), &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let (all, findings) = rows(&out);
+    let stale = row(&all, "config/default-file-status");
+    assert_eq!(stale["level"], serde_json::json!("warn"));
+    let message = stale["message"].as_str().expect("message");
+    assert!(message.contains("`triage`"), "{message}");
+    assert!(message.contains("filings land ready"), "{message}");
+    assert!(
+        message.contains("config defaultFileStatus backlog"),
+        "{message}"
+    );
+    assert_eq!(findings, 1);
+
+    // The new word, or no setting at all, is no row.
+    repo.git(&["config", "tower.defaultFileStatus", "backlog"]);
+    let out = ff_tower(repo.path(), &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let (all, findings) = rows(&out);
+    assert!(
+        !all.iter()
+            .any(|row| row["check"] == serde_json::json!("config/default-file-status")),
+        "{all:?}"
+    );
+    assert_eq!(findings, 0);
+}

@@ -176,7 +176,7 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "usage/bad-status",
         summary: "that is not a status",
-        detail: "The statuses are a closed vocabulary — triage, waiting, ready, in_progress, \
+        detail: "The statuses are a closed vocabulary — backlog, waiting, ready, in_progress, \
                  held, done, canceled — and the word given is not among them. The refusal lives \
                  at the verb so the log never has to guess: the wire itself stays a free \
                  string, and a newer tower's value folds through untouched.",
@@ -203,7 +203,7 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "usage/file-status",
         summary: "that is not a status a flight can be filed with",
-        detail: "`--status` takes the words a filing can be born with — triage, ready, \
+        detail: "`--status` takes the words a filing can be born with — backlog, ready, \
                  in_progress — and the word given is not one of them. Waiting and held are \
                  derived: the fold reads them off the edges and the open question, so they are \
                  never written. Done and canceled are closed, and filing something closed is \
@@ -532,7 +532,7 @@ pub static ENTRIES: &[Entry] = &[
         id: "procedure/bad-status",
         summary: "a flight declares a status it cannot be filed with",
         detail: "A `[[flight]]`'s `status` is the word the flight is born with, and the only \
-                 words a filing can be born with are triage, ready, and in_progress — the \
+                 words a filing can be born with are backlog, ready, and in_progress — the \
                  same list `--status` and `tower.defaultFileStatus` take. Waiting and held are \
                  derived from the edges and the question, and done and canceled are closed. \
                  The message names the file and the flight; leave `status` out to take the \

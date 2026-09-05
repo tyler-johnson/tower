@@ -533,7 +533,7 @@ mod tests {
                 stored("pi.2", 20, "ready", Some("me")),
                 stored("pi.3", 30, "ready", Some("pair")),
                 stored("pi.4", 40, "ready", Some("agent")),
-                stored("pi.5", 50, "triage", Some("agent")),
+                stored("pi.5", 50, "backlog", Some("agent")),
                 stored("pi.6", 60, "ready", Some("agent")),
                 linked("pi.7", 70, "pi.6", "pi.5"),
             ]),
@@ -546,7 +546,7 @@ mod tests {
         assert!(picks.passed.is_empty(), "excluded silently, never passed");
         assert_eq!(
             picks.yours, 3,
-            "Ready off the agent lane counts; Triage and Waiting do not"
+            "Ready off the agent lane counts; Backlog and Waiting do not"
         );
     }
 

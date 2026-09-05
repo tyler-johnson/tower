@@ -167,7 +167,7 @@ pub fn registry() -> &'static [Setting] {
             kind: SettingKind::Choice(Status::FILEABLE),
             desc: &[
                 "The status `ff tower file` gives a flight that says nothing else:",
-                "ready clears it for work at once, triage parks it for a person.",
+                "ready clears it for work at once, backlog parks it for a person.",
                 "--status beats this for one filing, and a procedure flight that",
                 "declares its own status keeps it.",
             ],
@@ -718,7 +718,7 @@ mod tests {
             assert_eq!(err.id(), "usage/bad-value");
             assert_eq!(
                 err.to_string(),
-                "invalid value for defaultFileStatus: want one of triage, ready, in_progress"
+                "invalid value for defaultFileStatus: want one of backlog, ready, in_progress"
             );
         }
     }
@@ -733,9 +733,9 @@ mod tests {
             "unset is the default"
         );
 
-        fixture.git(&["config", "tower.defaultFileStatus", "triage"]);
+        fixture.git(&["config", "tower.defaultFileStatus", "backlog"]);
         let config = Config::open(fixture.path()).expect("reopen");
-        assert_eq!(default_file_status(&config), "triage");
+        assert_eq!(default_file_status(&config), "backlog");
 
         fixture.git(&["config", "tower.defaultFileStatus", "in_progress"]);
         let config = Config::open(fixture.path()).expect("reopen");

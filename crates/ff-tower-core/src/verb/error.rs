@@ -47,7 +47,7 @@ pub enum Error {
     NeedsNote,
     /// A word the status vocabulary does not carry.
     #[error(
-        "`{word}` is not a status — triage, waiting, ready, in_progress, held, done, or canceled"
+        "`{word}` is not a status — backlog, waiting, ready, in_progress, held, done, or canceled"
     )]
     BadStatus { word: String },
     /// `waiting` typed as a move — the fold derives it from the edges.
@@ -65,7 +65,7 @@ pub enum Error {
     BadAssignee { word: String },
     /// `--status` with a word a flight cannot be filed with: not a
     /// status at all, one the fold derives, or one that is closed.
-    #[error("`{word}` cannot be filed — triage, ready, or in_progress")]
+    #[error("`{word}` cannot be filed — backlog, ready, or in_progress")]
     FileStatus { word: String },
     /// A lifecycle verb reaching a flight that is already off the board.
     #[error("`{display}` is done — the log keeps its record")]

@@ -16,8 +16,10 @@ use std::path::Path;
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, DoctorRow, Level, Reads, SeamHealth};
+use ff_tower_core::config::{self, Config};
 use ff_tower_core::ff::{self, BranchList};
 use ff_tower_core::log::Store;
+use ff_tower_core::model::Status;
 use ff_tower_core::procedure::Assignee;
 use ff_tower_core::{procedure, skill};
 
@@ -62,6 +64,10 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         if row.level == Level::Warn {
             report.findings += 1;
         }
+        report.rows.push(row);
+    }
+    if let Some(row) = stale_default_status(ff.repo()) {
+        report.findings += 1;
         report.rows.push(row);
     }
     // The update row rides both arms: the passive lane's cache answers
@@ -173,6 +179,26 @@ fn registry_rows(root: Option<&Path>) -> Vec<DoctorRow> {
         }
     }
     rows
+}
+
+/// The setting a filing reads falls back to Ready without a word when
+/// the set value is not one a flight can be filed with — so a
+/// `defaultFileStatus = triage` left in git config from before the
+/// rename would change every filing silently. Doctor is where it says so.
+fn stale_default_status(repo: &Path) -> Option<DoctorRow> {
+    let config = Config::open(repo).ok()?;
+    let setting = config::lookup("defaultFileStatus").ok()?;
+    let value = config.read(setting).value?;
+    if Status::fileable(&value).is_some() {
+        return None;
+    }
+    Some(DoctorRow {
+        level: Level::Warn,
+        check: "config/default-file-status".to_string(),
+        message: format!(
+            "tower.defaultFileStatus is `{value}`, not a word a flight can be filed with — filings land ready; ff tower config defaultFileStatus backlog"
+        ),
+    })
 }
 
 /// The tail of an unresolved-skill row. The engine ships empty, so no

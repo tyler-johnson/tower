@@ -87,7 +87,7 @@ pub fn matches_cli(served: &str, cli: &str) {
         serde_json::from_str(served.trim_end()).expect("the served envelope");
     let cli: serde_json::Value = serde_json::from_str(cli.trim_end()).expect("the CLI envelope");
     assert_eq!(served["cmd"], serde_json::json!("board"));
-    for key in ["triage", "waiting", "ready", "in_progress", "held"] {
+    for key in ["backlog", "waiting", "ready", "in_progress", "held"] {
         let rows = cli["data"][key]
             .as_array()
             .cloned()

@@ -105,7 +105,7 @@ mod tests {
                 procedure: None,
                 subject: subject.to_string(),
                 body: String::new(),
-                status: "triage".to_string(),
+                status: "backlog".to_string(),
                 assignee: None,
                 priority: "none".to_string(),
                 labels: Vec::new(),
@@ -179,7 +179,7 @@ mod tests {
                 .err()
                 .expect("not a status"),
             "usage/bad-status",
-            "`claimed` is not a status — triage, waiting, ready, in_progress, held, done, or canceled",
+            "`claimed` is not a status — backlog, waiting, ready, in_progress, held, done, or canceled",
             &[],
         );
         pinned(

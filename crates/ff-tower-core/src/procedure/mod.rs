@@ -146,7 +146,7 @@ pub struct FlightDef {
     #[serde(default)]
     pub labels: Vec<String>,
     /// The status the flight is born with, one of the fileable words —
-    /// triage, ready, in_progress. Unsaid, the flight takes the word
+    /// backlog, ready, in_progress. Unsaid, the flight takes the word
     /// `file` resolves for rows that declare nothing. Validated at load
     /// against the closed list, since a filed word is what the log keeps.
     #[serde(default)]
@@ -605,7 +605,7 @@ pub enum Error {
     /// A status a flight cannot be filed with: not a word at all, one
     /// the fold derives, or one that is closed.
     #[error(
-        "procedure `{name}` ({at}): flight `{part}` declares status `{word}` — triage, ready, or in_progress"
+        "procedure `{name}` ({at}): flight `{part}` declares status `{word}` — backlog, ready, or in_progress"
     )]
     BadStatus {
         name: String,

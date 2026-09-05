@@ -53,7 +53,7 @@ fn file(repo: &Path, subject: &str) {
             procedure: None,
             subject: subject.to_string(),
             body: String::new(),
-            status: "triage".to_string(),
+            status: "backlog".to_string(),
             assignee: None,
             priority: "none".to_string(),
             labels: Vec::new(),
@@ -414,7 +414,7 @@ fn edit_rewords_a_flight_and_a_comment_over_http() {
     );
     let (_, _, board) = http(&server.addr, "/api/board");
     let board: serde_json::Value = serde_json::from_str(&board).expect("the board envelope");
-    let row = &group(&board, "triage")[0];
+    let row = &group(&board, "backlog")[0];
     assert_eq!(row["subject"], json!("the right subject"));
     assert_eq!(row["priority"], json!("high"));
     assert_eq!(row["labels"], json!(["chore"]));
@@ -787,7 +787,7 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
     // untouched flight.
     let out = ff_tower(repo.path(), &["--json"]);
     let board: serde_json::Value = serde_json::from_slice(&out.stdout).expect("the board envelope");
-    assert_eq!(board["data"]["triage"].as_array().expect("open").len(), 1);
+    assert_eq!(board["data"]["backlog"].as_array().expect("open").len(), 1);
 }
 
 #[test]

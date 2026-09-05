@@ -83,7 +83,7 @@ export function neighbors(
 /// of names no section at all.
 export function section(status: string): string | null {
   switch (status) {
-    case "triage":
+    case "backlog":
     case "waiting":
     case "ready":
     case "in_progress":
@@ -243,7 +243,7 @@ export function statusDot(status: string): string {
       return "status-error";
     case "done":
       return "status-success";
-    case "triage":
+    case "backlog":
     case "canceled":
     default:
       return "status-neutral";
@@ -265,7 +265,7 @@ export function statusWord(status: string): string {
 export function groupTitle(key: string | null): string {
   if (key === null) return "none";
   switch (key) {
-    case "triage":
+    case "backlog":
     case "waiting":
     case "ready":
     case "in_progress":

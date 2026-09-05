@@ -151,14 +151,14 @@ fn a_ready_flight_off_the_agent_lane_is_the_exit_3_needs_you() {
 }
 
 #[test]
-fn a_triage_filing_is_never_pulled_and_the_board_drains_to_1() {
+fn a_backlog_filing_is_never_pulled_and_the_board_drains_to_1() {
     let repo = repo();
     stdout(&ff_tower(
         repo.path(),
-        &["file", "unclassified work", "--status", "triage"],
+        &["file", "unclassified work", "--status", "backlog"],
     ));
-    // Even in the agent lane: Triage is not Ready, and nothing leaves
-    // Triage but a person's gesture.
+    // Even in the agent lane: Backlog is not Ready, and nothing leaves
+    // Backlog but a person's gesture.
     stdout(&ff_tower(repo.path(), &["assign", "1", "agent"]));
 
     let out = ff_tower(repo.path(), &["next"]);
@@ -167,7 +167,7 @@ fn a_triage_filing_is_never_pulled_and_the_board_drains_to_1() {
     assert!(text.contains("nothing ready\n"), "{text}");
     assert!(
         !text.contains("need you"),
-        "Triage is not yours-Ready: {text}"
+        "Backlog is not yours-Ready: {text}"
     );
 
     // The person's gesture is what clears it.

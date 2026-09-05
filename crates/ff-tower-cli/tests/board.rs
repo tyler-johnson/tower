@@ -67,7 +67,7 @@ fn repo_with_a_filing() -> Repo {
             procedure: None,
             subject: "write the doctor verb".to_string(),
             body: String::new(),
-            status: "triage".to_string(),
+            status: "backlog".to_string(),
             assignee: None,
             priority: "none".to_string(),
             labels: Vec::new(),
@@ -91,7 +91,7 @@ fn json_emits_towers_envelope_and_round_trips() {
     let data = envelope["data"].as_object().expect("data is an object");
     for key in [
         "waiting_on_you",
-        "triage",
+        "backlog",
         "waiting",
         "ready",
         "in_progress",
@@ -107,14 +107,14 @@ fn json_emits_towers_envelope_and_round_trips() {
     for key in ["questions", "yours"] {
         assert!(inbox.contains_key(key), "the inbox is missing `{key}`");
     }
-    assert_eq!(data["triage"][0]["id"], serde_json::json!("pi.1"));
-    assert_eq!(data["triage"][0]["stale"], serde_json::json!(false));
+    assert_eq!(data["backlog"][0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(data["backlog"][0]["stale"], serde_json::json!(false));
     assert_eq!(
-        data["triage"][0]["changed_since_ready"],
+        data["backlog"][0]["changed_since_ready"],
         serde_json::json!(false)
     );
-    assert!(data["triage"][0]["last_change"].is_null());
-    assert!(data["triage"][0]["progress"].is_null());
+    assert!(data["backlog"][0]["last_change"].is_null());
+    assert!(data["backlog"][0]["progress"].is_null());
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn a_piped_render_is_plain_text_and_names_its_groups() {
         "piped output has escape bytes: {out:?}"
     );
     assert!(
-        out.contains("triage\n"),
+        out.contains("backlog\n"),
         "the group header is the derived status: {out}"
     );
     assert!(out.contains("#1"));
@@ -240,7 +240,7 @@ fn the_groups_are_the_derived_statuses_in_lifecycle_order() {
     repo.pin_writer("pi");
     stdout(&ff_tower(
         repo.path(),
-        &["file", "one", "--status", "triage"],
+        &["file", "one", "--status", "backlog"],
     ));
     for subject in ["two", "three", "four"] {
         stdout(&ff_tower(repo.path(), &["file", subject]));
@@ -250,7 +250,7 @@ fn the_groups_are_the_derived_statuses_in_lifecycle_order() {
     stdout(&ff_tower(repo.path(), &["status", "4", "in_progress"]));
 
     let out = stdout(&ff_tower(repo.path(), &[]));
-    let order: Vec<usize> = ["triage\n", "waiting\n", "ready\n", "in progress\n"]
+    let order: Vec<usize> = ["backlog\n", "waiting\n", "ready\n", "in progress\n"]
         .iter()
         .map(|title| {
             out.find(title)
@@ -264,7 +264,7 @@ fn the_groups_are_the_derived_statuses_in_lifecycle_order() {
 
     let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
     let data = &envelope["data"];
-    assert_eq!(data["triage"][0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(data["backlog"][0]["id"], serde_json::json!("pi.1"));
     assert_eq!(data["waiting"][0]["id"], serde_json::json!("pi.2"));
     assert_eq!(data["ready"][0]["id"], serde_json::json!("pi.3"));
     assert_eq!(data["in_progress"][0]["id"], serde_json::json!("pi.4"));

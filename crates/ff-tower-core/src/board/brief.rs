@@ -139,7 +139,7 @@ pub enum Standing {
     /// it says who.
     InProgress,
     /// Not in the pool by the status and the lane alone: not Ready —
-    /// Triage, or Waiting on a live dependency — or not in the agent
+    /// Backlog, or Waiting on a live dependency — or not in the agent
     /// lane. Unknown never rounds down.
     Yours,
     /// In the pool and admitted by the full walk.
@@ -423,7 +423,7 @@ mod tests {
                 procedure: None,
                 subject: subject.to_string(),
                 body: body.to_string(),
-                status: "triage".to_string(),
+                status: "backlog".to_string(),
                 assignee: None,
                 priority: "none".to_string(),
                 labels: Vec::new(),
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(brief.body, "the body\ntwo lines");
         assert_eq!(brief.filed_by, "filer@b.c");
         assert_eq!(brief.filed_at, 10);
-        assert_eq!(brief.status, "triage");
+        assert_eq!(brief.status, "backlog");
         assert!(brief.status_by.is_none() && brief.status_at.is_none());
         assert!(brief.assignee.is_none());
         assert_eq!(brief.priority, "none");
@@ -744,7 +744,7 @@ mod tests {
         assert_eq!(two.blocks.len(), 1);
         assert_eq!(two.blocks[0].flight, "pi.1");
         assert_eq!(two.blocks[0].subject, "the dependent");
-        assert_eq!(two.blocks[0].status, "triage");
+        assert_eq!(two.blocks[0].status, "backlog");
         assert!(!two.blocks[0].closed);
         assert!(two.depends_on.is_empty());
     }
@@ -992,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn a_triage_flight_is_yours_with_no_lane() {
+    fn a_backlog_flight_is_yours_with_no_lane() {
         let brief = brief_of(
             &[filed("pi.1", 10, "s", "")],
             &reads(Vec::new(), Vec::new(), None),

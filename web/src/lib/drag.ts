@@ -23,7 +23,7 @@ import { write, type Write } from "./write";
 /// rather than a field's value.
 export type Drop = Write | { verb: "done" | "cancel"; body: { flight: string } };
 
-const STATUSES = ["triage", "waiting", "ready", "in_progress", "held", "done", "canceled"];
+const STATUSES = ["backlog", "waiting", "ready", "in_progress", "held", "done", "canceled"];
 const PRIORITIES = ["urgent", "high", "medium", "low", "none"];
 const LANES = ["me", "agent", null];
 
@@ -105,7 +105,7 @@ function statusDrop(view: FlightView, to: string | null): Drop | null {
       return { verb: "done", body: { flight } };
     case "canceled":
       return { verb: "cancel", body: { flight } };
-    case "triage":
+    case "backlog":
     case "ready":
     case "in_progress":
       if (view.question !== null) return null;

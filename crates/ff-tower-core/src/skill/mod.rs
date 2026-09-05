@@ -321,13 +321,13 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        std::fs::write(repo.join("triage.md"), "# triage\n").unwrap();
+        std::fs::write(repo.join("sort.md"), "# sort\n").unwrap();
         // The name is the stem; a non-`.md` neighbor is not a skill.
         std::fs::write(repo.join("notes.txt"), "not a skill").unwrap();
 
         let installed = layered(Some(&dir.path().join("never-made")), Some(&repo)).expect("loads");
-        assert_eq!(installed.names(), ["triage"]);
-        assert_eq!(installed.get("triage").expect("triage").summary(), "triage");
+        assert_eq!(installed.names(), ["sort"]);
+        assert_eq!(installed.get("sort").expect("sort").summary(), "sort");
     }
 
     #[test]

@@ -49,7 +49,7 @@ function flight(
 describe("the drag", () => {
   it("a grouping seeds its vocabulary", () => {
     expect(seeded("status")).toEqual([
-      "triage",
+      "backlog",
       "waiting",
       "ready",
       "in_progress",
@@ -68,6 +68,10 @@ describe("the drag", () => {
     expect(drop("status", ready, "ready", "in_progress")).toEqual({
       verb: "status",
       body: { flight: ready.id, status: "in_progress" },
+    });
+    expect(drop("status", ready, "ready", "backlog")).toEqual({
+      verb: "status",
+      body: { flight: ready.id, status: "backlog" },
     });
     expect(drop("status", ready, "ready", "done")).toEqual({
       verb: "done",

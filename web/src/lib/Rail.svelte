@@ -23,7 +23,7 @@
   /// from a question: neither is a fact a word can assign, so core refuses
   /// both and neither is offered. A flight standing in one of them shows
   /// it as the current value, unpickable.
-  const STATUSES = ["triage", "ready", "in_progress", "done", "canceled"];
+  const STATUSES = ["backlog", "ready", "in_progress", "done", "canceled"];
   /// `none` is the wire word for clearing the lane, the CLI's own.
   const LANES = ["me", "agent", "none"];
   const PRIORITIES = ["urgent", "high", "medium", "low", "none"];

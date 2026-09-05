@@ -13,7 +13,7 @@
 //! of survives the fold intact and simply matches nothing.
 //!
 //! Status is the one field the fold derives rather than stores. A status
-//! word in the log assigns the facts in [`Stand`] — in triage, started,
+//! word in the log assigns the facts in [`Stand`] — in backlog, started,
 //! closed — and the question and the edges are facts of their own; a
 //! post-pass projects the seven words back out of them. Waiting and
 //! Ready are never written: a flight with a live dependency is Waiting
@@ -123,7 +123,7 @@ impl Flight {
 /// flight the edges alone decide.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Stand {
-    pub triage: bool,
+    pub backlog: bool,
     pub started: bool,
     /// "done" or "canceled".
     pub closed: Option<String>,
@@ -137,8 +137,10 @@ pub struct Stand {
 /// beside them until a known word lands.
 fn assign(stand: &mut Stand, word: &str) {
     *stand = match word {
-        "triage" => Stand {
-            triage: true,
+        // `triage` is what the log said before the rename: read here as
+        // the Backlog fact forever, written nowhere.
+        "backlog" | "triage" => Stand {
+            backlog: true,
             ..Stand::default()
         },
         "ready" | "waiting" | "held" => Stand::default(),
@@ -623,7 +625,7 @@ pub fn fold(events: &[Event]) -> Fold {
 /// 1. A foreign word stands verbatim — unknown never rounds down.
 /// 2. Closed is closed, whatever the edges say.
 /// 3. An open question is Held.
-/// 4. Triage.
+/// 4. Backlog.
 /// 5. Started is In Progress — a pull beats an open dependency, because
 ///    someone is flying it and the board should say so.
 /// 6. Any dependency not closed is Waiting.
@@ -659,8 +661,8 @@ fn derive(flights: &mut [Flight], by_id: &HashMap<&EventId, usize>) {
                 }),
                 None,
             )
-        } else if stand.triage {
-            ("triage".to_string(), flight.moved.clone(), None)
+        } else if stand.backlog {
+            ("backlog".to_string(), flight.moved.clone(), None)
         } else if stand.started {
             ("in_progress".to_string(), flight.moved.clone(), None)
         } else {
@@ -713,7 +715,7 @@ mod tests {
         }
     }
 
-    /// A bare filing — Triage, no lane, default fields.
+    /// A bare filing — Backlog, no lane, default fields.
     fn filed(id: &str, time: i64, subject: &str) -> Event {
         event(
             id,
@@ -722,7 +724,7 @@ mod tests {
                 procedure: None,
                 subject: subject.to_string(),
                 body: String::new(),
-                status: "triage".to_string(),
+                status: "backlog".to_string(),
                 assignee: None,
                 priority: "none".to_string(),
                 labels: Vec::new(),
@@ -1311,14 +1313,14 @@ mod tests {
             30
         );
 
-        // A held Triage flight answers back into Triage: nobody cleared
+        // A held Backlog flight answers back into Backlog: nobody cleared
         // it, and an answer is not a clearance.
         let parked = fold(&[
             filed("pi.1", 10, "s"),
             held("pi.2", 20, "pi.1", "which?"),
             answered("pi.3", 30, "pi.1"),
         ]);
-        assert_eq!(parked.flights[0].status, "triage");
+        assert_eq!(parked.flights[0].status, "backlog");
     }
 
     #[test]
@@ -1326,8 +1328,32 @@ mod tests {
         let fold = fold(&[filed("pi.1", 10, "s"), answered("pi.2", 20, "pi.1")]);
         assert!(fold.flights[0].question.is_none());
         assert_eq!(fold.flights[0].answered.as_ref().expect("answered").at, 20);
-        assert_eq!(fold.flights[0].status, "triage");
+        assert_eq!(fold.flights[0].status, "backlog");
         assert!(fold.unrouted.is_empty());
+    }
+
+    #[test]
+    fn the_old_word_triage_folds_as_backlog() {
+        // Logs written before the rename say `triage`, on a filing and on
+        // a move alike. The fold reads both as the Backlog fact and the
+        // derived word is the new one; nothing writes the old word again.
+        let mut old = filed("pi.1", 10, "s");
+        if let Kind::Filed { status, .. } = &mut old.kind {
+            *status = "triage".to_string();
+        }
+        let fold = fold(&[
+            old,
+            filed_agent("pi.2", 20, "t"),
+            status("pi.3", 30, "pi.2", "triage"),
+        ]);
+        assert_eq!(fold.flights[0].status, "backlog");
+        assert!(fold.flights[0].stand.backlog);
+        assert_eq!(fold.flights[1].status, "backlog");
+        assert!(fold.flights[1].stand.backlog);
+        assert!(
+            fold.flights[1].stand.foreign.is_none(),
+            "a known word, not a foreign one"
+        );
     }
 
     #[test]
@@ -1728,7 +1754,7 @@ mod tests {
         let fold = fold(&[filed("pi.1", 10, "s"), historic]);
         let flight = &fold.flights[0];
         assert_eq!(flight.procedure.as_deref(), Some("review"));
-        assert_eq!(flight.status, "triage", "nothing moved");
+        assert_eq!(flight.status, "backlog", "nothing moved");
         assert!(flight.status_mark.is_none());
         assert!(flight.assignee.is_none());
         assert_eq!(flight.priority, "none");

@@ -30,7 +30,7 @@ fn filed(subject: &str) -> Kind {
         procedure: None,
         subject: subject.to_string(),
         body: String::new(),
-        status: "triage".to_string(),
+        status: "backlog".to_string(),
         assignee: None,
         priority: "none".to_string(),
         labels: Vec::new(),
@@ -99,16 +99,16 @@ fn a_tagged_flight_carries_its_branch_and_an_untouched_one_carries_nothing() {
     let events = store.read_all().expect("read_all");
     let board = assemble(repo.path(), &events);
 
-    // Both were filed into Triage and the capture does not move them:
+    // Both were filed into Backlog and the capture does not move them:
     // the group is the stored field, and the branch is a fact beside it.
-    assert_eq!(board.triage.len(), 2);
-    let flown = board.triage.iter().find(|v| v.id == "pi.1").expect("pi.1");
+    assert_eq!(board.backlog.len(), 2);
+    let flown = board.backlog.iter().find(|v| v.id == "pi.1").expect("pi.1");
     assert_eq!(flown.branch.as_deref(), Some("main"));
     assert!(flown.tip.is_some());
     assert!(flown.current, "the fixture's worktree sits on main");
     assert!(flown.last_change.is_some());
 
-    let untouched = board.triage.iter().find(|v| v.id == "pi.2").expect("pi.2");
+    let untouched = board.backlog.iter().find(|v| v.id == "pi.2").expect("pi.2");
     assert!(untouched.branch.is_none() && untouched.last_change.is_none());
     assert!(board.waiting_on_you.questions.is_empty());
     assert!(board.unrouted.is_empty());
@@ -149,7 +149,7 @@ fn a_held_flight_assembles_into_waiting_on_you() {
     assert!(view.asked_at.is_some());
     assert_eq!(view.status, "held", "the hold is a status move too");
     assert_eq!(board.held.len(), 1, "the inbox is a view of the same row");
-    assert!(board.in_progress.is_empty() && board.triage.is_empty());
+    assert!(board.in_progress.is_empty() && board.backlog.is_empty());
 }
 
 #[test]
@@ -188,9 +188,9 @@ fn colliding_branches_carry_their_verdicts_through_the_board() {
     let events = store.read_all().expect("read_all");
     let board = assemble(repo.path(), &events);
 
-    assert_eq!(board.triage.len(), 3);
-    let one = board.triage.iter().find(|v| v.id == "pi.1").expect("pi.1");
-    let two = board.triage.iter().find(|v| v.id == "pi.2").expect("pi.2");
+    assert_eq!(board.backlog.len(), 3);
+    let one = board.backlog.iter().find(|v| v.id == "pi.1").expect("pi.1");
+    let two = board.backlog.iter().find(|v| v.id == "pi.2").expect("pi.2");
     assert_eq!(one.collides.len(), 1, "{one:?}");
     assert_eq!(one.collides[0].with, "pi.2");
     assert_eq!(one.collides[0].paths, ["shared.txt"]);
@@ -199,7 +199,7 @@ fn colliding_branches_carry_their_verdicts_through_the_board() {
     assert_eq!(two.collides[0].paths, ["shared.txt"]);
     assert!(one.unanswered.is_empty() && two.unanswered.is_empty());
 
-    let untouched = board.triage.iter().find(|v| v.id == "pi.3").expect("pi.3");
+    let untouched = board.backlog.iter().find(|v| v.id == "pi.3").expect("pi.3");
     assert!(untouched.collides.is_empty() && untouched.unanswered.is_empty());
 }
 
@@ -223,8 +223,8 @@ fn a_bay_tagged_capture_reaches_the_board_from_main() {
     let events = store.read_all().expect("read_all");
     let board = assemble(repo.path(), &events);
 
-    assert_eq!(board.triage.len(), 1, "{board:?}");
-    let view = &board.triage[0];
+    assert_eq!(board.backlog.len(), 1, "{board:?}");
+    let view = &board.backlog[0];
     assert_eq!(view.id, "pi.1");
     assert_eq!(view.branch.as_deref(), Some("feather"));
     assert!(!view.current, "the render's own worktree sits on main");

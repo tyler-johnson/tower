@@ -33,7 +33,7 @@ fn file(repo: &Path, subject: &str) {
             procedure: None,
             subject: subject.to_string(),
             body: String::new(),
-            status: "triage".to_string(),
+            status: "backlog".to_string(),
             assignee: None,
             priority: "none".to_string(),
             labels: Vec::new(),
@@ -269,7 +269,7 @@ fn the_board_after_a_save_is_unchanged_and_still_the_clis() {
     let (status, _, before) = http(&server.addr, "/api/board");
     assert_eq!(status, 200, "{before}");
 
-    let (status, _, body) = save(&server, r#"{"name":"mine","query":"status=triage"}"#);
+    let (status, _, body) = save(&server, r#"{"name":"mine","query":"status=backlog"}"#);
     assert_eq!(status, 200, "{body}");
 
     let (status, _, after) = http(&server.addr, "/api/board");

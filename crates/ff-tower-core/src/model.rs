@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
-    Triage,
+    Backlog,
     Waiting,
     Ready,
     InProgress,
@@ -29,7 +29,7 @@ impl Status {
     /// The wire name.
     pub fn name(&self) -> &'static str {
         match self {
-            Status::Triage => "triage",
+            Status::Backlog => "backlog",
             Status::Waiting => "waiting",
             Status::Ready => "ready",
             Status::InProgress => "in_progress",
@@ -43,7 +43,7 @@ impl Status {
     /// does not know.
     pub fn parse(text: &str) -> Option<Status> {
         Some(match text {
-            "triage" => Status::Triage,
+            "backlog" => Status::Backlog,
             "waiting" => Status::Waiting,
             "ready" => Status::Ready,
             "in_progress" => Status::InProgress,
@@ -57,7 +57,7 @@ impl Status {
     /// Every wire name, in lifecycle order — what a bad-status refusal
     /// lists.
     pub const NAMES: [&'static str; 7] = [
-        "triage",
+        "backlog",
         "waiting",
         "ready",
         "in_progress",
@@ -72,7 +72,7 @@ impl Status {
     /// `waiting` and `held` are derived and never written; `done` and
     /// `canceled` are closed, and filing something closed is not a
     /// filing.
-    pub const FILEABLE: &'static [&'static str] = &["triage", "ready", "in_progress"];
+    pub const FILEABLE: &'static [&'static str] = &["backlog", "ready", "in_progress"];
 
     /// The word back to the value, only for a word on [`Status::FILEABLE`].
     pub fn fileable(text: &str) -> Option<Status> {

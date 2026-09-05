@@ -2,7 +2,7 @@
 //! this verb carrying a payload.
 //!
 //! One `status` event, the byline the mover. The word assigns the facts
-//! the fold stores — in triage, started, closed — and the fold derives
+//! the fold stores — in backlog, started, closed — and the fold derives
 //! the status the board shows, so `ready` on a flight with a live
 //! dependency lands it Waiting, and the echo says so. The word is
 //! checked against the closed vocabulary here — the wire stays a free

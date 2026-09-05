@@ -21,7 +21,7 @@ twice, and a render never blocks on the network.
 
 Bare `ff tower` is the board. What needs a person is pinned on top —
 questions an agent stopped on, and your own Ready flights — and under
-it the flights group by the status the record derives: triage,
+it the flights group by the status the record derives: backlog,
 waiting, ready, in progress, held, and the three newest closed.
 --closed takes
 more or less of that last group: a count, a span like 7d, `all`, or
@@ -130,11 +130,11 @@ procedure name.
 
 Every stored field is a flag: -m the body, -p the priority, --label
 (repeatable), --skill, --assignee (me or agent), --bay, --status
-(triage, ready, or in_progress). A procedure is nothing more than
+(backlog, ready, or in_progress). A procedure is nothing more than
 those same fields saved across a graph of flights.
 
 Where a filing lands is a setting: `ff tower config
-defaultFileStatus triage` parks every bare filing for a person
+defaultFileStatus backlog` parks every bare filing for a person
 instead. --status beats the setting for one filing, and a procedure
 flight that declares its own status keeps it. A bare filing whose
 fields a match rule covers files under that rule's procedure as if
@@ -156,7 +156,7 @@ pub const FILE_EXAMPLES: &str = "\
 Examples:
   ff tower file \"fix the login redirect\"        one line, born Ready
   ff tower file \"rotate the keys\" -m \"…\"        with a body
-  ff tower file \"decide later\" --status triage    parked for a person
+  ff tower file \"decide later\" --status backlog  parked for a person
   ff tower file review feather                  under a procedure
   ff tower file \"upgrade axum\" --label chore     under whatever chore matches
   ff tower file \"upgrade axum\" -p high --label chore --assignee agent   fields at filing
@@ -333,7 +333,7 @@ Examples:
   ff tower next --peek           what the agent lane would hand out";
 
 pub const STATUS: &str = "\
-Move a flight: triage, ready, in_progress, done, or canceled. One
+Move a flight: backlog, ready, in_progress, done, or canceled. One
 event with your byline saying where you want it — the lifecycle verbs
 are this verb carrying a payload — and the record derives where it
 lands. Waiting and held are not words you can type: waiting comes
@@ -477,7 +477,7 @@ Examples:
   ff tower config                every setting, defaults marked
   ff tower config bays           what the pool root is
   ff tower config bays ../bays   set it, this repo
-  ff tower config defaultFileStatus triage   bare filings park for a person
+  ff tower config defaultFileStatus backlog   bare filings park for a person
   ff tower config --global autoUpdate false   set it, every repo
   ff tower config --unset bays   back to the default";
 

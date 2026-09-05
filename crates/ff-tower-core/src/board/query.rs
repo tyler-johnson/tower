@@ -1126,7 +1126,7 @@ fn moment_holds(filter: &Filter, held: Option<i64>, now: i64) -> bool {
 fn vocabulary(field: Field) -> &'static [&'static str] {
     match field {
         Field::Status => &[
-            "triage",
+            "backlog",
             "waiting",
             "ready",
             "in_progress",
@@ -1252,7 +1252,7 @@ fn absent_last<T: Ord>(a: Option<T>, b: Option<T>) -> Ordering {
 /// unknown priority sorts after `none`.
 fn lifecycle(status: &str) -> u8 {
     match status {
-        "triage" => 0,
+        "backlog" => 0,
         "waiting" => 1,
         "ready" => 2,
         "in_progress" => 3,
@@ -1438,7 +1438,7 @@ mod tests {
         assert_eq!(Query::parse(&rendered).expect("round trip"), query);
 
         // And the filter still matches the label it was written for.
-        let mut view = flights(&[filed("pi.1", 10, "triage", "none", None, &[awkward])]);
+        let mut view = flights(&[filed("pi.1", 10, "backlog", "none", None, &[awkward])]);
         assert!(holds(&query.filters[0], &view.remove(0), NOW));
     }
 
@@ -1461,8 +1461,8 @@ mod tests {
 
         // And the relative one actually means the last three days.
         let views = flights(&[
-            filed("pi.1", NOW - DAY, "triage", "none", None, &[]),
-            filed("pi.2", NOW - 10 * DAY, "triage", "none", None, &[]),
+            filed("pi.1", NOW - DAY, "backlog", "none", None, &[]),
+            filed("pi.2", NOW - 10 * DAY, "backlog", "none", None, &[]),
         ]);
         let filter = &Query::parse("filed=after:3d").expect("recent").filters[0];
         assert!(holds(filter, &views[0], NOW));
@@ -1530,7 +1530,7 @@ mod tests {
         let query = Query::parse("status=parked").expect("an unheard-of status parses");
         let folded = query.fold(
             flights(&[
-                filed("pi.1", 10, "triage", "none", None, &[]),
+                filed("pi.1", 10, "backlog", "none", None, &[]),
                 filed("pi.2", 20, "ready", "none", None, &[]),
             ]),
             NOW,
@@ -1544,7 +1544,7 @@ mod tests {
         // And the negation of an unknown value keeps everything.
         let query = Query::parse("status=not:parked").expect("parses");
         let folded = query.fold(
-            flights(&[filed("pi.1", 10, "triage", "none", None, &[])]),
+            flights(&[filed("pi.1", 10, "backlog", "none", None, &[])]),
             NOW,
         );
         assert_eq!(folded.filtered, 0);
@@ -1554,12 +1554,12 @@ mod tests {
     /// done and one canceled.
     fn closed_and_live() -> Vec<FlightView> {
         flights(&[
-            filed("pi.1", 10, "triage", "none", None, &[]),
+            filed("pi.1", 10, "backlog", "none", None, &[]),
             filed("pi.2", 20, "ready", "none", None, &[]),
             filed("pi.3", 30, "in_progress", "none", None, &[]),
             filed("pi.4", 40, "ready", "none", None, &[]),
             filed("pi.5", 50, "in_progress", "none", None, &[]),
-            filed("pi.6", 60, "triage", "none", None, &[]),
+            filed("pi.6", 60, "backlog", "none", None, &[]),
             filed("pi.7", 70, "ready", "none", None, &[]),
             moved("pi.8", NOW - 200, "pi.6", "done"),
             moved("pi.9", NOW - 100, "pi.7", "canceled"),
@@ -1589,7 +1589,7 @@ mod tests {
             filed("pi.2", 20, "ready", "none", Some("me"), &[]),
             filed("pi.3", 30, "in_progress", "none", Some("me"), &[]),
             filed("pi.4", 40, "ready", "none", Some("agent"), &[]),
-            filed("pi.5", 50, "triage", "none", None, &[]),
+            filed("pi.5", 50, "backlog", "none", None, &[]),
             event(
                 "pi.6",
                 60,
@@ -1649,7 +1649,7 @@ mod tests {
                 .iter()
                 .filter_map(|group| group.key.as_deref())
                 .collect::<Vec<&str>>(),
-            ["triage", "ready", "in_progress", "done", "canceled"],
+            ["backlog", "ready", "in_progress", "done", "canceled"],
             "every status the fixture reaches stands"
         );
 
@@ -1666,13 +1666,13 @@ mod tests {
         // Four closed with a window of one, and three live of which the
         // filter keeps one.
         let events = [
-            filed("pi.1", 10, "triage", "none", None, &[]),
-            filed("pi.2", 20, "triage", "none", None, &[]),
+            filed("pi.1", 10, "backlog", "none", None, &[]),
+            filed("pi.2", 20, "backlog", "none", None, &[]),
             filed("pi.3", 30, "ready", "none", None, &[]),
-            filed("pi.4", 40, "triage", "none", None, &[]),
-            filed("pi.5", 50, "triage", "none", None, &[]),
-            filed("pi.6", 60, "triage", "none", None, &[]),
-            filed("pi.7", 70, "triage", "none", None, &[]),
+            filed("pi.4", 40, "backlog", "none", None, &[]),
+            filed("pi.5", 50, "backlog", "none", None, &[]),
+            filed("pi.6", 60, "backlog", "none", None, &[]),
+            filed("pi.7", 70, "backlog", "none", None, &[]),
             moved("pi.8", NOW - 400, "pi.4", "done"),
             moved("pi.9", NOW - 300, "pi.5", "done"),
             moved("pi.10", NOW - 200, "pi.6", "canceled"),
@@ -1698,9 +1698,9 @@ mod tests {
     fn grouping_by_labels_puts_a_flight_in_every_column_it_carries() {
         let folded = Query::parse("group=label").expect("parses").fold(
             flights(&[
-                filed("pi.1", 10, "triage", "none", None, &["infra", "docs"]),
-                filed("pi.2", 20, "triage", "none", None, &["docs"]),
-                filed("pi.3", 30, "triage", "none", None, &[]),
+                filed("pi.1", 10, "backlog", "none", None, &["infra", "docs"]),
+                filed("pi.2", 20, "backlog", "none", None, &["docs"]),
+                filed("pi.3", 30, "backlog", "none", None, &[]),
             ]),
             NOW,
         );
@@ -1721,10 +1721,10 @@ mod tests {
 
     #[test]
     fn an_empty_group_is_dropped_unless_the_query_asks_for_it() {
-        let views = flights(&[filed("pi.1", 10, "triage", "none", None, &[])]);
+        let views = flights(&[filed("pi.1", 10, "backlog", "none", None, &[])]);
 
         let folded = Query::default().fold(views.clone(), NOW);
-        assert_eq!(columns(&folded), [(Some("triage"), vec!["pi.1"])]);
+        assert_eq!(columns(&folded), [(Some("backlog"), vec!["pi.1"])]);
 
         let folded = Query::parse("empty=true").expect("parses").fold(views, NOW);
         let keys: Vec<Option<&str>> = folded
@@ -1735,7 +1735,7 @@ mod tests {
         assert_eq!(
             keys,
             [
-                Some("triage"),
+                Some("backlog"),
                 Some("waiting"),
                 Some("ready"),
                 Some("in_progress"),
@@ -1752,9 +1752,9 @@ mod tests {
     fn an_unknown_priority_still_sorts_after_none() {
         let folded = Query::parse("group=&order=priority").expect("parses").fold(
             flights(&[
-                filed("pi.1", 10, "triage", "blocker", None, &[]),
-                filed("pi.2", 20, "triage", "none", None, &[]),
-                filed("pi.3", 30, "triage", "urgent", None, &[]),
+                filed("pi.1", 10, "backlog", "blocker", None, &[]),
+                filed("pi.2", 20, "backlog", "none", None, &[]),
+                filed("pi.3", 30, "backlog", "urgent", None, &[]),
             ]),
             NOW,
         );
@@ -1768,9 +1768,9 @@ mod tests {
         // unknown column after every known one.
         let folded = Query::parse("group=priority").expect("parses").fold(
             flights(&[
-                filed("pi.1", 10, "triage", "blocker", None, &[]),
-                filed("pi.2", 20, "triage", "none", None, &[]),
-                filed("pi.3", 30, "triage", "urgent", None, &[]),
+                filed("pi.1", 10, "backlog", "blocker", None, &[]),
+                filed("pi.2", 20, "backlog", "none", None, &[]),
+                filed("pi.3", 30, "backlog", "urgent", None, &[]),
             ]),
             NOW,
         );
@@ -1790,17 +1790,17 @@ mod tests {
         // that belongs in none, and four closed flights against the
         // compiled-in window of three.
         let events = [
-            filed("pi.1", 10, "triage", "low", None, &[]),
-            filed("pi.2", 20, "triage", "urgent", None, &[]),
+            filed("pi.1", 10, "backlog", "low", None, &[]),
+            filed("pi.2", 20, "backlog", "urgent", None, &[]),
             filed("pi.3", 30, "ready", "none", None, &[]),
             filed("pi.4", 40, "ready", "high", Some("me"), &[]),
             filed("pi.5", 50, "ready", "medium", Some("agent"), &[]),
             filed("pi.6", 60, "in_progress", "none", Some("agent"), &[]),
             filed("pi.7", 70, "ready", "none", None, &[]),
-            filed("pi.8", 80, "triage", "none", None, &[]),
-            filed("pi.9", 90, "triage", "none", None, &[]),
-            filed("pi.10", 100, "triage", "none", None, &[]),
-            filed("pi.11", 110, "triage", "none", None, &[]),
+            filed("pi.8", 80, "backlog", "none", None, &[]),
+            filed("pi.9", 90, "backlog", "none", None, &[]),
+            filed("pi.10", 100, "backlog", "none", None, &[]),
+            filed("pi.11", 110, "backlog", "none", None, &[]),
             moved("pi.12", 120, "pi.8", "parked"),
             moved("pi.13", NOW - 4_000, "pi.9", "done"),
             moved("pi.14", NOW - 3_000, "pi.10", "canceled"),
@@ -1848,7 +1848,7 @@ mod tests {
         assert_eq!(
             columns(&folded),
             [
-                (Some("triage"), ids(&board.triage)),
+                (Some("backlog"), ids(&board.backlog)),
                 (Some("waiting"), ids(&board.waiting)),
                 (Some("ready"), ids(&board.ready)),
                 (Some("in_progress"), ids(&board.in_progress)),

@@ -7,7 +7,7 @@
 //!
 //! ```json
 //! {"id":"pi.17","author":"tyler@example.com","writer":"pi","time":1787638881,
-//!  "kind":"filed","body":{"subject":"…","body":"…","status":"triage",…}}
+//!  "kind":"filed","body":{"subject":"…","body":"…","status":"backlog",…}}
 //! ```
 //!
 //! `body` survives one pass unparsed (`Box<RawValue>`) and is matched into
@@ -95,7 +95,7 @@ pub enum Kind {
         procedure: Option<String>,
         subject: String,
         body: String,
-        /// A status word: `triage`, `ready` (cleared), `in_progress`,
+        /// A status word: `backlog`, `ready` (cleared), `in_progress`,
         /// `done`, `canceled`. The word assigns the fold's facts and the
         /// fold derives the status; `waiting` and `held` in an old log
         /// read as cleared.
@@ -112,7 +112,7 @@ pub enum Kind {
         branch: Option<String>,
     },
     /// Moves a flight: the word assigns the fold's facts last-wins —
-    /// in triage, started, closed — and the fold derives the status, the
+    /// in backlog, started, closed — and the fold derives the status, the
     /// byline the mover. Done and Canceled ride here like every other
     /// move, and `next`'s pull appends one per pick in a single batch —
     /// the append is the exclusivity, the byline the pilot.
@@ -260,7 +260,7 @@ struct Wire {
 }
 
 fn default_status() -> String {
-    "triage".to_string()
+    "backlog".to_string()
 }
 
 fn default_priority() -> String {
@@ -273,7 +273,7 @@ fn default_done() -> String {
 
 /// The stored fields ride the filing with serde defaults, so a body
 /// written before the stored model — `procedure` and `part`, no status —
-/// still parses: it folds as a Triage flight with default fields, and
+/// still parses: it folds as a Backlog flight with default fields, and
 /// its `part` key is simply not read. Tolerant on purpose: no
 /// `deny_unknown_fields` on any event body.
 #[derive(Serialize, Deserialize)]
@@ -706,7 +706,7 @@ mod tests {
             procedure: None,
             subject: subject.to_string(),
             body: body.to_string(),
-            status: "triage".to_string(),
+            status: "backlog".to_string(),
             assignee: None,
             priority: "none".to_string(),
             labels: Vec::new(),
@@ -760,14 +760,14 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&event).expect("serialize"),
-            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"triage","priority":"none","done":"asserted"}}"#
+            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"backlog","priority":"none","done":"asserted"}}"#
         );
     }
 
     #[test]
     fn an_old_shape_filing_still_parses_with_defaulted_fields() {
         // A body written before the stored model: `procedure` a bare
-        // string, a `part` stamp, no status. It folds as a Triage flight
+        // string, a `part` stamp, no status. It folds as a Backlog flight
         // with default fields, and the stamp is simply not read.
         let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"procedure":"review","subject":"the retry test · pass","body":"","part":{"id":"pass","crew":"agent","skill":"review","done":"asserted"}}}"#;
         let event: Event = serde_json::from_str(filed).expect("parse");
@@ -787,12 +787,25 @@ mod tests {
         };
         assert_eq!(procedure.as_deref(), Some("review"));
         assert_eq!(subject, "the retry test · pass");
-        assert_eq!(status, "triage");
+        assert_eq!(status, "backlog");
         assert!(assignee.is_none(), "the old stamp's crew is not read");
         assert_eq!(priority, "none");
         assert!(labels.is_empty());
         assert!(skill.is_none());
         assert_eq!(done, "asserted");
+    }
+
+    #[test]
+    fn a_filing_from_before_the_rename_still_parses_with_its_old_word() {
+        // Status is a free string on the wire, so a log that says `triage`
+        // parses exactly as written and keeps saying it; the fold is the
+        // one reader that knows the old word means Backlog.
+        let filed = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"triage","priority":"none","done":"asserted"}}"#;
+        let event: Event = serde_json::from_str(filed).expect("parse");
+        let Kind::Filed { status, .. } = &event.kind else {
+            panic!("a filing parses as a filing");
+        };
+        assert_eq!(status, "triage");
     }
 
     #[test]

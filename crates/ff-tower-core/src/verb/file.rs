@@ -2,10 +2,10 @@
 //!
 //! A bare filing carries no procedure and mints one flight where
 //! `tower.defaultFileStatus` says — **Ready** unless the setting says
-//! otherwise, because most filings are work already decided on. `triage`
+//! otherwise, because most filings are work already decided on. `backlog`
 //! parks it for a person instead. `--status` overrides the setting for
 //! one filing; the words it takes are the ones a flight can be filed
-//! with — triage, ready, in_progress — never the derived or closed ones.
+//! with — backlog, ready, in_progress — never the derived or closed ones.
 //! Every stored field is a flag: `-m` the body, priority, labels, skill,
 //! assignee, bay, copied onto the filing as given.
 //!
@@ -18,10 +18,10 @@
 //! because no adapter exists to carry provenance. The match runs on the
 //! filing machine against the procedures it has, so a pushed log never
 //! gets a teammate's flight restamped under rules only this machine
-//! holds; moving a flight to Triage later, or editing a label on, never
+//! holds; moving a flight to Backlog later, or editing a label on, never
 //! re-matches — `file <procedure>` by name, or `decompose`, is how a
 //! flight gets a shape later. A routed filing lands where the named
-//! filing would: Ready under the default setting, parked under `triage`,
+//! filing would: Ready under the default setting, parked under `backlog`,
 //! because the rule decides the shape and the setting the clearance.
 //! Since every bare filing now reads the registry, a rule file that does
 //! not parse refuses the filing by path, the way `procedures` and a
@@ -414,7 +414,7 @@ done     = "committed"
     #[test]
     fn the_setting_moves_the_bare_default_and_the_flag_beats_it() {
         let (repo, _) = store();
-        let store = with_default(&repo, "triage");
+        let store = with_default(&repo, "backlog");
         file(&store, "parked", Fields::default(), None).expect("files");
         file(
             &store,
@@ -428,11 +428,11 @@ done     = "committed"
         .expect("files");
 
         let fold = folded(&store);
-        assert_eq!(fold.flights[0].status, "triage", "the setting's word");
+        assert_eq!(fold.flights[0].status, "backlog", "the setting's word");
         assert_eq!(fold.flights[1].status, "in_progress", "--status wins");
         assert!(
             !fold.flights[0].pullable(),
-            "Triage — the lane alone clears nothing"
+            "Backlog — the lane alone clears nothing"
         );
     }
 
@@ -454,7 +454,7 @@ done     = "committed"
             assert_eq!(err.id(), "usage/file-status");
             assert_eq!(
                 err.to_string(),
-                format!("`{word}` cannot be filed — triage, ready, or in_progress")
+                format!("`{word}` cannot be filed — backlog, ready, or in_progress")
             );
         }
         assert!(folded(&store).flights.is_empty(), "nothing was written");
@@ -472,7 +472,7 @@ name = "staged"
 [[flight]]
 id       = "look"
 assignee = "me"
-status   = "triage"
+status   = "backlog"
 
 [[flight]]
 id       = "do"
@@ -488,17 +488,17 @@ assignee = "agent"
                 .find(|flight| flight.subject.ends_with(tail))
                 .expect("minted")
         };
-        assert_eq!(by_subject("· look").status, "triage", "declared, kept");
+        assert_eq!(by_subject("· look").status, "backlog", "declared, kept");
         assert_eq!(
             by_subject("· do").status,
             "ready",
             "undeclared, the default"
         );
 
-        // Under `triage` as the default, the declared word still wins
+        // Under `backlog` as the default, the declared word still wins
         // and the sibling follows the setting; `--status` lands on the
         // parent, and In Progress is not a word the edges gate.
-        let store = with_default(&repo, "triage");
+        let store = with_default(&repo, "backlog");
         file(
             &store,
             "again",
@@ -516,10 +516,10 @@ assignee = "agent"
                 .find(|flight| flight.subject == tail)
                 .expect("minted")
         };
-        assert_eq!(by_subject("again · look").status, "triage");
+        assert_eq!(by_subject("again · look").status, "backlog");
         assert_eq!(
             by_subject("again · do").status,
-            "triage",
+            "backlog",
             "the setting's word"
         );
         assert_eq!(
@@ -541,7 +541,7 @@ name = "parked"
 [[flight]]
 id       = "work"
 assignee = "me"
-status   = "triage"
+status   = "backlog"
 "#,
         );
         file(&store, "declared", Fields::default(), Some("parked")).expect("files");
@@ -559,7 +559,7 @@ status   = "triage"
         file(&store, "defaulted", Fields::default(), Some("ticket")).expect("files");
 
         let fold = folded(&store);
-        assert_eq!(fold.flights[0].status, "triage", "the definition's word");
+        assert_eq!(fold.flights[0].status, "backlog", "the definition's word");
         assert_eq!(fold.flights[1].status, "ready", "--status beats it");
         assert_eq!(
             fold.flights[2].status, "ready",
@@ -730,16 +730,16 @@ done     = "landed"
     }
 
     #[test]
-    fn a_routed_filing_parks_under_the_triage_setting_like_any_other() {
+    fn a_routed_filing_parks_under_the_backlog_setting_like_any_other() {
         // The rule decides the shape, the setting decides the clearance:
         // a matched filing lands where a named one would.
         let (repo, _) = store();
         install(&repo, "chores", CHORES);
-        let store = with_default(&repo, "triage");
+        let store = with_default(&repo, "backlog");
         file(&store, "sweep the logs", labeled("chore"), None).expect("files");
         let fold = folded(&store);
         assert_eq!(fold.flights[0].procedure.as_deref(), Some("chores"));
-        assert_eq!(fold.flights[0].status, "triage");
+        assert_eq!(fold.flights[0].status, "backlog");
     }
 
     #[test]

@@ -468,9 +468,9 @@ fn an_empty_procedure_is_a_usage_refusal() {
 #[test]
 fn the_setting_parks_a_bare_filing_and_the_flag_beats_it() {
     let repo = repo();
-    repo.git(&["config", "tower.defaultFileStatus", "triage"]);
+    repo.git(&["config", "tower.defaultFileStatus", "backlog"]);
     let out = stdout(&ff_tower(repo.path(), &["file", "parked"]));
-    assert_eq!(out, "filed #1 in triage: parked\nboard: ff tower\n");
+    assert_eq!(out, "filed #1 in backlog: parked\nboard: ff tower\n");
     let out = stdout(&ff_tower(
         repo.path(),
         &["file", "moving", "--status", "in_progress"],
@@ -478,7 +478,7 @@ fn the_setting_parks_a_bare_filing_and_the_flag_beats_it() {
     assert_eq!(out, "filed #2 in in progress: moving\nboard: ff tower\n");
 
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
-    assert_eq!(board["data"]["triage"][0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(board["data"]["backlog"][0]["id"], serde_json::json!("pi.1"));
     assert_eq!(
         board["data"]["in_progress"][0]["id"],
         serde_json::json!("pi.2")
@@ -504,7 +504,7 @@ fn an_unfileable_status_at_filing_is_a_usage_refusal() {
         assert_eq!(
             envelope["error"]["message"],
             serde_json::json!(format!(
-                "`{word}` cannot be filed — triage, ready, or in_progress"
+                "`{word}` cannot be filed — backlog, ready, or in_progress"
             ))
         );
         assert_eq!(
@@ -525,7 +525,7 @@ fn a_procedure_flight_declaring_a_status_keeps_it_beside_the_default() {
         ".tower/procedures/staged.toml",
         concat!(
             "name = \"staged\"\n\n",
-            "[[flight]]\nid       = \"look\"\nassignee = \"me\"\nstatus   = \"triage\"\n\n",
+            "[[flight]]\nid       = \"look\"\nassignee = \"me\"\nstatus   = \"backlog\"\n\n",
             "[[flight]]\nid       = \"do\"\nassignee = \"agent\"\n",
         ),
     );
@@ -533,7 +533,7 @@ fn a_procedure_flight_declaring_a_status_keeps_it_beside_the_default() {
 
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(
-        board["data"]["triage"][0]["subject"],
+        board["data"]["backlog"][0]["subject"],
         serde_json::json!("the thing · look"),
         "declared, kept"
     );
@@ -852,7 +852,7 @@ fn a_word_outside_the_status_vocabulary_is_refused() {
     assert_eq!(
         envelope["error"]["message"],
         serde_json::json!(
-            "`claimed` is not a status — triage, waiting, ready, in_progress, held, done, or canceled"
+            "`claimed` is not a status — backlog, waiting, ready, in_progress, held, done, or canceled"
         )
     );
 }
@@ -1191,7 +1191,7 @@ fn done_takes_the_flight_off_the_board_and_out_of_the_count() {
     assert_eq!(out, "done #1: finished\nboard: ff tower\n");
 
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
-    for group in ["triage", "waiting", "ready", "in_progress", "held"] {
+    for group in ["backlog", "waiting", "ready", "in_progress", "held"] {
         let views = board["data"][group].as_array().expect(group);
         assert!(
             views
