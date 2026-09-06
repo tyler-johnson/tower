@@ -443,9 +443,10 @@ of exits. --list is the whole catalog, one line per id.
 
 A pure registry lookup: no store, no repository, no fufu spawn — it
 answers on a machine where nothing else does. Every refusal tower
-prints carries an id shaped namespace/name, and the namespace picks
-the exit code: usage/* exits 2, everything else 1. The 3s are not
-among them — an outcome, not an error.";
+prints carries an id shaped namespace/name, and the id picks the
+exit code: usage/* exits 2, ref/contended exits 4 — run it again —
+and everything else 1. hold's 3 is not among them — an outcome, not
+an error.";
 
 pub const EXPLAIN_EXAMPLES: &str = "\
 Examples:

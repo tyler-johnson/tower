@@ -7,13 +7,13 @@
 //! machine with no fufu on it — and one spelling means no question about
 //! which one is canonical.
 //!
-//! Exit codes follow the error id's namespace, fufu's derivation:
-//! `usage/*` exits 2, anything else 1. `hold`'s 3 is not among them — an
-//! outcome, not an error, so it rides the success path below with a full
-//! data envelope on `ff sync`'s precedent, and the `held/*` error
-//! namespace stays unused. `next`'s 1 and `doctor`'s 1 are the verdict
-//! precedent: an empty pick and findings, each reported in a full data
-//! envelope, fufu's "no."
+//! Exit codes follow the error id, fufu's derivation: `usage/*` exits 2,
+//! `ref/contended` exits 4, anything else 1. `hold`'s 3 is not among
+//! them — an outcome, not an error, so it rides the success path below
+//! with a full data envelope on `ff sync`'s precedent, and the `held/*`
+//! error namespace stays unused. `next`'s 1 and `doctor`'s 1 are the
+//! verdict precedent: an empty pick and findings, each reported in a
+//! full data envelope, fufu's "no."
 //! Success is otherwise 0, an empty board included — a board render is
 //! never a yes/no question. Clap keeps its default 2 for a command line
 //! it refused itself.

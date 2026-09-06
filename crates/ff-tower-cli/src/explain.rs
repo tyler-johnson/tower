@@ -658,12 +658,15 @@ pub static ENTRIES: &[Entry] = &[
         exits: &["git config user.email <email>"],
     },
     Entry {
-        id: "log/contended",
+        id: "ref/contended",
         summary: "another writer holds the tower log",
         detail: "Appends to one writer's chain are serialized, and another process held the \
                  lock through the whole wait — or the compare-and-swap kept losing through \
                  every retry. Both mean the same thing: the other writer is mid-append, and the \
-                 verb refuses fast rather than waiting forever. Run it again in a moment.",
+                 verb refuses fast rather than waiting forever. Nothing moved, and the same \
+                 call run once more is the answer — fufu's `ref/contended` family, exit 4, \
+                 which the relay tells an agent to retry rather than stop on. Cap the retries: \
+                 a lock nobody clears gives the same answer every time.",
         exits: &[],
     },
     Entry {

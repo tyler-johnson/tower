@@ -757,7 +757,7 @@ impl ApiError {
                 | "link/missing"
         ) {
             StatusCode::CONFLICT
-        } else if id == "log/contended" {
+        } else if id == "ref/contended" {
             StatusCode::SERVICE_UNAVAILABLE
         } else {
             StatusCode::INTERNAL_SERVER_ERROR

@@ -30,7 +30,10 @@ pub enum Error {
 
     /// Another writer held the log through the whole wait, or the CAS kept
     /// losing through every retry. Both mean the same thing to a caller:
-    /// try again when the other writer is done.
+    /// try again when the other writer is done. The id is fufu's
+    /// `ref/contended` family — nothing moved, and the same call run once
+    /// more is the answer — so the CLI exits 4 on it and the relay tells
+    /// an agent to retry rather than stop.
     #[error("another writer holds the tower log for `{writer}`")]
     Contended { writer: String },
 
@@ -58,7 +61,7 @@ impl Error {
     pub fn id(&self) -> &'static str {
         match self {
             Error::Identity => "identity/missing",
-            Error::Contended { .. } => "log/contended",
+            Error::Contended { .. } => "ref/contended",
             Error::RefName { .. } => "log/ref-name",
             Error::NotTowerLog { .. } => "log/not-tower",
             Error::Version { .. } => "log/version",

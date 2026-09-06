@@ -1,8 +1,8 @@
 //! What the binary can fail with, and the id every failure answers to.
 //!
 //! fufu's convention, tower's registry: ids are `category/kebab-case`, and
-//! the exit code derives from the namespace the way fufu's
-//! `Error::exit_code()` derives it — `usage/*` is 2, `held/*` is 3,
+//! the exit code derives from the id the way fufu's `Error::exit_code()`
+//! derives it — `usage/*` is 2, `held/*` is 3, `ref/contended` is 4,
 //! anything else 1. The `held/*` namespace stays unused in practice:
 //! hold's 3 is an outcome, and it rides the success path in `main.rs`.
 //! The prose behind each id lives in `explain.rs`'s registry — `ff tower
@@ -104,13 +104,17 @@ impl CliError {
         }
     }
 
-    /// The namespace is the exit code: `usage/*` 2, `held/*` 3, else 1.
+    /// The id is the exit code: `usage/*` 2, `held/*` 3, `ref/contended`
+    /// 4 — the one id fufu's contract names rather than a namespace, so
+    /// it is matched whole — else 1.
     pub fn exit_code(&self) -> i32 {
         let id = self.id();
         if id.starts_with("usage/") {
             2
         } else if id.starts_with("held/") {
             3
+        } else if id == "ref/contended" {
+            4
         } else {
             1
         }
@@ -128,5 +132,28 @@ impl From<ff_tower_serve::Error> for CliError {
             ff_tower_serve::Error::Repo(err) => CliError::Log(err),
             err => CliError::Serve(err),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four codes fufu's contract names, each from the id that owes it.
+    /// Contention is a live race the CLI suite cannot provoke, so its 4 is
+    /// pinned here beside the namespaces.
+    #[test]
+    fn the_exit_code_follows_the_id() {
+        let contended = CliError::from(log::Error::Contended {
+            writer: "pi".to_string(),
+        });
+        assert_eq!(contended.id(), "ref/contended");
+        assert_eq!(contended.exit_code(), 4, "run it again");
+
+        let usage = CliError::coded("usage/bad-count", "no", Vec::new());
+        assert_eq!(usage.exit_code(), 2);
+
+        let identity = CliError::from(log::Error::Identity);
+        assert_eq!(identity.exit_code(), 1);
     }
 }
