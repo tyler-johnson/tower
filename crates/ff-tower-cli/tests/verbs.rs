@@ -74,6 +74,9 @@ fn family(brief: &serde_json::Value, key: &str) -> Vec<String> {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
+/// The id is passed bare and asserted namespaced — `tower/<id>` is what
+/// the wire carries, and every call site goes on naming the id the
+/// registry keys on.
 fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -83,7 +86,10 @@ fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!(format!("tower/{id}"))
+    );
     envelope
 }
 
@@ -147,8 +153,8 @@ fn file_json_round_trips_body_and_procedure() {
     );
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["tower"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("file"));
+    assert_eq!(envelope["ff"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower file"));
     let filed = &envelope["data"]["filed"];
     assert_eq!(filed["id"], serde_json::json!("pi.1"));
     assert_eq!(filed["kind"], serde_json::json!("filed"));
@@ -278,7 +284,7 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
     );
     let filing = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(filing["cmd"], serde_json::json!("file"));
+    assert_eq!(filing["cmd"], serde_json::json!("tower file"));
     let data = &filing["data"];
 
     // The parent keeps the procedure stamp and the body, and is filed
@@ -512,7 +518,7 @@ fn an_unfileable_status_at_filing_is_a_usage_refusal() {
         );
         assert_eq!(
             envelope["error"]["exits"],
-            serde_json::json!(["ff tower explain usage/file-status"]),
+            serde_json::json!(["ff tower explain tower/usage/file-status"]),
             "no exit of its own, so the registry lookup rides"
         );
     }
@@ -569,7 +575,7 @@ fn comment_json_carries_the_appended_event() {
     let out = ff_tower(repo.path(), &["comment", "pi.1", "-m", "a note", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("comment"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower comment"));
     let commented = &envelope["data"]["commented"];
     assert_eq!(commented["id"], serde_json::json!("pi.2"));
     assert_eq!(commented["body"]["flight"], serde_json::json!("pi.1"));
@@ -871,7 +877,7 @@ fn status_json_carries_the_appended_move() {
     let out = ff_tower(repo.path(), &["status", "1", "ready", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("status"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower status"));
     let moved = &envelope["data"]["status"];
     assert_eq!(moved["id"], serde_json::json!("pi.2"));
     assert_eq!(moved["kind"], serde_json::json!("status"));
@@ -998,7 +1004,7 @@ fn assign_json_carries_the_appended_event() {
     let out = ff_tower(repo.path(), &["assign", "1", "me", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("assign"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower assign"));
     let assigned = &envelope["data"]["assigned"];
     assert_eq!(assigned["kind"], serde_json::json!("assigned"));
     assert_eq!(assigned["body"]["flight"], serde_json::json!("pi.1"));
@@ -1061,7 +1067,7 @@ fn hold_exits_three_with_a_data_envelope() {
     );
     assert_eq!(out.status.code(), Some(3), "hold's success exits 3");
     let envelope = envelope(&out);
-    assert_eq!(envelope["cmd"], serde_json::json!("hold"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower hold"));
     assert!(envelope["error"].is_null());
     let held = &envelope["data"]["held"];
     assert_eq!(held["body"]["flight"], serde_json::json!("pi.1"));
@@ -1258,7 +1264,7 @@ fn done_json_lands_under_its_own_cmd_name() {
     let out = ff_tower(repo.path(), &["done", "1", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("done"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower done"));
     let moved = &envelope["data"]["status"];
     assert_eq!(moved["kind"], serde_json::json!("status"));
     assert_eq!(moved["body"]["status"], serde_json::json!("done"));
@@ -1299,7 +1305,7 @@ fn cancel_json_lands_under_its_own_cmd_name_with_the_reason() {
     );
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("cancel"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower cancel"));
     let moved = &envelope["data"]["status"];
     assert_eq!(moved["body"]["status"], serde_json::json!("canceled"));
     assert_eq!(moved["body"]["reason"], serde_json::json!("not worth it"));
@@ -1374,7 +1380,7 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
     );
     let decomposed = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(decomposed["cmd"], serde_json::json!("decompose"));
+    assert_eq!(decomposed["cmd"], serde_json::json!("tower decompose"));
     let data = &decomposed["data"];
     assert_eq!(data["parent"], serde_json::json!("pi.1"));
 

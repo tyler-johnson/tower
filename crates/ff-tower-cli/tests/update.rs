@@ -44,10 +44,10 @@ fn the_refusal_envelope_names_the_id_and_the_exit() {
     assert_eq!(out.status.code(), Some(1));
     let envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
-    assert_eq!(envelope["cmd"], serde_json::json!("update"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower update"));
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("update/source-build")
+        serde_json::json!("tower/update/source-build")
     );
     let message = envelope["error"]["message"].as_str().expect("message");
     assert!(

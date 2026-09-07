@@ -12,7 +12,7 @@ import type { Envelope } from "./tower";
 /// so it carries no exits.
 function unreachable(cmd: string, detail: string): Envelope<never> {
   return {
-    tower: 1,
+    ff: 1,
     cmd,
     error: { id: "web/unreachable", message: detail, exits: [] },
   };

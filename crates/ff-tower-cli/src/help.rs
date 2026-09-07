@@ -42,10 +42,12 @@ against the board's filed flights, and an ambiguous one refuses with
 the full forms — and a leading # is stripped, so what tower prints
 pastes back in.
 
---json swaps the human render for the machine envelope: one line of
-JSON carrying the contract number, the verb, and either data or error,
-never both — success and failure alike. A refusal's error id reads
-back through `ff tower explain <id>`.
+--json swaps the human render for the machine envelope: fufu's own
+shape, one line of JSON keyed ff with the contract number, cmd naming
+the verb as `tower <verb>`, and either data or error, never both —
+success and failure alike. A refusal's error id is namespaced
+tower/<id> and reads back through `ff tower explain <id>`, which takes
+it with the namespace or without.
 
 There is no bare tower binary. `ff tower` reaches ff-tower through
 fufu's ff-<name> dispatch, git-style, so the verb is typed through
@@ -443,16 +445,19 @@ of exits. --list is the whole catalog, one line per id.
 
 A pure registry lookup: no store, no repository, no fufu spawn — it
 answers on a machine where nothing else does. Every refusal tower
-prints carries an id shaped namespace/name, and the id picks the
-exit code: usage/* exits 2, ref/contended exits 4 — run it again —
-and everything else 1. hold's 3 is not among them — an outcome, not
-an error.";
+prints carries an id shaped tower/namespace/name, and either spelling
+finds it: paste the id whole out of an envelope, or drop the tower/
+the way fufu does before it forwards the lookup here. The namespace
+past tower/ picks the exit code: usage/* exits 2, ref/contended
+exits 4 — run it again — and everything else 1. hold's 3 is not among
+them — an outcome, not an error. A refusal fufu shaped itself keeps
+fufu's own bare id, and `ff explain <id>` is where its prose lives.";
 
 pub const EXPLAIN_EXAMPLES: &str = "\
 Examples:
-  ff tower explain flight/not-found        one id, in full
-  ff tower explain --list        every id tower knows
-  ff tower explain usage/needs-message     why a bare comment refused";
+  ff tower explain tower/flight/not-found  one id, in full
+  ff tower explain --list                  every id tower knows
+  ff tower explain usage/needs-message     the bare spelling works too";
 
 pub const CONFIG: &str = "\
 Settings, on fufu's typed-registry model. No subcommands — arity

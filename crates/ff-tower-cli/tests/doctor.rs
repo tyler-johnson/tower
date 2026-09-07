@@ -69,7 +69,7 @@ fn warm(repo: &Repo, name: &str, branch: &str) -> String {
 /// The doctor rows out of a `--json` run, with the findings count.
 fn rows(output: &Output) -> (Vec<serde_json::Value>, u64) {
     let envelope = envelope(output);
-    assert_eq!(envelope["cmd"], serde_json::json!("doctor"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower doctor"));
     let rows = envelope["data"]["rows"].as_array().expect("rows").clone();
     let findings = envelope["data"]["findings"].as_u64().expect("findings");
     (rows, findings)

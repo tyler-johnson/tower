@@ -184,7 +184,7 @@ fn a_named_skill_is_the_raw_file_byte_for_byte() {
 fn the_json_forms_carry_summary_and_text() {
     let repo = stocked();
     let all = envelope(&ff_tower(repo.path(), &["skills", "--json"]));
-    assert_eq!(all["cmd"], serde_json::json!("skills"));
+    assert_eq!(all["cmd"], serde_json::json!("tower skills"));
     let skills = all["data"]["skills"].as_array().expect("skills");
     assert_eq!(skills.len(), 2);
     assert_eq!(skills[0]["name"], serde_json::json!("plan"));
@@ -216,7 +216,7 @@ fn a_name_that_is_not_installed_is_refused_naming_the_set() {
     let envelope = envelope(&out);
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("skill/not-found")
+        serde_json::json!("tower/skill/not-found")
     );
     assert_eq!(
         envelope["error"]["message"],

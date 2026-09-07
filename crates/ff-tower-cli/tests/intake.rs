@@ -187,7 +187,7 @@ fn a_broken_rule_file_leaves_board_running_and_file_and_procedures_refusing() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.is_empty(), "stderr: {stderr}");
     let board = envelope(&out);
-    assert_eq!(board["cmd"], serde_json::json!("board"));
+    assert_eq!(board["cmd"], serde_json::json!("tower board"));
 
     // The surfaces that read a definition refuse loudly — a bare
     // filing now among them.
@@ -200,7 +200,7 @@ fn a_broken_rule_file_leaves_board_running_and_file_and_procedures_refusing() {
         let refusal = envelope(&out);
         assert_eq!(
             refusal["error"]["id"],
-            serde_json::json!("procedure/no-parts"),
+            serde_json::json!("tower/procedure/no-parts"),
             "{args:?}"
         );
     }
@@ -219,6 +219,6 @@ fn explain_carries_the_rule_refusals() {
     let repo = Repo::new();
     for id in ["procedure/empty-rule", "procedure/duplicate-rule"] {
         let out = envelope(&ff_tower(repo.path(), &["explain", id, "--json"]));
-        assert_eq!(out["data"]["id"], serde_json::json!(id));
+        assert_eq!(out["data"]["id"], serde_json::json!(format!("tower/{id}")));
     }
 }

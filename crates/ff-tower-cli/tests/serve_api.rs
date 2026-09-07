@@ -180,14 +180,14 @@ fn a_query_that_does_not_parse_is_400_and_the_query_envelope() {
         "{head}"
     );
     let envelope: serde_json::Value = serde_json::from_str(body.trim_end()).expect("an envelope");
-    assert_eq!(envelope["cmd"], json!("board"));
-    assert_eq!(envelope["error"]["id"], json!("usage/unknown-field"));
+    assert_eq!(envelope["cmd"], json!("tower board"));
+    assert_eq!(envelope["error"]["id"], json!("tower/usage/unknown-field"));
     assert_eq!(envelope["error"]["exits"], json!(["ff tower"]));
 
     let (status, _, body) = http(&server.addr, "/api/board?priority=before:3d");
     assert_eq!(status, 400, "{body}");
     let envelope: serde_json::Value = serde_json::from_str(body.trim_end()).expect("an envelope");
-    assert_eq!(envelope["error"]["id"], json!("usage/bad-operator"));
+    assert_eq!(envelope["error"]["id"], json!("tower/usage/bad-operator"));
 }
 
 #[test]
@@ -209,6 +209,15 @@ fn the_brief_route_answers_every_reference_form() {
 fn the_bays_route_is_the_bay_list_verb_byte_for_byte() {
     let (repo, server) = served();
     parity(&server, repo.path(), "/api/bays", &["bay", "--json"]);
+
+    // Parity alone would hold with the envelope's key or its `cmd`
+    // spelled wrong — both sides move together — so the two-word verb is
+    // pinned absolutely here, where nothing else pins it.
+    let (_, _, body) = http(&server.addr, "/api/bays");
+    assert!(
+        body.starts_with(r#"{"ff":1,"cmd":"tower bay list","data":"#),
+        "{body}"
+    );
 }
 
 #[test]

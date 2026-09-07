@@ -203,7 +203,7 @@ fn the_detail_carries_the_flights_the_inert_rule_and_the_file() {
 fn the_json_form_is_the_registry_as_data() {
     let repo = stocked();
     let all = envelope(&ff_tower(repo.path(), &["procedures", "--json"]));
-    assert_eq!(all["cmd"], serde_json::json!("procedures"));
+    assert_eq!(all["cmd"], serde_json::json!("tower procedures"));
     let procedures = all["data"]["procedures"].as_array().expect("procedures");
     assert_eq!(procedures.len(), 2);
     assert_eq!(procedures[0]["name"], serde_json::json!("review"));
@@ -275,7 +275,7 @@ fn a_flight_with_an_unfileable_status_is_refused_naming_the_file_and_the_flight(
     let refusal = envelope(&out);
     assert_eq!(
         refusal["error"]["id"],
-        serde_json::json!("procedure/bad-status")
+        serde_json::json!("tower/procedure/bad-status")
     );
     assert_eq!(
         refusal["error"]["message"],
@@ -379,7 +379,7 @@ fn a_definition_that_does_not_load_is_refused_by_path() {
     let envelope = envelope(&out);
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("procedure/no-parts")
+        serde_json::json!("tower/procedure/no-parts")
     );
     assert_eq!(
         envelope["error"]["exits"],
@@ -395,7 +395,7 @@ fn a_name_that_is_not_installed_is_refused_naming_the_set() {
     let envelope = envelope(&out);
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("procedure/not-found")
+        serde_json::json!("tower/procedure/not-found")
     );
     assert_eq!(
         envelope["error"]["message"],

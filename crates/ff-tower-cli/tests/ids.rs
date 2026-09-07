@@ -41,6 +41,9 @@ fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
+/// The id is passed bare and asserted namespaced — `tower/<id>` is what
+/// the wire carries, and every call site goes on naming the id the
+/// registry keys on.
 fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -50,7 +53,10 @@ fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!(format!("tower/{id}"))
+    );
     envelope
 }
 

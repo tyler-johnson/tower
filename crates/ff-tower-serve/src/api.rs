@@ -139,7 +139,10 @@ async fn respond(
                 cmd,
                 "serve/failed",
                 &format!("the fold behind `{cmd}` panicked"),
-                &["ff tower explain serve/failed".to_string()],
+                &[format!(
+                    "ff tower explain {}",
+                    machine::namespaced("serve/failed")
+                )],
             ),
         ),
     }
@@ -168,10 +171,17 @@ async fn act<Body: DeserializeOwned + Send + 'static>(
 }
 
 /// A refusal as a reply: the id's status, and the error envelope.
+/// tower's own ids go out namespaced `tower/<id>`; a refusal fufu shaped
+/// itself keeps fufu's id verbatim, the way the CLI's does.
 fn refusal(cmd: &str, err: &ApiError) -> Reply {
+    let emit = if err.forwarded() {
+        machine::emit_forwarded
+    } else {
+        machine::emit_error
+    };
     reply(
         err.status(),
-        machine::emit_error(cmd, err.id(), &err.to_string(), &err.exits()),
+        emit(cmd, err.id(), &err.to_string(), &err.exits()),
     )
 }
 
@@ -705,15 +715,20 @@ impl ApiError {
         }
     }
 
+    /// Whether this is a refusal fufu shaped itself rather than one of
+    /// tower's own. Only those pass the `tower/` namespace by: their id
+    /// is fufu's, `ff explain` routes it back to fufu's registry, and
+    /// tower has no entry for it.
+    fn forwarded(&self) -> bool {
+        matches!(self, ApiError::Ff(err) if err.ff_id().is_some())
+    }
+
     /// The CLI's `exits_for` fallback, without its registry: the site's
     /// own exits when it has any; a refusal fufu shaped itself keeps
     /// fufu's verbatim, empty included, because its prose lives in
     /// fufu's registry; anything else points at the lookup that holds
     /// the prose.
     fn exits(&self) -> Vec<String> {
-        if let ApiError::Ff(err @ ff::Error::Ff(_)) = self {
-            return err.exits();
-        }
         let own = match self {
             ApiError::Resolve(err) => err.exits(),
             ApiError::Log(err) => err.exits(),
@@ -723,8 +738,11 @@ impl ApiError {
             ApiError::Query(err) => err.exits(),
             ApiError::Body { .. } => Vec::new(),
         };
-        if own.is_empty() {
-            vec![format!("ff tower explain {}", self.id())]
+        if own.is_empty() && !self.forwarded() {
+            vec![format!(
+                "ff tower explain {}",
+                machine::namespaced(self.id())
+            )]
         } else {
             own
         }

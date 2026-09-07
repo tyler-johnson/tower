@@ -50,11 +50,21 @@ fn a_known_id_renders_id_summary_detail_and_the_try_block() {
     let text = stdout(&ff_tower(dir.path(), &["explain", "flight/not-found"]));
 
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("flight/not-found"), "{text}");
+    assert_eq!(lines.next(), Some("tower/flight/not-found"), "{text}");
     assert_eq!(lines.next(), Some("no such flight on the board"), "{text}");
     assert_eq!(lines.next(), Some(""), "a blank before the detail: {text}");
     assert!(text.contains("The reference parsed"), "{text}");
     assert!(text.contains("  try:\n    ff tower\n"), "{text}");
+
+    // fufu splits the namespace off before spawning `ff-tower explain
+    // <id>`, and a person pastes the id whole out of an envelope. Both
+    // spellings are the same lookup and print the same page.
+    let namespaced = stdout(&ff_tower(
+        dir.path(),
+        &["explain", "tower/flight/not-found"],
+    ));
+    assert_eq!(namespaced, text);
+
     // The detail wraps at 80 columns.
     assert!(
         text.lines().all(|line| line.chars().count() <= 80),
@@ -66,7 +76,7 @@ fn a_known_id_renders_id_summary_detail_and_the_try_block() {
 fn an_entry_with_no_exits_prints_no_try_block() {
     let dir = tempfile::TempDir::new().unwrap();
     let text = stdout(&ff_tower(dir.path(), &["explain", "usage/self-link"]));
-    assert!(text.starts_with("usage/self-link\n"), "{text}");
+    assert!(text.starts_with("tower/usage/self-link\n"), "{text}");
     assert!(!text.contains("try:"), "{text}");
 }
 
@@ -77,7 +87,7 @@ fn the_list_aligns_ids_beside_summaries() {
 
     let not_found = text
         .lines()
-        .find(|line| line.starts_with("flight/not-found"))
+        .find(|line| line.starts_with("tower/flight/not-found"))
         .expect("the list carries flight/not-found");
     assert!(not_found.contains("no such flight on the board"), "{text}");
     // Every row is one aligned `id  summary` pair: the summaries start
@@ -105,10 +115,10 @@ fn json_carries_the_entry_and_the_list() {
     let out = ff_tower(dir.path(), &["explain", "flight/not-found", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let single = envelope(&out);
-    assert_eq!(single["tower"], serde_json::json!(1));
-    assert_eq!(single["cmd"], serde_json::json!("explain"));
+    assert_eq!(single["ff"], serde_json::json!(1));
+    assert_eq!(single["cmd"], serde_json::json!("tower explain"));
     let data = &single["data"];
-    assert_eq!(data["id"], serde_json::json!("flight/not-found"));
+    assert_eq!(data["id"], serde_json::json!("tower/flight/not-found"));
     assert_eq!(
         data["summary"],
         serde_json::json!("no such flight on the board")
@@ -119,7 +129,7 @@ fn json_carries_the_entry_and_the_list() {
     let out = ff_tower(dir.path(), &["explain", "--list", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let listing = envelope(&out);
-    assert_eq!(listing["cmd"], serde_json::json!("explain"));
+    assert_eq!(listing["cmd"], serde_json::json!("tower explain"));
     let entries = listing["data"]["entries"].as_array().expect("entries");
     assert!(entries.len() > 25, "the whole catalog: {}", entries.len());
     for entry in entries {
@@ -130,7 +140,7 @@ fn json_carries_the_entry_and_the_list() {
     assert!(
         entries
             .iter()
-            .any(|entry| entry["id"] == serde_json::json!("usage/unknown-error-id")),
+            .any(|entry| entry["id"] == serde_json::json!("tower/usage/unknown-error-id")),
         "the verb's own refusal is in its own catalog"
     );
 }
@@ -141,10 +151,10 @@ fn an_unknown_id_refuses_with_exit_2_and_names_the_list() {
     let out = ff_tower(dir.path(), &["explain", "nonsense", "--json"]);
     assert_eq!(out.status.code(), Some(2));
     let envelope = envelope(&out);
-    assert_eq!(envelope["cmd"], serde_json::json!("explain"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower explain"));
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("usage/unknown-error-id")
+        serde_json::json!("tower/usage/unknown-error-id")
     );
     assert_eq!(
         envelope["error"]["exits"],
@@ -164,6 +174,26 @@ fn a_slash_shaped_unknown_id_points_at_fufus_registry() {
     assert_eq!(
         envelope["error"]["exits"],
         serde_json::json!(["ff tower explain --list", "ff explain repo/bare"])
+    );
+}
+
+#[test]
+fn a_tower_shaped_unknown_id_offers_the_list_not_fufus_registry() {
+    // The namespace comes off before the heuristics run: `tower/nonsense`
+    // is a miss in tower's own registry, and the `ff explain` hint would
+    // send the asker exactly the wrong way.
+    let dir = tempfile::TempDir::new().unwrap();
+    let out = ff_tower(dir.path(), &["explain", "tower/nonsense", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    let envelope = envelope(&out);
+    assert_eq!(
+        envelope["error"]["exits"],
+        serde_json::json!(["ff tower explain --list"])
+    );
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("no such error id: nonsense"),
+        "the id the registry was actually asked for"
     );
 }
 
@@ -195,7 +225,7 @@ fn bare_explain_refuses_with_exit_2() {
     let envelope = envelope(&out);
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("usage/bad-flags")
+        serde_json::json!("tower/usage/bad-flags")
     );
 }
 
@@ -223,7 +253,7 @@ fn a_raise_with_no_exits_gains_the_registry_lookup() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("  try:\n    ff tower explain usage/self-link\n"),
+        stderr.contains("  try:\n    ff tower explain tower/usage/self-link\n"),
         "{stderr}"
     );
 
@@ -232,10 +262,10 @@ fn a_raise_with_no_exits_gains_the_registry_lookup() {
     let envelope = envelope(&out);
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("usage/self-link")
+        serde_json::json!("tower/usage/self-link")
     );
     assert_eq!(
         envelope["error"]["exits"],
-        serde_json::json!(["ff tower explain usage/self-link"])
+        serde_json::json!(["ff tower explain tower/usage/self-link"])
     );
 }

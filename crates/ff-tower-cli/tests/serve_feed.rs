@@ -193,10 +193,10 @@ fn a_feed_query_that_does_not_parse_is_400() {
         "{head}"
     );
     let envelope: serde_json::Value = serde_json::from_str(body.trim_end()).expect("an envelope");
-    assert_eq!(envelope["cmd"], serde_json::json!("board"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("usage/unknown-field")
+        serde_json::json!("tower/usage/unknown-field")
     );
 }
 

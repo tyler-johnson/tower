@@ -42,7 +42,31 @@ fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
+/// The id is passed bare and asserted namespaced — `tower/<id>` is what
+/// the wire carries, and every call site goes on naming the id the
+/// registry keys on.
 fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
+    assert_eq!(
+        output.status.code(),
+        Some(code),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let envelope = envelope(output);
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!(format!("tower/{id}"))
+    );
+    envelope
+}
+
+/// The forwarded half of the same assertion: a refusal fufu shaped
+/// itself keeps fufu's own id, with no `tower/` on it, because `ff
+/// explain` routes that id back to fufu's registry and tower has no
+/// entry for it. Passed verbatim on purpose — do not "fix" this to the
+/// prefixing helper above.
+fn refusal_forwarded(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
         Some(code),
@@ -92,7 +116,7 @@ fn warm_creates_a_bay_and_bare_bay_lists_it_free() {
     );
     assert_eq!(out.status.code(), Some(0));
     let warmed = envelope(&out);
-    assert_eq!(warmed["cmd"], serde_json::json!("bay warm"));
+    assert_eq!(warmed["cmd"], serde_json::json!("tower bay warm"));
     let added = &warmed["data"]["added"];
     assert_eq!(added["branch"], serde_json::json!("feather"));
     assert!(added["id"].is_string() && added["path"].is_string());
@@ -107,7 +131,7 @@ fn warm_creates_a_bay_and_bare_bay_lists_it_free() {
 
     let out = ff_tower(repo.path(), &["bay", "--json"]);
     let listed = envelope(&out);
-    assert_eq!(listed["cmd"], serde_json::json!("bay list"));
+    assert_eq!(listed["cmd"], serde_json::json!("tower bay list"));
     let bays = listed["data"]["bays"].as_array().expect("bays");
     assert_eq!(bays.len(), 2);
     assert_eq!(bays[0]["id"], serde_json::json!("main"));
@@ -182,7 +206,7 @@ fn release_of_a_free_bay_removes_it() {
     let out = ff_tower(repo.path(), &["bay", "release", "bay2", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let released = envelope(&out);
-    assert_eq!(released["cmd"], serde_json::json!("bay release"));
+    assert_eq!(released["cmd"], serde_json::json!("tower bay release"));
     let removed = &released["data"]["removed"];
     assert_eq!(removed["id"], serde_json::json!("bay2"));
     assert_eq!(removed["branch"], serde_json::json!("quill"));
@@ -200,7 +224,7 @@ fn release_of_a_free_bay_removes_it() {
 fn releasing_main_forwards_fufus_refusal() {
     let repo = repo();
     let out = ff_tower(repo.path(), &["bay", "release", "main", "--json"]);
-    refusal(&out, 1, "worktree/is-main");
+    refusal_forwarded(&out, 1, "worktree/is-main");
 }
 
 #[test]

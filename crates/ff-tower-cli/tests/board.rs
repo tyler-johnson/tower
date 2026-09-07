@@ -86,8 +86,8 @@ fn json_emits_towers_envelope_and_round_trips() {
     let out = stdout(&ff_tower(repo.path(), &["--json"]));
 
     let envelope: serde_json::Value = serde_json::from_str(&out).expect("an envelope");
-    assert_eq!(envelope["tower"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("board"));
+    assert_eq!(envelope["ff"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
     let data = envelope["data"].as_object().expect("data is an object");
     for key in [
         "waiting_on_you",
@@ -195,10 +195,10 @@ fn a_closed_window_the_grammar_does_not_cover_is_a_coded_refusal() {
     assert_eq!(out.status.code(), Some(2), "a usage refusal exits 2");
     let envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
-    assert_eq!(envelope["cmd"], serde_json::json!("board"));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("usage/bad-closed")
+        serde_json::json!("tower/usage/bad-closed")
     );
     assert!(envelope.get("data").is_none(), "data and error, never both");
 }
@@ -212,7 +212,7 @@ fn the_closed_flag_does_not_ride_another_verb() {
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("usage/bad-flags")
+        serde_json::json!("tower/usage/bad-flags")
     );
 }
 
@@ -375,17 +375,17 @@ fn a_missing_ff_exits_one_and_names_fufu() {
     assert_eq!(output.status.code(), Some(1));
     let envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("an envelope");
-    assert_eq!(envelope["tower"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("board"));
+    assert_eq!(envelope["ff"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("ff/not-installed")
+        serde_json::json!("tower/ff/not-installed")
     );
     // The raise site says nothing, so `exits_for` falls back to naming
     // the registry lookup — a coded failure always has prose behind it.
     assert_eq!(
         envelope["error"]["exits"],
-        serde_json::json!(["ff tower explain ff/not-installed"])
+        serde_json::json!(["ff tower explain tower/ff/not-installed"])
     );
     assert!(envelope.get("data").is_none(), "data and error, never both");
 }

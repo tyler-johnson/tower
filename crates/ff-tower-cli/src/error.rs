@@ -83,6 +83,14 @@ impl CliError {
         }
     }
 
+    /// Whether this is a refusal fufu shaped itself rather than one of
+    /// tower's own. Only those pass the `tower/` namespace by: their id
+    /// is fufu's, `ff explain` routes it back to fufu's registry, and
+    /// tower has no entry for it.
+    pub fn forwarded(&self) -> bool {
+        matches!(self, CliError::Ff(err) if err.ff_id().is_some())
+    }
+
     /// Commands that lead out of it. Empty where no command helps — the
     /// envelope carries `[]`, never null.
     pub fn exits(&self) -> Vec<String> {

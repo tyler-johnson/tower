@@ -94,7 +94,7 @@ fn an_empty_list_answers_the_view_list_envelope() {
         status,
         &head,
         &body,
-        r#"{"tower":1,"cmd":"view list","data":{"views":[]}}"#.to_string(),
+        r#"{"ff":1,"cmd":"tower view list","data":{"views":[]}}"#.to_string(),
     );
 }
 
@@ -189,7 +189,7 @@ fn edit_renames_and_keeps_the_query_and_delete_empties_the_list() {
         body,
         format!(
             "{}\n",
-            r#"{"tower":1,"cmd":"view list","data":{"views":[]}}"#
+            r#"{"ff":1,"cmd":"tower view list","data":{"views":[]}}"#
         )
     );
 }
@@ -201,8 +201,8 @@ fn the_refusals_answer_their_ids_under_their_statuses() {
     let (status, _, body) = save(&server, r#"{"name":"mine"}"#);
     assert_eq!(status, 400, "{body}");
     let envelope: serde_json::Value = serde_json::from_str(&body).expect("an envelope");
-    assert_eq!(envelope["cmd"], json!("view save"));
-    assert_eq!(envelope["error"]["id"], json!("usage/bad-body"));
+    assert_eq!(envelope["cmd"], json!("tower view save"));
+    assert_eq!(envelope["error"]["id"], json!("tower/usage/bad-body"));
 
     refused(
         "/api/views/save",
@@ -212,7 +212,7 @@ fn the_refusals_answer_their_ids_under_their_statuses() {
             "view save",
             "usage/empty-name",
             "the view name is empty",
-            &["ff tower explain usage/empty-name".to_string()],
+            &["ff tower explain tower/usage/empty-name".to_string()],
         ),
     );
 
@@ -255,7 +255,7 @@ fn the_refusals_answer_their_ids_under_their_statuses() {
             "view delete",
             "usage/bad-view",
             "`1` is not a view id — `<writer>.<seq>`",
-            &["ff tower explain usage/bad-view".to_string()],
+            &["ff tower explain tower/usage/bad-view".to_string()],
         ),
     );
 

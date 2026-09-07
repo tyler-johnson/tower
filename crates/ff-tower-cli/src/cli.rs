@@ -15,7 +15,10 @@ use crate::help;
 /// is the one place the project name is worth a line: it is what somebody
 /// searches for — it matches the release titles and the README — and
 /// `ff-tower` is dispatch plumbing, not a name.
-pub const NAME: &str = "tower";
+///
+/// One spelling, from core: the same constant prefixes `cmd` and
+/// namespaces every id on the wire.
+pub use ff_tower_core::machine::NAME;
 
 /// What `ff tower -v` and `ff tower version` both print: the release, the
 /// commit it was built from, and the project's home under it. Both

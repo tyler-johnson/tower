@@ -49,6 +49,9 @@ pub fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
+/// The id is passed bare and asserted namespaced — `tower/<id>` is what
+/// the wire carries, and every call site goes on naming the id the
+/// registry keys on.
 pub fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -58,7 +61,10 @@ pub fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!(format!("tower/{id}"))
+    );
     envelope
 }
 
@@ -86,7 +92,7 @@ pub fn matches_cli(served: &str, cli: &str) {
     let served: serde_json::Value =
         serde_json::from_str(served.trim_end()).expect("the served envelope");
     let cli: serde_json::Value = serde_json::from_str(cli.trim_end()).expect("the CLI envelope");
-    assert_eq!(served["cmd"], serde_json::json!("board"));
+    assert_eq!(served["cmd"], serde_json::json!("tower board"));
     for key in ["backlog", "waiting", "ready", "in_progress", "held"] {
         let rows = cli["data"][key]
             .as_array()

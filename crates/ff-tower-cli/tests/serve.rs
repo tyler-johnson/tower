@@ -101,8 +101,8 @@ fn the_startup_envelope_names_the_address_it_bound() {
     let server = Server::start(repo.path(), &["--port", &port.to_string()], &[]);
 
     let envelope = &server.startup;
-    assert_eq!(envelope["tower"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("serve"));
+    assert_eq!(envelope["ff"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower serve"));
     assert_eq!(envelope["data"]["host"], serde_json::json!("127.0.0.1"));
     assert_eq!(envelope["data"]["port"], serde_json::json!(port));
     assert_eq!(

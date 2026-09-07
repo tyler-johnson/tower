@@ -150,9 +150,9 @@ fn the_version_flag_takes_the_envelope() {
     let out = ff_tower(dir.path(), &["-v", "--json"]);
     assert!(out.status.success(), "exit 0: {:?}", out.status);
     let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid json");
-    assert_eq!(v["tower"], 1);
+    assert_eq!(v["ff"], 1);
     assert_eq!(
-        v["cmd"], "version",
+        v["cmd"], "tower version",
         "the flag settled as the verb, not the board"
     );
     assert_eq!(v["data"]["version"], env!("CARGO_PKG_VERSION"));
@@ -172,7 +172,7 @@ fn the_version_flag_does_not_ride_another_verb() {
     let out = ff_tower(dir.path(), &["-v", "board", "--json"]);
     assert_eq!(out.status.code(), Some(2), "usage error: {:?}", out.status);
     let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid json");
-    assert_eq!(v["error"]["id"], "usage/bad-flags");
+    assert_eq!(v["error"]["id"], "tower/usage/bad-flags");
 }
 
 /// The envelope carries the line as fields, so a caller never takes the
@@ -183,8 +183,8 @@ fn version_json_splits_the_line_into_fields() {
     let out = ff_tower(dir.path(), &["version", "--json"]);
     assert!(out.status.success(), "exit 0: {:?}", out.status);
     let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid json");
-    assert_eq!(v["tower"], 1);
-    assert_eq!(v["cmd"], "version");
+    assert_eq!(v["ff"], 1);
+    assert_eq!(v["cmd"], "tower version");
     assert_eq!(v["data"]["version"], env!("CARGO_PKG_VERSION"));
 
     // Commit and date are both recorded or both null — never one alone,

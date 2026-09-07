@@ -1,16 +1,24 @@
 //! Curated error ids with prose. The single source of truth for what each
 //! id means and how to leave it — fufu's registry, tower's ids.
 //!
-//! Only tower-owned ids live here. A refusal fufu shaped itself passes
-//! through the seam verbatim — its id, message, and exits are fufu's
-//! words, and fufu's own envelopes already carry the `ff explain <id>`
-//! hint — so entering them here would be a second copy waiting to drift.
-
-use serde::Serialize;
+//! Only tower-owned ids live here, and that is now visible on the wire:
+//! every id tower prints is namespaced `tower/<id>`, so a refusal, this
+//! catalog, and the exit that names the lookup all spell the same
+//! string. A refusal fufu shaped itself passes through the seam
+//! verbatim — its id, message, and exits are fufu's words, it keeps
+//! fufu's bare id, and fufu's own envelopes already carry the `ff
+//! explain <id>` hint — so entering them here would be a second copy
+//! waiting to drift.
+//!
+//! The entries themselves stay bare. The namespace goes on at the
+//! surfaces a reader sees — the envelope in `machine.rs`, and `render`,
+//! `render_list` and `exits_for` below — because the registry lookup,
+//! the exit-code derivation and the server's status table all key on the
+//! bare id, and rewriting the literals would break every one of them.
 
 use crate::error::CliError;
+use crate::machine::namespaced;
 
-#[derive(Serialize)]
 pub struct Entry {
     pub id: &'static str,
     /// One line: what this error means.
@@ -769,7 +777,17 @@ pub static ENTRIES: &[Entry] = &[
     },
 ];
 
-/// Find an entry by id, or None.
+/// An id as the registry keys it: one leading `tower/` off, nothing
+/// else. Both spellings reach the same entry — the one a person pasted
+/// out of an envelope, and the one fufu hands over after splitting the
+/// namespace off itself before running `ff-tower explain <id>`.
+pub fn strip(id: &str) -> &str {
+    id.strip_prefix(crate::cli::NAME)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(id)
+}
+
+/// Find an entry by id, or None. Keyed on the bare id: strip first.
 pub fn find(id: &str) -> Option<&'static Entry> {
     ENTRIES.iter().find(|entry| entry.id == id)
 }
@@ -795,17 +813,20 @@ pub fn exits_for(err: &CliError) -> Vec<String> {
     }
     let id = err.id();
     match find(id) {
-        Some(entry) if entry.exits.is_empty() => vec![format!("ff tower explain {id}")],
+        Some(entry) if entry.exits.is_empty() => {
+            vec![format!("ff tower explain {}", namespaced(id))]
+        }
         Some(entry) => entry.exits.iter().map(|exit| (*exit).to_string()).collect(),
         None => Vec::new(),
     }
 }
 
 /// One entry, rendered: id line, summary, a blank, the detail wrapped at
-/// 80 columns, and the `try:` block when there are exits.
+/// 80 columns, and the `try:` block when there are exits. The id is the
+/// namespaced one, which is the spelling an envelope handed the reader.
 pub fn render(entry: &Entry) -> String {
     let mut out = String::new();
-    out.push_str(entry.id);
+    out.push_str(&namespaced(entry.id));
     out.push('\n');
     out.push_str(entry.summary);
     out.push('\n');
@@ -822,27 +843,32 @@ pub fn render(entry: &Entry) -> String {
 }
 
 /// Every entry as `id  summary`, ids padded to align — no header, the
-/// list is its own explanation.
+/// list is its own explanation. Namespaced like `render`'s heading, so
+/// the catalog and the wire join.
 pub fn render_list() -> String {
-    let width = ENTRIES
-        .iter()
-        .map(|entry| entry.id.len())
-        .max()
-        .unwrap_or(0);
+    let ids: Vec<String> = ENTRIES.iter().map(|entry| namespaced(entry.id)).collect();
+    let width = ids.iter().map(String::len).max().unwrap_or(0);
     let mut out = String::new();
-    for entry in ENTRIES {
-        out.push_str(&format!("{:<width$}  {}\n", entry.id, entry.summary));
+    for (id, entry) in ids.iter().zip(ENTRIES) {
+        out.push_str(&format!("{id:<width$}  {}\n", entry.summary));
     }
     out
 }
 
 /// The refusal for an id the registry does not carry. Exit 2 by the
 /// `usage/` rule. The exits meet the asker where they are: the list
-/// always; fufu's lookup when the id is slash-shaped, because forwarded
-/// fufu ids live in fufu's registry; and the brief when the argument
-/// parses as a flight reference — someone reaching for the verb's old
-/// meaning.
+/// always; fufu's lookup when the id is slash-shaped, because an id with
+/// a namespace that is not tower's is one of fufu's and lives in fufu's
+/// registry; and the brief when the argument parses as a flight
+/// reference — someone reaching for the verb's old meaning.
+///
+/// A leading `tower/` comes off first, and the stripping is what makes
+/// the slash test mean what it says: `tower/nonsense` is a miss in
+/// tower's own namespace, and pointing it at `ff explain` would send the
+/// asker exactly the wrong way. The message reports the stripped id,
+/// which is the one the registry was actually asked for.
 pub fn unknown_id(id: &str) -> CliError {
+    let id = strip(id);
     let mut exits = vec!["ff tower explain --list".to_string()];
     if id.contains('/') {
         exits.push(format!("ff explain {id}"));
@@ -1149,6 +1175,14 @@ mod tests {
     /// The slash-shaped id literals inside a file's `fn id()` body — the
     /// match tables that name wrapped errors. Shape-filtered so prose in
     /// a doc string could never scan as an id.
+    ///
+    /// The filter takes literals with *exactly one* `/`, which is the
+    /// standing hazard here: ids live bare in these tables and the
+    /// `tower/` namespace goes on at the emit boundary, so a
+    /// `tower/`-prefixed literal landing in one of the eleven scanned
+    /// `fn id()` bodies would be dropped from the raised set without a
+    /// word — surfacing later as `every_registry_entry_is_reachable`
+    /// calling the entry an orphan, which points at the wrong cause.
     fn id_table_ids(text: &str) -> Vec<String> {
         let Some(at) = text.find("fn id(") else {
             return Vec::new();
