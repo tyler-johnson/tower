@@ -953,6 +953,18 @@ mod tests {
                 }
             }
         }
+        // The manual is prose that spells commands too, and it is held
+        // to the same tree: every backticked `ff tower …` span and every
+        // code-block line that starts with one.
+        for (label, text) in [("skill", Some(crate::integ::SKILL))] {
+            let Some(text) = text else { continue };
+            let mut spans = quoted(text);
+            spans.extend(example_rows(text));
+            for tokens in &spans {
+                check(&tree, tokens, label);
+                found += 1;
+            }
+        }
         // Same reason the exit walk proves it reads the tree: an
         // extractor that quietly matched nothing would pass while
         // checking nothing.

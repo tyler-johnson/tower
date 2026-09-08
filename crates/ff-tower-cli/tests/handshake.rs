@@ -70,7 +70,8 @@ fn the_manifest_declares_tower() {
     assert_eq!(data["undoable"], false);
     assert_eq!(data["briefing"], true);
     assert_eq!(data["tools"], true);
-    for absent in ["skills", "mcp", "events"] {
+    assert_eq!(data["skills"], serde_json::json!(["tower"]));
+    for absent in ["mcp", "events"] {
         assert!(
             data.get(absent).is_none(),
             "{absent} is not declared: {data}"
@@ -127,7 +128,7 @@ fn the_wrong_arity_is_a_usage_refusal() {
 #[test]
 fn a_skill_the_binary_does_not_ship_is_refused() {
     let dir = tempfile::TempDir::new().unwrap();
-    for name in ["tower", "tower-plan"] {
+    for name in ["tower-plan", "tower-nothing"] {
         let out = ff_tower(dir.path(), &["--ff-skill", name]);
         let v = refusal(&out, 1, "tower/skill/unknown");
         assert_eq!(v["cmd"], "tower --ff-skill");
@@ -241,12 +242,28 @@ fn the_handshakes_ignore_the_repository() {
         assert_eq!(text.lines().count(), 1, "{args:?}: {text}");
         let v: serde_json::Value = serde_json::from_str(&text).expect("an envelope");
         assert_eq!(v["ff"], 1, "{args:?}");
+        assert!(v.get("data").is_some(), "{args:?}: {text}");
         if args[0] == "--ff-skill" {
-            assert_eq!(v["error"]["id"], "tower/skill/unknown");
-        } else {
-            assert!(v.get("data").is_some(), "{args:?}: {text}");
+            let files = v["data"]["files"].as_array().expect("files");
+            assert_eq!(files.len(), 1, "{text}");
+            assert_eq!(files[0]["path"], "SKILL.md");
+            let content = files[0]["content"].as_str().expect("content");
+            assert!(content.starts_with("---\nname: tower\n"), "{content:.60}");
         }
     }
+}
+
+/// The skill reply is the embedded manual, byte for byte: what `ff hook`
+/// writes to disk is what the binary compares against for staleness.
+#[test]
+fn the_tower_skill_is_the_embedded_manual() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let v = reply(&ff_tower(dir.path(), &["--ff-skill", "tower"]));
+    assert_eq!(v["cmd"], "tower --ff-skill");
+    assert_eq!(
+        v["data"]["files"][0]["content"],
+        include_str!("../src/integ/skill.md")
+    );
 }
 
 /// A handshake flag is argv[1] or it is nothing: riding a verb, it is

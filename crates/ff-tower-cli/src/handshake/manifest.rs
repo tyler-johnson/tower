@@ -146,10 +146,11 @@ mod tests {
             .collect();
         // serde_json's map sorts, so compare as a set.
         let mut want = vec![
-            "name", "version", "contract", "verbs", "undoable", "briefing", "tools",
+            "name", "version", "contract", "verbs", "undoable", "briefing", "tools", "skills",
         ];
         want.sort_unstable();
-        assert_eq!(keys, want, "no `skills` while the table is empty: {value}");
+        assert_eq!(keys, want, "{value}");
+        assert_eq!(value["skills"], serde_json::json!(["tower"]));
         assert_eq!(value["name"], "tower");
         assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(value["contract"], 1);

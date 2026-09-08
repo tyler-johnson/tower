@@ -1,11 +1,11 @@
 //! `--ff-skill <name>`: the files behind one skill the manifest lists,
 //! for `ff hook` to install.
 //!
-//! The table is empty today. #107 adds `tower-plan` and `tower-loop`
-//! from `integ::PLAN` and `integ::LOOP`; #37 adds `tower`. fufu only asks
-//! for names the manifest lists, and the manifest lists this table, so a
-//! name that reaches `answer` and misses is an `ff hook` from a manifest
-//! this binary did not write.
+//! The table holds `tower`, the manual from `integ::SKILL`. #107 adds
+//! `tower-plan` and `tower-loop` from `integ::PLAN` and `integ::LOOP`.
+//! fufu only asks for names the manifest lists, and the manifest lists
+//! this table, so a name that reaches `answer` and misses is an
+//! `ff hook` from a manifest this binary did not write.
 
 use serde::Serialize;
 
@@ -25,7 +25,13 @@ pub struct Skill {
 }
 
 /// Every skill this binary ships.
-pub const SKILLS: &[Skill] = &[];
+pub const SKILLS: &[Skill] = &[Skill {
+    name: "tower",
+    files: &[SkillFile {
+        path: "SKILL.md",
+        content: crate::integ::SKILL,
+    }],
+}];
 
 /// The reply's `data`: `files`, each `{path, content}`.
 #[derive(Debug, Serialize)]
@@ -68,8 +74,7 @@ mod tests {
 
     use super::*;
 
-    /// fufu's rules for a skill reply, applied to every table entry:
-    /// vacuous while the table is empty, load-bearing the day it is not.
+    /// fufu's rules for a skill reply, applied to every table entry.
     #[test]
     fn every_shipped_skill_is_whole() {
         const CAP: usize = 8 * 1024 * 1024;
