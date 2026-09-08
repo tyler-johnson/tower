@@ -143,7 +143,7 @@ fn a_skill_the_binary_does_not_ship_is_refused() {
 }
 
 #[test]
-fn the_tools_are_the_verbs_an_agent_calls() {
+fn the_tools_are_the_loops_four_gestures() {
     let dir = tempfile::TempDir::new().unwrap();
     let v = reply(&ff_tower(dir.path(), &["--ff-tools"]));
     assert_eq!(v["cmd"], "tower --ff-tools");
@@ -151,27 +151,7 @@ fn the_tools_are_the_verbs_an_agent_calls() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
-    let mut want = vec![
-        "board",
-        "brief",
-        "next",
-        "file",
-        "comment",
-        "edit",
-        "link",
-        "unlink",
-        "decompose",
-        "assign",
-        "status",
-        "cancel",
-        "hold",
-        "answer",
-        "done",
-        "explain",
-        "procedures",
-        "skills",
-        "bay",
-    ];
+    let mut want = vec!["next", "brief", "hold", "done"];
     want.sort_unstable();
     assert_eq!(sorted, want);
 
@@ -217,38 +197,25 @@ fn the_tools_are_the_verbs_an_agent_calls() {
     }
 
     let tool = |name: &str| tools.iter().find(|t| t["name"] == name).unwrap();
-    assert_eq!(tool("board")["annotations"]["readOnlyHint"], true);
-    assert_eq!(tool("file")["annotations"]["readOnlyHint"], false);
+    assert_eq!(tool("brief")["annotations"]["readOnlyHint"], true);
+    assert_eq!(tool("done")["annotations"]["readOnlyHint"], false);
 
-    let bay = &tool("bay")["inputSchema"];
-    assert_eq!(
-        bay["positional"],
-        serde_json::json!(["action", "path", "branch"])
-    );
-    assert_eq!(bay["required"], serde_json::json!(["action"]));
-    assert_eq!(
-        bay["properties"]["action"]["enum"],
-        serde_json::json!(["list", "warm", "release"])
-    );
+    let brief = &tool("brief")["inputSchema"];
+    assert_eq!(brief["positional"], serde_json::json!(["flight"]));
+    assert_eq!(brief["required"], serde_json::json!(["flight"]));
 
-    let file = &tool("file")["inputSchema"];
-    assert_eq!(file["positional"], serde_json::json!(["first", "second"]));
-    assert!(file.get("required").is_none(), "{file}");
-    assert_eq!(file["properties"]["label"]["type"], "array");
-    assert_eq!(file["properties"]["message"]["type"], "string");
-
-    let comment = &tool("comment")["inputSchema"];
-    assert_eq!(comment["positional"], serde_json::json!(["flight"]));
-    assert_eq!(comment["required"], serde_json::json!(["flight"]));
-    assert!(comment["properties"].get("message").is_some());
-
-    assert_eq!(
-        tool("decompose")["inputSchema"]["properties"]["parts"]["type"],
-        "array"
-    );
     let next = &tool("next")["inputSchema"]["properties"];
     assert_eq!(next["count"]["type"], "integer");
     assert_eq!(next["peek"]["type"], "boolean");
+
+    let hold = &tool("hold")["inputSchema"];
+    assert_eq!(hold["positional"], serde_json::json!(["flight"]));
+    assert_eq!(hold["required"], serde_json::json!(["flight"]));
+    assert_eq!(hold["properties"]["message"]["type"], "string");
+
+    let done = &tool("done")["inputSchema"];
+    assert_eq!(done["positional"], serde_json::json!(["flight"]));
+    assert!(done.get("required").is_none(), "bare done: {done}");
 }
 
 /// The handshakes are compiled in: a repository that does not exist
