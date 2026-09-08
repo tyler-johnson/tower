@@ -34,8 +34,9 @@ pub static ENTRIES: &[Entry] = &[
         summary: "the command line does not combine into one command",
         detail: "The line was answerable but not runnable: `-V` where tower's version flag is \
                  lowercase `-v`, the version flag riding another verb — two commands on one line \
-                 — or `explain` with neither an id nor `--list`. The refusal itself names the \
-                 spellings that would each be right alone.",
+                 — `explain` with neither an id nor `--list`, or one of fufu's handshake flags \
+                 (`--ff-manifest`, `--ff-skill`, `--ff-tools`) with arguments it does not take. \
+                 The refusal itself names the spellings that would each be right alone.",
         exits: &[],
     },
     Entry {
@@ -583,6 +584,16 @@ pub static ENTRIES: &[Entry] = &[
                  normal state of a fresh box: bare `ff tower skills` names both directories, \
                  and the tower repository's `docs/skills/` carries worked examples to copy in.",
         exits: &["ff tower skills"],
+    },
+    Entry {
+        id: "skill/unknown",
+        summary: "no skill by that name ships in the binary",
+        detail: "`--ff-skill <name>` is fufu's question at `ff hook`: the files behind one skill \
+                 the manifest lists. The manifest names what this binary ships, and fufu asks \
+                 only for those, so a miss is a manifest a different tower wrote. fufu reads \
+                 only that it is an error and says the skill was left out; there is nothing to \
+                 type. `ff tower skills` is a different shelf — the store's, not the binary's.",
+        exits: &[],
     },
     Entry {
         id: "skill/invalid",

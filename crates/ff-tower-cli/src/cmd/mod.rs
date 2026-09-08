@@ -13,6 +13,7 @@ pub mod assign;
 pub mod bay;
 pub mod board;
 pub mod brief;
+pub mod briefing;
 pub mod cancel;
 pub mod comment;
 pub mod config;

@@ -6,6 +6,13 @@
 //! missing-but-required message is a coded refusal from the verb rather
 //! than a clap `required = true` — a `--json` caller gets an envelope,
 //! not clap's usage text.
+//!
+//! The short-only flags — the six `-m` and `next`'s `-n` — carry a hidden
+//! alias (`message`, `count`) so fufu's tool spelling has a long form to
+//! emit: `ff mcp` serves each verb from `--ff-tools`'s schema and spells
+//! every key as `--key`. Clap resolves an alias as a long flag whether or
+//! not the arg has a `long`, and a hidden one leaves the help pages as
+//! they were.
 
 use clap::{Parser, Subcommand};
 
@@ -110,7 +117,7 @@ pub enum Command {
     #[command(long_about = help::NEXT, after_long_help = help::NEXT_EXAMPLES)]
     Next {
         /// How many flights to hand out; one when unsaid.
-        #[arg(short = 'n', value_name = "k")]
+        #[arg(short = 'n', alias = "count", value_name = "k")]
         count: Option<usize>,
         /// The same computation with no claim written.
         #[arg(long)]
@@ -142,7 +149,7 @@ pub enum Command {
         #[arg(value_name = "subject")]
         second: Option<String>,
         /// The body — detail beyond the subject.
-        #[arg(short = 'm', value_name = "msg")]
+        #[arg(short = 'm', alias = "message", value_name = "msg")]
         message: Option<String>,
         /// The priority the flight is born with.
         #[arg(short = 'p', long = "priority", value_name = "priority")]
@@ -171,7 +178,7 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
         /// The note.
-        #[arg(short = 'm', value_name = "msg")]
+        #[arg(short = 'm', alias = "message", value_name = "msg")]
         message: Option<String>,
     },
     /// Reword a flight or a comment — an overlay on the record; the log
@@ -186,7 +193,7 @@ pub enum Command {
         #[arg(short = 's', long = "subject", value_name = "subject")]
         subject: Option<String>,
         /// The new body — or the comment's new text.
-        #[arg(short = 'm', value_name = "msg")]
+        #[arg(short = 'm', alias = "message", value_name = "msg")]
         message: Option<String>,
         /// The new priority; flights only.
         #[arg(short = 'p', long = "priority", value_name = "priority")]
@@ -275,7 +282,7 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
         /// Why — stored on the move.
-        #[arg(short = 'm', value_name = "msg")]
+        #[arg(short = 'm', alias = "message", value_name = "msg")]
         message: Option<String>,
     },
     /// Stop a flight with a question attached — bay warm, exit 3.
@@ -285,7 +292,7 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
         /// The question.
-        #[arg(short = 'm', value_name = "msg")]
+        #[arg(short = 'm', alias = "message", value_name = "msg")]
         message: Option<String>,
     },
     /// Answer the open question and release the hold.
@@ -295,7 +302,7 @@ pub enum Command {
         #[arg(value_name = "flight")]
         flight: String,
         /// The answer.
-        #[arg(short = 'm', value_name = "msg")]
+        #[arg(short = 'm', alias = "message", value_name = "msg")]
         message: Option<String>,
     },
     /// Finish a flight — off the board, on the record.
@@ -377,6 +384,9 @@ pub enum Command {
         #[arg(long, value_name = "n")]
         port: Option<String>,
     },
+    /// One line for fufu's session briefing: what is in flight here.
+    #[command(long_about = help::BRIEFING, after_long_help = help::BRIEFING_EXAMPLES)]
+    Briefing,
 }
 
 /// The ambient lanes: what rides an invocation besides the verb itself.
@@ -407,6 +417,12 @@ impl Command {
             // update children at startup, and a notice printed at
             // shutdown would report a release that landed hours ago.
             Command::Serve { .. } => Lanes {
+                update: false,
+                notice: false,
+            },
+            // fufu spawns it with nobody in front of it, under a one-second
+            // box: no child to fork, and no one to read a notice.
+            Command::Briefing => Lanes {
                 update: false,
                 notice: false,
             },

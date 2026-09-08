@@ -22,8 +22,9 @@ mod cli;
 mod cmd;
 mod error;
 mod explain;
+mod handshake;
 mod help;
-// The Claude Code plugin body; #39's install verbs consume it.
+// The plugin body; #107 ships it through `--ff-skill`.
 #[allow(dead_code)]
 mod integ;
 mod machine;
@@ -38,6 +39,12 @@ use ff_tower_core::board::{self, ClosedWindow};
 use ff_tower_core::ff::Ff;
 
 fn main() {
+    // fufu's handshakes come before clap and before every lane: they are
+    // answered from what is compiled in, outside any repository, and a
+    // machine is on the other end of stdout.
+    if let Some(code) = handshake::answer(std::env::args_os()) {
+        std::process::exit(code);
+    }
     let cli = Cli::parse();
     // `-V` is the version flag every other tool has; here it is lowercase.
     // Answered rather than parsed, so the person who typed the habit is
@@ -197,6 +204,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Update { .. }) => "update",
         Some(Command::Doctor) => "doctor",
         Some(Command::Serve { .. }) => "serve",
+        Some(Command::Briefing) => "briefing",
     }
 }
 
@@ -291,6 +299,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Serve { host, port }) => {
             cmd::serve::run(cli.json, host.as_deref(), port.as_deref())?
         }
+        Some(Command::Briefing) => cmd::briefing::run(cli.json)?,
     }
     Ok(0)
 }

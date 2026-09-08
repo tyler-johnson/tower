@@ -657,6 +657,28 @@ Examples:
   ff tower config servePort 9000          the same, remembered
   ff tower serve --json          the address as an envelope, then serve";
 
+pub const BRIEFING: &str = "\
+One line for fufu's session briefing, which is the paragraph fufu puts
+in front of an agent when a session starts. fufu asks every declared
+extension that offers one, takes stdout verbatim, and keeps a line
+only if it is one line of at most 240 characters — anything longer is
+dropped whole, so the subject is elided here rather than there.
+
+The line is the bay's answer. When the worktree fufu ran it in is
+flying a flight, the line names that flight, its subject, and the bay,
+and points at `ff tower brief <flight>`. Otherwise it counts what is
+Ready across the board, or says nothing is.
+
+fufu runs it with a one-second box and stderr discarded, so a failure
+— no repository, no fufu, a drifted seam — costs nothing but the
+line. Run by hand, the failure reports the way every verb's does.
+--json carries the line as `data.line`.";
+
+pub const BRIEFING_EXAMPLES: &str = "\
+Examples:
+  ff tower briefing              the line fufu would show
+  ff tower briefing --json       the same, as a field";
+
 pub const BAY_LIST: &str = "\
 Every bay, one row: the painted id, the branch it stands on, and the
 occupant — the live flight whose freshest work sits on that branch —
