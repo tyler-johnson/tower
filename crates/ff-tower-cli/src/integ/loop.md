@@ -1,5 +1,7 @@
 ---
+name: tower-loop
 description: drain the board unattended — claim, work, hold or finish, repeat until it stops
+disable-model-invocation: true
 ---
 
 # loop
@@ -8,11 +10,11 @@ You are the crew of a loop over `ff tower next`. The harness you run in is the s
 
 The loop step is `ff tower next --json`. Exit 0 is a pick: `picked[0]` carries `flight`, `subject`, `branch`, `bay`, and — when the flight's part names one — `skill`. Exit 1 is an empty pick, and `data.outcome` says which: `drained` is a board with nothing left, and `yours` is work that exists and needs a person. Both stop the loop and are reported by their word. Those are the only exits. Never sleep and retry, never add a timeout, never invent a sentinel.
 
-Fan-out: when the harness can run parallel subagents, `ff tower next -n <k>` claims a set that collides with neither each other nor anything already flying. Hand each picked row to one worker in its own bay, and rejoin the loop when all of them have ended their flight with a verb. Solo remains the default; fan out only when the board shows independent ready flights and the harness genuinely runs workers concurrently.
+Fan-out: when the harness can run parallel subagents, `ff tower next -n 3` claims a set that collides with neither each other nor anything already flying. Hand each picked row to one worker in its own bay, and rejoin the loop when all of them have ended their flight with a verb. Solo remains the default; fan out only when the board shows independent ready flights and the harness genuinely runs workers concurrently.
 
 Bay discipline: cd into the picked `bay` and work only there, on the picked `branch`. Never touch the main worktree or another bay. A pick without a bay stops the step — report the claim and the missing tree rather than improvising one.
 
-Read the brief before touching anything: `ff tower brief <flight> --json` — the body, the comments, the links and their done states, and the open question when one stands. The brief holds this flight's facts: the files it touches, the prior art, the verify command. This command knows how to drive tower; the brief knows the flight.
+Read the brief before touching anything: `ff tower brief <flight> --json` — the body, the comments, the links and their done states, and the open question when one stands. The brief holds this flight's facts: the files it touches, the prior art, the verify command. This skill knows how to drive tower; the brief knows the flight.
 
 When the pick carries a `skill`, run `ff tower skills <name>` and follow that markdown for this flight in place of the work step below, rejoining at the hold rule. The user never typed that name; the flight carried it.
 
@@ -20,8 +22,8 @@ Do the work in the bay, and commit with `ff commit` as coherent pieces land. Run
 
 Questions are holds, never guesses. Nobody is here to ask: when the brief does not settle a decision, `ff tower hold <flight> -m "<question>"` and continue the loop. A held flight is parked with its question on the record, not the run's end.
 
-Finish or give back. Verified done: `ff tower done <flight>`. Unworkable with no question worth holding on: `ff tower requeue <flight>` and continue the loop, carrying the reason into the final report.
+Finish or give back. Verified done: `ff tower done <flight>`. Unworkable with no question worth holding on: `ff tower status <flight> ready` — the record decides between Ready and Waiting — and continue the loop, carrying the reason into the final report.
 
-The push boundary: stop at committed on the branch. No push, no PR, no forge or tracker write. Wanting this loop to publish — or to behave differently in any other way — means writing your own command, using this one as reference.
+The push boundary: stop at committed on the branch. No push, no PR, no forge or tracker write. Wanting this loop to publish — or to behave differently in any other way — means writing your own skill, using this one as reference.
 
-End the run with a report: which outcome ended it — `drained` or `yours` — and the flights worked, held with their questions, and requeued with their reasons.
+End the run with a report: which outcome ended it — `drained` or `yours` — and the flights worked, held with their questions, and handed back with their reasons.
