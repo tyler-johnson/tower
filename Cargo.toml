@@ -93,6 +93,13 @@ tokio-stream = { version = "0.1", default-features = false, features = [
 # runtime read-from-disk mode to accidentally ship, and its build-dep
 # tree is smaller. MIT, already on deny.toml's allowlist.
 include_dir = "0.7"
+# Debug and test builds keep line tables but drop full DWARF: panics and
+# backtraces still name their file and line, while the per-binary debuginfo
+# that grew target/debug/deps to 171G goes away. `[profile.test]` inherits
+# this, so `cargo test` artifacts shrink with it.
+[profile.dev]
+debug = "line-tables-only"
+
 
 [profile.release]
 lto = "fat"
@@ -100,10 +107,10 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
-# Local dogfood builds: release semantics without the LTO link cost. A
-# separate target dir (target/dogfood), so it never thrashes the pristine
-# fat-LTO target/release. `make install` symlinks the binary here, and
-# strip stays off so a panic in daily use names its own line.
+# Local dogfood builds: release semantics without the LTO link cost. Its own
+# profile dir (<target>/dogfood), so it never thrashes the pristine fat-LTO
+# release dir. With that dir on PATH, `make` is the whole install, and strip
+# stays off so a panic in daily use names its own line.
 [profile.dogfood]
 inherits = "release"
 lto = "off"

@@ -70,12 +70,11 @@ Installed binaries keep themselves fresh: a passive lane checks for releases abo
 
 ```console
 $ make              # fast dogfood build -- release semantics, no LTO link cost
-$ make install      # link ~/.cargo/bin/ff-tower at it; `ff tower` is live
 $ make test         # the suite
 $ make release      # the honest fat-LTO build
 ```
 
-`make install` is the whole install: fufu's `ff-<name>` dispatch searches PATH, so a symlink is all `ff tower` needs. It is idempotent, and the binary is live the moment a build links — no reinstall step between editing and running.
+`make` is the whole install: fufu's `ff-<name>` dispatch searches PATH, and with cargo's target dir shared machine-wide and its dogfood/ on PATH, `ff tower` is live the moment a build links — no reinstall step between editing and running.
 
 Building needs Node and pnpm: cargo's build script runs the web build itself and embeds the output, so `cargo build` alone yields the full binary with the board inside. They are build dependencies only — fufu stays a runtime dependency rather than a build one: tower spawns `ff`, so running tower needs `ff` on PATH and nothing else.
 

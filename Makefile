@@ -1,8 +1,9 @@
-# Daily driver: `make` = fast dogfood build; ~/.cargo/bin/ff-tower symlinks
-# to target/dogfood/ff-tower, so `ff tower` is live the moment it links.
-# `make release` is the honest fat-LTO build.
+# Daily driver: `make` = fast dogfood build. With cargo's target dir shared
+# machine-wide (`[build] target-dir` in ~/.cargo/config.toml) and its dogfood/
+# on PATH, fufu's `ff-<name>` dispatch finds ff-tower the moment it links;
+# there is nothing to install. `make release` is the honest fat-LTO build.
 
-.PHONY: build release test fmt fmt-check lint install clean
+.PHONY: build release test fmt fmt-check lint clean
 
 build:
 	cargo build --profile dogfood
@@ -25,13 +26,7 @@ lint:
 	cargo clippy --workspace --all-targets -- -D warnings
 	pnpm --dir web lint
 
-# Point ~/.cargo/bin/ff-tower at the dogfood binary. That is the whole
-# install: fufu's `ff-<name>` dispatch searches PATH, so `ff tower` finds it
-# with nothing else wired. Idempotent; rerun after a move.
-install: build
-	@mkdir -p $(HOME)/.cargo/bin
-	ln -sfn $(CURDIR)/target/dogfood/ff-tower $(HOME)/.cargo/bin/ff-tower
-	@echo "linked $(HOME)/.cargo/bin/ff-tower -> $(CURDIR)/target/dogfood/ff-tower"
-
+# Only this workspace's own crates: the target dir is shared with every
+# other workspace on the machine, so a bare `cargo clean` would take theirs.
 clean:
-	cargo clean
+	cargo clean -p ff-tower-core -p ff-tower-cli -p ff-tower-serve -p ff-tower-testsupport
