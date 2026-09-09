@@ -107,7 +107,12 @@ mod tests {
 
     #[test]
     fn the_load_bearing_verbs_survive_rewording() {
-        for verb in ["ff tower next", "ff tower skills", "hold", "ff tower status"] {
+        for verb in [
+            "ff tower next",
+            "ff tower skills",
+            "hold",
+            "ff tower status",
+        ] {
             assert!(LOOP.contains(verb), "loop lost `{verb}`");
         }
         assert!(
