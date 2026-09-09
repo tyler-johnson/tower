@@ -24,9 +24,6 @@ mod error;
 mod explain;
 mod handshake;
 mod help;
-// The plugin body. `SKILL` ships through `--ff-skill tower`; `PLAN` and
-// `LOOP` wait on #107, so the allow stays until then.
-#[allow(dead_code)]
 mod integ;
 mod machine;
 mod render;

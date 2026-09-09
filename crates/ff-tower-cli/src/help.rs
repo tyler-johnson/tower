@@ -953,11 +953,14 @@ mod tests {
                 }
             }
         }
-        // The manual is prose that spells commands too, and it is held
+        // The skills are prose that spells commands too, and they are held
         // to the same tree: every backticked `ff tower …` span and every
         // code-block line that starts with one.
-        for (label, text) in [("skill", Some(crate::integ::SKILL))] {
-            let Some(text) = text else { continue };
+        for (label, text) in [
+            ("skill", crate::integ::SKILL),
+            ("plan", crate::integ::PLAN),
+            ("loop", crate::integ::LOOP),
+        ] {
             let mut spans = quoted(text);
             spans.extend(example_rows(text));
             for tokens in &spans {

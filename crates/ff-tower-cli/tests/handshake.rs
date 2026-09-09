@@ -70,7 +70,10 @@ fn the_manifest_declares_tower() {
     assert_eq!(data["undoable"], false);
     assert_eq!(data["briefing"], true);
     assert_eq!(data["tools"], true);
-    assert_eq!(data["skills"], serde_json::json!(["tower"]));
+    assert_eq!(
+        data["skills"],
+        serde_json::json!(["tower", "tower-plan", "tower-loop"])
+    );
     for absent in ["mcp", "events"] {
         assert!(
             data.get(absent).is_none(),
@@ -128,7 +131,7 @@ fn the_wrong_arity_is_a_usage_refusal() {
 #[test]
 fn a_skill_the_binary_does_not_ship_is_refused() {
     let dir = tempfile::TempDir::new().unwrap();
-    for name in ["tower-plan", "tower-nothing"] {
+    for name in ["tower-work", "tower-nothing"] {
         let out = ff_tower(dir.path(), &["--ff-skill", name]);
         let v = refusal(&out, 1, "tower/skill/unknown");
         assert_eq!(v["cmd"], "tower --ff-skill");
@@ -264,6 +267,29 @@ fn the_tower_skill_is_the_embedded_manual() {
         v["data"]["files"][0]["content"],
         include_str!("../src/integ/skill.md")
     );
+}
+
+/// The two intents ship the same way: one `SKILL.md` each, the embedded
+/// markdown byte for byte, named by its front matter.
+#[test]
+fn the_intent_skills_are_the_embedded_markdown() {
+    let dir = tempfile::TempDir::new().unwrap();
+    for (name, markdown) in [
+        ("tower-plan", include_str!("../src/integ/plan.md")),
+        ("tower-loop", include_str!("../src/integ/loop.md")),
+    ] {
+        let v = reply(&ff_tower(dir.path(), &["--ff-skill", name]));
+        assert_eq!(v["cmd"], "tower --ff-skill");
+        let files = v["data"]["files"].as_array().expect("files");
+        assert_eq!(files.len(), 1, "{name}: {v}");
+        assert_eq!(files[0]["path"], "SKILL.md", "{name}");
+        assert_eq!(files[0]["content"], markdown, "{name}");
+        let content = files[0]["content"].as_str().expect("content");
+        assert!(
+            content.starts_with(&format!("---\nname: {name}\n")),
+            "{name}: {content:.60}"
+        );
+    }
 }
 
 /// A handshake flag is argv[1] or it is nothing: riding a verb, it is

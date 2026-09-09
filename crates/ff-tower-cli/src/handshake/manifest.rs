@@ -150,7 +150,10 @@ mod tests {
         ];
         want.sort_unstable();
         assert_eq!(keys, want, "{value}");
-        assert_eq!(value["skills"], serde_json::json!(["tower"]));
+        assert_eq!(
+            value["skills"],
+            serde_json::json!(["tower", "tower-plan", "tower-loop"])
+        );
         assert_eq!(value["name"], "tower");
         assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(value["contract"], 1);
