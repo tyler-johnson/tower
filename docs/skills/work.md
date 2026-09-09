@@ -19,8 +19,8 @@ Do the work in the bay, and commit with `ff commit` as coherent pieces land. Run
 
 Questions are holds, never guesses. When the brief does not settle a decision, `ff tower hold <flight> -m "<question>"` and continue the loop. A held flight is parked with its question on the record, not the run's end.
 
-Finish or give back. Verified done: `ff tower done <flight>`. Unworkable with no question worth holding on: `ff tower requeue <flight>` and continue the loop, carrying the reason into the final report.
+Finish or give back. Verified done: `ff tower done <flight>`. Unworkable with no question worth holding on: `ff tower status <flight> ready` and continue the loop, carrying the reason into the final report.
 
 The push boundary: stop at committed on the branch. No push, no PR, no forge or tracker write. Wanting this loop to publish means editing this file — fork it to `.tower/skills/work.md` or `~/.config/tower/skills/work.md` — and the edit is visibly the operator's: `ff tower skills` names the layer every skill came from.
 
-End the run with a report: which outcome ended it — `drained` or `yours` — and the flights worked, held with their questions, and requeued with their reasons.
+End the run with a report: which outcome ended it — `drained` or `yours` — and the flights worked, held with their questions, and handed back with their reasons.

@@ -9,7 +9,7 @@ Turn a goal into flights tower stores. Planning files flights and links; it neve
 
 Understand before cutting. Read enough of the repository to place real seams; a flight is one claimable stretch of work, not a heading.
 
-Check the shelf first: `ff tower procedures`. When an installed procedure matches the shape of the work, file under it — `ff tower file "<subject>" -p <name>` — rather than hand-rolling its parts.
+Check the shelf first: `ff tower procedures`. When an installed procedure matches the shape of the work, file under it — `ff tower file <procedure> "<subject>"` — rather than hand-rolling its parts.
 
 Choose the shape. Work one sitting finishes is one flight: `ff tower file "<subject>" -m "<body>"`. Work with distinct parts is a parent split with `ff tower decompose`, or separate filings joined with `ff tower link <a> <b>` for each real ordering. Link only where the order is load-bearing — unlinked flights can fly together, and that is the point of leaving them unlinked.
 
