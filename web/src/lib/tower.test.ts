@@ -49,6 +49,7 @@ function flight(number: number, status: string, labels: string[] = []): FlightVi
     current: false,
     question: null,
     asked_at: null,
+    closed_reason: null,
     collides: [],
     unanswered: [],
   };

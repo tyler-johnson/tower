@@ -87,6 +87,10 @@ pub struct Brief {
     pub question: Option<String>,
     pub asked_by: Option<String>,
     pub asked_at: Option<i64>,
+    /// A close's `-m` — a cancel's reason, most often — standing where
+    /// the question stood. `None` while the flight is open or when the
+    /// close said nothing.
+    pub closed_reason: Option<String>,
     /// `@detached` is a real literal value here, carried as fufu emitted
     /// it; a render decides how to print it.
     pub branch: Option<String>,
@@ -252,6 +256,7 @@ pub fn brief(
         question: flight.question.as_ref().map(|q| q.text.clone()),
         asked_by: flight.question.as_ref().map(|q| q.by.clone()),
         asked_at: flight.question.as_ref().map(|q| q.at),
+        closed_reason: flight.closed_reason.clone(),
         branch,
         tip: row.and_then(|row| row.tip.clone()),
         held: row.is_some_and(|row| row.held),
@@ -556,6 +561,19 @@ mod tests {
 
     fn done(id: &str, author: &str, time: i64, flight: &str) -> Event {
         moved(id, author, time, flight, "done")
+    }
+
+    fn canceled(id: &str, author: &str, time: i64, flight: &str, reason: &str) -> Event {
+        lifecycle(
+            id,
+            author,
+            time,
+            Kind::Status {
+                flight: flight.parse().expect("id"),
+                status: "canceled".to_string(),
+                reason: Some(reason.to_string()),
+            },
+        )
     }
 
     fn op(session: &str, branch: Option<&str>, time: i64) -> OpEntry {
@@ -892,6 +910,55 @@ mod tests {
         assert_eq!(brief.asked_at, Some(60));
         assert_eq!(brief.status, "held");
         assert!(matches!(brief.standing, Standing::Question));
+    }
+
+    #[test]
+    fn a_cancel_over_a_question_briefs_the_reason_and_history_keeps_the_hold() {
+        let events = [
+            filed("pi.1", 10, "s", ""),
+            held("pi.2", "asker@b.c", 60, "pi.1", "which?"),
+            canceled("pi.3", "a@b.c", 70, "pi.1", "superseded"),
+        ];
+        let brief = brief_of(
+            &events,
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert!(brief.question.is_none(), "the close took the question");
+        assert!(brief.asked_by.is_none());
+        assert!(brief.asked_at.is_none());
+        assert_eq!(brief.closed_reason.as_deref(), Some("superseded"));
+        assert_eq!(brief.status, "canceled");
+        assert!(matches!(brief.standing, Standing::Done));
+        assert!(
+            brief.history.iter().any(|moment| matches!(
+                &moment.detail,
+                Some(super::super::history::Detail::Held { question }) if question == "which?"
+            )),
+            "the hold stays a moment of the record: {:?}",
+            brief.history
+        );
+    }
+
+    #[test]
+    fn a_bare_done_over_a_question_briefs_no_question_and_no_reason() {
+        let brief = brief_of(
+            &[
+                filed("pi.1", 10, "s", ""),
+                held("pi.2", "asker@b.c", 60, "pi.1", "which?"),
+                done("pi.3", "a@b.c", 70, "pi.1"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+            &Verdicts::default(),
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert!(brief.question.is_none());
+        assert!(brief.asked_by.is_none());
+        assert!(brief.asked_at.is_none());
+        assert!(brief.closed_reason.is_none());
     }
 
     #[test]

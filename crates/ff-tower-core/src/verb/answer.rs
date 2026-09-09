@@ -5,7 +5,10 @@
 //! it does not become a comment, and it writes no status — the fold
 //! derives Ready or Waiting from the facts and the edges beneath. A
 //! flight with no open question refuses — an answer to nothing would
-//! append a gesture the board cannot show.
+//! append a gesture the board cannot show. A closed flight refuses like
+//! every lifecycle verb, and when its close took a question off the
+//! record the refusal says so, since the asker is the one most likely
+//! to come back to it.
 
 use serde::Serialize;
 
@@ -34,6 +37,12 @@ pub fn answer(store: &Store, flight: &str, message: Option<String>) -> Result<An
     board::parse_ref(flight)?;
     let fold = board::fold(&store.read_all()?);
     let flight = board::resolve(&fold, flight)?;
+    let closed_over = board::flight(&fold, &flight);
+    if closed_over.closed() && closed_over.abandoned.is_some() {
+        return Err(Error::QuestionAbandoned {
+            display: display(&fold, &flight),
+        });
+    }
     let filed = ensure_active(&fold, &flight)?;
     if filed.question.is_none() {
         return Err(Error::NotHeld {

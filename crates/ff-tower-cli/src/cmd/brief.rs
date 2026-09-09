@@ -246,6 +246,9 @@ fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
     }
     if let Some(question) = brief.question.as_deref() {
         phrases.push(render::paint_warn(question, colored));
+    } else if let Some(reason) = brief.closed_reason.as_deref() {
+        // The same slot, dim: a close's reason needs nobody.
+        phrases.push(render::paint_dim(reason, colored));
     }
     if brief.held {
         phrases.push(render::paint_warn("held", colored));

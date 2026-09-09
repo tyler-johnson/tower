@@ -331,6 +331,41 @@ fn a_held_flight_renders_its_question() {
 }
 
 #[test]
+fn a_cancel_over_a_question_briefs_the_reason_and_keeps_the_hold_in_history() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck work"]));
+    let out = ff_tower(repo.path(), &["hold", "1", "-m", "which color?"]);
+    assert_eq!(out.status.code(), Some(3));
+    stdout(&ff_tower(repo.path(), &["cancel", "1", "-m", "superseded"]));
+
+    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
+    let note = text
+        .lines()
+        .find(|line| line.contains("canceled — tests@tower.invalid"))
+        .expect("the note line");
+    assert!(note.contains("superseded"), "{note}");
+    assert!(!note.contains("which color?"), "{note}");
+    assert!(!note.contains("asked "), "{note}");
+    // The hold is still a moment of the record.
+    assert!(text.contains("pi.2 · held · "), "{text}");
+
+    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
+    let data = &envelope(&out)["data"];
+    assert!(data["question"].is_null(), "{data}");
+    assert!(data["asked_by"].is_null(), "{data}");
+    assert!(data["asked_at"].is_null(), "{data}");
+    assert_eq!(data["closed_reason"], serde_json::json!("superseded"));
+    assert_eq!(data["status"], serde_json::json!("canceled"));
+    let history = data["history"].as_array().expect("a history");
+    assert!(
+        history
+            .iter()
+            .any(|moment| moment["what"] == "held" && moment["question"] == "which color?"),
+        "{history:?}"
+    );
+}
+
+#[test]
 fn a_closed_flight_still_briefs_with_its_move() {
     let repo = repo();
     stdout(&ff_tower(

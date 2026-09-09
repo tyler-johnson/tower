@@ -30,6 +30,7 @@ function brief(comments: CommentView[], history: Moment[]): Brief {
     question: null,
     asked_by: null,
     asked_at: null,
+    closed_reason: null,
     branch: null,
     tip: null,
     held: false,

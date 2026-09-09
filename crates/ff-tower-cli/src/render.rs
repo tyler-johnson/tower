@@ -178,6 +178,9 @@ fn note(
     let mut phrases = Vec::new();
     if let Some(question) = view.question.as_deref() {
         phrases.push(paint_warn(question, colored));
+    } else if let Some(reason) = view.closed_reason.as_deref() {
+        // The same slot, dim: a close's reason needs nobody.
+        phrases.push(paint_dim(reason, colored));
     }
     if view.held {
         phrases.push(paint_warn("held", colored));
@@ -415,6 +418,7 @@ mod tests {
             current: false,
             question: None,
             asked_at: None,
+            closed_reason: None,
             collides: Vec::new(),
             unanswered: Vec::new(),
         }

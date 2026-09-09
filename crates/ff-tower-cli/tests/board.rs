@@ -322,6 +322,42 @@ fn a_held_flight_is_pinned_in_the_inbox_and_keeps_its_group() {
 }
 
 #[test]
+fn a_canceled_row_shows_the_reason_where_the_question_stood() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which flow wins?"]);
+    stdout(&ff_tower(repo.path(), &["cancel", "1", "-m", "superseded"]));
+
+    let out = stdout(&ff_tower(repo.path(), &["--closed", "all"]));
+    assert!(out.contains("canceled\n"), "{out}");
+    // The note is the indented line under the row.
+    let lines: Vec<&str> = out.lines().collect();
+    let row = lines
+        .iter()
+        .position(|line| line.contains("stuck"))
+        .expect("the canceled row");
+    let note = lines[row + 1];
+    assert!(note.contains("superseded"), "{note}");
+    assert!(!note.contains("which flow wins?"), "{note}");
+    assert!(!note.contains("asked"), "{note}");
+    assert!(!out.contains("questions\n"), "nothing is open: {out}");
+
+    let envelope = envelope(&ff_tower(repo.path(), &["--json", "--closed", "all"]));
+    let row = &envelope["data"]["closed"][0];
+    assert_eq!(row["id"], serde_json::json!("pi.1"));
+    assert!(row["question"].is_null(), "{row}");
+    assert!(row["asked_at"].is_null(), "{row}");
+    assert_eq!(row["closed_reason"], serde_json::json!("superseded"));
+    assert!(
+        envelope["data"]["waiting_on_you"]["questions"]
+            .as_array()
+            .expect("an inbox")
+            .is_empty()
+    );
+}
+
+#[test]
 fn a_ready_flight_in_the_me_lane_is_the_inboxs_second_group() {
     let repo = Repo::new();
     repo.pin_writer("pi");

@@ -43,6 +43,7 @@ function flight(
     current: false,
     question,
     asked_at: question !== null ? 0 : null,
+    closed_reason: null,
     collides: [],
     unanswered: [],
   };

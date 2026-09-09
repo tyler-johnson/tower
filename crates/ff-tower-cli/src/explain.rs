@@ -418,7 +418,9 @@ pub static ENTRIES: &[Entry] = &[
                  closed record. The log keeps the record — `brief` still reads it whole — and \
                  `comment`, `link`, and `edit` stay permissive on purpose: a note on the \
                  record is fine, and a wrong word in a closed record is exactly what `edit` is \
-                 for.",
+                 for. Answering a closed flight that was held says the close abandoned its \
+                 question — the close took it off the record, and `brief`'s history still \
+                 carries the hold.",
         exits: &["ff tower brief <flight>"],
     },
     Entry {

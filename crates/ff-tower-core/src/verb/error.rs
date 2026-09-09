@@ -73,6 +73,11 @@ pub enum Error {
     /// `done` twice — the same id, with "already" wording.
     #[error("`{display}` is already done")]
     AlreadyDone { display: String },
+    /// `answer` on a closed flight whose close took an open question off
+    /// the record — the same id as [`Error::FlightDone`], with wording
+    /// that names what became of the question.
+    #[error("`{display}` is done — the close abandoned its question")]
+    QuestionAbandoned { display: String },
     /// A status move over an open question — only `done` and `canceled`
     /// may override it.
     #[error("`{display}` is held on a question: {question}")]
@@ -137,7 +142,9 @@ impl Error {
             Error::StatusHold { .. } => "usage/status-held",
             Error::BadAssignee { .. } => "usage/bad-assignee",
             Error::FileStatus { .. } => "usage/file-status",
-            Error::FlightDone { .. } | Error::AlreadyDone { .. } => "flight/done",
+            Error::FlightDone { .. }
+            | Error::AlreadyDone { .. }
+            | Error::QuestionAbandoned { .. } => "flight/done",
             Error::StatusHeld { .. } => "status/held",
             Error::AlreadyHeld { .. } => "hold/exists",
             Error::NotHeld { .. } => "answer/not-held",
@@ -184,6 +191,7 @@ impl Error {
             Error::NeedsNote => &["ff tower comment <flight> -m <note>"],
             Error::FlightDone { .. }
             | Error::AlreadyDone { .. }
+            | Error::QuestionAbandoned { .. }
             | Error::NotHeld { .. }
             | Error::ViewNotFound { .. }
             | Error::NeedsViewEdit

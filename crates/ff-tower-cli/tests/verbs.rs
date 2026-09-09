@@ -1326,6 +1326,22 @@ fn done_twice_is_refused_as_already_done() {
 }
 
 #[test]
+fn answering_a_closed_flight_that_was_held_names_the_abandoned_question() {
+    let repo = repo();
+    stdout(&ff_tower(repo.path(), &["file", "stuck"]));
+    ff_tower(repo.path(), &["hold", "1", "-m", "which?"]);
+    stdout(&ff_tower(repo.path(), &["cancel", "1", "-m", "superseded"]));
+
+    let out = ff_tower(repo.path(), &["answer", "1", "-m", "a", "--json"]);
+    let envelope = refusal(&out, 1, "flight/done");
+    assert_eq!(
+        envelope["error"]["message"],
+        serde_json::json!("`#1` is done — the close abandoned its question")
+    );
+    assert_eq!(envelope["error"]["exits"], serde_json::json!(["ff tower"]));
+}
+
+#[test]
 fn the_lifecycle_verbs_refuse_a_closed_flight_but_a_comment_lands() {
     let repo = repo();
     stdout(&ff_tower(repo.path(), &["file", "finished"]));

@@ -190,6 +190,10 @@ pub struct FlightView {
     /// `held`/`resolving`, which stay fufu's branch verdicts.
     pub question: Option<String>,
     pub asked_at: Option<i64>,
+    /// A close's `-m` — a cancel's reason, most often — standing where
+    /// the question stood. `null` while the flight is open or when the
+    /// close said nothing.
+    pub closed_reason: Option<String>,
     /// Flights this one would conflict with, and where. Filed order.
     pub collides: Vec<CollideView>,
     /// Flights whose pairing fufu could not judge — unknown never rounds
@@ -381,10 +385,11 @@ pub fn enrich(
     let mut held = Vec::new();
     let mut group = Vec::new();
     for view in rows.flights {
-        // The inbox, live rows only: a closed flight needs nobody, and
-        // `done` does not clear a question the log still carries.
+        // The inbox: an open question, or Ready in the `me` lane on a
+        // live row — a closed flight needs nobody, and the fold already
+        // took a close's question off the record.
         let live = !closed_row(&view);
-        let questioned = live && view.question.is_some();
+        let questioned = view.question.is_some();
         let mine = live && view.status == "ready" && view.assignee.as_deref() == Some("me");
         if questioned {
             inbox.questions.push(view.clone());
@@ -564,6 +569,7 @@ fn view(
         current,
         question,
         asked_at,
+        closed_reason: flight.closed_reason,
         collides: Vec::new(),
         unanswered: Vec::new(),
     }
@@ -650,6 +656,18 @@ mod tests {
                 flight: flight.parse().expect("id"),
                 status: to.to_string(),
                 reason: None,
+            },
+        )
+    }
+
+    fn canceled(id: &str, time: i64, flight: &str, reason: &str) -> Event {
+        lifecycle(
+            id,
+            time,
+            Kind::Status {
+                flight: flight.parse().expect("id"),
+                status: "canceled".to_string(),
+                reason: Some(reason.to_string()),
             },
         )
     }
@@ -994,6 +1012,24 @@ mod tests {
         );
         assert!(board.waiting_on_you.questions.is_empty());
         assert_eq!(ids(&board.closed), ["pi.1"]);
+    }
+
+    #[test]
+    fn a_canceled_rows_question_is_gone_and_its_reason_stands_in_its_place() {
+        let board = board(
+            &[
+                filed("pi.1", 10),
+                held("pi.2", 20, "pi.1", "which?"),
+                canceled("pi.3", NOW - 60, "pi.1", "superseded"),
+            ],
+            &reads(Vec::new(), Vec::new(), None),
+        );
+        assert!(board.waiting_on_you.questions.is_empty());
+        let row = &board.closed[0];
+        assert_eq!(row.id, "pi.1");
+        assert!(row.question.is_none());
+        assert!(row.asked_at.is_none());
+        assert_eq!(row.closed_reason.as_deref(), Some("superseded"));
     }
 
     #[test]

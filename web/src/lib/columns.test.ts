@@ -40,6 +40,7 @@ const view: FlightView = {
   current: false,
   question: null,
   asked_at: null,
+  closed_reason: null,
   collides: [],
   unanswered: [],
 };

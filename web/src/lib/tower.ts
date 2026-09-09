@@ -156,6 +156,9 @@ export interface FlightView {
   current: boolean;
   question: string | null;
   asked_at: number | null;
+  /// A close's `-m` — a cancel's reason, most often — standing where the
+  /// question stood; `null` while open or when the close said nothing.
+  closed_reason: string | null;
   collides: CollideView[];
   unanswered: string[];
 }
@@ -358,6 +361,7 @@ export function notePhrases(view: FlightView, refs: Map<string, string>): NotePh
   const warn = (text: string) => phrases.push({ text, tone: "warn" });
   const dim = (text: string) => phrases.push({ text, tone: "dim" });
   if (view.question !== null) warn(view.question);
+  else if (view.closed_reason !== null) dim(view.closed_reason);
   if (view.held) warn("held");
   if (view.resolving) warn("resolving");
   for (const collide of view.collides) {
@@ -541,6 +545,7 @@ export interface Brief {
   question: string | null;
   asked_by: string | null;
   asked_at: number | null;
+  closed_reason: string | null;
   branch: string | null;
   tip: string | null;
   held: boolean;
@@ -654,6 +659,7 @@ export function briefNote(brief: Brief, refs: Map<string, string>, now: number):
   );
   if (brief.status_reason !== null) dim(brief.status_reason);
   if (brief.question !== null) warn(brief.question);
+  else if (brief.closed_reason !== null) dim(brief.closed_reason);
   if (brief.held) warn("held");
   if (brief.resolving) warn("resolving");
   switch (brief.standing) {
@@ -777,6 +783,7 @@ const KNOWN_BRIEF_KEYS = new Set([
   "question",
   "asked_by",
   "asked_at",
+  "closed_reason",
   "branch",
   "tip",
   "held",

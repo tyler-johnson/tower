@@ -92,8 +92,17 @@ pub struct Flight {
     /// The branch the filing resolved for this flight, when a
     /// definition's `subject = "branch"` said so.
     pub branch_stamp: Option<String>,
-    /// The open question, when the flight is held. Cleared by `answered`.
+    /// The open question, when the flight is held. Cleared by
+    /// `answered`, or by a close.
     pub question: Option<Question>,
+    /// The question a `done` or `canceled` closed over — what `answer`
+    /// names in its refusal. Cleared by nothing: a closed flight refuses
+    /// every move.
+    pub abandoned: Option<Question>,
+    /// The `-m` the closing move carried; `None` when unsaid or while
+    /// the flight is open. Distinct from the dependency phrase the
+    /// board's `status_reason` derives.
+    pub closed_reason: Option<String>,
     /// The last edit touching this flight's record — its own fields or a
     /// comment's text, either target type. A reword is a gesture on the
     /// flight, so it counts as motion.
@@ -295,6 +304,8 @@ pub fn fold(events: &[Event]) -> Fold {
                     done_kind: done.clone(),
                     branch_stamp: branch.clone(),
                     question: None,
+                    abandoned: None,
+                    closed_reason: None,
                     edited: None,
                 });
             }
@@ -388,7 +399,15 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 None => unrouted.push(event.clone()),
             },
-            Kind::Status { flight, status, .. } => match by_id.get(flight) {
+            // A close takes the question off the record: the flight is
+            // closed, not held, and nothing is open for anyone. The
+            // question moves to `abandoned` and the close's reason rides
+            // beside it; history still shows the hold from the raw log.
+            Kind::Status {
+                flight,
+                status,
+                reason,
+            } => match by_id.get(flight) {
                 Some(&at) => {
                     let flight = &mut flights[at];
                     assign(&mut flight.stand, status);
@@ -398,6 +417,14 @@ pub fn fold(events: &[Event]) -> Fold {
                         at: event.time,
                         order,
                     });
+                    if flight.stand.closed.is_some() {
+                        if let Some(question) = flight.question.take() {
+                            flight.abandoned = Some(question);
+                        }
+                        flight.closed_reason = reason.clone();
+                    } else {
+                        flight.closed_reason = None;
+                    }
                 }
                 None => unrouted.push(event.clone()),
             },
@@ -1841,6 +1868,53 @@ mod tests {
         assert_eq!(fold.flights[0].status_mark.as_ref().expect("mark").at, 30);
         assert!(fold.flights[1].closed());
         assert_eq!(fold.flights[1].status, "canceled");
+    }
+
+    #[test]
+    fn a_close_takes_the_question_off_the_record_and_keeps_the_reason() {
+        let canceled = event(
+            "pi.3",
+            30,
+            Kind::Status {
+                flight: "pi.1".parse().expect("id"),
+                status: "canceled".to_string(),
+                reason: Some("superseded".to_string()),
+            },
+        );
+        let fold = fold(&[
+            filed("pi.1", 10, "s"),
+            held("pi.2", 20, "pi.1", "which?"),
+            canceled,
+        ]);
+        let flight = &fold.flights[0];
+        assert!(
+            flight.question.is_none(),
+            "nothing is open on a closed flight"
+        );
+        assert_eq!(
+            flight.abandoned.as_ref().expect("the close took it").text,
+            "which?"
+        );
+        assert_eq!(flight.closed_reason.as_deref(), Some("superseded"));
+        assert_eq!(flight.status, "canceled");
+    }
+
+    #[test]
+    fn a_bare_done_over_a_question_abandons_it_with_no_reason() {
+        let closed = fold(&[
+            filed("pi.1", 10, "s"),
+            held("pi.2", 20, "pi.1", "which?"),
+            done("pi.3", 30, "pi.1"),
+        ]);
+        let flight = &closed.flights[0];
+        assert!(flight.question.is_none());
+        assert!(flight.abandoned.is_some());
+        assert!(flight.closed_reason.is_none(), "the close said nothing");
+        assert_eq!(flight.status, "done");
+
+        // A close over no question abandons nothing.
+        let quiet = fold(&[filed("pi.1", 10, "s"), done("pi.2", 20, "pi.1")]);
+        assert!(quiet.flights[0].abandoned.is_none());
     }
 
     #[test]
