@@ -290,15 +290,13 @@ skill directory or a fork's starting point needs no flag.
 
 Two layers, the most specific winning whole: user,
 ~/.config/tower/skills/<name>.md; repo, .tower/skills/<name>.md under
-the main worktree. tower ships none of its own — the documentation's
-docs/skills/ carries worked examples to copy in and fork. A flight
-names the skill it is flown with, and `next` hands the name out on
-the picked row.
+the main worktree. tower ships none of its own: a skill is authored
+under one of the two layers. A flight names the skill it is flown
+with, and `next` hands the name out on the picked row.
 
-Read-only, and it spawns no fufu. The documented examples stop at
-committed on a branch — no push, no PR — and where your own copy
-draws that line is your call, visibly yours: the listing names the
-layer every skill came from.";
+Read-only, and it spawns no fufu. Where a copy draws the push line —
+committed on a branch, or past it — is its owner's call, visibly so:
+the listing names the layer every skill came from.";
 
 pub const SKILLS_EXAMPLES: &str = "\
 Examples:
@@ -854,20 +852,14 @@ mod tests {
                 }
             }
         }
-        // The skills are prose that spells commands too, and they are held
+        // The manual is prose that spells commands too, and it is held
         // to the same tree: every backticked `ff tower …` span and every
         // code-block line that starts with one.
-        for (label, text) in [
-            ("skill", crate::integ::SKILL),
-            ("plan", crate::integ::PLAN),
-            ("loop", crate::integ::LOOP),
-        ] {
-            let mut spans = quoted(text);
-            spans.extend(example_rows(text));
-            for tokens in &spans {
-                check(&tree, tokens, label);
-                found += 1;
-            }
+        let mut spans = quoted(crate::integ::SKILL);
+        spans.extend(example_rows(crate::integ::SKILL));
+        for tokens in &spans {
+            check(&tree, tokens, "skill");
+            found += 1;
         }
         // Same reason the exit walk proves it reads the tree: an
         // extractor that quietly matched nothing would pass while

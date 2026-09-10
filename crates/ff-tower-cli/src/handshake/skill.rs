@@ -1,10 +1,9 @@
 //! `--ff-skill <name>`: the files behind one skill the manifest lists,
 //! for `ff hook` to install.
 //!
-//! The table holds the three: `tower`, the manual from `integ::SKILL`,
-//! and the intents `tower-plan` and `tower-loop` from `integ::PLAN` and
-//! `integ::LOOP`. fufu only asks for names the manifest lists, and the manifest lists
-//! this table, so a name that reaches `answer` and misses is an
+//! The table holds one: `tower`, the manual from `integ::SKILL`. fufu
+//! only asks for names the manifest lists, and the manifest lists this
+//! table, so a name that reaches `answer` and misses is an
 //! `ff hook` from a manifest this binary did not write.
 
 use serde::Serialize;
@@ -25,29 +24,13 @@ pub struct Skill {
 }
 
 /// Every skill this binary ships.
-pub const SKILLS: &[Skill] = &[
-    Skill {
-        name: "tower",
-        files: &[SkillFile {
-            path: "SKILL.md",
-            content: crate::integ::SKILL,
-        }],
-    },
-    Skill {
-        name: "tower-plan",
-        files: &[SkillFile {
-            path: "SKILL.md",
-            content: crate::integ::PLAN,
-        }],
-    },
-    Skill {
-        name: "tower-loop",
-        files: &[SkillFile {
-            path: "SKILL.md",
-            content: crate::integ::LOOP,
-        }],
-    },
-];
+pub const SKILLS: &[Skill] = &[Skill {
+    name: "tower",
+    files: &[SkillFile {
+        path: "SKILL.md",
+        content: crate::integ::SKILL,
+    }],
+}];
 
 /// The reply's `data`: `files`, each `{path, content}`.
 #[derive(Debug, Serialize)]

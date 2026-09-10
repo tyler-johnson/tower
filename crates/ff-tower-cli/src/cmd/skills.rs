@@ -8,8 +8,7 @@
 //! harness's skill path or a fork's starting point never needs a flag.
 //!
 //! The engine ships empty, so nothing installed is the normal state of a
-//! fresh box rather than a fault: the empty list says where a skill goes
-//! and where the worked examples are.
+//! fresh box rather than a fault: the empty list says where a skill goes.
 
 use std::path::Path;
 
@@ -126,8 +125,8 @@ fn list(installed: &Registry, repo_root: Option<&Path>, colored: bool) -> String
     out
 }
 
-/// Nothing installed: the same two homes the fork line offers, plus
-/// where the worked examples are, in place of a bare zero.
+/// Nothing installed: the same two homes the fork line offers, in
+/// place of a bare zero.
 fn empty(repo_root: Option<&Path>, colored: bool) -> String {
     let mut out = String::new();
     out.push_str(&render::paint_dim("no skills installed", colored));
@@ -140,11 +139,6 @@ fn empty(repo_root: Option<&Path>, colored: bool) -> String {
         ));
         out.push('\n');
     }
-    out.push_str(&render::paint_dim(
-        "examples: docs/skills/ in the tower repository",
-        colored,
-    ));
-    out.push('\n');
     out
 }
 

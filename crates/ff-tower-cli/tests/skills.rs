@@ -98,10 +98,10 @@ fn an_empty_shelf_says_so_and_where_a_skill_goes() {
     // bare zero, and not a fault.
     let repo = repo();
     let out = stdout(&ff_tower(repo.path(), &["skills"]));
-    assert!(out.starts_with("no skills installed\n"), "{out}");
-    assert!(
-        out.contains(&format!(
-            "author: {} · {}\n",
+    assert_eq!(
+        out,
+        format!(
+            "no skills installed\nauthor: {} · {}\n",
             repo.path()
                 .join(".tower")
                 .join("skills")
@@ -112,12 +112,8 @@ fn an_empty_shelf_says_so_and_where_a_skill_goes() {
                 .join("skills")
                 .join("<name>.md")
                 .display()
-        )),
-        "both homes, repository first: {out}"
-    );
-    assert!(
-        out.contains("examples: docs/skills/ in the tower repository\n"),
-        "{out}"
+        ),
+        "both homes, repository first, and nothing else: {out}"
     );
 
     // And the JSON form is an empty set rather than an absence.

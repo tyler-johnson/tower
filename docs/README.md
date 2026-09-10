@@ -2,6 +2,8 @@
 
 The engine ships empty. There are no built-in procedures and no built-in skills — every opinion about how work flows is a file its owner authored, and this directory is where the examples live so you can copy one in and fork it.
 
+The three skills here are one workflow among many. tower ships the manual and the mechanism, and the shape of the loop is yours to fork.
+
 A **procedure** is the named recipe for one shape of work, as data: a name, optional match rules, and the flights it stamps out, each with the same fields any flight carries, pre-filled. Filing under one mints the whole family in a single append, and the definition is read once — editing it afterwards never disturbs a flight already in the air.
 
 A **skill** is the prose an agent-assigned flight is flown with: instructions a harness executes, never a process tower spawns. A procedure's flight names a skill by string, and that seam is what keeps structure in data and judgment in markdown.

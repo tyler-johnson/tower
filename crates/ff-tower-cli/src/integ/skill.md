@@ -64,9 +64,9 @@ Hold is the fallback for an unattended run. With a person in the conversation, a
 
 ## Claiming
 
-`ff tower next` pulls from the pool: every Ready flight in the `agent` lane, walked in filed order. `-n 3` admits up to three in filed order; `--peek` runs the same computation with nothing written, and the envelope's `pulled` says which happened. Three outcomes: `work` (exit 0, something picked), `drained` (exit 1, the board has nothing left), and `yours` (exit 1, Ready work exists that the lane alone kept out of the pool). Both empties are full data envelopes; a JSON reader branches on `outcome`, and a shell loop stops on the code. `-n 0` refuses.
+`ff tower next` pulls from the pool: every Ready flight in the `agent` lane, walked in filed order. `-n 3` admits up to three in filed order; `--peek` runs the same computation with nothing written, and the envelope's `pulled` says which happened. Three outcomes: `work` (exit 0, something picked), `drained` (exit 1, the board has nothing left), and `yours` (exit 1, Ready work exists that the lane alone kept out of the pool). Both empties are full data envelopes: `--json` exits 0 on a pick and 1 on an empty one, a JSON reader branches on `outcome`, and a shell loop stops on the code. `-n 0` refuses.
 
-Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent when the flight names none). A flight with a live dependency is Waiting, not in the pool, and never reaches the walk.
+The pick is the claim and nothing else: each picked flight is set In Progress with your byline, and `next` hands out no branch and no tree. Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent when the flight names none); a `skill` is an installed skill's name, and `ff tower skills <name>` prints it raw. A flight with a live dependency is Waiting, not in the pool, and never reaches the walk.
 
 ## Lanes
 

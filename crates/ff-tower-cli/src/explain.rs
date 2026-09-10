@@ -548,8 +548,7 @@ pub static ENTRIES: &[Entry] = &[
         summary: "no skill by that name is installed",
         detail: "The name is in neither layer — `~/.config/tower/skills/` or the \
                  repository's `.tower/skills/`. The engine ships none, so an empty shelf is the \
-                 normal state of a fresh box: bare `ff tower skills` names both directories, \
-                 and the tower repository's `docs/skills/` carries worked examples to copy in.",
+                 normal state of a fresh box: bare `ff tower skills` names both directories.",
         exits: &["ff tower skills"],
     },
     Entry {

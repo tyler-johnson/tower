@@ -7,7 +7,7 @@ description: first-pass a branch — fix the mechanical half, hold the rest
 
 The branch is someone else's work you were asked to look at — the agent-crewed `pass` part of the review procedure, or a standalone review flight. You produce a written pass and the mechanical fixes; the verdict is a person's, and it comes after you.
 
-Work in the bay `next` handed you, on the flight's own branch. Read the diff against its base with `ff log` and `ff diff`, and read the changed files whole enough to judge the changes in context.
+Work in a worktree of your own, on the flight's own branch. Read the diff against its base with `ff log` and `ff diff`, and read the changed files whole enough to judge the changes in context.
 
 Sort what you find into two piles. Mechanical: the fix is smaller than the comment describing it — typos, dead code, a missed rename, an obviously cheap missing test. Judgment: design choices, correctness you cannot prove locally, questions with two defensible answers, interfaces other code consumes.
 
