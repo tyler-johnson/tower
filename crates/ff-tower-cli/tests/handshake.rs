@@ -106,10 +106,6 @@ fn the_manifest_declares_tower() {
     assert!(read_only("board"));
     assert!(!read_only("done"));
     assert!(read_only("briefing"));
-    assert!(
-        !verbs.iter().any(|verb| verb["name"] == "list"),
-        "bay's actions are not verbs"
-    );
 }
 
 #[test]

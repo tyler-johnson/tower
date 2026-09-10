@@ -1,6 +1,6 @@
 //! The API: the CLI's `--json` surface, re-exposed over HTTP.
 //!
-//! Two halves, one contract. The read half is five resources over six
+//! Two halves, one contract. The read half is four resources over five
 //! GET routes, every one answering the envelope the matching verb emits
 //! under `--json` — same fold, same serializer, same bytes, trailing
 //! newline included. The board route is the one that takes an argument:
@@ -16,7 +16,7 @@
 //! rather than the board envelope: a saved view is not a row.
 //! The arguments ride the body rather than the path on purpose: a flight
 //! reference can carry `#`, and `#` is a URL fragment. `cmd` on each
-//! envelope keeps the CLI's wire name (`/api/bays` answers `bay list`),
+//! envelope keeps the CLI's wire name (`/api/views` answers `view list`),
 //! because the envelope is the contract and the route is only the door.
 //! A refusal is the same one-line error envelope, with the id tables and
 //! Display strings read from core rather than re-implemented here; only
@@ -90,7 +90,6 @@ pub(crate) fn router(repo: &Path, feed: watch::Receiver<Latest>) -> Router {
         .route("/api/board", get(board))
         .route("/api/feed", get(feed_route))
         .route("/api/brief/{flight}", get(brief))
-        .route("/api/bays", get(bays))
         .route("/api/procedures", get(procedures))
         .route("/api/procedures/{name}", get(procedure))
         .route("/api/file", post(file))
@@ -337,18 +336,6 @@ async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<
     .await
 }
 
-async fn bays(State(state): State<Arc<AppState>>) -> Reply {
-    respond("bay list", state, |repo| {
-        let ff = Ff::at(repo).env_program();
-        let store = Store::open(repo)?;
-        let fold = board::fold(&store.read_all()?);
-        let reads = board::gather(&ff)?;
-        let bays = board::bays(&fold, &reads);
-        Ok(machine::emit("bay list", &board::Pool { bays }))
-    })
-    .await
-}
-
 async fn procedures(State(state): State<Arc<AppState>>) -> Reply {
     respond("procedures", state, |repo| {
         let store = Store::open(repo)?;
@@ -396,7 +383,6 @@ struct FileBody {
     labels: Vec<String>,
     skill: Option<String>,
     assignee: Option<String>,
-    bay: Option<String>,
     status: Option<String>,
 }
 
@@ -489,7 +475,6 @@ struct EditBody {
     #[serde(default)]
     labels: Vec<String>,
     skill: Option<String>,
-    bay: Option<String>,
 }
 
 /// `link` and `unlink`'s arguments: `flight` depends on `dependency`,
@@ -513,7 +498,6 @@ async fn file(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
                 labels: body.labels,
                 skill: body.skill,
                 assignee: body.assignee,
-                bay: body.bay,
                 status: body.status,
             },
             body.procedure.as_deref(),
@@ -610,7 +594,6 @@ async fn edit(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
                 priority: body.priority,
                 labels: body.labels,
                 skill: body.skill,
-                bay: body.bay,
             },
         )?;
         Ok(machine::emit("edit", &outcome.payload))

@@ -37,7 +37,6 @@ function flight(number: number, status: string, labels: string[] = []): FlightVi
     priority: "none",
     labels,
     skill: null,
-    bay: null,
     branch: null,
     tip: null,
     last_change: null,

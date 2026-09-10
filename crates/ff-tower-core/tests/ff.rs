@@ -6,10 +6,8 @@
 //! tower. The fakes cover what a healthy fufu will not emit on request: a
 //! contract from the future, a held exit, output that is not an envelope.
 
-use std::path::Path;
-
 use ff_tower_core::ff::{Error, Exit, Ff, Head, Pairing};
-use ff_tower_testsupport::{FakeFf, Repo, canonicalized};
+use ff_tower_testsupport::{FakeFf, Repo};
 
 // ---------------------------------------------------------------- real fufu
 
@@ -334,78 +332,4 @@ fn version_reads_the_payload() {
         .version()
         .expect("version");
     assert_eq!(version.version, "0.9.0");
-}
-
-#[test]
-fn worktree_list_add_remove_round_trips_on_a_real_repository() {
-    let repo = Repo::new();
-
-    let survey = Ff::at(repo.path()).worktree_list().expect("list");
-    assert_eq!(survey.worktrees.len(), 1);
-    assert!(survey.orphans.is_empty(), "nothing released yet");
-    let main = &survey.worktrees[0];
-    assert_eq!(main.id, "main");
-    assert!(main.current);
-    assert!(main.path.is_some());
-    assert_eq!(main.branch.as_deref(), Some("main"));
-
-    let bay = repo.bay_path("bay1");
-    let added = Ff::at(repo.path())
-        .worktree_add(bay.to_str().expect("utf8"), None)
-        .expect("add");
-    assert_eq!(added.branch, "bay1", "a branch named after the directory");
-    // ff answers the canonical path with separators of its own choosing,
-    // so compare as paths, against the canonical form.
-    assert_eq!(Path::new(&added.path), canonicalized(&bay));
-
-    let survey = Ff::at(repo.path()).worktree_list().expect("list");
-    assert_eq!(survey.worktrees.len(), 2);
-    let row = survey
-        .worktrees
-        .iter()
-        .find(|row| row.id == added.id)
-        .expect("the bay is surveyed");
-    assert!(!row.current);
-    assert_eq!(row.branch.as_deref(), Some("bay1"));
-
-    let removed = Ff::at(repo.path())
-        .worktree_remove(&added.id)
-        .expect("remove");
-    assert_eq!(removed.id, added.id);
-    assert_eq!(removed.branch.as_deref(), Some("bay1"));
-    let survey = Ff::at(repo.path()).worktree_list().expect("list");
-    assert_eq!(survey.worktrees.len(), 1, "the bay is gone from the survey");
-
-    // The real-fufu proof the doctor's design leans on: the removed
-    // bay's chain outlives it as an orphan, its branch recorded.
-    assert_eq!(survey.orphans.len(), 1, "the chain outlives the bay");
-    let orphan = &survey.orphans[0];
-    assert_eq!(orphan.id, added.id);
-    assert_eq!(orphan.branch.as_deref(), Some("bay1"));
-    assert!(orphan.tip.is_some(), "the capture is the way back");
-    assert!(orphan.time.is_some());
-}
-
-#[test]
-fn at_path_re_aims_the_handle_and_drops_the_session() {
-    let fake = FakeFf::script(
-        r#"for a in "$@"; do printf '%s\n' "$a" >> "$0.argv"; done
-printf '{"ff":1,"cmd":"status","data":null}\n'
-"#,
-    );
-    let ff = Ff::at("/some/bay")
-        .program(fake.path())
-        .session("flight-7")
-        .at_path("/other/bay");
-    let _ = ff.run::<Option<()>>("status", &[] as &[&str]);
-
-    // The argv file existing at all proves the program override rode along.
-    let recorded = std::fs::read_to_string(fake.dir().join("ff.argv")).expect("argv recorded");
-    let args: Vec<&str> = recorded.lines().collect();
-    assert_eq!(args[0], "-C");
-    assert_eq!(args[1], "/other/bay", "the handle re-aimed");
-    assert!(
-        !args.contains(&"--session"),
-        "a poll of someone else's bay must not tag its chain: {args:?}"
-    );
 }

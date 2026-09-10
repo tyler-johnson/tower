@@ -24,7 +24,6 @@ function brief(comments: CommentView[], history: Moment[]): Brief {
     priority: "none",
     labels: [],
     skill: null,
-    bay: null,
     edited_by: null,
     edited_at: null,
     question: null,

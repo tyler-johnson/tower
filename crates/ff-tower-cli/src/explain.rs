@@ -110,14 +110,6 @@ pub static ENTRIES: &[Entry] = &[
         ],
     },
     Entry {
-        id: "usage/needs-path",
-        summary: "bare `warm` needs a pool root",
-        detail: "`bay warm` with no path mints the next slot under the `tower.bays` setting, and \
-                 the setting is unset — there is nowhere to mint. Either set the pool root once \
-                 and let bare `warm` number the slots, or name the path explicitly this time.",
-        exits: &["ff tower config bays <dir>", "ff tower bay warm <path>"],
-    },
-    Entry {
         id: "usage/needs-message",
         summary: "the verb needs `-m`",
         detail: "`hold` carries a question, `answer` an answer, `comment` a note — all through \
@@ -130,7 +122,7 @@ pub static ENTRIES: &[Entry] = &[
         id: "usage/needs-edit",
         summary: "`edit` has nothing to change",
         detail: "`edit` rewords through its flags — `-s` the subject, `-m` the body or a \
-                 comment's text, `--priority`, `--label`, `--skill`, `--bay` the fields — and \
+                 comment's text, `--priority`, `--label`, `--skill` the fields — and \
                  none was given, so there is no overlay to write. Any flag alone is a \
                  complete edit; every other field stands unchanged. A view edit raises the \
                  same id when its body names the view and none of its name, query, or shared.",
@@ -143,7 +135,7 @@ pub static ENTRIES: &[Entry] = &[
         id: "usage/subject-on-comment",
         summary: "a comment carries no fields",
         detail: "The target resolved to a comment, and `-s`, `--priority`, `--label`, \
-                 `--skill`, and `--bay` name fields only flights carry. A comment is one text, \
+                 and `--skill` name fields only flights carry. A comment is one text, \
                  and `-m` is how it rewords; the flight the comment sits on has the fields, \
                  and editing those is a different target.",
         exits: &["ff tower edit <target> -m <msg>"],
@@ -306,8 +298,8 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "usage/not-groupable",
         summary: "the board cannot group by that field",
-        detail: "`group` and `sub` take the six fields a board sections by — status, assignee, \
-                 priority, label, skill, bay — each a word a flight carries. Free prose and \
+        detail: "`group` and `sub` take the five fields a board sections by — status, assignee, \
+                 priority, label, skill — each a word a flight carries. Free prose and \
                  moments make no columns.",
         exits: &["ff tower"],
     },
@@ -465,24 +457,6 @@ pub static ENTRIES: &[Entry] = &[
                  `done` and `cancel` override the hold, because abandoning the question is \
                  deliberate when the flight itself is over.",
         exits: &["ff tower answer <flight> -m <answer>"],
-    },
-    Entry {
-        id: "bay/pool-root",
-        summary: "the pool root could not be prepared",
-        detail: "Minting a slot creates and canonicalizes the directory `tower.bays` points at, \
-                 and the filesystem said no — a permission, a missing parent, a path that is \
-                 not a directory. The message carries the OS's own words; pointing the setting \
-                 somewhere writable is the usual fix.",
-        exits: &["ff tower config bays <dir>"],
-    },
-    Entry {
-        id: "bay/occupied",
-        summary: "a live flight keeps its bay",
-        detail: "Releasing a bay tears its worktree down, and a live flight is sitting in it — \
-                 releasing anyway would pull the floor out from under work in motion. Finish \
-                 the flight first; fufu captures the tree before teardown either way, so \
-                 nothing is lost, but the occupancy rule is tower's to keep.",
-        exits: &["ff tower done <flight>", "ff tower bay"],
     },
     Entry {
         id: "procedure/not-found",

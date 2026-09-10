@@ -17,8 +17,8 @@
 //! are silent here because the board is their surface, not this one's.
 //!
 //! Every live flight *not* in the pool keeps its branch on the gate —
-//! waiting and holding flights included, because a warm bay holds real
-//! work that will land. Admission is greedy: candidates walk in filed
+//! waiting and holding flights included, because a held branch holds
+//! real work that will land. Admission is greedy: candidates walk in filed
 //! order, and one joins the pick when its branch is clear against the
 //! gate and every candidate already admitted. Unknown excludes — a
 //! pairing fufu could not judge never rounds down to clear.
@@ -321,8 +321,6 @@ mod tests {
                 anonymous: Vec::new(),
             },
             current_branch: None,
-            worktrees: Vec::new(),
-            orphans: Vec::new(),
         }
     }
 

@@ -14,7 +14,7 @@
 //! So the CAS is the second line, and this file is the first: tower's own
 //! lock, held across read-tip → write-objects → move-ref. It matters more
 //! here than in fufu, whose chains are keyed per worktree and never
-//! contend — every tower bay on one machine writes the *same* ref, so
+//! contend — every tower worktree on one machine writes the *same* ref, so
 //! contention is the normal case rather than the rare one.
 //!
 //! The lock is tower's own file rather than the ref's `.lock`: gix takes

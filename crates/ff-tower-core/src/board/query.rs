@@ -56,7 +56,6 @@ pub enum Field {
     Priority,
     Label,
     Skill,
-    Bay,
     Subject,
     Body,
     Procedure,
@@ -75,13 +74,12 @@ pub enum Field {
 }
 
 /// Every field, in the order the refusals list them.
-pub const FIELDS: [Field; 21] = [
+pub const FIELDS: [Field; 20] = [
     Field::Status,
     Field::Assignee,
     Field::Priority,
     Field::Label,
     Field::Skill,
-    Field::Bay,
     Field::Subject,
     Field::Body,
     Field::Procedure,
@@ -122,7 +120,6 @@ impl Field {
             Field::Priority => "priority",
             Field::Label => "label",
             Field::Skill => "skill",
-            Field::Bay => "bay",
             Field::Subject => "subject",
             Field::Body => "body",
             Field::Procedure => "procedure",
@@ -152,16 +149,11 @@ impl Field {
         self.shape() != Shape::Column
     }
 
-    /// The six a board can be grouped into columns by.
+    /// The five a board can be grouped into columns by.
     pub fn groupable(&self) -> bool {
         matches!(
             self,
-            Field::Status
-                | Field::Assignee
-                | Field::Priority
-                | Field::Label
-                | Field::Skill
-                | Field::Bay
+            Field::Status | Field::Assignee | Field::Priority | Field::Label | Field::Skill
         )
     }
 
@@ -194,7 +186,6 @@ impl Field {
             | Field::Priority
             | Field::Label
             | Field::Skill
-            | Field::Bay
             | Field::Procedure
             | Field::Branch
             | Field::Stale
@@ -668,7 +659,7 @@ pub enum QueryError {
 
     #[error(
         "`{field}` is not a column a board groups by — group by status, assignee, priority, \
-         label, skill, or bay"
+         label, or skill"
     )]
     NotGroupable { field: &'static str },
 
@@ -1011,7 +1002,6 @@ fn holds(filter: &Filter, view: &FlightView, now: i64) -> bool {
         Field::Priority => one(filter, Some(view.priority.as_str())),
         Field::Assignee => one(filter, view.assignee.as_deref()),
         Field::Skill => one(filter, view.skill.as_deref()),
-        Field::Bay => one(filter, view.bay.as_deref()),
         Field::Procedure => one(filter, view.procedure.as_deref()),
         Field::Branch => one(filter, view.branch.as_deref()),
         Field::Label => many(filter, &view.labels),
@@ -1155,7 +1145,6 @@ fn keys(field: Field, view: &FlightView) -> Vec<Option<String>> {
         Field::Priority => vec![Some(view.priority.clone())],
         Field::Assignee => vec![view.assignee.clone()],
         Field::Skill => vec![view.skill.clone()],
-        Field::Bay => vec![view.bay.clone()],
         Field::Label => {
             if view.labels.is_empty() {
                 vec![None]
@@ -1339,8 +1328,6 @@ mod tests {
                 anonymous: Vec::new(),
             },
             current_branch: None,
-            worktrees: Vec::new(),
-            orphans: Vec::new(),
         }
     }
 

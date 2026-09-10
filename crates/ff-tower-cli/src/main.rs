@@ -31,7 +31,7 @@ mod selfupdate;
 
 use clap::Parser;
 
-use cli::{BayAction, BoardArgs, Cli, Command};
+use cli::{BoardArgs, Cli, Command};
 use error::CliError;
 use ff_tower_core::board::{self, ClosedWindow};
 use ff_tower_core::ff::Ff;
@@ -193,11 +193,6 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Done { .. }) => "done",
         Some(Command::Explain { .. }) => "explain",
         Some(Command::Config { .. }) => "config",
-        Some(Command::Bay { action }) => match action {
-            None | Some(BayAction::List) => "bay list",
-            Some(BayAction::Warm { .. }) => "bay warm",
-            Some(BayAction::Release { .. }) => "bay release",
-        },
         Some(Command::Version) => "version",
         Some(Command::Update { .. }) => "update",
         Some(Command::Doctor) => "doctor",
@@ -226,7 +221,6 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             labels,
             skill,
             assignee,
-            bay,
             status,
         }) => cmd::file::run(
             cli.json,
@@ -238,7 +232,6 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
                 labels: labels.clone(),
                 skill: skill.clone(),
                 assignee: assignee.clone(),
-                bay: bay.clone(),
                 status: status.clone(),
             },
         )?,
@@ -252,7 +245,6 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             priority,
             labels,
             skill,
-            bay,
         }) => cmd::edit::run(
             cli.json,
             target,
@@ -262,7 +254,6 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
                 priority: priority.clone(),
                 labels: labels.clone(),
                 skill: skill.clone(),
-                bay: bay.clone(),
             },
         )?,
         Some(Command::Link { a, b }) => cmd::link::run(cli.json, a, b)?,
@@ -290,7 +281,6 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             unset,
             global,
         }) => cmd::config::run(cli.json, key.as_deref(), value.clone(), *unset, *global)?,
-        Some(Command::Bay { action }) => cmd::bay::run(cli.json, action.as_ref())?,
         Some(Command::Version) => cmd::version::run(cli.json)?,
         Some(Command::Update { check }) => cmd::update::run(cli.json, *check)?,
         Some(Command::Doctor) => return cmd::doctor::run(cli.json),

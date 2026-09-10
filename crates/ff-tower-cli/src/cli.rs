@@ -163,9 +163,6 @@ pub enum Command {
         /// The lane — me or agent.
         #[arg(long = "assignee", value_name = "lane")]
         assignee: Option<String>,
-        /// `warm` builds a tree ahead of whoever flies it.
-        #[arg(long = "bay", value_name = "bay")]
-        bay: Option<String>,
         /// The status the flight is born with — backlog, ready, or
         /// in_progress; beats `tower.defaultFileStatus` for this filing.
         #[arg(long = "status", value_name = "status")]
@@ -205,9 +202,6 @@ pub enum Command {
         /// The new skill; flights only.
         #[arg(long = "skill", value_name = "name")]
         skill: Option<String>,
-        /// The new bay ask; flights only.
-        #[arg(long = "bay", value_name = "bay")]
-        bay: Option<String>,
     },
     /// Declare a dependency: `a` depends on `b`.
     #[command(long_about = help::LINK, after_long_help = help::LINK_EXAMPLES)]
@@ -285,7 +279,7 @@ pub enum Command {
         #[arg(short = 'm', alias = "message", value_name = "msg")]
         message: Option<String>,
     },
-    /// Stop a flight with a question attached — bay warm, exit 3.
+    /// Stop a flight with a question attached — exit 3.
     #[command(long_about = help::HOLD, after_long_help = help::HOLD_EXAMPLES)]
     Hold {
         /// The flight to hold.
@@ -327,8 +321,8 @@ pub enum Command {
     /// gets, key + value sets, `--unset` returns to the default.
     #[command(long_about = help::CONFIG, after_long_help = help::CONFIG_EXAMPLES)]
     Config {
-        /// The setting — `bays`, or `tower.bays`; the whole list when
-        /// unsaid.
+        /// The setting — `servePort`, or `tower.servePort`; the whole
+        /// list when unsaid.
         #[arg(value_name = "key")]
         key: Option<String>,
         /// The new value; validated before anything touches disk.
@@ -341,12 +335,6 @@ pub enum Command {
         #[arg(long)]
         global: bool,
     },
-    /// The pool: what is bootstrapped, what is occupied, what is free.
-    #[command(long_about = help::BAY, after_long_help = help::BAY_EXAMPLES)]
-    Bay {
-        #[command(subcommand)]
-        action: Option<BayAction>,
-    },
     /// Which tower this is, and whether it is the current one.
     #[command(long_about = help::VERSION, after_long_help = help::VERSION_EXAMPLES)]
     Version,
@@ -357,8 +345,8 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
-    /// Stale bays and drift — doctor observes and complains, never
-    /// enforces.
+    /// The seam, the log, and the registries — doctor observes and
+    /// complains, never enforces.
     #[command(long_about = help::DOCTOR, after_long_help = help::DOCTOR_EXAMPLES)]
     Doctor,
     /// Run tower's standing process: a server the browser board mounts
@@ -451,42 +439,10 @@ impl Command {
             | Command::Cancel { .. }
             | Command::Hold { .. }
             | Command::Answer { .. }
-            | Command::Done { .. }
-            | Command::Bay { .. } => Lanes {
+            | Command::Done { .. } => Lanes {
                 update: true,
                 notice: true,
             },
         }
     }
-}
-
-/// The pool's three verbs; bare `ff tower bay` is the list, the same
-/// optional-subcommand mechanism as bare `ff tower` being the board.
-#[derive(Subcommand)]
-pub enum BayAction {
-    /// Every bay: id, branch, and the live flight sitting in it.
-    #[command(long_about = help::BAY_LIST, after_long_help = help::BAY_LIST_EXAMPLES)]
-    List,
-    /// Warm a bay — `ff worktree add`, so the chain floor is laid before
-    /// the first command runs in it.
-    #[command(long_about = help::BAY_WARM, after_long_help = help::BAY_WARM_EXAMPLES)]
-    Warm {
-        /// Where to put it; a relative path resolves against the
-        /// repository, not the shell's directory. Minted under
-        /// `tower.bays` when unsaid.
-        #[arg(value_name = "path")]
-        path: Option<String>,
-        /// The branch it stands on — a new one named after the directory
-        /// when unsaid.
-        #[arg(value_name = "branch")]
-        branch: Option<String>,
-    },
-    /// Release a bay — refused while a live flight sits in it; fufu
-    /// captures the tree before teardown either way.
-    #[command(long_about = help::BAY_RELEASE, after_long_help = help::BAY_RELEASE_EXAMPLES)]
-    Release {
-        /// The bay, by id or by path.
-        #[arg(value_name = "bay")]
-        bay: String,
-    },
 }

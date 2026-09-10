@@ -22,11 +22,13 @@ use std::process::Command;
 /// against a contract that had moved.
 ///
 /// The tempdir is a root holding `repo/`, and [`Repo::path`] answers the
-/// subdirectory: a bay warmed *inside* the working tree would ride into
-/// every capture as untracked noise, so [`Repo::bay_path`] hands out
-/// sibling slots beside `repo/` instead, inside the fixture's lifetime.
+/// subdirectory: anything a test makes *inside* the working tree — a
+/// worktree, a config root — would ride into every capture as untracked
+/// noise, so the root leaves sibling slots beside `repo/` instead, inside
+/// the fixture's lifetime.
 pub struct Repo {
-    dir: tempfile::TempDir,
+    /// Held for its lifetime alone: the root goes when the fixture does.
+    _dir: tempfile::TempDir,
     repo: PathBuf,
 }
 
@@ -37,7 +39,10 @@ impl Repo {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("repo");
         std::fs::create_dir(&path).expect("mkdir repo");
-        let repo = Repo { dir, repo: path };
+        let repo = Repo {
+            _dir: dir,
+            repo: path,
+        };
 
         repo.ff(&["init"]);
         // Identity, a quiet default branch, and byte-for-byte line endings:
@@ -59,12 +64,6 @@ impl Repo {
 
     pub fn path(&self) -> &Path {
         &self.repo
-    }
-
-    /// A sibling slot beside the repository for a bay, never created here
-    /// — `ff worktree add` insists on making the directory itself.
-    pub fn bay_path(&self, name: &str) -> PathBuf {
-        self.dir.path().join(name)
     }
 
     /// Write a file, creating parent directories.
@@ -228,22 +227,6 @@ impl FakeFf {
 /// The OS's null device, for pointing git config paths at nothing.
 pub fn null_device() -> &'static str {
     if cfg!(windows) { "NUL" } else { "/dev/null" }
-}
-
-/// `std::fs::canonicalize` in the shape ff reports paths: symlinks
-/// resolved (macOS tempdirs live behind the `/var` link to `/private/var`),
-/// 8.3 aliases expanded, and without the `\\?\` prefix std adds on
-/// Windows — ff's envelopes carry the plain form git and gix answer with.
-pub fn canonicalized(path: &Path) -> PathBuf {
-    let full = std::fs::canonicalize(path)
-        .unwrap_or_else(|err| panic!("canonicalize {}: {err}", path.display()));
-    if !cfg!(windows) {
-        return full;
-    }
-    match full.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-        Some(plain) => PathBuf::from(plain),
-        None => full,
-    }
 }
 
 /// A string with backslashes flipped to `/`, for containment assertions

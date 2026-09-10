@@ -173,7 +173,8 @@ pub enum Done {
     Landed,
 }
 
-/// What a part asks of the pool. One value today: warm a bay for it.
+/// The `bay` key a procedure file may still carry. Parsed and read by
+/// nothing: retired with #125, and #129 decides the format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Bay {
@@ -347,8 +348,7 @@ pub fn user_dir() -> Option<PathBuf> {
 }
 
 /// Where the team's live, under the main worktree — never the invoking
-/// one. The anchor is `tower.bays`'s, for its reason: every bay must see
-/// the same definitions.
+/// one, so every worktree sees the same definitions.
 pub fn repo_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".tower").join("procedures")
 }

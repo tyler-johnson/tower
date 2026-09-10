@@ -99,7 +99,7 @@ pub enum Error {
     LinkMissing { from: String, to: String },
     /// `edit` with every flag left unsaid.
     #[error(
-        "nothing to change — `-s` rewords the subject, `-m` the body or comment text, and `--priority`, `--label`, `--skill`, `--bay` reset a field"
+        "nothing to change — `-s` rewords the subject, `-m` the body or comment text, and `--priority`, `--label`, `--skill` reset a field"
     )]
     NeedsEdit,
     /// A field flag on a comment target — only flights carry fields.

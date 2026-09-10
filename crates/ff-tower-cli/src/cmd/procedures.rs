@@ -202,9 +202,6 @@ fn detail(definition: &Definition, colored: bool) -> String {
         if !flight.labels.is_empty() {
             phrases.push(flight.labels.join(", "));
         }
-        if let Some(bay) = flight.bay {
-            phrases.push(format!("bay {}", bay.name()));
-        }
         if !flight.after.is_empty() {
             phrases.push(format!("after {}", flight.after.join(", ")));
         }

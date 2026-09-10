@@ -22,7 +22,6 @@ pub struct Fields {
     pub labels: Vec<String>,
     pub skill: Option<String>,
     pub assignee: Option<String>,
-    pub bay: Option<String>,
     pub status: Option<String>,
 }
 
@@ -80,7 +79,7 @@ pub fn classify(
                 .unwrap_or_else(|| "none".to_string()),
             labels: fields.labels.clone(),
             skill: fields.skill.clone(),
-            bay: fields.bay.clone(),
+            bay: None,
             done: "asserted".to_string(),
             branch: None,
         });
@@ -136,8 +135,7 @@ fn filed(
     overlay: Option<&Fields>,
 ) -> Kind {
     let own_assignee = Some(flight.assignee.name().to_string());
-    let own_bay = flight.bay.map(|bay| bay.name().to_string());
-    let (assignee, priority, labels, skill, bay) = match overlay {
+    let (assignee, priority, labels, skill) = match overlay {
         Some(fields) => (
             fields.assignee.clone().or(own_assignee),
             fields
@@ -151,7 +149,6 @@ fn filed(
                 fields.labels.clone()
             },
             fields.skill.clone().or_else(|| flight.skill.clone()),
-            fields.bay.clone().or(own_bay),
         ),
         None => (
             own_assignee,
@@ -161,7 +158,6 @@ fn filed(
                 .unwrap_or_else(|| "none".to_string()),
             flight.labels.clone(),
             flight.skill.clone(),
-            own_bay,
         ),
     };
     Kind::Filed {
@@ -173,7 +169,7 @@ fn filed(
         priority,
         labels,
         skill,
-        bay,
+        bay: None,
         done: flight.done.name().to_string(),
         branch: None,
     }

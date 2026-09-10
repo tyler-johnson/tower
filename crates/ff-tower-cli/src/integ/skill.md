@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Advanced use of tower (ff tower), the board over fufu. Use when driving tower from a script or a loop, reading its JSON envelope and exit codes, naming a flight by number or wire id, holding a flight on a question or answering one, claiming work with next into a bay, filing under a procedure or decomposing a flight, or whenever the board says something a verb refuses to change.
+description: Advanced use of tower (ff tower), the board over fufu. Use when driving tower from a script or a loop, reading its JSON envelope and exit codes, naming a flight by number or wire id, holding a flight on a question or answering one, claiming work with next, filing under a procedure or decomposing a flight, or whenever the board says something a verb refuses to change.
 ---
 
 # tower
@@ -15,7 +15,7 @@ The MCP server `ff mcp` serves four tower tools beside fufu's own: `tower__next`
 
 ## The model
 
-**A flight is a record, and the board is derived from it.** The stored fields are subject, body, status word, assignee lane, priority (a free string, `none` when unsaid), labels, skill, bay ask, the edges it depends on, its comments, and a history of every gesture with the byline and session that made it. A sub-flight is a flight: it files into its own status group, and what says a row is a family is the parent's progress mark, `(1/3)`, closed children over total.
+**A flight is a record, and the board is derived from it.** The stored fields are subject, body, status word, assignee lane, priority (a free string, `none` when unsaid), labels, skill, the edges it depends on, its comments, and a history of every gesture with the byline and session that made it. A sub-flight is a flight: it files into its own status group, and what says a row is a family is the parent's progress mark, `(1/3)`, closed children over total.
 
 **Intent is stored; the repository audits it.** Two lines appear on a row when the branch disagrees with the word: `no changes on the branch for 2d` under In Progress, after `tower.staleFlightThreshold` (`false` turns it off), and `changes on the branch since it was set ready` under Ready, which has no threshold and is never off. Both are flagged, never corrected. Done is asserted, never derived.
 
@@ -30,21 +30,21 @@ A flight has two names. The board prints `#3`; when two writers share a board an
 Every read folds the log fresh and never blocks on the network.
 
 - `ff tower`, and `ff tower board` — what needs a person pinned on top: `questions` (held flights, oldest ask first) and `yours` (Ready in the `me` lane); under it backlog, waiting, ready, in progress, held, and the three newest closed. `ff tower --closed 7d` widens that last group to a span; a count, `all`, and `none` work too.
-- `ff tower brief <flight>` (alias `show`) — the whole record plus the reads: branch, tip, last change, the two audit bits, `current` (the invoking worktree is its bay), `held` (a fufu hold on the branch), `resolving`, and the standing on `next`'s walk. It runs no collide probe unless a verdict could change the answer, so a brief is instant. A closed flight briefs like any other.
+- `ff tower brief <flight>` (alias `show`) — the whole record plus the reads: branch, tip, last change, the two audit bits, `current` (the invoking worktree's branch), `held` (a fufu hold on the branch), `resolving`, and the standing on `next`'s walk. It runs no collide probe unless a verdict could change the answer, so a brief is instant. A closed flight briefs like any other.
 - `ff tower procedures` and `ff tower skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `ff tower explain <id>` — the prose behind a refusal; `ff tower explain --list` is the whole catalog. A pure lookup, no repository needed.
 - `ff tower config` — every setting with its value and default; `ff tower version`; `ff tower doctor`, which exits 1 on findings so a script can gate on it; `ff tower briefing`, the line fufu shows a new session.
 
 ## Filing and shaping
 
-`ff tower file <subject>` files one flight; `ff tower file <procedure> <subject>` files under an installed procedure. The procedure is the first positional, and `-p` is priority: `ff tower file "upgrade axum" -p high` sets a priority and names no procedure. The other flags are `-m` for the body, `--label` (repeat it for more than one), `--skill`, `--assignee`, `--bay`, and `--status`, which takes only `backlog`, `ready`, or `in_progress`. A filing that says nothing lands on `tower.defaultFileStatus`, `ready` by default.
+`ff tower file <subject>` files one flight; `ff tower file <procedure> <subject>` files under an installed procedure. The procedure is the first positional, and `-p` is priority: `ff tower file "upgrade axum" -p high` sets a priority and names no procedure. The other flags are `-m` for the body, `--label` (repeat it for more than one), `--skill`, `--assignee`, and `--status`, which takes only `backlog`, `ready`, or `in_progress`. A filing that says nothing lands on `tower.defaultFileStatus`, `ready` by default.
 
 A procedure is those same fields saved across a graph of flights. A one-flight procedure collapses onto the filing, your flags winning; two or more file a parent and its parts in one append, so no flight is ever live, unlinked, and pullable. A bare filing whose fields a match rule covers files under that rule's procedure once, at file time, and a `routed` event on the record names the rule. The definition is copied into the log at filing, so editing it afterward disturbs nothing in the air.
 
 - `ff tower decompose <flight> <part>` with one subject per argument splits a flight by hand; exactly one argument naming an installed procedure mints its flights instead. Parts are born Ready whatever the default says. Every part closed makes the parent Ready, not done: finishing the whole is a judgment.
 - `ff tower link <a> <b>` declares that `a` depends on `b`; `ff tower unlink <a> <b>` takes it back, and is the only way to disagree with a derived Waiting.
 - `ff tower comment <flight> -m "<note>"` goes on the record and nowhere else.
-- `ff tower edit <target>` rewords a flight (`-s`, `-m`, `-p`, `--label`, `--skill`, `--bay`) or, given a comment's event id, the comment. An overlay: the fold reads the newest value per field and the log keeps every prior one. `--label` replaces the set wholesale and cannot clear it.
+- `ff tower edit <target>` rewords a flight (`-s`, `-m`, `-p`, `--label`, `--skill`) or, given a comment's event id, the comment. An overlay: the fold reads the newest value per field and the log keeps every prior one. `--label` replaces the set wholesale and cannot clear it.
 
 Procedures and skills live in two layers keyed by name, `~/.config/tower/procedures/<name>.toml` and `<main worktree>/.tower/procedures/<name>.toml` (skills under `skills/<name>.md` beside them), and a repository entry replaces the user's wholesale. tower ships none.
 
@@ -56,21 +56,17 @@ A closed flight refuses every move; the log keeps its record, and comments and e
 
 ## Holds and answers
 
-`ff tower hold <flight> -m "<question>"` stops a flight with the question on its record. The exit is 3, an outcome and not an error: the envelope is a full success envelope carrying the held event, and only the code says the flight stopped with a question. One question per flight; a second hold refuses with `tower/hold/exists`. Holding clears started, so the flight is no longer In Progress, and nothing is torn down: the bay stays warm, and the branch and its tip stay on the row.
+`ff tower hold <flight> -m "<question>"` stops a flight with the question on its record. The exit is 3, an outcome and not an error: the envelope is a full success envelope carrying the held event, and only the code says the flight stopped with a question. One question per flight; a second hold refuses with `tower/hold/exists`. Holding clears started, so the flight is no longer In Progress, and nothing is torn down: the branch stays, and it and its tip stay on the row.
 
 `ff tower answer <flight> -m "<answer>"` clears the question. The answer counts as the flight's freshest motion and the record derives Ready, or Waiting when a dependency is still live, never straight back to In Progress; the next pull is a fresh claim, and the answer is on the brief for whoever makes it. `next` never picks a held flight, and `yours` never counts one.
 
 Hold is the fallback for an unattended run. With a person in the conversation, ask there, and put the decision on the record as a comment or an edit.
 
-## Claiming and bays
+## Claiming
 
 `ff tower next` pulls from the pool: every Ready flight in the `agent` lane, walked in filed order. `-n 3` admits up to three that collide with neither each other nor anything flying; `--peek` runs the same computation with nothing written, and the envelope's `pulled` says which happened. Three outcomes: `work` (exit 0, something picked), `drained` (exit 1, the board has nothing left), and `yours` (exit 1, Ready work exists that the lane alone kept out of the pool). Both empties are full data envelopes; a JSON reader branches on `outcome`, and a shell loop stops on the code. `-n 0` refuses.
 
 Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent when the flight names none). `passed` rows say why a checked candidate lost — `collides`, with the flight and the paths, or `no-verdict` when fufu could not judge the pair — and stop where the walk stopped, so the output is bounded by the ask. The collision rule: only a candidate that already has a branch is checked, against every flying tree and every candidate already admitted, and an unknown verdict excludes. A fresh flight is admitted unchecked, because one tree per flight is the deconfliction. A flight with a live dependency is Waiting, not in the pool, and never reaches the walk.
-
-**Bays are worktrees, never registered.** The pool is what `ff worktree list` reports, and occupancy is derived per render: the live flight whose freshest session-tagged operation sits on a bay's branch is the occupant, and a closed flight frees its bay on the next render.
-
-- `ff tower bay` lists the pool with occupants; `ff tower bay warm` mints the next slot under `tower.bays` (refused until it is set; a path argument puts one exactly there); `ff tower bay release <bay>` tears one down, refused with `tower/bay/occupied` while a live flight sits in it.
 
 ## Lanes
 
@@ -97,7 +93,7 @@ Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent whe
 
 The log is `refs/tower/log/<author>/<writer>`, one orphan chain per writer; `tower.writer` is minted at the first append and is not a setting to copy between machines. Sync is a `git push` or `git fetch` of that refspec; there is no verb, and a chain this repository has not fetched shows in `ff tower doctor` as events off the board. `ff tower serve` answers the same envelopes at `/api/…` and streams changes at `/api/feed`; a person starts it, and every other interface works with it down.
 
-Every fufu read tower makes captures first, like every fufu verb, so folding a board against a dirty tree appends a snapshot to that worktree's fufu chain. Under `ff tower <verb>` the child inherits `FF_REPO`, `FF_CONTRACT`, and `FF_SESSION` from fufu's dispatch, and bare `ff tower done` and bay occupancy both read the session.
+Every fufu read tower makes captures first, like every fufu verb, so folding a board against a dirty tree appends a snapshot to that worktree's fufu chain. Under `ff tower <verb>` the child inherits `FF_REPO`, `FF_CONTRACT`, and `FF_SESSION` from fufu's dispatch, and bare `ff tower done` reads the session.
 
 ## Landmines
 

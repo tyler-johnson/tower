@@ -10,7 +10,6 @@
 
 pub mod answer;
 pub mod assign;
-pub mod bay;
 pub mod board;
 pub mod brief;
 pub mod briefing;

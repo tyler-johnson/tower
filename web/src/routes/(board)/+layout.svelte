@@ -6,9 +6,10 @@
 </script>
 
 <!--
-	The shell and the board are the group's layout, not a page: the bay
-	drawer renders over both while they are still live behind it. The
-	flight page is outside the group, so no board renders behind it.
+	The shell and the board are the group's layout, not a page, so a
+	page in the group renders over both while they are still live behind
+	it. The flight page is outside the group, so no board renders behind
+	it.
 	The main is the window's height, so the board scrolls inside it and
 	the footer stays in view.
 -->

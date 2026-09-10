@@ -1,6 +1,6 @@
 // The write table: one field, one target, one value, and the verb and
-// body that land it. The six fields a flight's record edits — status,
-// assignee, priority, label, skill, bay — and nothing else, because
+// body that land it. The five fields a flight's record edits — status,
+// assignee, priority, label, skill — and nothing else, because
 // nothing else is a field a person sets.
 //
 // Shared on purpose. The kanban writes a field by dragging a card into a
@@ -22,14 +22,14 @@ export type Write =
   | { verb: "assign"; body: { flight: string; assignee: string } }
   | {
       verb: "edit";
-      body: { target: string; priority?: string; labels?: string[]; skill?: string; bay?: string };
+      body: { target: string; priority?: string; labels?: string[]; skill?: string };
     };
 
 /// What setting `field` on `target` to `value` writes, or null when the
 /// value is not one the field can take.
 ///
 /// `null` clears the lane — `none` is the wire word, the CLI's own — and
-/// clears nothing else: priority, skill and bay have no clearing on the
+/// clears nothing else: priority and skill have no clearing on the
 /// wire, and an empty `labels` means *unchanged* rather than *emptied*, so
 /// the last label cannot be removed. Each of those answers null rather
 /// than sending a write the route would ignore.
@@ -48,8 +48,6 @@ export function write(field: Field, target: string, value: string | string[] | n
       return value === null ? null : { verb: "edit", body: { target, priority: value } };
     case "skill":
       return value === null ? null : { verb: "edit", body: { target, skill: value } };
-    case "bay":
-      return value === null ? null : { verb: "edit", body: { target, bay: value } };
     default:
       return null;
   }

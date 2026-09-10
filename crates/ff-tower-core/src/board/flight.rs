@@ -86,7 +86,6 @@ pub struct Flight {
     pub priority: String,
     pub labels: Vec<String>,
     pub skill: Option<String>,
-    pub bay: Option<String>,
     /// What finishing means, as the filing stamped it.
     pub done_kind: String,
     /// The open question, when the flight is held. Cleared by
@@ -261,7 +260,7 @@ pub fn fold(events: &[Event]) -> Fold {
                 priority,
                 labels,
                 skill,
-                bay,
+                bay: _,
                 done,
                 branch: _,
             } => {
@@ -297,7 +296,6 @@ pub fn fold(events: &[Event]) -> Fold {
                     priority: priority.clone(),
                     labels: labels.clone(),
                     skill: skill.clone(),
-                    bay: bay.clone(),
                     done_kind: done.clone(),
                     question: None,
                     abandoned: None,
@@ -551,7 +549,6 @@ pub fn fold(events: &[Event]) -> Fold {
             priority,
             labels,
             skill,
-            bay,
             ..
         } = &event.kind
         {
@@ -568,9 +565,6 @@ pub fn fold(events: &[Event]) -> Fold {
             if let Some(skill) = skill {
                 flight.skill = Some(skill.clone());
             }
-            if let Some(bay) = bay {
-                flight.bay = Some(bay.clone());
-            }
             continue;
         }
         let Kind::Edited {
@@ -580,7 +574,7 @@ pub fn fold(events: &[Event]) -> Fold {
             priority,
             labels,
             skill,
-            bay,
+            bay: _,
         } = &event.kind
         else {
             unreachable!("pass 2 collected only edits and routings");
@@ -607,9 +601,6 @@ pub fn fold(events: &[Event]) -> Fold {
             }
             if let Some(skill) = skill {
                 flight.skill = Some(skill.clone());
-            }
-            if let Some(bay) = bay {
-                flight.bay = Some(bay.clone());
             }
             flight.edited = Some(mark);
         } else if let Some(at) = flights
@@ -1567,7 +1558,6 @@ mod tests {
         assert_eq!(flight.priority, "high", "an absent field stands");
         assert_eq!(flight.labels, ["ops"], "labels replace wholesale");
         assert_eq!(flight.skill.as_deref(), Some("review"));
-        assert_eq!(flight.bay.as_deref(), Some("warm"));
         assert_eq!(flight.edited.as_ref().expect("marked").at, 30);
     }
 

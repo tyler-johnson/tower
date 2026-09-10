@@ -168,7 +168,7 @@ pub fn user_dir() -> Option<PathBuf> {
 }
 
 /// Where the team's live, under the main worktree — never the invoking
-/// one, so every bay sees the same skills.
+/// one, so every worktree sees the same skills.
 pub fn repo_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".tower").join("skills")
 }

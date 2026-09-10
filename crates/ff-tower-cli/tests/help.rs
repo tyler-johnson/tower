@@ -83,14 +83,6 @@ fn help_board_prints_the_root_page() {
 }
 
 #[test]
-fn help_resolves_nested_subcommands() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let body = stdout(&ff_tower(dir.path(), &["bay", "warm", "--help"]));
-    assert!(body.contains("Usage: ff tower bay warm"), "{body}");
-    assert!(body.contains("Examples:"), "{body}");
-}
-
-#[test]
 fn short_help_stays_short() {
     let dir = tempfile::TempDir::new().unwrap();
     let short = stdout(&ff_tower(dir.path(), &["next", "-h"]));

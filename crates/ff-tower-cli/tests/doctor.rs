@@ -1,7 +1,5 @@
 //! `ff tower doctor` against real repositories: the healthy ok row, the
-//! rows a released bay leaves behind, the half-gone bay, and the drifted
-//! seam — plus the board regression the gather fix earns: a hand-deleted
-//! bay directory must not kill the render doctor depends on.
+//! drifted seam, and the registry and config rows.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -58,14 +56,6 @@ fn repo() -> Repo {
     repo
 }
 
-/// Warm a bay through the binary and hand back its path as a string.
-fn warm(repo: &Repo, name: &str, branch: &str) -> String {
-    let bay = repo.bay_path(name);
-    let bay = bay.to_str().expect("utf8");
-    stdout(&ff_tower(repo.path(), &["bay", "warm", bay, branch]));
-    bay.to_string()
-}
-
 /// The doctor rows out of a `--json` run, with the findings count.
 fn rows(output: &Output) -> (Vec<serde_json::Value>, u64) {
     let envelope = envelope(output);
@@ -113,68 +103,7 @@ fn a_fresh_repository_is_healthy() {
 }
 
 #[test]
-fn a_released_bay_is_an_orphan_and_its_leftover_branch_a_finding() {
-    let repo = repo();
-    let bay = warm(&repo, "bay1", "feather");
-    stdout(&ff_tower(repo.path(), &["bay", "release", &bay]));
-
-    let out = ff_tower(repo.path(), &["doctor", "--json"]);
-    assert_eq!(out.status.code(), Some(1), "a finding drives the exit");
-    let (all, findings) = rows(&out);
-    let orphan = row(&all, "bay/orphan-chain");
-    assert_eq!(orphan["level"], serde_json::json!("info"));
-    let message = orphan["message"].as_str().expect("message");
-    assert!(message.contains("ff restore --at-op"), "{message}");
-    let leftover = row(&all, "bay/leftover-branch");
-    assert_eq!(leftover["level"], serde_json::json!("warn"));
-    let message = leftover["message"].as_str().expect("message");
-    assert!(message.contains("feather"), "{message}");
-    assert_eq!(findings, 1, "the orphan is info; only the branch counts");
-
-    let out = ff_tower(repo.path(), &["doctor"]);
-    assert_eq!(out.status.code(), Some(1));
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("WARN"), "{text}");
-    assert!(text.contains("1 finding"), "{text}");
-
-    // Delete the branch: the info row alone remains, and info is not a
-    // finding — every release leaves a chain by design.
-    repo.ff(&["git", "branch", "-D", "feather"]);
-    let out = ff_tower(repo.path(), &["doctor", "--json"]);
-    assert_eq!(out.status.code(), Some(0));
-    let (all, findings) = rows(&out);
-    row(&all, "bay/orphan-chain");
-    assert!(
-        !all.iter()
-            .any(|row| row["check"] == serde_json::json!("bay/leftover-branch")),
-        "{all:?}"
-    );
-    assert_eq!(findings, 0);
-}
-
-#[test]
-fn a_hand_deleted_bay_directory_warns_and_the_board_still_renders() {
-    let repo = repo();
-    let bay = warm(&repo, "bay1", "feather");
-    std::fs::remove_dir_all(&bay).expect("delete the directory by hand");
-
-    // The regression the gather fix earns: the per-bay fan-out's `-C`
-    // failure answers for `map`, and the board must skip it, not die.
-    let board = stdout(&ff_tower(repo.path(), &[]));
-    assert!(board.contains("nothing on the board"), "{board}");
-
-    let out = ff_tower(repo.path(), &["doctor", "--json"]);
-    assert_eq!(out.status.code(), Some(1));
-    let (all, findings) = rows(&out);
-    let missing = row(&all, "bay/missing-directory");
-    assert_eq!(missing["level"], serde_json::json!("warn"));
-    let message = missing["message"].as_str().expect("message");
-    assert!(message.contains("ff worktree remove bay1"), "{message}");
-    assert_eq!(findings, 1);
-}
-
-#[test]
-fn a_drifted_contract_is_a_finding_and_skips_the_bay_checks() {
+fn a_drifted_contract_is_a_finding() {
     let repo = repo();
     let fake = FakeFf::script(
         r#"for a in "$@"; do printf '%s\n' "$a" >> "$0.argv"; done
@@ -197,14 +126,14 @@ printf '%s\n' '{"ff":99,"cmd":"version","data":{"version":"9.9.9"}}'
     assert!(message.contains("99") && message.contains('1'), "{message}");
     assert_eq!(findings, 1);
 
-    // No gather on a broken seam: the version call is the only spawn.
-    // Line-exact, because the recorded `-C` path itself contains "op".
+    // On a broken seam the version call is the only spawn. Line-exact,
+    // because the recorded `-C` path itself contains "op".
     let recorded = std::fs::read_to_string(fake.dir().join("ff.argv")).expect("argv recorded");
     let words: Vec<&str> = recorded.lines().collect();
     assert!(words.contains(&"version"), "{recorded}");
     assert!(
-        !words.contains(&"worktree") && !words.contains(&"op") && !words.contains(&"status"),
-        "a drifted contract fails every gather spawn — doctor must not try: {recorded}"
+        !words.contains(&"op") && !words.contains(&"status"),
+        "a drifted contract fails every spawn — doctor must not try: {recorded}"
     );
 }
 

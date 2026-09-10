@@ -19,7 +19,7 @@
 	The chips at the navbar's left: the views, built-in and custom alike,
 	drawn the same because to a reader they are the same thing. A pick is
 	`query.set` of the view's canonical text, over whatever path is open,
-	so a drawer stays up over the new board. The list is the server's
+	so an open page stays up over the new board. The list is the server's
 	cut, shared plus the viewer's own, and the viewer is the process's
 	git identity, so there is nothing to decide here about who sees what.
 -->

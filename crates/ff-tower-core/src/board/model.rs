@@ -164,9 +164,6 @@ pub struct FlightView {
     pub priority: String,
     pub labels: Vec<String>,
     pub skill: Option<String>,
-    /// The bay a filing or an edit stamped this flight for — a stored
-    /// field, and not the pool's own answer about occupancy.
-    pub bay: Option<String>,
     /// `@detached` is a real literal value here, carried as fufu emitted
     /// it; a render decides how to print it.
     pub branch: Option<String>,
@@ -557,7 +554,6 @@ fn view(
         priority: flight.priority,
         labels: flight.labels,
         skill: flight.skill,
-        bay: flight.bay,
         branch,
         tip,
         last_change: None,
@@ -734,8 +730,6 @@ mod tests {
                 anonymous: Vec::new(),
             },
             current_branch: current.map(str::to_string),
-            worktrees: Vec::new(),
-            orphans: Vec::new(),
         }
     }
 
@@ -1386,7 +1380,7 @@ mod tests {
     }
 
     #[test]
-    fn a_question_keeps_the_bay_warm() {
+    fn a_question_keeps_the_branch() {
         let board = board(
             &[filed("pi.1", 10), held("pi.2", 60, "pi.1", "which?")],
             &reads(

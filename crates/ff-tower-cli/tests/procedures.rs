@@ -176,10 +176,7 @@ fn the_detail_carries_the_flights_the_inert_rule_and_the_file() {
         out.contains("· pass     agent · skill review · done asserted\n"),
         "{out}"
     );
-    assert!(
-        out.contains("· smoke    me · bay warm · done asserted\n"),
-        "{out}"
-    );
+    assert!(out.contains("· smoke    me · done asserted\n"), "{out}");
     assert!(
         out.contains("· verdict  me · after pass, smoke · done asserted\n"),
         "{out}"

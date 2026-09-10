@@ -7,7 +7,7 @@
 //! one filing; the words it takes are the ones a flight can be filed
 //! with — backlog, ready, in_progress — never the derived or closed ones.
 //! Every stored field is a flag: `-m` the body, priority, labels, skill,
-//! assignee, bay, copied onto the filing as given.
+//! assignee, copied onto the filing as given.
 //!
 //! **A bare filing is matched once, here.** The registry loads, and the
 //! first rule whose predicates all hold against the caller's fields —
@@ -116,7 +116,7 @@ pub fn file(
                 .unwrap_or_else(|| "none".to_string()),
             labels: fields.labels.clone(),
             skill: fields.skill.clone(),
-            bay: fields.bay.clone(),
+            bay: None,
             done: "asserted".to_string(),
             branch: None,
         }])?;
@@ -401,7 +401,6 @@ done     = "committed"
                 labels: vec!["web".to_string()],
                 skill: Some("debug".to_string()),
                 assignee: Some("agent".to_string()),
-                bay: Some("warm".to_string()),
                 status: None,
             },
             None,
@@ -419,7 +418,6 @@ done     = "committed"
         assert_eq!(flight.priority, "high");
         assert_eq!(flight.labels, ["web"]);
         assert_eq!(flight.skill.as_deref(), Some("debug"));
-        assert_eq!(flight.bay.as_deref(), Some("warm"));
         assert_eq!(flight.body, "the redirect loops");
         assert!(flight.pullable(), "agent-laned and Ready — pullable");
     }
@@ -621,7 +619,6 @@ status   = "backlog"
         let smoke = by_subject("· smoke");
         assert_eq!(smoke.status, "ready");
         assert_eq!(smoke.assignee.as_deref(), Some("me"));
-        assert_eq!(smoke.bay.as_deref(), Some("warm"));
 
         let verdict = by_subject("· verdict");
         assert_eq!(verdict.status, "waiting", "dependencies — born Waiting");

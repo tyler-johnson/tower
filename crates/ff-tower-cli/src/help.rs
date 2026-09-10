@@ -60,7 +60,7 @@ Examples:
   ff tower next                  pull the next Ready flight
   ff tower brief 17              everything known about one flight
   ff tower file \"fix the login redirect\"   put work on the board
-  ff tower hold 17 -m \"which flow wins?\"   stop with a question, bay warm
+  ff tower hold 17 -m \"which flow wins?\"   stop with a question
   ff tower done 17               off the board, on the record
   ff tower --closed 7d           a week of closed instead of three rows
   ff tower explain --list        every refusal tower can make
@@ -132,7 +132,7 @@ that is not installed is refused, and one word is never guessed as a
 procedure name.
 
 Every stored field is a flag: -m the body, -p the priority, --label
-(repeatable), --skill, --assignee (me or agent), --bay, --status
+(repeatable), --skill, --assignee (me or agent), --status
 (backlog, ready, or in_progress). A procedure is nothing more than
 those same fields saved across a graph of flights.
 
@@ -184,7 +184,7 @@ Examples:
 pub const EDIT: &str = "\
 Reword a flight — its subject with -s, its body with -m — or reset
 its fields: --priority, --label (repeatable, replacing the label set
-wholesale), --skill, --bay. A comment's text rewords with -m, naming
+wholesale), --skill. A comment's text rewords with -m, naming
 the comment by its event id. An overlay, not a rewrite: the fold
 applies the newest value per field, and the log keeps every prior
 one.
@@ -377,8 +377,9 @@ Examples:
 
 pub const HOLD: &str = "\
 Stop a flight with a question attached. The hold moves it to waiting
-on you with its bay intact — branch and tip stay on the row, because
-a warm bay is the point of holding rather than abandoning — and the
+on you with its branch intact — branch and tip stay on the row,
+because keeping the work is the point of holding rather than
+abandoning — and the
 exit is 3: an outcome, not an error, fufu's precedent. The envelope
 is a full success envelope with the held event in it; only the code
 says the flight stopped with a question. Holding is stopping: the
@@ -421,7 +422,7 @@ what is live and the log keeps everything else.
 
 Bare `ff tower done` derives the flight from the invoking worktree:
 the newest session-tagged operation on its own chain names it — the
-one place this verb spawns fufu. Run it from the bay the work
+one place this verb spawns fufu. Run it from the worktree the work
 happened in, or name the flight from anywhere.
 
 Finishing a waiting flight is allowed: abandoning the question is
@@ -468,11 +469,10 @@ tower can never disagree, and precedence is git's own. What the
 registry adds is what git config cannot say: which settings exist,
 what they default to, and whether a value will parse — validated
 through the readers' own parsers before anything touches disk.
-Spelling is forgiving: bays, tower.bays, and BAYS all name one
-setting.
+Spelling is forgiving: servePort, tower.servePort, and SERVEPORT all
+name one setting.
 
-Seven settings ship — bays, the pool root bare `ff tower bay warm`
-mints slots under; defaultFileStatus, where a bare `ff tower file`
+Six settings ship — defaultFileStatus, where a bare `ff tower file`
 lands; staleFlightThreshold, how long an In Progress flight sits
 quiet before the board says so; serveHost and servePort, the address
 and the port `ff tower serve` binds; updateCheck, how often the
@@ -484,29 +484,11 @@ an identity exists.";
 pub const CONFIG_EXAMPLES: &str = "\
 Examples:
   ff tower config                every setting, defaults marked
-  ff tower config bays           what the pool root is
-  ff tower config bays ../bays   set it, this repo
+  ff tower config servePort      what port serve binds
+  ff tower config servePort 7777   set it, this repo
   ff tower config defaultFileStatus backlog   bare filings park for a person
   ff tower config --global autoUpdate false   set it, every repo
-  ff tower config --unset bays   back to the default";
-
-pub const BAY: &str = "\
-The pool of worktrees flights fly from, read off fufu's own survey —
-`ff worktree list` — never entered and never registered, so there is
-no bay state to drift. Occupancy is the same flight-to-branch
-derivation the board runs: the live flight whose freshest work sits
-on a bay's branch is the occupant.
-
-Bare `ff tower bay` is the list. `warm` builds a slot ahead of the
-work; `release` tears one down, and is refused while a live flight
-sits in it.";
-
-pub const BAY_EXAMPLES: &str = "\
-Examples:
-  ff tower bay                   the pool: occupied and free
-  ff tower bay warm              build the next slot ahead of the work
-  ff tower bay release bay-3     tear one down; fufu captures first
-  ff tower config bays ../bays   where bare warm mints slots";
+  ff tower config --unset servePort   back to the default";
 
 pub const VERSION: &str = "\
 Which tower this is: the release, the commit and date it was built
@@ -554,18 +536,17 @@ Examples:
   ff tower version               is a newer release already cached?";
 
 pub const DOCTOR: &str = "\
-Stale bays, drift, and events off the board: doctor observes and
+The seam, the log, and the registries: doctor observes and
 complains, never enforces — read-only, with no --fix and no writes.
-The seam comes first: fufu's version runs before any bay-facing read,
+The seam comes first: fufu's version runs before anything else,
 because a drifted contract fails every spawn, and doctor is the verb
 that reports the broken seam rather than dying of it.
 
-On a healthy seam it reads what the board reads — the pool, with the
-bays whose directories are gone from disk — and the update lane's
-cache. It also names every event the fold could not place, which the
-board can only count: a chain this repository has yet to fetch, a
-kind a newer tower wrote, a kind tower has retired, and the two
-shapes only a hand-edited log produces.
+Then the log: every event the fold could not place, which the board
+can only count — a chain this repository has yet to fetch, a kind a
+newer tower wrote, a kind tower has retired, and the two shapes only
+a hand-edited log produces. Then the registries — the installed
+procedures and skills, and the update lane's cache.
 
 Rows come at three levels: ok counts nothing, info is news rather
 than a problem, WARN is a finding. Findings drive the exit — 0
@@ -574,9 +555,8 @@ gates on the code, and --json emits the same rows.";
 
 pub const DOCTOR_EXAMPLES: &str = "\
 Examples:
-  ff tower doctor                read the pool, the seam, and the log
-  ff tower doctor --json         the same rows, for machines
-  ff tower bay                   the pool it is judging";
+  ff tower doctor                read the seam, the log, and the registries
+  ff tower doctor --json         the same rows, for machines";
 
 pub const SERVE: &str = "\
 Run tower's standing process: the server behind the browser board.
@@ -584,8 +564,8 @@ It serves the read API, the verb API, the change feed, and the board
 itself — the web app is embedded in the binary at build time, and
 every path outside /api answers a build file or the app shell.
 
-The read API is five GET routes — /api/board, /api/brief/<flight>,
-/api/bays, /api/procedures, bare or /<name>, and /api/views — each
+The read API is four GET routes — /api/board, /api/brief/<flight>,
+/api/procedures, bare or /<name>, and /api/views — each
 answering the same envelope the matching verb emits under --json,
 folded fresh per request; nothing is cached. /api/board takes the
 query string ff tower's views store, on its URL
@@ -600,7 +580,7 @@ taking the verb's arguments as a small JSON body ({\"flight\": …}
 with an optional \"message\", file's {\"subject\": …}, assign's
 {\"assignee\": …}, status's {\"status\": …}, decompose's
 {\"parts\": […]}, edit's {\"target\": …} plus any of \"subject\",
-\"message\", \"priority\", \"labels\", \"skill\", \"bay\", and link's
+\"message\", \"priority\", \"labels\", \"skill\", and link's
 and unlink's {\"flight\": …, \"dependency\": …}), appending to the
 log, and answering the verb's own data envelope; hold answers 200,
 its exit-3 outcome being the CLI's channel, and done requires the
@@ -615,7 +595,7 @@ takes the same query on its URL, folds the current board on connect,
 then an event whenever the repository moves, each subscriber's frame
 being /api/board?<query>'s body minus the trailing newline. A
 different query is a new subscription. Updates arrive whoever wrote
-— this server's own POSTs, the CLI, an agent in a bay, a push
+— this server's own POSTs, the CLI, an agent, a push
 landing — including writes that never touched this server.
 
 It runs in the foreground the way `ff watch` does, and Ctrl-C ends
@@ -661,10 +641,9 @@ extension that offers one, takes stdout verbatim, and keeps a line
 only if it is one line of at most 240 characters — anything longer is
 dropped whole, so the subject is elided here rather than there.
 
-The line is the bay's answer. When the worktree fufu ran it in is
-flying a flight, the line names that flight, its subject, and the bay,
-and points at `ff tower brief <flight>`. Otherwise it counts what is
-Ready across the board, or says nothing is.
+The line counts what is Ready across the board, and points at
+`ff tower` when there is something to pull; otherwise it says nothing
+is ready.
 
 fufu runs it with a one-second box and stderr discarded, so a failure
 — no repository, no fufu, a drifted seam — costs nothing but the
@@ -675,59 +654,6 @@ pub const BRIEFING_EXAMPLES: &str = "\
 Examples:
   ff tower briefing              the line fufu would show
   ff tower briefing --json       the same, as a field";
-
-pub const BAY_LIST: &str = "\
-Every bay, one row: the painted id, the branch it stands on, and the
-occupant — the live flight whose freshest work sits on that branch —
-or a dim free, with a dim here on the row you invoked from. Bare
-`ff tower bay` is this list, the same optional-subcommand mechanism
-as bare `ff tower` being the board.
-
-Occupancy is derived per render, never registered, and the survey is
-fufu's: a worktree `ff worktree list` does not show is not a bay.";
-
-pub const BAY_LIST_EXAMPLES: &str = "\
-Examples:
-  ff tower bay list              the pool, spelled out
-  ff tower bay                   the same, bare
-  ff tower bay list --json       the rows, for a machine
-  ff tower bay warm              add a slot to it";
-
-pub const BAY_WARM: &str = "\
-Build a bay ahead of the work — `ff worktree add`, so the chain floor
-is laid before the first command runs in it and `ff undo` works there
-from the start.
-
-Bare warm mints the next slot under tower.bays: bay-<n>, smallest
-free n, refused until the key is set. A path puts the bay exactly
-there instead — a relative path resolves against the repository,
-never the shell's directory — and the branch is a name you give, or
-a new one named after the directory when unsaid.";
-
-pub const BAY_WARM_EXAMPLES: &str = "\
-Examples:
-  ff tower bay warm              the next slot under tower.bays
-  ff tower bay warm ../bays/api  exactly there
-  ff tower bay warm ../bays/api feature-api   on a branch you name
-  ff tower config bays ../bays   set the pool root once";
-
-pub const BAY_RELEASE: &str = "\
-Tear a bay down — `ff worktree remove` behind tower's one gate: a bay
-a live flight sits in is refused, because releasing the ground under
-a flight is a decision rather than housekeeping. Finish the flight
-first, and the bay frees itself on the next render.
-
-Everything else stays fufu's refusal, forwarded verbatim — a missing
-worktree, the main worktree, the bay you are standing in. fufu
-captures the tree before teardown either way, so uncommitted work in
-the bay survives the release on the worktree's own chain.";
-
-pub const BAY_RELEASE_EXAMPLES: &str = "\
-Examples:
-  ff tower bay release bay-3     by id
-  ff tower bay release ../bays/api         by path
-  ff tower done 17               what frees an occupied bay
-  ff tower bay                   which bays are free";
 
 #[cfg(test)]
 mod tests {

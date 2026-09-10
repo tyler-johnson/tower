@@ -51,7 +51,6 @@ const NOT_TOOLS: &[&str] = &[
     "answer",
     "explain",
     "config",
-    "bay",
     "version",
     "update",
     "doctor",
@@ -93,13 +92,10 @@ pub struct Annotations {
 #[derive(Default)]
 pub struct Properties(pub Vec<(String, Value)>);
 
+#[cfg(test)]
 impl Properties {
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.0.iter().find(|(k, _)| k == key).map(|(_, v)| v)
-    }
-
-    fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
-        self.0.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 }
 
@@ -130,44 +126,16 @@ fn describe(cmd: &clap::Command) -> Descriptor {
     }
 }
 
-/// One verb's schema. A verb with sub-verbs — `bay` — takes them as an
-/// `action` enum, first positional and required, and the sub-verbs'
-/// own arguments merge in after it: positionals by index, options by
-/// name, each slot named by the first sub-verb declaring it and
-/// described by every one that does.
+/// One verb's schema: every positional a slot, every option a
+/// property, required where clap says so.
 fn schema(cmd: &clap::Command) -> Schema {
     let mut schema = Schema {
         kind: "object",
         ..Schema::default()
     };
-    let subs: Vec<&clap::Command> = super::verbs_of(cmd).collect();
-    if !subs.is_empty() {
-        let names: Vec<&str> = subs.iter().map(|sub| sub.get_name()).collect();
-        schema.properties.0.push((
-            "action".to_string(),
-            json!({
-                "type": "string",
-                "enum": names,
-                "description": format!("The {} action: {}.", cmd.get_name(), names.join(", ")),
-            }),
-        ));
-        schema.required.push("action".to_string());
-        schema.positional.push("action".to_string());
-    }
-    walk(cmd, None, &mut schema);
-    let base = schema.positional.len();
-    for sub in subs {
-        walk_merged(sub, base, &mut schema);
-    }
-    schema
-}
-
-/// The verb's own arguments: every positional a slot, every option a
-/// property, required where clap says so.
-fn walk(cmd: &clap::Command, prefix: Option<&str>, schema: &mut Schema) {
     for arg in args_of(cmd) {
         let (name, mut value) = property(arg);
-        value["description"] = json!(describe_arg(arg, prefix));
+        value["description"] = json!(arg.get_help().map(ToString::to_string).unwrap_or_default());
         if arg.is_positional() {
             schema.positional.push(name.clone());
             if arg.is_required_set() {
@@ -176,45 +144,7 @@ fn walk(cmd: &clap::Command, prefix: Option<&str>, schema: &mut Schema) {
         }
         schema.properties.0.push((name, value));
     }
-}
-
-/// A sub-verb's arguments folded into the parent's schema. Nothing a
-/// sub-verb declares is required at the union level: the other actions
-/// do not take it.
-fn walk_merged(sub: &clap::Command, base: usize, schema: &mut Schema) {
-    let prefix = sub.get_name();
-    let mut slot = base;
-    for arg in args_of(sub) {
-        let (name, mut value) = property(arg);
-        let help = describe_arg(arg, Some(prefix));
-        let existing = if arg.is_positional() {
-            let existing = schema.positional.get(slot).cloned();
-            slot += 1;
-            existing
-        } else {
-            schema.properties.get(&name).map(|_| name.clone())
-        };
-        match existing {
-            Some(key) => {
-                let value = schema
-                    .properties
-                    .get_mut(&key)
-                    .expect("a slot is a property");
-                let joined = format!(
-                    "{}; {help}",
-                    value["description"].as_str().unwrap_or_default()
-                );
-                value["description"] = json!(joined);
-            }
-            None => {
-                value["description"] = json!(help);
-                if arg.is_positional() {
-                    schema.positional.push(name.clone());
-                }
-                schema.properties.0.push((name, value));
-            }
-        }
-    }
+    schema
 }
 
 /// The arguments a caller spells: the globals (`--json`, appended by
@@ -258,14 +188,6 @@ fn kind(arg: &clap::Arg) -> Value {
     }
 }
 
-fn describe_arg(arg: &clap::Arg, prefix: Option<&str>) -> String {
-    let help = arg.get_help().map(ToString::to_string).unwrap_or_default();
-    match prefix {
-        Some(prefix) => format!("{prefix}: {help}"),
-        None => help,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -300,18 +222,15 @@ mod tests {
     fn every_option_has_a_long_spelling() {
         let tree = super::super::tree();
         let mut checked = 0usize;
-        for verb in super::super::verbs_of(&tree) {
-            for cmd in std::iter::once(verb).chain(super::super::verbs_of(verb)) {
-                for arg in args_of(cmd).filter(|arg| !arg.is_positional()) {
-                    assert!(
-                        long_of(arg).is_some(),
-                        "`{} {}`: {} has neither a long nor an alias — add `alias = \"…\"`",
-                        verb.get_name(),
-                        cmd.get_name(),
-                        arg.get_id()
-                    );
-                    checked += 1;
-                }
+        for cmd in super::super::verbs_of(&tree) {
+            for arg in args_of(cmd).filter(|arg| !arg.is_positional()) {
+                assert!(
+                    long_of(arg).is_some(),
+                    "`{}`: {} has neither a long nor an alias — add `alias = \"…\"`",
+                    cmd.get_name(),
+                    arg.get_id()
+                );
+                checked += 1;
             }
         }
         assert!(
@@ -352,31 +271,18 @@ mod tests {
         assert_eq!(done.input_schema.positional, ["flight"]);
         assert!(
             done.input_schema.required.is_empty(),
-            "bare done is the bay's flight"
+            "bare done derives the flight"
         );
     }
 
     /// The generator covers the whole grammar, served or not: the
     /// integer and the boolean, the array positional and the array
-    /// option, and the sub-verb merge — so a verb promoted to a tool
-    /// gets a schema that was already right.
+    /// option — so a verb promoted to a tool gets a schema that was
+    /// already right.
     #[test]
     fn the_generator_covers_the_grammar() {
         let tree = super::super::tree();
         let verb = |name: &str| describe(tree.find_subcommand(name).expect(name));
-        let bay = verb("bay");
-        assert_eq!(bay.input_schema.positional, ["action", "path", "branch"]);
-        assert_eq!(bay.input_schema.required, ["action"]);
-        assert_eq!(
-            bay.input_schema.properties.get("action").unwrap()["enum"],
-            json!(["list", "warm", "release"])
-        );
-        let path = bay.input_schema.properties.get("path").unwrap();
-        let description = path["description"].as_str().unwrap();
-        assert!(
-            description.starts_with("warm: ") && description.contains("; release: "),
-            "{description}"
-        );
         let next = verb("next");
         assert_eq!(
             next.input_schema.properties.get("count").unwrap()["type"],
@@ -454,63 +360,36 @@ mod tests {
                 .filter(|(key, _)| !positional.contains(key))
                 .map(|(key, value)| (key, value))
                 .collect();
-            let subs: Vec<&clap::Command> = super::super::verbs_of(cmd).collect();
-            if subs.is_empty() {
-                let words: Vec<String> = positional
+            let words: Vec<String> = positional
+                .iter()
+                .map(|key| placeholder(props.get(key).unwrap()).to_string())
+                .collect();
+            parse(&d.name, &words, &[]);
+            for (key, value) in &options {
+                // A positional clap declares in conflict with the option
+                // is a refusal on purpose — `config <key> <value>
+                // --unset` — so the spelling stops at the first one,
+                // the way a caller who read the refusal would.
+                let arg = args_of(cmd)
+                    .find(|arg| long_of(arg).as_deref() == Some(key.as_str()))
+                    .expect("an option is an arg");
+                // Clap reads a conflict from the side that declared
+                // it, so both sides are asked.
+                let conflicts = |a: &clap::Arg, b: &clap::Arg| {
+                    cmd.get_arg_conflicts_with(a)
+                        .iter()
+                        .any(|other| other.get_id() == b.get_id())
+                };
+                let clear = positional
                     .iter()
-                    .map(|key| placeholder(props.get(key).unwrap()).to_string())
-                    .collect();
-                parse(&d.name, &words, &[]);
-                for (key, value) in &options {
-                    // A positional clap declares in conflict with the option
-                    // is a refusal on purpose — `config <key> <value>
-                    // --unset` — so the spelling stops at the first one,
-                    // the way a caller who read the refusal would.
-                    let arg = args_of(cmd)
-                        .find(|arg| long_of(arg).as_deref() == Some(key.as_str()))
-                        .expect("an option is an arg");
-                    // Clap reads a conflict from the side that declared
-                    // it, so both sides are asked.
-                    let conflicts = |a: &clap::Arg, b: &clap::Arg| {
-                        cmd.get_arg_conflicts_with(a)
-                            .iter()
-                            .any(|other| other.get_id() == b.get_id())
-                    };
-                    let clear = positional
-                        .iter()
-                        .position(|key| {
-                            let slot = args_of(cmd)
-                                .find(|arg| arg.get_id() == key.as_str())
-                                .expect("a slot is an arg");
-                            conflicts(arg, slot) || conflicts(slot, arg)
-                        })
-                        .unwrap_or(positional.len());
-                    parse(&d.name, &words[..clear], &spell_option(key, value));
-                }
-                continue;
-            }
-            assert_eq!(positional.first().map(String::as_str), Some("action"));
-            for sub in subs {
-                // The sub-verb's own slots, and no more: the union's other
-                // slots belong to its siblings.
-                let own = args_of(sub).filter(|arg| arg.is_positional()).count();
-                let mut words = vec![sub.get_name().to_string()];
-                words.extend(
-                    positional[1..1 + own]
-                        .iter()
-                        .map(|key| placeholder(props.get(key).unwrap()).to_string()),
-                );
-                parse(&d.name, &words, &[]);
-                let declared: Vec<String> = args_of(cmd)
-                    .chain(args_of(sub))
-                    .filter(|arg| !arg.is_positional())
-                    .filter_map(long_of)
-                    .collect();
-                for (key, value) in &options {
-                    if declared.contains(key) {
-                        parse(&d.name, &words, &spell_option(key, value));
-                    }
-                }
+                    .position(|key| {
+                        let slot = args_of(cmd)
+                            .find(|arg| arg.get_id() == key.as_str())
+                            .expect("a slot is an arg");
+                        conflicts(arg, slot) || conflicts(slot, arg)
+                    })
+                    .unwrap_or(positional.len());
+                parse(&d.name, &words[..clear], &spell_option(key, value));
             }
         }
     }

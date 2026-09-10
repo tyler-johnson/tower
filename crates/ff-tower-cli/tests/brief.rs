@@ -115,7 +115,7 @@ fn install_pipeline(repo: &Repo) {
 }
 
 /// `docs/procedures/review.toml`'s shape, for the one test that needs a
-/// flight born with a skill and another born with a bay.
+/// flight born with a skill.
 fn install_review(repo: &Repo) {
     repo.write(
         ".tower/procedures/review.toml",
@@ -228,19 +228,12 @@ fn the_stored_fields_get_their_own_line_under_the_head() {
     );
 
     let text = stdout(&ff_tower(repo.path(), &["brief", "3"]));
-    assert!(
-        text.contains("    assignee me · bay warm · under review\n"),
-        "{text}"
-    );
+    assert!(text.contains("    assignee me · under review\n"), "{text}");
 
     let envelope = envelope(&ff_tower(repo.path(), &["brief", "2", "--json"]));
     assert_eq!(envelope["data"]["assignee"], serde_json::json!("agent"));
     assert_eq!(envelope["data"]["skill"], serde_json::json!("review"));
     assert_eq!(envelope["data"]["status"], serde_json::json!("ready"));
-    assert!(
-        envelope["data"]["bay"].is_null(),
-        "absent facts are null: {envelope}"
-    );
 }
 
 #[test]
@@ -778,7 +771,6 @@ fn the_json_pins_the_merged_envelope() {
         "priority",
         "labels",
         "skill",
-        "bay",
         "body",
         "comments",
     ] {

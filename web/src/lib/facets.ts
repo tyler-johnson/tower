@@ -43,9 +43,6 @@ export function facets(field: Field, rows: FlightView[]): Facet[] {
       case "skill":
         hit(row.skill);
         break;
-      case "bay":
-        hit(row.bay);
-        break;
       case "procedure":
         hit(row.procedure);
         break;

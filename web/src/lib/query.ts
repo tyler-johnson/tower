@@ -22,7 +22,6 @@ export type Field =
   | "priority"
   | "label"
   | "skill"
-  | "bay"
   | "subject"
   | "body"
   | "procedure"
@@ -46,7 +45,6 @@ export const FIELDS: Field[] = [
   "priority",
   "label",
   "skill",
-  "bay",
   "subject",
   "body",
   "procedure",
@@ -151,7 +149,6 @@ export function shape(field: Field): Shape {
     case "priority":
     case "label":
     case "skill":
-    case "bay":
     case "procedure":
     case "branch":
     case "stale":
@@ -187,7 +184,6 @@ export function groupable(field: Field): boolean {
     case "priority":
     case "label":
     case "skill":
-    case "bay":
       return true;
     default:
       return false;

@@ -138,7 +138,6 @@ export interface FlightView {
   priority: string;
   labels: string[];
   skill: string | null;
-  bay: string | null;
   branch: string | null;
   tip: string | null;
   /// The freshest session-tagged capture on this flight's branch — the
@@ -537,7 +536,6 @@ export interface Brief {
   priority: string;
   labels: string[];
   skill: string | null;
-  bay: string | null;
   /// The last edit touching the record — the flight's own fields or a
   /// comment's text — flat like the status mark.
   edited_by: string | null;
@@ -564,20 +562,6 @@ export interface Brief {
   with?: string;
   paths?: string[];
   beat: Passed[];
-}
-
-/// One worktree in the pool.
-export interface BayView {
-  id: string;
-  path: string;
-  branch: string | null;
-  flight: string | null;
-  subject: string | null;
-  current: boolean;
-}
-
-export interface Pool {
-  bays: BayView[];
 }
 
 /// One procedure as the registry holds it, mirroring
@@ -698,7 +682,7 @@ export function briefNote(brief: Brief, refs: Map<string, string>, now: number):
 }
 
 /// The stored fields, one line, ported from cmd/brief.rs's `fields_line()`:
-/// lane, priority, labels, skill, bay, and the procedure the filing was
+/// lane, priority, labels, skill, and the procedure the filing was
 /// minted under. Its own line rather than phrases in the note — the note
 /// is urgency ordered, and a field is not urgency.
 export function fieldsLine(brief: Brief): string {
@@ -706,7 +690,6 @@ export function fieldsLine(brief: Brief): string {
   if (brief.priority !== "none") phrases.push(`priority ${brief.priority}`);
   if (brief.labels.length > 0) phrases.push(brief.labels.join(", "));
   if (brief.skill !== null) phrases.push(`skill ${brief.skill}`);
-  if (brief.bay !== null) phrases.push(`bay ${brief.bay}`);
   if (brief.procedure !== null) phrases.push(`under ${brief.procedure}`);
   return phrases.join(" · ");
 }
@@ -777,7 +760,6 @@ const KNOWN_BRIEF_KEYS = new Set([
   "priority",
   "labels",
   "skill",
-  "bay",
   "edited_by",
   "edited_at",
   "question",

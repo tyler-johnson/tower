@@ -24,7 +24,7 @@ class QueryState {
   /// it — the shell's alert has the words, and the bar draws nothing.
   parsed = $derived(parse(this.search));
 
-  /// `path` with the current query carried along, so a drawer opened
+  /// `path` with the current query carried along, so a page opened
   /// over a filtered board closes back onto the same board.
   href(path: string): string {
     return this.search === "" ? path : `${path}?${this.search}`;

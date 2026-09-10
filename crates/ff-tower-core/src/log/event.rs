@@ -104,6 +104,7 @@ pub enum Kind {
         priority: String,
         labels: Vec<String>,
         skill: Option<String>,
+        /// Retired with #125; read for old events, never written.
         bay: Option<String>,
         done: String,
         /// Retired with #124; read for old events, never written.
@@ -142,6 +143,7 @@ pub enum Kind {
         /// Wholesale replacement — the label set is one value.
         labels: Option<Vec<String>>,
         skill: Option<String>,
+        /// Retired with #125; read for old events, never written.
         bay: Option<String>,
     },
     /// `from` depends on `to` — a declared dependency, stored intent.
@@ -193,6 +195,7 @@ pub enum Kind {
         priority: Option<String>,
         labels: Option<Vec<String>>,
         skill: Option<String>,
+        /// Retired with #125; read for old events, never written.
         bay: Option<String>,
         done: Option<String>,
         /// Retired with #124; read for old events, never written.

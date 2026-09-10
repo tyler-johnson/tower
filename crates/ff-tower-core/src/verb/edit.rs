@@ -25,7 +25,6 @@ pub struct Overlay {
     pub priority: Option<String>,
     pub labels: Vec<String>,
     pub skill: Option<String>,
-    pub bay: Option<String>,
 }
 
 /// Where an edit lands: a flight's record, or one comment on it.
@@ -59,7 +58,6 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
         && overlay.priority.is_none()
         && labels.is_none()
         && overlay.skill.is_none()
-        && overlay.bay.is_none()
     {
         return Err(Error::NeedsEdit);
     }
@@ -76,8 +74,7 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
     let fields_ride = subject.is_some()
         || overlay.priority.is_some()
         || labels.is_some()
-        || overlay.skill.is_some()
-        || overlay.bay.is_some();
+        || overlay.skill.is_some();
     if fields_ride && matches!(target, EditTarget::Comment { .. }) {
         return Err(Error::SubjectOnComment);
     }
@@ -93,7 +90,7 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
         priority: overlay.priority,
         labels,
         skill: overlay.skill,
-        bay: overlay.bay,
+        bay: None,
     }])?;
     let id = ids.into_iter().next().expect("one edited event");
 
@@ -169,7 +166,6 @@ mod tests {
             priority: None,
             labels: Vec::new(),
             skill: None,
-            bay: None,
         }
     }
 
@@ -189,7 +185,7 @@ mod tests {
                 .expect("nothing to change"),
             "usage/needs-edit",
             "nothing to change — `-s` rewords the subject, `-m` the body or comment text, and \
-             `--priority`, `--label`, `--skill`, `--bay` reset a field",
+             `--priority`, `--label`, `--skill` reset a field",
             &[
                 "ff tower edit <target> -s <subject>",
                 "ff tower edit <target> -m <msg>",

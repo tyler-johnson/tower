@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { bays } from "./bays.svelte";
   import { feed } from "./feed.svelte";
   import { panel } from "./panel.svelte";
   import type { Field } from "./query";
@@ -12,9 +11,6 @@
   let verbs = $derived(allowedVerbs(brief));
   let note = $derived(briefNote(brief, refs, now));
   let other = $derived(unknownRows(brief));
-  // The bay flying it, off the shared pool the root layout keeps live:
-  // one fewer request per open, and the line moves with every frame.
-  let bay = $derived(bays.pool.find((row) => row.flight === brief.id) ?? null);
   // A closed flight refuses every move and every re-laning — `ensure_active`
   // — and takes an edit, which is why the other four stay live.
   let closed = $derived(brief.status === "done" || brief.status === "canceled");
@@ -104,10 +100,10 @@
     if (word !== brief.priority) await set("priority", word);
   }
 
-  /// Skill and bay: free text, and no clearing — neither has one on the
-  /// wire, so an emptied box puts the record's own word back.
-  async function text(field: "skill" | "bay", input: HTMLInputElement) {
-    const was = (field === "skill" ? brief.skill : brief.bay) ?? "";
+  /// Skill: free text, and no clearing — it has none on the wire, so an
+  /// emptied box puts the record's own word back.
+  async function text(field: "skill", input: HTMLInputElement) {
+    const was = brief.skill ?? "";
     const value = input.value.trim();
     if (value === "" || value === was) {
       input.value = was;
@@ -227,18 +223,6 @@
     />
   </label>
 
-  <label class="flex w-full flex-col gap-1">
-    {@render heading("bay")}
-    <input
-      type="text"
-      class="input input-sm w-full"
-      disabled={panel.busy}
-      value={brief.bay ?? ""}
-      onkeydown={(event) => keydown(event, brief.bay ?? "")}
-      onblur={(event) => text("bay", event.currentTarget)}
-    />
-  </label>
-
   <div class="flex w-full flex-col gap-1">
     {@render heading("labels")}
     {#if brief.labels.length > 0}
@@ -321,7 +305,7 @@
 
   <!--
 		What no one sets: where the flight stands and since when, the
-		reason under it, the audits, the beat rows, and the bay flying it.
+		reason under it, the audits, and the beat rows.
 	-->
   <div class="border-base-300 text-base-content/40 flex flex-col gap-1 border-t pt-4 text-sm">
     {#each note as phrase, i (i)}
@@ -333,12 +317,6 @@
     {#each brief.beat as beaten (beaten.flight)}
       <p>{beatLine(beaten, refs)}</p>
     {/each}
-    {#if bay}
-      <p>
-        bay {bay.id} · {bay.path}{#if bay.branch}
-          · on {bay.branch}{/if}
-      </p>
-    {/if}
   </div>
 
   <!--

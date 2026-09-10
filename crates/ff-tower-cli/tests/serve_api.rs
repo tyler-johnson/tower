@@ -206,21 +206,6 @@ fn the_brief_route_answers_every_reference_form() {
 }
 
 #[test]
-fn the_bays_route_is_the_bay_list_verb_byte_for_byte() {
-    let (repo, server) = served();
-    parity(&server, repo.path(), "/api/bays", &["bay", "--json"]);
-
-    // Parity alone would hold with the envelope's key or its `cmd`
-    // spelled wrong — both sides move together — so the two-word verb is
-    // pinned absolutely here, where nothing else pins it.
-    let (_, _, body) = http(&server.addr, "/api/bays");
-    assert!(
-        body.starts_with(r#"{"ff":1,"cmd":"tower bay list","data":"#),
-        "{body}"
-    );
-}
-
-#[test]
 fn the_procedures_routes_are_the_verb_bare_and_named() {
     let (repo, server) = served();
     // The engine ships empty, so the named route needs a definition to

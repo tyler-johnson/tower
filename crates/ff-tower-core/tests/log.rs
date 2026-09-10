@@ -48,7 +48,7 @@ fn the_stored_fields_ride_the_store_onto_the_folds_flight() {
             priority: "high".to_string(),
             labels: vec!["chore".to_string()],
             skill: None,
-            bay: Some("warm".to_string()),
+            bay: None,
             done: "asserted".to_string(),
             branch: Some("feather".to_string()),
         }])
@@ -62,7 +62,6 @@ fn the_stored_fields_ride_the_store_onto_the_folds_flight() {
     assert_eq!(flight.assignee.as_deref(), Some("me"));
     assert_eq!(flight.priority, "high");
     assert_eq!(flight.labels, ["chore"]);
-    assert_eq!(flight.bay.as_deref(), Some("warm"));
     assert!(flight.skill.is_none());
 }
 
@@ -430,16 +429,4 @@ fn a_first_append_mints_the_writer_and_keeps_it() {
     // A fresh open resolves the same writer from config.
     let reopened = Store::open(repo.path()).expect("open");
     assert_eq!(reopened.writer(), Some(writer.as_str()));
-}
-
-#[test]
-fn pool_root_reads_the_key_and_is_none_without_it() {
-    let repo = Repo::new();
-    let store = Store::open(repo.path()).expect("open");
-    assert_eq!(store.pool_root(), None);
-
-    // The snapshot is taken at open, so the key lands before a fresh one.
-    repo.git(&["config", "tower.bays", "../bays"]);
-    let store = Store::open(repo.path()).expect("open");
-    assert_eq!(store.pool_root().as_deref(), Some("../bays"));
 }

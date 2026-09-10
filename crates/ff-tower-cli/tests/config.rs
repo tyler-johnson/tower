@@ -73,14 +73,13 @@ fn list_shows_every_setting_with_defaults_and_the_trailer() {
     let repo = Repo::new();
     let text = stdout(&ff_tower(repo.path(), &["config"]));
 
-    assert!(text.contains("bays"), "{text}");
     assert!(text.contains("defaultFileStatus  ready"), "{text}");
     assert!(text.contains("staleFlightThreshold  2d"), "{text}");
     assert!(text.contains("serveHost  127.0.0.1"), "{text}");
     assert!(text.contains("servePort  7420"), "{text}");
     assert!(text.contains("updateCheck  1d"), "{text}");
     assert!(text.contains("autoUpdate  true"), "{text}");
-    assert_eq!(text.matches("(default)").count(), 7, "{text}");
+    assert_eq!(text.matches("(default)").count(), 6, "{text}");
     assert!(
         text.contains("Set with:     ff tower config <key> <value>   (--global: every repo)"),
         "{text}"
@@ -105,7 +104,7 @@ fn list_json_pins_the_registry() {
     let settings = envelope["data"]["settings"]
         .as_array()
         .expect("a settings array");
-    assert_eq!(settings.len(), 7, "{envelope}");
+    assert_eq!(settings.len(), 6, "{envelope}");
     let keys: Vec<&str> = settings
         .iter()
         .map(|entry| entry["key"].as_str().expect("a key"))
@@ -113,7 +112,6 @@ fn list_json_pins_the_registry() {
     assert_eq!(
         keys,
         [
-            "bays",
             "defaultFileStatus",
             "staleFlightThreshold",
             "serveHost",
@@ -128,11 +126,9 @@ fn list_json_pins_the_registry() {
         .collect();
     assert_eq!(
         kinds,
-        [
-            "dir", "choice", "cadence", "host", "port", "cadence", "bool"
-        ]
+        ["choice", "cadence", "host", "port", "cadence", "bool"]
     );
-    let file_status = &settings[1];
+    let file_status = &settings[0];
     assert_eq!(file_status["value"], serde_json::json!("ready"));
     assert_eq!(
         file_status["git_key"],
@@ -176,21 +172,21 @@ fn an_unknown_key_is_the_usage_envelope_exit_2() {
 #[test]
 fn set_round_trips_through_real_git() {
     let repo = Repo::new();
-    let text = stdout(&ff_tower(repo.path(), &["config", "bays", "../bays"]));
-    assert_eq!(text, "bays = ../bays (this repo)\n");
+    let text = stdout(&ff_tower(repo.path(), &["config", "servePort", "7777"]));
+    assert_eq!(text, "servePort = 7777 (this repo)\n");
 
     // Interop proof: what the verb wrote, git reads.
-    assert_eq!(repo.git(&["config", "tower.bays"]).trim(), "../bays");
+    assert_eq!(repo.git(&["config", "tower.servePort"]).trim(), "7777");
 
-    let text = stdout(&ff_tower(repo.path(), &["config", "bays"]));
-    assert_eq!(text, "../bays\n");
+    let text = stdout(&ff_tower(repo.path(), &["config", "servePort"]));
+    assert_eq!(text, "7777\n");
 
     let list = stdout(&ff_tower(repo.path(), &["config"]));
-    let bays_line = list
+    let port_line = list
         .lines()
-        .find(|line| line.starts_with("bays  "))
-        .expect("a bays line");
-    assert!(!bays_line.contains("(default)"), "{bays_line}");
+        .find(|line| line.starts_with("servePort  "))
+        .expect("a servePort line");
+    assert!(!port_line.contains("(default)"), "{port_line}");
 }
 
 #[test]
@@ -284,7 +280,7 @@ fn global_set_creates_home_gitconfig_and_the_list_reports_global() {
 
     let out = ff_tower(repo.path(), &["config", "--json"]);
     let envelope = envelope(&out);
-    let entry = &envelope["data"]["settings"][5];
+    let entry = &envelope["data"]["settings"][4];
     assert_eq!(entry["key"], serde_json::json!("updateCheck"));
     assert_eq!(entry["value"], serde_json::json!("12h"));
     assert_eq!(entry["source"], serde_json::json!("global"));
@@ -343,22 +339,22 @@ fn the_unset_ladder() {
 fn set_and_unset_json_payloads() {
     let repo = Repo::new();
 
-    let out = ff_tower(repo.path(), &["config", "--json", "bays", "../bays"]);
+    let out = ff_tower(repo.path(), &["config", "--json", "servePort", "7777"]);
     assert_eq!(
         envelope(&out)["data"],
-        serde_json::json!({ "key": "bays", "value": "../bays", "global": false })
+        serde_json::json!({ "key": "servePort", "value": "7777", "global": false })
     );
 
-    let out = ff_tower(repo.path(), &["config", "--json", "--unset", "bays"]);
+    let out = ff_tower(repo.path(), &["config", "--json", "--unset", "servePort"]);
     assert_eq!(
         envelope(&out)["data"],
-        serde_json::json!({ "key": "bays", "global": false, "removed": true, "still_applies": null })
+        serde_json::json!({ "key": "servePort", "global": false, "removed": true, "still_applies": null })
     );
 
-    let out = ff_tower(repo.path(), &["config", "--json", "--unset", "bays"]);
+    let out = ff_tower(repo.path(), &["config", "--json", "--unset", "servePort"]);
     assert_eq!(
         envelope(&out)["data"],
-        serde_json::json!({ "key": "bays", "global": false, "removed": false, "still_applies": null })
+        serde_json::json!({ "key": "servePort", "global": false, "removed": false, "still_applies": null })
     );
 }
 
@@ -416,16 +412,5 @@ fn update_check_syncs_cache() {
     assert!(
         content.contains("\"interval_secs\":0"),
         "expected 0 after unset: {content}"
-    );
-}
-
-#[test]
-fn bay_warm_refusal_names_the_config_verb() {
-    let repo = Repo::new();
-    let out = ff_tower(repo.path(), &["bay", "warm", "--json"]);
-    let envelope = refusal(&out, 2, "usage/needs-path");
-    assert_eq!(
-        envelope["error"]["exits"],
-        serde_json::json!(["ff tower config bays <dir>", "ff tower bay warm <path>"])
     );
 }

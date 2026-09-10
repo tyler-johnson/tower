@@ -152,8 +152,8 @@
 	grouping, the lanes the sub-grouping, and the card is the row's
 	anatomy folded into a tile under the same `show`. A drag is a verb
 	or it is not offered: status is `status`, with `done` and `cancel` on
-	their own routes; assignee is `assign`; priority, label, skill and
-	bay are `edit`; and a grouping with no write behind it draws its
+	their own routes; assignee is `assign`; priority, label and skill
+	are `edit`; and a grouping with no write behind it draws its
 	columns and offers no drag. The write needs no refetch — the feed
 	refolds on the log's motion — and the board says why when a drop is
 	refused or a `ready` lands in waiting. No inbox: the inbox is the

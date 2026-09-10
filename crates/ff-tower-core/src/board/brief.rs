@@ -79,7 +79,6 @@ pub struct Brief {
     pub priority: String,
     pub labels: Vec<String>,
     pub skill: Option<String>,
-    pub bay: Option<String>,
     /// The last edit touching the record — the flight's own fields or a
     /// comment's text — flat like the status mark.
     pub edited_by: Option<String>,
@@ -250,7 +249,6 @@ pub fn brief(
         priority: flight.priority.clone(),
         labels: flight.labels.clone(),
         skill: flight.skill.clone(),
-        bay: flight.bay.clone(),
         edited_by: flight.edited.as_ref().map(|mark| mark.by.clone()),
         edited_at: flight.edited.as_ref().map(|mark| mark.at),
         question: flight.question.as_ref().map(|q| q.text.clone()),
@@ -601,8 +599,6 @@ mod tests {
                 anonymous: Vec::new(),
             },
             current_branch: current.map(str::to_string),
-            worktrees: Vec::new(),
-            orphans: Vec::new(),
         }
     }
 

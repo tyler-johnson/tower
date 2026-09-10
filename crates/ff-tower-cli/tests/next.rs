@@ -275,7 +275,7 @@ fn a_pull_writes_nothing_to_the_repository() {
     assert_eq!(
         keys(row),
         ["flight", "number", "subject"],
-        "no bay, no branch, no skill the flight never named: {row}"
+        "no branch, no skill the flight never named: {row}"
     );
 
     // The pull is a log event and nothing else: no branch minted, and

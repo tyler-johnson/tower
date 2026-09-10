@@ -215,8 +215,6 @@ fn the_field_flags_ride_the_filing_and_the_board_reads_them_back() {
             "review",
             "--assignee",
             "agent",
-            "--bay",
-            "warm",
         ],
     ));
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
@@ -226,9 +224,6 @@ fn the_field_flags_ride_the_filing_and_the_board_reads_them_back() {
     assert_eq!(view["labels"], serde_json::json!(["chore", "web"]));
     assert_eq!(view["skill"], serde_json::json!("review"));
     assert_eq!(view["assignee"], serde_json::json!("agent"));
-
-    let brief = envelope(&ff_tower(repo.path(), &["brief", "1", "--json"]));
-    assert_eq!(brief["data"]["bay"], serde_json::json!("warm"));
 }
 
 #[test]
@@ -331,7 +326,6 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
             "status": "ready",
             "assignee": "me",
             "priority": "none",
-            "bay": "warm",
             "done": "asserted",
         })
     );

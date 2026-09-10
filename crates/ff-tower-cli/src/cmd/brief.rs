@@ -191,8 +191,8 @@ fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
     out
 }
 
-/// The stored fields, one line: lane, priority, labels, skill, bay, and
-/// the procedure the filing was minted under. Its own line rather than
+/// The stored fields, one line: lane, priority, labels, skill, and the
+/// procedure the filing was minted under. Its own line rather than
 /// phrases in the note: the note is urgency ordered, and a field is not
 /// urgency — it is what a reader needs to know before picking the
 /// flight up, which is what a brief is for.
@@ -209,9 +209,6 @@ fn fields_line(brief: &Brief, colored: bool) -> String {
     }
     if let Some(skill) = brief.skill.as_deref() {
         phrases.push(format!("skill {skill}"));
-    }
-    if let Some(bay) = brief.bay.as_deref() {
-        phrases.push(format!("bay {bay}"));
     }
     if let Some(procedure) = brief.procedure.as_deref() {
         phrases.push(format!("under {procedure}"));

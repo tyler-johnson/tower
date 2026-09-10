@@ -81,7 +81,6 @@ impl Error {
 /// needs — kinds earn existence like verbs.
 #[derive(Debug)]
 pub enum SettingKind {
-    Dir,
     Cadence,
     Bool,
     Port,
@@ -95,7 +94,6 @@ impl SettingKind {
     /// The wire name, lowercased, for the machine envelope.
     pub fn name(&self) -> &'static str {
         match self {
-            SettingKind::Dir => "dir",
             SettingKind::Cadence => "cadence",
             SettingKind::Bool => "bool",
             SettingKind::Port => "port",
@@ -149,17 +147,6 @@ pub const DEFAULT_FILE_STATUS: &str = "ready";
 /// setting it to another machine's id forks that writer's chain.
 pub fn registry() -> &'static [Setting] {
     &[
-        Setting {
-            name: "bays",
-            key: "tower.bays",
-            def: "",
-            kind: SettingKind::Dir,
-            desc: &[
-                "The pool root bare `bay warm` mints bay-<n> slots under: absolute,",
-                "or relative to the main worktree. Unset, bare warm refuses and",
-                "asks for a path.",
-            ],
-        },
         Setting {
             name: "defaultFileStatus",
             key: "tower.defaultFileStatus",
@@ -265,7 +252,8 @@ pub fn default_file_status(config: &Config) -> &'static str {
 }
 
 /// The setting a user's spelling names: case-insensitive, `tower.`
-/// prefix optional, so `bays`, `tower.bays`, and `BAYS` all answer.
+/// prefix optional, so `servePort`, `tower.servePort`, and `SERVEPORT`
+/// all answer.
 pub fn lookup(input: &str) -> Result<&'static Setting> {
     let stripped = if input.len() >= 6 && input[..6].eq_ignore_ascii_case("tower.") {
         &input[6..]
@@ -284,7 +272,6 @@ pub fn lookup(input: &str) -> Result<&'static Setting> {
 /// parser that reader runs, before anything touches disk.
 pub fn validate(setting: &Setting, value: &str) -> Result<()> {
     let (ok, want) = match setting.kind {
-        SettingKind::Dir => (!value.trim().is_empty(), "want a directory path"),
         SettingKind::Cadence => (
             parse_cadence(value).is_some(),
             "want true, false, or a duration like 12h or 7d",
@@ -621,9 +608,15 @@ mod tests {
 
     #[test]
     fn lookup_accepts_all_spellings_and_refuses_unknown() {
-        assert_eq!(lookup("bays").expect("bare").name, "bays");
-        assert_eq!(lookup("tower.bays").expect("prefixed").name, "bays");
-        assert_eq!(lookup("BAYS").expect("case-insensitive").name, "bays");
+        assert_eq!(lookup("servePort").expect("bare").name, "servePort");
+        assert_eq!(
+            lookup("tower.servePort").expect("prefixed").name,
+            "servePort"
+        );
+        assert_eq!(
+            lookup("SERVEPORT").expect("case-insensitive").name,
+            "servePort"
+        );
         assert_eq!(
             lookup("Tower.UpdateCheck").expect("both").name,
             "updateCheck"
@@ -664,7 +657,6 @@ mod tests {
         // interpolates the setting actually being set.
         for setting in registry() {
             let bad = match setting.kind {
-                SettingKind::Dir => "   ",
                 SettingKind::Cadence => "5x",
                 SettingKind::Bool => "maybe",
                 SettingKind::Port => "70000",
@@ -820,7 +812,7 @@ mod tests {
     fn a_config_file_round_trips_with_comments_preserved() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config");
-        std::fs::write(&path, "# hands off\n[tower]\n\tbays = ../pool\n").expect("seed");
+        std::fs::write(&path, "# hands off\n[tower]\n\tservePort = 7777\n").expect("seed");
 
         let mut file = load_config_file(&path, Source::Local).expect("load");
         file.set_raw_value_by("tower", None, "updateCheck", "12h")
@@ -829,7 +821,7 @@ mod tests {
 
         let after = std::fs::read_to_string(&path).expect("read back");
         assert!(after.contains("# hands off"), "comment lost: {after}");
-        assert!(after.contains("bays = ../pool"), "value lost: {after}");
+        assert!(after.contains("servePort = 7777"), "value lost: {after}");
         assert!(after.contains("updateCheck = 12h"), "set lost: {after}");
     }
 }

@@ -1,12 +1,11 @@
-//! `ff tower doctor` — stale bays and drift: observe and complain,
-//! never enforce.
+//! `ff tower doctor` — the seam, the log, and the registries: observe
+//! and complain, never enforce.
 //!
-//! Seam-first: `ff version` runs before any bay-facing read, because a
-//! drifted contract fails every gather spawn — doctor is the verb that
-//! reports the broken seam instead of dying of it. On a healthy seam the
-//! pipeline is the board's — store, fold, gather — with the doctor fold
-//! in place of `enrich`, plus the one impure check that stays out of the
-//! fold: which surveyed directories still exist on disk.
+//! Seam-first: `ff version` runs before anything else, because a
+//! drifted contract fails every spawn — doctor is the verb that reports
+//! the broken seam instead of dying of it. On a healthy seam the
+//! pipeline is the board's — store, fold — with the doctor fold in
+//! place of `enrich`.
 //!
 //! The exit is fufu's doctor precedent: 0 healthy, 1 findings, an
 //! outcome riding the success path with a full envelope.
@@ -15,9 +14,9 @@ use std::path::Path;
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, DoctorRow, Level, Reads, SeamHealth};
+use ff_tower_core::board::{self, DoctorRow, Level, SeamHealth};
 use ff_tower_core::config::{self, Config};
-use ff_tower_core::ff::{self, BranchList};
+use ff_tower_core::ff;
 use ff_tower_core::log::Store;
 use ff_tower_core::model::Status;
 use ff_tower_core::procedure::Assignee;
@@ -38,21 +37,11 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         SeamHealth::Ok { .. } => {
             let store = Store::open(ff.repo())?;
             let fold = board::fold(&store.read_all()?);
-            let reads = board::gather(&ff)?;
-            let gone: Vec<(String, String)> = reads
-                .worktrees
-                .iter()
-                .filter_map(|row| {
-                    let path = row.path.as_deref()?;
-                    (!std::path::Path::new(path).exists())
-                        .then(|| (row.id.clone(), path.to_string()))
-                })
-                .collect();
-            board::doctor(&fold, &reads, &seam, &gone)
+            board::doctor(&fold, &seam)
         }
-        // A broken seam: no store, no gather — the seam row alone, and
-        // absence of a bay row asserts nothing.
-        _ => board::doctor(&board::fold(&[]), &no_reads(), &seam, &[]),
+        // A broken seam: no store — the seam row alone, and absence of
+        // a log row asserts nothing.
+        _ => board::doctor(&board::fold(&[]), &seam),
     };
     // The registries ride both arms too: they read files, never the
     // seam, so a drifted contract cannot hide an unresolved skill or a
@@ -226,19 +215,5 @@ fn update_row() -> DoctorRow {
         level: Level::Info,
         check: "tower/update".to_string(),
         message,
-    }
-}
-
-/// Empty reads for the broken-seam path — nothing was gathered.
-fn no_reads() -> Reads {
-    Reads {
-        ops: Vec::new(),
-        branches: BranchList {
-            named: Vec::new(),
-            anonymous: Vec::new(),
-        },
-        current_branch: None,
-        worktrees: Vec::new(),
-        orphans: Vec::new(),
     }
 }

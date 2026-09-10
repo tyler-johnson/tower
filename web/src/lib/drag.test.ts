@@ -31,7 +31,6 @@ function flight(
     priority: "none",
     labels,
     skill: null,
-    bay: null,
     branch: null,
     tip: null,
     last_change: null,
@@ -144,14 +143,13 @@ describe("the drag", () => {
     });
   });
 
-  it("a skill or bay has no clear path", () => {
+  it("a skill has no clear path", () => {
     const ready = flight(7, "ready");
     expect(drop("skill", ready, "rust", null)).toBeNull();
     expect(drop("skill", ready, null, "rust")).toEqual({
       verb: "edit",
       body: { target: ready.id, skill: "rust" },
     });
-    expect(drop("bay", ready, "a", null)).toBeNull();
     expect(drop("procedure", ready, "a", "b")).toBeNull();
   });
 });

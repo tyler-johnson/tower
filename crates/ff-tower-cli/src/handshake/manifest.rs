@@ -3,8 +3,7 @@
 //! The verbs are walked out of the clap tree rather than listed, so a
 //! verb added to `cli.rs` joins the manifest by existing; what a verb
 //! cannot carry in clap is its read-only bit, which is the one table
-//! here. `bay` is one verb — its sub-verbs are its actions, not verbs of
-//! their own.
+//! here.
 
 use serde::Serialize;
 
@@ -77,8 +76,9 @@ pub fn read_only(verb: &str) -> Option<bool> {
         "board" | "brief" | "procedures" | "skills" | "explain" | "version" | "doctor"
         | "briefing" => Some(true),
         "next" | "file" | "comment" | "edit" | "link" | "unlink" | "decompose" | "assign"
-        | "status" | "cancel" | "hold" | "answer" | "done" | "config" | "bay" | "update"
-        | "serve" => Some(false),
+        | "status" | "cancel" | "hold" | "answer" | "done" | "config" | "update" | "serve" => {
+            Some(false)
+        }
         _ => None,
     }
 }
@@ -124,7 +124,6 @@ mod tests {
             "answer",
             "done",
             "config",
-            "bay",
             "update",
             "serve",
         ] {
@@ -161,11 +160,6 @@ mod tests {
         assert_eq!(value["briefing"], true);
         assert_eq!(value["tools"], true);
         let verbs = value["verbs"].as_array().expect("verbs");
-        assert!(verbs.iter().any(|verb| verb["name"] == "bay"));
-        assert!(
-            !verbs.iter().any(|verb| verb["name"] == "list"),
-            "bay's actions are not verbs: {verbs:?}"
-        );
         for verb in verbs {
             let name = verb["name"].as_str().expect("name");
             assert!(!name.contains(' '), "one word: {name}");

@@ -406,7 +406,6 @@ mod tests {
             priority: "none".to_string(),
             labels: Vec::new(),
             skill: None,
-            bay: None,
             branch: None,
             tip: None,
             last_change: None,

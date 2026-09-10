@@ -11,7 +11,7 @@
 //!
 //! Holding is stopping: the flight is no longer started, so the answer
 //! releases it to Ready or Waiting by the graph, never back In
-//! Progress — whoever pulls it next resumes in the warm bay.
+//! Progress — whoever pulls it next resumes on the same branch.
 
 use serde::Serialize;
 

@@ -28,7 +28,6 @@ const view: FlightView = {
   priority: "high",
   labels: ["web", "ui"],
   skill: null,
-  bay: null,
   branch: "@detached",
   tip: null,
   last_change: null,

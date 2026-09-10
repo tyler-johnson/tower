@@ -94,7 +94,7 @@ fn error_line(cmd: &str, id: &str, message: &str, exits: &[String]) -> String {
     .expect("the error serializes")
 }
 
-/// The verb as fufu names it: `tower board`, `tower bay list`. Every
+/// The verb as fufu names it: `tower board`, `tower view list`. Every
 /// call site passes the bare verb, so the extension's name is written
 /// once.
 fn qualified(cmd: &str) -> String {

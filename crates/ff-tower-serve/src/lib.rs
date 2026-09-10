@@ -29,7 +29,7 @@
 //! # No lock
 //!
 //! A second server on one repository is another writer, indistinguishable
-//! from the CLI or an agent in a bay — the log already serializes writers
+//! from the CLI or an agent — the log already serializes writers
 //! and names contention, so two of these cost duplicated work and never
 //! correctness. What is worth refusing is two processes wanting one port,
 //! and the socket says that itself: `EADDRINUSE` at bind, rendered as a

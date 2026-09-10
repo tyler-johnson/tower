@@ -29,7 +29,7 @@ const LANES = ["me", "agent", null];
 
 /// The columns a grouping stands up before the wire's, so a drop target
 /// exists with nothing in it: status its seven words, priority its five,
-/// assignee the two lanes and none. Label, skill and bay seed nothing —
+/// assignee the two lanes and none. Label and skill seed nothing —
 /// their values are whatever the rows named.
 export function seeded(field: Field | null): (string | null)[] {
   switch (field) {
@@ -55,7 +55,6 @@ export function draggable(field: Field | null, view: FlightView): boolean {
     case "priority":
     case "label":
     case "skill":
-    case "bay":
       return true;
     default:
       return false;
@@ -78,7 +77,6 @@ export function drop(
     case "assignee":
     case "priority":
     case "skill":
-    case "bay":
       return write(field, flight, to);
     case "label": {
       // The set the flight would carry: `from` out, `to` in, deduped.

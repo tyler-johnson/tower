@@ -86,22 +86,9 @@ impl Store {
         self.writer.get().map(String::as_str)
     }
 
-    /// `tower.bays` from config, when set: the pool root bare `warm`
-    /// mints slots under. Same granularity story as `tower.writer`:
-    /// local config lives in the common dir and is shared across a
-    /// repository's linked worktrees, so every bay sees the same pool
-    /// root.
-    pub fn pool_root(&self) -> Option<String> {
-        self.repo
-            .config_snapshot()
-            .string("tower.bays")
-            .map(|value| value.to_string())
-    }
-
-    /// The settings registry over this store's repository. Beside
-    /// `pool_root` and for its reason: core reads config, the CLI stays
-    /// gix-free. A verb that needs a setting reads it here rather than
-    /// discovering the repository a second time.
+    /// The settings registry over this store's repository. Core reads
+    /// config, the CLI stays gix-free. A verb that needs a setting reads
+    /// it here rather than discovering the repository a second time.
     pub fn config(&self) -> Config {
         Config::from_repo(self.repo.clone())
     }
@@ -109,11 +96,11 @@ impl Store {
     /// The main worktree's path — the parent of the common dir — or
     /// `None` for a bare repository, which has no tree to anchor to.
     ///
-    /// Beside `pool_root` and for its reason: the CLI stays gix-free, and
-    /// this is the anchor `.tower/procedures` resolves against. The main
-    /// worktree rather than the invoking one, because a bay must read the
-    /// same definitions the repository does. No spawn — `file` keeps the
-    /// property that it never runs fufu.
+    /// The CLI stays gix-free, and this is the anchor `.tower/procedures`
+    /// resolves against. The main worktree rather than the invoking one,
+    /// because every worktree must read the same definitions the
+    /// repository does. No spawn — `file` keeps the property that it
+    /// never runs fufu.
     pub fn main_worktree(&self) -> Option<PathBuf> {
         if self.repo.is_bare() {
             return None;
@@ -404,7 +391,7 @@ fn session_from_environment(repo: &gix::Repository) -> Option<String> {
 
 /// `tower.writer` from config, when set. Local config lives in the common
 /// dir and is shared across a repository's linked worktrees, which is
-/// exactly the granularity wanted: every bay on one machine is one writer
+/// exactly the granularity wanted: every worktree on one machine is one writer
 /// writing one chain, serialized by the lock.
 fn configured_writer(repo: &gix::Repository) -> Option<String> {
     repo.config_snapshot()

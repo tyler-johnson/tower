@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ff_tower_core::procedure::{self, Assignee, Bay, Done, Source};
+use ff_tower_core::procedure::{self, Assignee, Done, Source};
 
 /// DESIGN.md's *Procedures* block, verbatim.
 const REVIEW: &str = r#"
@@ -86,13 +86,11 @@ fn designs_review_block_loads_to_its_flights_and_edges() {
     assert_eq!(pass.skill.as_deref(), Some("review"));
     assert!(pass.after.is_empty());
     assert_eq!(pass.done, Done::Asserted);
-    assert!(pass.bay.is_none());
     assert!(pass.priority.is_none());
     assert!(pass.labels.is_empty());
 
     let smoke = &definition.flights[1];
     assert_eq!(smoke.assignee, Assignee::Me);
-    assert_eq!(smoke.bay, Some(Bay::Warm));
     // Concurrency is the absence of a declaration: neither names the
     // other, so both fly at once.
     assert!(smoke.after.is_empty());

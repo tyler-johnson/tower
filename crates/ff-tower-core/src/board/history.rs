@@ -58,7 +58,7 @@ pub enum Detail {
     /// The lane; `None` (JSON `null`) is the clearing.
     Assigned { assignee: Option<String> },
     /// The wire names of the fields the edit touched, in the enum's
-    /// order: subject, body, priority, labels, skill, bay. `comment` is
+    /// order: subject, body, priority, labels, skill. `comment` is
     /// the comment's event id when the target was a comment rather than
     /// the flight.
     Edited {
@@ -177,7 +177,7 @@ fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
             priority,
             labels,
             skill,
-            bay,
+            bay: _,
         } => {
             let fields = [
                 ("subject", subject.is_some()),
@@ -185,7 +185,6 @@ fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
                 ("priority", priority.is_some()),
                 ("labels", labels.is_some()),
                 ("skill", skill.is_some()),
-                ("bay", bay.is_some()),
             ]
             .into_iter()
             .filter(|(_, set)| *set)
@@ -311,7 +310,7 @@ mod tests {
         assert_eq!(rows.len(), 4);
         assert_eq!(
             rows[2]["fields"],
-            serde_json::json!(["subject", "body", "priority", "labels", "skill", "bay"])
+            serde_json::json!(["subject", "body", "priority", "labels", "skill"])
         );
         assert!(rows[2].get("comment").is_none(), "{}", rows[2]);
         assert_eq!(rows[3]["fields"], serde_json::json!(["body"]));

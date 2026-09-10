@@ -1,11 +1,9 @@
 //! `ff tower briefing` against real repositories: the empty board, the
-//! ready count, the flight flying in this worktree, the cap, and the
-//! failure outside a repository.
+//! ready count, and the failure outside a repository.
 
 use std::path::Path;
 use std::process::{Command, Output};
 
-use ff_tower_core::ff::Ff;
 use ff_tower_testsupport::Repo;
 
 fn ff_tower(repo: &Path, args: &[&str]) -> Output {
@@ -76,46 +74,6 @@ fn ready_flights_are_counted() {
         &["file", "two", "--status", "ready"],
     ));
     assert!(line(&repo).contains("2 flights ready"), "{}", line(&repo));
-}
-
-#[test]
-fn a_flight_flying_here_is_named() {
-    let repo = repo();
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", "fix the login redirect", "--status", "in_progress"],
-    ));
-    // The session tag on an op is what binds the flight to this branch.
-    repo.write("work.txt", "flying\n");
-    Ff::at(repo.path())
-        .session("pi.1")
-        .status()
-        .expect("status");
-
-    let line = line(&repo);
-    assert!(line.contains("#1"), "{line}");
-    assert!(line.contains("fix the login redirect"), "{line}");
-    assert!(line.contains("in main"), "{line}");
-    assert!(line.contains("ff tower brief #1"), "{line}");
-}
-
-#[test]
-fn a_long_subject_is_elided_under_the_cap() {
-    let repo = repo();
-    let subject = "w".repeat(300);
-    stdout(&ff_tower(
-        repo.path(),
-        &["file", &subject, "--status", "in_progress"],
-    ));
-    repo.write("work.txt", "flying\n");
-    Ff::at(repo.path())
-        .session("pi.1")
-        .status()
-        .expect("status");
-
-    let line = line(&repo);
-    assert!(line.contains('…'), "{line}");
-    assert!(line.contains("ff tower brief #1"), "{line}");
 }
 
 #[test]

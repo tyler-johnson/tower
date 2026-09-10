@@ -45,8 +45,6 @@ export function cell(field: Field, view: FlightView, refs: Map<string, string>, 
       return { kind: "dim", text: ageColumn(view, now) };
     case "skill":
       return { kind: "dim", text: view.skill ?? "" };
-    case "bay":
-      return { kind: "dim", text: view.bay ?? "" };
     case "procedure":
       return { kind: "dim", text: view.procedure ?? "" };
     case "branch":
