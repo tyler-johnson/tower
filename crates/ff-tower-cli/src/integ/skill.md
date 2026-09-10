@@ -17,7 +17,7 @@ The MCP server `ff mcp` serves four tower tools beside fufu's own: `tower__next`
 
 **A flight is a record, and the board is derived from it.** The stored fields are subject, body, status word, assignee lane, priority (a free string, `none` when unsaid), labels, skill, the edges it depends on, its comments, and a history of every gesture with the byline and session that made it. A sub-flight is a flight: it files into its own status group, and what says a row is a family is the parent's progress mark, `(1/3)`, closed children over total.
 
-**Intent is stored; the repository audits it.** Two lines appear on a row when the branch disagrees with the word: `no changes on the branch for 2d` under In Progress, after `tower.staleFlightThreshold` (`false` turns it off), and `changes on the branch since it was set ready` under Ready, which has no threshold and is never off. Both are flagged, never corrected. Done is asserted, never derived.
+**Intent is stored; the board is derived.** The word a row shows is folded from the record at every render — in backlog, started, closed, the open question, the edges — and nothing on it was read from a tree or asked of fufu. In Progress is a word someone set, with their byline; Done is asserted, never derived. tower checks neither against the repository, and it stores nothing it did not receive as a verb.
 
 **Nothing tower writes is undoable by `ff undo`.** The manifest says so (`undoable: false`): the log is append-only, and every verb is a new event. Disagreeing with the record is another event — `ff tower edit <target>`, `ff tower unlink <a> <b>`, `ff tower cancel <flight> -m "<why>"` — and the brief's history keeps both.
 
@@ -30,7 +30,7 @@ A flight has two names. The board prints `#3`; when two writers share a board an
 Every read folds the log fresh and never blocks on the network.
 
 - `ff tower`, and `ff tower board` — what needs a person pinned on top: `questions` (held flights, oldest ask first) and `yours` (Ready in the `me` lane); under it backlog, waiting, ready, in progress, held, and the three newest closed. `ff tower --closed 7d` widens that last group to a span; a count, `all`, and `none` work too.
-- `ff tower brief <flight>` (alias `show`) — the whole record plus the reads: branch, tip, last change, the two audit bits, `current` (the invoking worktree's branch), `held` (a fufu hold on the branch), `resolving`, and the standing. A closed flight briefs like any other.
+- `ff tower brief <flight>` (alias `show`) — the whole record: every field, the comments with any question and answer among them, the links with each linked flight's subject and status, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
 - `ff tower procedures` and `ff tower skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `ff tower explain <id>` — the prose behind a refusal; `ff tower explain --list` is the whole catalog. A pure lookup, no repository needed.
 - `ff tower config` — every setting with its value and default; `ff tower version`; `ff tower doctor`, which exits 1 on findings so a script can gate on it; `ff tower briefing`, the line fufu shows a new session.

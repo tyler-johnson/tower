@@ -17,7 +17,7 @@ Both kinds layer the same way, keyed by name, the more specific replacing the le
 | user | `~/.config/tower/procedures/<name>.toml` | `~/.config/tower/skills/<name>.md` |
 | repository | `<main worktree>/.tower/procedures/<name>.toml` | `<main worktree>/.tower/skills/<name>.md` |
 
-The user layer roams with your config; the repository layer is the team's, and it is anchored to the main worktree so every bay sees the same set. `$XDG_CONFIG_HOME` replaces `~/.config` when it is set. A missing directory is an empty layer; a file that does not parse is a refusal naming the path.
+The user layer roams with your config; the repository layer is the team's, and it is anchored to the main worktree so every worktree sees the same set. `$XDG_CONFIG_HOME` replaces `~/.config` when it is set. A missing directory is an empty layer; a file that does not parse is a refusal naming the path.
 
 `ff tower procedures` and `ff tower skills` list what is installed and name the layer each came from.
 
@@ -38,13 +38,11 @@ For yourself, `~/.config/tower/procedures/` and `~/.config/tower/skills/` take t
 
 The name a procedure is filed under is the `name =` line inside the file, not the file name — rename `ticket.toml` freely, and rename what is inside it to change the word `ff tower file` takes.
 
-## The harness redirect
+## Reaching an agent
 
-tower never writes another program's config, so the bridge to a harness is your own redirect: `ff tower skills <name>` prints the installed file raw, byte for byte.
+The manual is fufu's to install: `ff extension add tower` declares tower, and `ff hook` asks the binary for the `tower` skill and installs it beside fufu's own in every client it wires. Nothing here is the manual, and the manual never appears on the shelf.
 
-```sh
-ff tower skills work > .claude/skills/tower-work/SKILL.md
-```
+A shelf skill reaches an agent by name. An agent-assigned flight names the skill it is flown with, `ff tower next` hands that name out on the picked row, and the agent prints it with `ff tower skills <name>` and follows it for that flight. tower writes no other program's config, so there is no redirect to set up: the flight carries the name, and the pick delivers it.
 
 ## A procedure should end with you
 
