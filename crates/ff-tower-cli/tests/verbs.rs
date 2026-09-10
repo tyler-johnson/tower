@@ -320,9 +320,6 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
             "priority": "none",
             "skill": "review",
             "done": "asserted",
-            // `review` resolves its subject against a branch, so file
-            // time stamps the branch each flight flies on.
-            "branch": "the retry test",
         })
     );
     assert_eq!(
@@ -336,7 +333,6 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
             "priority": "none",
             "bay": "warm",
             "done": "asserted",
-            "branch": "the retry test",
         })
     );
     assert_eq!(
@@ -349,7 +345,6 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
             "assignee": "me",
             "priority": "none",
             "done": "asserted",
-            "branch": "the retry test",
         })
     );
 

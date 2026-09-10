@@ -72,15 +72,12 @@ Pull the next Ready flight from the agent lane, or with -n <k> the
 next k. The pool is every Ready flight assigned to the agent lane,
 and the pick is filed order. The pull is the Ready check and the move
 in one command: each picked flight is set In Progress with your byline
-as the pilot, and it is handed a tree to fly in. --peek is the same
-computation with nothing written, and the envelope says which
-happened either way.
+as the pilot. --peek is the same computation with nothing written, and
+the envelope says which happened either way.
 
 A flight that already has a tree — one requeued or answered — is
 checked against every flying tree with `ff collide` before it is
-admitted, and a pairing fufu could not judge excludes. Collisions
-between fresh flights are what bays are for: one tree per flight, and
-the board reports the pair when two trees meet.
+admitted, and a pairing fufu could not judge excludes.
 
 An empty pick exits 1 with a full data envelope, and `outcome` on it
 says which of `drained` and `yours` it was: `drained` is a board with

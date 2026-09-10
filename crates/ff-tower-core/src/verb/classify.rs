@@ -60,7 +60,6 @@ pub fn classify(
                 .as_deref()
                 .or(only.status.as_deref())
                 .unwrap_or(born),
-            subject,
             Some(fields),
         )];
     }
@@ -96,7 +95,6 @@ pub fn classify(
             format!("{subject} · {}", flight.id),
             String::new(),
             flight.status.as_deref().unwrap_or(born),
-            subject,
             None,
         )
     }));
@@ -125,17 +123,16 @@ pub fn classify(
 }
 
 /// One definition flight as the log carries it: the closed enums become
-/// their names, the caller's flags win where an overlay rides, and the
-/// definition's `subject = "branch"` rule resolves once — the subject
-/// handed in is the flight's own, never the `"{subject} · {id}"` a child
-/// is filed under, so for `review` the branch is the parent's subject.
+/// their names, and the caller's flags win where an overlay rides. The
+/// `branch` field is retired with #124 and kept for reading — the
+/// definition's `subject = "branch"` rule no longer resolves here, and a
+/// filing writes `None`.
 fn filed(
     definition: &Definition,
     flight: &FlightDef,
     subject: String,
     body: String,
     born: &str,
-    branch_subject: &str,
     overlay: Option<&Fields>,
 ) -> Kind {
     let own_assignee = Some(flight.assignee.name().to_string());
@@ -178,7 +175,6 @@ fn filed(
         skill,
         bay,
         done: flight.done.name().to_string(),
-        branch: (definition.subject.as_deref() == Some("branch"))
-            .then(|| branch_subject.to_string()),
+        branch: None,
     }
 }

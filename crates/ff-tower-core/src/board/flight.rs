@@ -89,9 +89,6 @@ pub struct Flight {
     pub bay: Option<String>,
     /// What finishing means, as the filing stamped it.
     pub done_kind: String,
-    /// The branch the filing resolved for this flight, when a
-    /// definition's `subject = "branch"` said so.
-    pub branch_stamp: Option<String>,
     /// The open question, when the flight is held. Cleared by
     /// `answered`, or by a close.
     pub question: Option<Question>,
@@ -266,7 +263,7 @@ pub fn fold(events: &[Event]) -> Fold {
                 skill,
                 bay,
                 done,
-                branch,
+                branch: _,
             } => {
                 // A duplicate filed id is unreachable by construction —
                 // ids are unique per writer, writers cannot collide — but
@@ -302,7 +299,6 @@ pub fn fold(events: &[Event]) -> Fold {
                     skill: skill.clone(),
                     bay: bay.clone(),
                     done_kind: done.clone(),
-                    branch_stamp: branch.clone(),
                     question: None,
                     abandoned: None,
                     closed_reason: None,
@@ -371,7 +367,6 @@ pub fn fold(events: &[Event]) -> Fold {
                 status,
                 assignee,
                 done,
-                branch,
                 ..
             } => match by_id.get(on) {
                 Some(&at) => {
@@ -391,9 +386,6 @@ pub fn fold(events: &[Event]) -> Fold {
                     }
                     if let Some(done) = done {
                         flight.done_kind = done.clone();
-                    }
-                    if let Some(branch) = branch {
-                        flight.branch_stamp = Some(branch.clone());
                     }
                     overlays.push(event);
                 }
@@ -1706,7 +1698,6 @@ mod tests {
         assert_eq!(flight.assignee.as_deref(), Some("agent"));
         assert_eq!(flight.priority, "high");
         assert_eq!(flight.skill.as_deref(), Some("review"));
-        assert_eq!(flight.branch_stamp.as_deref(), Some("s"));
         assert!(flight.labels.is_empty(), "an absent overlay field stands");
         assert!(flight.edited.is_none(), "routing is not a reword");
         assert!(fold.unrouted.is_empty());

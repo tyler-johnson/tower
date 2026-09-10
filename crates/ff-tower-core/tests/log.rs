@@ -63,7 +63,6 @@ fn the_stored_fields_ride_the_store_onto_the_folds_flight() {
     assert_eq!(flight.priority, "high");
     assert_eq!(flight.labels, ["chore"]);
     assert_eq!(flight.bay.as_deref(), Some("warm"));
-    assert_eq!(flight.branch_stamp.as_deref(), Some("feather"));
     assert!(flight.skill.is_none());
 }
 

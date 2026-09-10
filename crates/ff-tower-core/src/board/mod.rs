@@ -19,8 +19,7 @@
 //! the log the fold was built from, because last-wins marks keep no
 //! record of how often a flight changed hands. [`bays`] is the pool over
 //! the same reads too: occupancy joined from the survey and the fold,
-//! never registered, and [`assign`] hands each pick a bay out of that
-//! same fold — the join `next` binds a flight in. [`doctor`] is the
+//! never registered. [`doctor`] is the
 //! health fold — stale bays and
 //! drift as rows over the same reads plus the seam's own answer, and it
 //! observes and complains, never enforces. [`resolve`] is how a typed
@@ -47,7 +46,7 @@ mod reads;
 mod resolve;
 mod view;
 
-pub use bay::{BayView, Berth, Pool, assign, bays};
+pub use bay::{BayView, Pool, bays};
 pub use brief::{Brief, CommentView, LinkView, Standing, brief, wants_verdicts};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};

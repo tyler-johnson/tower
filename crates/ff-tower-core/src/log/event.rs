@@ -106,9 +106,7 @@ pub enum Kind {
         skill: Option<String>,
         bay: Option<String>,
         done: String,
-        /// The branch this flight flies on, resolved at file time from a
-        /// definition's `subject = "branch"`. The definition is read
-        /// once, so a later `next` reads this rather than the registry.
+        /// Retired with #124; read for old events, never written.
         branch: Option<String>,
     },
     /// Moves a flight: the word assigns the fold's facts last-wins —
@@ -197,8 +195,7 @@ pub enum Kind {
         skill: Option<String>,
         bay: Option<String>,
         done: Option<String>,
-        /// A definition's `subject = "branch"`, resolved at routing
-        /// time before #102; `None` since.
+        /// Retired with #124; read for old events, never written.
         branch: Option<String>,
     },
     /// A kind from a newer tower, preserved verbatim so the fold can carry

@@ -11,17 +11,16 @@
 //! the following invocation — the `yours` outcome when the released
 //! flight is off the agent lane, which in this shape it always is.
 //!
-//! The assignment half rides the same fixtures. Main is a bay and it is
-//! first in survey order, so the solo norm's single pick binds *there*;
-//! a warmed slot is what the second pick takes. Every pull ends with a
-//! branch and an op row tagged with the flight, and a warm or bind that
-//! fufu refuses lands on the row rather than ending the walk.
+//! A pull writes to tower's log and nothing to the repository: no
+//! branch, no worktree, no op row. The picked row is the flight, its
+//! number, its subject, and its skill when it names one, and the tree it
+//! flies in is the agent's own to choose.
 
 use std::path::Path;
 use std::process::{Command, Output};
 
 use ff_tower_core::ff::Ff;
-use ff_tower_testsupport::{Repo, canonicalized};
+use ff_tower_testsupport::Repo;
 
 fn ff_tower(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ff-tower"))
@@ -122,7 +121,6 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
         brief.contains("in progress — tests@tower.invalid"),
         "{brief}"
     );
-    assert!(brief.contains("on flight/pi.2"), "{brief}");
 
     // The pool is empty and the parent and `verdict` are born Waiting —
     // no Ready work off the lane, so the outcome is drained, not yours.
@@ -249,10 +247,44 @@ fn peek_reads_without_pulling() {
         "a peek is still work — the outcome says what was found, `pulled` what was written"
     );
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
+    let row = &envelope["data"]["picked"][0];
+    assert_eq!(row["flight"], serde_json::json!("pi.2"));
+    assert_eq!(keys(row), ["flight", "number", "subject"]);
+}
+
+/// The keys on one picked row, in emitted order.
+fn keys(row: &serde_json::Value) -> Vec<&str> {
+    row.as_object()
+        .expect("a row is an object")
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
+#[test]
+fn a_pull_writes_nothing_to_the_repository() {
+    let repo = repo();
+    file_pipeline(&repo, "the one flight");
+
+    let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
+    assert_eq!(envelope["data"]["pulled"], serde_json::json!(true));
+    let row = &envelope["data"]["picked"][0];
+    assert_eq!(row["flight"], serde_json::json!("pi.2"));
+    assert_eq!(row["number"], serde_json::json!(2));
+    assert_eq!(row["subject"], serde_json::json!("the one flight · pass"));
     assert_eq!(
-        envelope["data"]["picked"][0]["flight"],
-        serde_json::json!("pi.2")
+        keys(row),
+        ["flight", "number", "subject"],
+        "no bay, no branch, no skill the flight never named: {row}"
     );
+
+    // The pull is a log event and nothing else: no branch minted, and
+    // the operator's own tree still stands where it was.
+    let branches = repo.ff(&["branch", "list"]);
+    assert!(!branches.contains("flight/"), "{branches}");
+    let status: serde_json::Value =
+        serde_json::from_str(&repo.ff(&["status", "--json"])).expect("a status envelope");
+    assert_eq!(status["data"]["head"]["name"], serde_json::json!("main"));
 }
 
 #[test]
@@ -412,218 +444,6 @@ fn next_never_exits_three() {
         }
     }
     assert_eq!(seen, [("work", 0), ("yours", 1), ("drained", 1)]);
-}
-
-/// A procedure whose subject resolves against a branch — `next` binds by
-/// switching to the flight's own subject rather than minting a name.
-fn install_branchy(repo: &Repo) {
-    repo.write(
-        ".tower/procedures/branchy.toml",
-        concat!(
-            "name = \"branchy\"\nsubject = \"branch\"\n\n",
-            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\n\n",
-            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
-        ),
-    );
-}
-
-/// `pipeline`, with the agent flight asking the pool for a tree.
-fn install_warmly(repo: &Repo) {
-    repo.write(
-        ".tower/procedures/warmly.toml",
-        concat!(
-            "name = \"warmly\"\n\n",
-            "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nbay      = \"warm\"\n\n",
-            "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\"]\n",
-        ),
-    );
-}
-
-/// A fufu verb against an arbitrary worktree — the bays live outside the
-/// repository, so `Repo::ff` cannot reach them.
-fn ff_at(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("ff")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("FF_NONINTERACTIVE", "1")
-        .env_remove("FF_SESSION")
-        .output()
-        .expect("spawn ff");
-    assert!(
-        output.status.success(),
-        "`ff {}` exited {:?}: {}",
-        args.join(" "),
-        output.status.code(),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-#[test]
-fn a_pull_binds_the_flight_to_a_branch_in_a_bay_and_tags_the_op_row() {
-    let repo = repo();
-    file_pipeline(&repo, "the one flight");
-
-    let out = ff_tower(repo.path(), &["next", "--json"]);
-    assert_eq!(out.status.code(), Some(0));
-    let row = &envelope(&out)["data"]["picked"][0];
-    // Main is first in survey order and free, and in the solo norm main
-    // *is* the bay — DESIGN's `bays: 1` case.
-    assert_eq!(row["bay_id"], serde_json::json!("main"));
-    assert_eq!(row["branch"], serde_json::json!("flight/pi.2"));
-    assert_eq!(row["warmed"], serde_json::json!(false));
-    assert_eq!(row["refused"], serde_json::Value::Null);
-    let bay = row["bay"].as_str().expect("a bay path");
-
-    // The branch exists in that tree, and the op row that made it carries
-    // the flight's name — which is what every later derivation reads.
-    assert!(ff_at(Path::new(bay), &["branch", "list"]).contains("flight/pi.2"));
-    let ops = ff_at(Path::new(bay), &["op", "log", "session(pi.2)", "-n", "0"]);
-    assert!(ops.contains("flight/pi.2"), "{ops}");
-
-    let out = ff_tower(repo.path(), &["next", "--peek"]);
-    assert_eq!(out.status.code(), Some(1), "the flight is pulled");
-}
-
-#[test]
-fn the_second_pick_takes_the_warm_bay_and_the_two_never_share_a_tree() {
-    let repo = repo();
-    file_pipeline(&repo, "left work");
-    file_pipeline(&repo, "right work");
-    let slot = repo.bay_path("bay-a");
-    stdout(&ff_tower(
-        repo.path(),
-        &["bay", "warm", slot.to_str().expect("utf8")],
-    ));
-
-    let out = ff_tower(repo.path(), &["next", "-n", "2", "--json"]);
-    assert_eq!(out.status.code(), Some(0));
-    let picked = envelope(&out)["data"]["picked"].clone();
-    assert_eq!(picked[0]["bay_id"], serde_json::json!("main"));
-    assert_eq!(picked[0]["branch"], serde_json::json!("flight/pi.2"));
-    assert_eq!(picked[1]["bay_id"], serde_json::json!("bay-a"));
-    assert_eq!(picked[1]["branch"], serde_json::json!("flight/pi.8"));
-
-    // The bay's own chain carries the second flight's tag, not the
-    // first's — the fan-out reads each bay separately for exactly this.
-    let ops = ff_at(&slot, &["op", "log", "session(pi.8)", "-n", "0"]);
-    assert!(ops.contains("flight/pi.8"), "{ops}");
-    assert!(ff_at(&slot, &["branch", "list"]).contains("flight/pi.8"));
-
-    // And the human render puts the tree under the pull.
-    let text = stdout(&ff_tower(repo.path(), &["bay"]));
-    assert!(
-        text.contains("flight/pi.2") && text.contains("flight/pi.8"),
-        "{text}"
-    );
-}
-
-#[test]
-fn a_subject_that_is_a_branch_switches_rather_than_minting_one() {
-    let repo = repo();
-    install_branchy(&repo);
-    repo.ff(&["start", "-b", "feature"]);
-    repo.write("feature.txt", "work\n");
-    repo.ff(&["commit", "-m", "feature: a file"]);
-    repo.ff(&["switch", "main"]);
-    stdout(&ff_tower(repo.path(), &["file", "branchy", "feature"]));
-
-    let out = ff_tower(repo.path(), &["next", "--json"]);
-    assert_eq!(out.status.code(), Some(0));
-    let row = &envelope(&out)["data"]["picked"][0];
-    assert_eq!(row["branch"], serde_json::json!("feature"));
-    assert_eq!(row["refused"], serde_json::Value::Null);
-
-    // Nothing was minted: the stamped branch is the one it flies on.
-    let branches = ff_at(repo.path(), &["branch", "list"]);
-    assert!(!branches.contains("flight/pi."), "{branches}");
-    let out = ff_tower(repo.path(), &["next", "--peek"]);
-    assert_eq!(out.status.code(), Some(1), "the flight is pulled");
-}
-
-#[test]
-fn peek_reports_the_bay_and_the_branch_and_binds_neither() {
-    let repo = repo();
-    file_pipeline(&repo, "the one flight");
-
-    let out = ff_tower(repo.path(), &["next", "--peek", "--json"]);
-    assert_eq!(out.status.code(), Some(0));
-    let row = &envelope(&out)["data"]["picked"][0];
-    assert_eq!(row["bay_id"], serde_json::json!("main"));
-    assert_eq!(row["branch"], serde_json::json!("flight/pi.2"));
-    assert_eq!(row["warmed"], serde_json::json!(false));
-
-    let text = stdout(&ff_tower(repo.path(), &["next", "--peek"]));
-    assert!(text.contains("ready #2: the one flight · pass"), "{text}");
-    assert!(text.contains("flight/pi.2"), "{text}");
-
-    // The tree never moved and the log never grew.
-    let branches = ff_at(repo.path(), &["branch", "list"]);
-    assert!(!branches.contains("flight/pi.2"), "{branches}");
-    let board = stdout(&ff_tower(repo.path(), &[]));
-    assert!(!board.contains("in progress\n"), "{board}");
-}
-
-#[test]
-fn a_full_pool_with_no_stamp_pulls_anyway_and_says_where_the_next_bay_comes_from() {
-    let repo = repo();
-    file_pipeline(&repo, "the first");
-    file_pipeline(&repo, "the second");
-    stdout(&ff_tower(repo.path(), &["next"]));
-
-    // Main is the only bay and the first flight is live in it, so the
-    // second pull gets no tree — which is a hint, not a refusal.
-    let out = ff_tower(repo.path(), &["next"]);
-    assert_eq!(out.status.code(), Some(0));
-    let text = stdout(&out);
-    assert!(text.contains("in progress #5: the second · pass"), "{text}");
-    assert!(text.contains("no free bay · ff tower bay warm"), "{text}");
-
-    let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
-    let row = &envelope["data"]["picked"][0];
-    assert!(row.is_null(), "both flights are pulled now");
-}
-
-#[test]
-fn a_warm_stamp_with_a_pool_root_mints_the_slot_it_needs() {
-    let repo = repo();
-    install_warmly(&repo);
-    let root = repo.bay_path("bays");
-    repo.git(&["config", "tower.bays", root.to_str().expect("utf8")]);
-    stdout(&ff_tower(repo.path(), &["file", "warmly", "the first"]));
-    stdout(&ff_tower(repo.path(), &["file", "warmly", "the second"]));
-
-    let out = ff_tower(repo.path(), &["next", "-n", "2", "--json"]);
-    assert_eq!(out.status.code(), Some(0));
-    let picked = envelope(&out)["data"]["picked"].clone();
-    assert_eq!(picked[0]["bay_id"], serde_json::json!("main"));
-    assert_eq!(picked[0]["warmed"], serde_json::json!(false));
-    assert_eq!(picked[1]["bay_id"], serde_json::json!("bay-1"));
-    assert_eq!(picked[1]["warmed"], serde_json::json!(true));
-    assert_eq!(picked[1]["branch"], serde_json::json!("flight/pi.8"));
-    assert!(canonicalized(&root).join("bay-1").is_dir());
-}
-
-#[test]
-fn a_warm_stamp_with_no_pool_root_lands_the_refusal_on_the_row_and_still_exits_zero() {
-    let repo = repo();
-    install_warmly(&repo);
-    stdout(&ff_tower(repo.path(), &["file", "warmly", "the first"]));
-    stdout(&ff_tower(repo.path(), &["file", "warmly", "the second"]));
-
-    let out = ff_tower(repo.path(), &["next", "-n", "2"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "a refusal on a row is not fatal"
-    );
-    let text = stdout(&out);
-    assert!(text.contains("in progress #5: the second · pass"), "{text}");
-    assert!(text.contains("needs a pool root"), "{text}");
-
-    let envelope = envelope(&ff_tower(repo.path(), &["next", "--json"]));
-    assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
 }
 
 #[test]

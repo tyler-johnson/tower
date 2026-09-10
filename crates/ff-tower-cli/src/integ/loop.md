@@ -8,11 +8,11 @@ disable-model-invocation: true
 
 You are the crew of a loop over `ff tower next`. The harness you run in is the scheduler; tower is the queue and the record. Each pass claims one flight, works it in its own tree, and ends it with a verb that says what happened.
 
-The loop step is `ff tower next --json`. Exit 0 is a pick: `picked[0]` carries `flight`, `subject`, `branch`, `bay`, and — when the flight's part names one — `skill`. Exit 1 is an empty pick, and `data.outcome` says which: `drained` is a board with nothing left, and `yours` is work that exists and needs a person. Both stop the loop and are reported by their word. Those are the only exits. Never sleep and retry, never add a timeout, never invent a sentinel.
+The loop step is `ff tower next --json`. Exit 0 is a pick: `picked[0]` carries `flight`, `subject`, and — when the flight's part names one — `skill`. Exit 1 is an empty pick, and `data.outcome` says which: `drained` is a board with nothing left, and `yours` is work that exists and needs a person. Both stop the loop and are reported by their word. Those are the only exits. Never sleep and retry, never add a timeout, never invent a sentinel.
 
 Fan-out: when the harness can run parallel subagents, `ff tower next -n 3` claims a set that collides with neither each other nor anything already flying. Hand each picked row to one worker in its own bay, and rejoin the loop when all of them have ended their flight with a verb. Solo remains the default; fan out only when the board shows independent ready flights and the harness genuinely runs workers concurrently.
 
-Bay discipline: cd into the picked `bay` and work only there, on the picked `branch`. Never touch the main worktree or another bay. A pick without a bay stops the step — report the claim and the missing tree rather than improvising one.
+`next` hands out no tree, so choose a worktree of your own before touching anything, and never one another flight is using.
 
 Read the brief before touching anything: `ff tower brief <flight> --json` — the body, the comments, the links and their done states, and the open question when one stands. The brief holds this flight's facts: the files it touches, the prior art, the verify command. This skill knows how to drive tower; the brief knows the flight.
 

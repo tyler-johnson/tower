@@ -616,11 +616,6 @@ status   = "backlog"
         assert_eq!(pass.status, "ready", "no after — born Ready");
         assert_eq!(pass.assignee.as_deref(), Some("agent"));
         assert_eq!(pass.skill.as_deref(), Some("review"));
-        assert_eq!(
-            pass.branch_stamp.as_deref(),
-            Some("feather"),
-            "the subject rule resolves once, at file time"
-        );
         assert!(pass.pullable());
 
         let smoke = by_subject("· smoke");
