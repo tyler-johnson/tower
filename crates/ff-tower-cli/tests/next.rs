@@ -1,4 +1,4 @@
-//! `ff tower next` against real repositories: the greedy admission, the
+//! `ff tower next` against real repositories: the filed-order walk, the
 //! peek, the lane gate, the outcomes — work, drained, yours — and the
 //! exit, 0 on a pick and 1 otherwise.
 //!
@@ -19,7 +19,6 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use ff_tower_core::ff::Ff;
 use ff_tower_testsupport::Repo;
 
 fn ff_tower(repo: &Path, args: &[&str]) -> Output {
@@ -295,8 +294,8 @@ fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
     // The agent flights: the first filing's is #2, the second's is #5.
     stdout(&ff_tower(repo.path(), &["link", "2", "5"]));
 
-    // The dependent is Waiting, not a candidate: neither pulled nor
-    // passed, and the dependency is what the walk hands out.
+    // The dependent is Waiting, not a candidate, and the dependency is
+    // what the walk hands out.
     let out = ff_tower(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
@@ -304,12 +303,8 @@ fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
         text.contains("in progress #5: the dependency · pass"),
         "{text}"
     );
-    assert!(!text.contains("passed"), "{text}");
     assert!(!text.contains("#2"), "{text}");
 
-    let out = ff_tower(repo.path(), &["next", "--peek", "--json"]);
-    let peek = envelope(&out);
-    assert_eq!(peek["data"]["passed"], serde_json::json!([]));
     let board = envelope(&ff_tower(repo.path(), &["--json"]));
     assert_eq!(board["data"]["waiting"][0]["id"], serde_json::json!("pi.1"));
     assert!(
@@ -323,65 +318,39 @@ fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
 }
 
 #[test]
-fn deconfliction_passes_the_collider_pulls_the_clear_one_and_pins_the_json() {
+fn a_count_picks_in_filed_order_and_the_envelope_has_no_passed_key() {
     let repo = repo();
-    file_pipeline(&repo, "left work");
-    file_pipeline(&repo, "right work");
+    file_pipeline(&repo, "first work");
+    file_pipeline(&repo, "second work");
     file_pipeline(&repo, "third work");
-    // Pull the first filing's agent flight by hand and put its work on a
-    // branch.
-    stdout(&ff_tower(repo.path(), &["status", "2", "in_progress"]));
 
-    repo.ff(&["start", "-b", "left"]);
-    repo.write("shared.txt", "left side\n");
-    Ff::at(repo.path())
-        .session("pi.2")
-        .status()
-        .expect("status");
-    repo.ff(&["commit", "-m", "left: touch shared"]);
-
-    repo.ff(&["switch", "main"]);
-    repo.ff(&["start", "-b", "right"]);
-    repo.write("shared.txt", "right side\n");
-    Ff::at(repo.path())
-        .session("pi.8")
-        .status()
-        .expect("status");
-    repo.ff(&["commit", "-m", "right: touch shared"]);
-
-    // The peek first, so the JSON pins the same pick the pulling run
-    // takes a line below — after the pull the pool would be different.
+    // The agent flights are #2, #5 and #8; two of three, in filed order,
+    // and nothing about a tree decides it.
     let out = ff_tower(repo.path(), &["next", "-n", "2", "--peek", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("work"));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     let picked = envelope["data"]["picked"].as_array().expect("picked");
-    assert_eq!(picked.len(), 1);
-    assert_eq!(picked[0]["flight"], serde_json::json!("pi.14"));
-    let passed = &envelope["data"]["passed"];
-    assert_eq!(passed[0]["flight"], serde_json::json!("pi.8"));
-    assert_eq!(passed[0]["reason"], serde_json::json!("collides"));
-    assert_eq!(passed[0]["with"], serde_json::json!("pi.2"));
-    assert_eq!(passed[0]["paths"], serde_json::json!(["shared.txt"]));
+    assert_eq!(picked.len(), 2);
+    assert_eq!(picked[0]["flight"], serde_json::json!("pi.2"));
+    assert_eq!(picked[1]["flight"], serde_json::json!("pi.8"));
+    let data = envelope["data"].as_object().expect("data");
+    assert!(!data.contains_key("passed"), "{envelope}");
+    for key in ["outcome", "picked", "pulled", "yours"] {
+        assert!(data.contains_key(key), "{key} missing: {envelope}");
+    }
 
     let out = ff_tower(repo.path(), &["next", "-n", "2"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
-    assert!(text.contains("in progress #8: third work · pass"), "{text}");
+    assert!(text.contains("in progress #2: first work · pass"), "{text}");
     assert!(
-        text.contains("passed #5 · collides with #2 on shared.txt"),
+        text.contains("in progress #5: second work · pass"),
         "{text}"
     );
-
-    // The move is a stored fact on the flight's own record, whatever
-    // group the board files it in.
-    let brief: serde_json::Value = serde_json::from_str(&stdout(&ff_tower(
-        repo.path(),
-        &["brief", "pi.14", "--json"],
-    )))
-    .expect("an envelope");
-    assert_eq!(brief["data"]["status"], serde_json::json!("in_progress"));
-    assert!(brief["data"]["status_by"].is_string(), "{brief}");
+    assert!(!text.contains("#8"), "{text}");
+    assert!(!text.contains("passed"), "{text}");
 }
 
 #[test]

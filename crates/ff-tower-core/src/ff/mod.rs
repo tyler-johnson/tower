@@ -46,8 +46,8 @@ use std::process::Command;
 
 pub use error::{Error, Refusal, Result};
 pub use payload::{
-    At, BranchInfo, BranchList, ChangeKind, Collision, Editing, FileStat, Head, Held, OpEntry,
-    OpLog, Open, Pairing, Side, Status, UnknownReason, Version,
+    At, BranchInfo, BranchList, ChangeKind, Editing, FileStat, Head, Held, OpEntry, OpLog, Open,
+    Status, Version,
 };
 
 use serde::Deserialize;
@@ -195,17 +195,6 @@ impl Ff {
     /// never *is* one, so there is no exit code here a caller could act on.
     pub fn status(&self) -> Result<Status> {
         Ok(self.run::<Status>("status", &[] as &[&str])?.data)
-    }
-
-    /// `ff collide --json` — would these two branches hit each other?
-    ///
-    /// One pair is the whole verb. Which sets can fly together is tower's
-    /// to fold out of these verdicts, because the fold needs a queue, a
-    /// notion of what is already in the air, and something to claim with —
-    /// none of which fufu has. A collision is a finding and not a failure,
-    /// so this exits 0 either way.
-    pub fn collide(&self, a: &str, b: &str) -> Result<Collision> {
-        Ok(self.run::<Collision>("collide", &[a, b])?.data)
     }
 
     /// `ff op log --json <revset> -n 0` — operation rows, filtered by a

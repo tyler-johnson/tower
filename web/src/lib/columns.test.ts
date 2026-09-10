@@ -40,8 +40,6 @@ const view: FlightView = {
   question: null,
   asked_at: null,
   closed_reason: null,
-  collides: [],
-  unanswered: [],
 };
 
 const refs = new Map([[view.id, "#3"]]);

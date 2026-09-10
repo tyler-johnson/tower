@@ -4,10 +4,7 @@
 //! Ready flight assigned to the agent lane, and unless `--peek` the
 //! picked set becomes one In Progress `status` event per flight in a
 //! single append, the byline the pilot. The verb writes to tower's log
-//! and nothing to the repository: no branch, no worktree, no op row. The
-//! collide gate is a courtesy: only a candidate that already has a
-//! branch — requeued or answered — is checked, through the board's
-//! probe, and a fresh flight is admitted unchecked.
+//! and nothing to the repository: no branch, no worktree, no op row.
 //!
 //! The verb's success code is 0 on a pick and 1 on an empty one, fufu's
 //! "no." An empty pick rides the success path with a full data envelope,
@@ -16,15 +13,15 @@
 //! pool that needs you. The code never says 3: 3 belongs to `held/*`,
 //! which an empty pool is not. `while ff tower next` terminates on the
 //! code alone; a harness that needs to know why reads the field, not the
-//! status. The pipeline is the board's — store, fold, gather, probe —
-//! with `pick` in place of `enrich`. `--peek` is the same computation
+//! status. The pipeline is the board's — store, fold, gather — with
+//! `pick` in place of `enrich`. `--peek` is the same computation
 //! with the append left out, and reports the pick alone.
 
 use serde::Serialize;
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, Fold, Outcome, Passed, Skip};
+use ff_tower_core::board::{self, Fold, Outcome};
 use ff_tower_core::log::{Kind, Store};
 
 /// One shape either way: `pulled` is `false` under `--peek`, so the
@@ -36,7 +33,6 @@ struct Data<'a> {
     outcome: Outcome,
     picked: &'a [Row],
     pulled: bool,
-    passed: &'a [Passed],
     /// Ready, kept out of the pool by the lane alone — the count behind
     /// the `yours` outcome.
     yours: usize,
@@ -69,8 +65,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     let events = store.read_all()?;
     let fold = board::fold(&events);
     let reads = board::gather(&ff)?;
-    let verdicts = board::probe(&ff, &fold, &reads)?;
-    let picks = board::pick(&fold, &reads, &verdicts, count);
+    let picks = board::pick(&fold, &reads, count);
     let outcome = picks.outcome();
 
     let pulled = !peek && !picks.picked.is_empty();
@@ -112,7 +107,6 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
                     outcome,
                     picked: &rows,
                     pulled,
-                    passed: &picks.passed,
                     yours: picks.yours,
                 }
             )
@@ -142,23 +136,6 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
             } else {
                 println!("nothing ready");
             }
-        }
-        for passed in &picks.passed {
-            let reason = match &passed.reason {
-                Skip::Collides { with, paths } => format!(
-                    "collides with {} on {}",
-                    show(&fold, with),
-                    render::paths_phrase(paths)
-                ),
-                Skip::NoVerdict { with } => format!("no verdict vs {}", show(&fold, with)),
-            };
-            println!(
-                "{}",
-                render::paint_dim(
-                    &format!("passed {} · {reason}", show(&fold, &passed.flight)),
-                    colored
-                )
-            );
         }
         println!("{}", super::tail(colored));
     }

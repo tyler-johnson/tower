@@ -2,14 +2,14 @@
   import { feed } from "./feed.svelte";
   import { panel } from "./panel.svelte";
   import type { Field } from "./query";
-  import { age, allowedVerbs, beatLine, briefNote, unknownRows, type Brief } from "./tower";
+  import { age, allowedVerbs, briefNote, unknownRows, type Brief } from "./tower";
   import { write } from "./write";
 
-  let { brief, refs }: { brief: Brief; refs: Map<string, string> } = $props();
+  let { brief }: { brief: Brief } = $props();
 
   let now = $derived(feed.now);
   let verbs = $derived(allowedVerbs(brief));
-  let note = $derived(briefNote(brief, refs, now));
+  let note = $derived(briefNote(brief, now));
   let other = $derived(unknownRows(brief));
   // A closed flight refuses every move and every re-laning — `ensure_active`
   // — and takes an edit, which is why the other four stay live.
@@ -305,7 +305,7 @@
 
   <!--
 		What no one sets: where the flight stands and since when, the
-		reason under it, the audits, and the beat rows.
+		reason under it, and the audits.
 	-->
   <div class="border-base-300 text-base-content/40 flex flex-col gap-1 border-t pt-4 text-sm">
     {#each note as phrase, i (i)}
@@ -314,9 +314,6 @@
     {#if brief.edited_by !== null && brief.edited_at !== null}
       <p>edited · by {brief.edited_by} · {age(now, brief.edited_at)}</p>
     {/if}
-    {#each brief.beat as beaten (beaten.flight)}
-      <p>{beatLine(beaten, refs)}</p>
-    {/each}
   </div>
 
   <!--

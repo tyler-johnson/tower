@@ -10,7 +10,7 @@ You are the crew of a loop over `ff tower next`. The harness you run in is the s
 
 The loop step is `ff tower next --json`. Exit 0 is a pick: `picked[0]` carries `flight`, `subject`, and — when the flight's part names one — `skill`. Exit 1 is an empty pick, and `data.outcome` says which: `drained` is a board with nothing left, and `yours` is work that exists and needs a person. Both stop the loop and are reported by their word. Those are the only exits. Never sleep and retry, never add a timeout, never invent a sentinel.
 
-Fan-out: when the harness can run parallel subagents, `ff tower next -n 3` claims a set that collides with neither each other nor anything already flying. Hand each picked row to one worker in its own worktree, and rejoin the loop when all of them have ended their flight with a verb. Solo remains the default; fan out only when the board shows independent ready flights and the harness genuinely runs workers concurrently.
+Fan-out: when the harness can run parallel subagents, `ff tower next -n 3` claims the next three in filed order. Hand each picked row to one worker in its own worktree, and rejoin the loop when all of them have ended their flight with a verb. Solo remains the default; fan out only when the board shows independent ready flights and the harness genuinely runs workers concurrently.
 
 `next` hands out no tree, so choose a worktree of your own before touching anything, and never one another flight is using.
 

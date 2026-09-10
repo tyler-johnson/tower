@@ -1,35 +1,23 @@
 //! The brief: one flight's full record over the same reads as the board,
-//! plus its standing on `next`'s walk and what it beat.
+//! plus where it stands.
 //!
 //! Pure like `flight.rs` and `pick.rs` — no `crate::ff` spawns, no
 //! `std::process`; the brief runs over a [`Fold`], the events it was
-//! folded from, a [`Reads`], and a [`Verdicts`] the caller already
-//! fetched. The events ride along for the history alone: every other
-//! field is the fold's, and both call sites hold the slice already. Laziness belongs to the
-//! caller: [`wants_verdicts`] says when probes can change the answer, and
-//! when it says no, [`Verdicts::default()`] briefs byte-identically to
-//! the probed run. A closed flight briefs like any other — the log keeps
-//! the record, and reading it is never a lifecycle move.
+//! folded from, and a [`Reads`] the caller already fetched. The events
+//! ride along for the history alone: every other field is the fold's,
+//! and both call sites hold the slice already. A closed flight briefs
+//! like any other — the log keeps the record, and reading it is never a
+//! lifecycle move.
 //!
-//! The standing is the walk narrowed to one flight. The walk here is
-//! `pick(fold, reads, verdicts, usize::MAX)`: `want` only gates the
-//! walk's break, so the full walk is canonical — a flight's outcome is
-//! byte-identical to any `next -n k` whose walk reached it, and every
-//! pool candidate lands in exactly one of `picked` and `passed`.
-//! Attribution inherits the walk's own limits: the gate check stops at
-//! the first hit, so `beat` is under-inclusive by design — `next`'s
-//! surface, not a full conflict matrix — and same-branch flights are one
-//! tree, so a flight can take a beat row its branchmate would otherwise
-//! have taken. Waiting is a status the fold derives, not a walk outcome:
-//! a flight with a live dependency is not pullable, so it stands as
+//! Waiting is a status the fold derives, not a standing of its own: a
+//! flight with a live dependency is not pullable, so it stands as
 //! `yours` with the status line saying Waiting.
 //!
 //! Standing precedence is `enrich`'s partition, not pick's one boolean:
 //! closed, then the open question, then fufu's branch hold, then In
 //! Progress, then the lane and the edges — `!pullable()` is *yours* —
-//! and only a pool candidate takes the walk's outcome. A brief that
-//! said "in progress" where the board shows *holding* would fail the
-//! one-glance test.
+//! and a pool candidate is *ready*. A brief that said "in progress"
+//! where the board shows *holding* would fail the one-glance test.
 
 use serde::Serialize;
 
@@ -37,14 +25,11 @@ use crate::log::{Event, EventId};
 
 use super::flight::{Flight, Fold};
 use super::history::{Moment, history};
-use super::pick::{Passed, Skip, pick};
-use super::reads::{Reads, Verdicts, branch_pairs};
+use super::reads::Reads;
 
 /// One flight, in full: the fold's record plus the reads' facts, flat in
 /// wire form like `FlightView`. Absent facts are `None`/empty, never
-/// missing keys — with one carved-out exception: the flattened
-/// [`Standing`] tag's payload keys (`on`, `with`, `paths`) ride only the
-/// variant that carries them, `Passed`'s own flatten precedent.
+/// missing keys.
 #[derive(Debug, Serialize)]
 pub struct Brief {
     pub id: String,
@@ -114,25 +99,17 @@ pub struct Brief {
     /// What happened to this flight, oldest first — the log's own
     /// gestures, which the last-wins fold cannot reconstruct.
     pub history: Vec<Moment>,
-    /// The arbitrated verdict, flat on the envelope beside the raw facts
-    /// it arbitrates — the reader gets `"standing": "collides"` beside
-    /// `with` and `paths`, no inner nesting.
+    /// Where the flight stands, flat on the envelope beside the raw facts
+    /// it arbitrates — the reader gets `"standing": "ready"`, no inner
+    /// nesting.
     #[serde(flatten)]
     pub standing: Standing,
-    /// The full walk's passed rows whose reason names this flight. A
-    /// flying flight's list is what its branch is blocking right now; a
-    /// passed candidate's is always empty — only gate entries and
-    /// admitted candidates are ever named.
-    pub beat: Vec<Passed>,
 }
 
 /// Where one flight stands, in `enrich`'s precedence, flattened onto the
-/// brief. The mark variants are units — their facts (the status fields,
-/// the question fields, `held`/`resolving`, `assignee`) already sit flat
-/// on [`Brief`], and a payload here would emit the same keys twice. Only
-/// the walk variants carry what the brief has no other field for,
-/// mirroring [`Skip`] flat — the walk's outcome, owned because `pick()`
-/// hands its rows over whole.
+/// brief. Every variant is a unit — its facts (the status fields, the
+/// question fields, `held`/`resolving`, `assignee`) already sit flat on
+/// [`Brief`], and a payload here would emit the same keys twice.
 #[derive(Debug, Serialize)]
 #[serde(tag = "standing", rename_all = "kebab-case")]
 pub enum Standing {
@@ -140,7 +117,7 @@ pub enum Standing {
     Done,
     /// Held on tower's own question — waiting on you.
     Question,
-    /// fufu's branch verdict — derived, not authored.
+    /// fufu's branch hold — derived, not authored.
     Held,
     /// In Progress — someone already flies it; the status mark beside
     /// it says who.
@@ -149,13 +126,8 @@ pub enum Standing {
     /// Backlog, or Waiting on a live dependency — or not in the agent
     /// lane. Unknown never rounds down.
     Yours,
-    /// In the pool and admitted by the full walk.
+    /// In the pool: `next` will hand it out in filed order.
     Ready,
-    /// A collide against a flying flight or an earlier-admitted
-    /// candidate; the first hit wins.
-    Collides { with: String, paths: Vec<String> },
-    /// A pairing fufu could not judge — unknown never rounds down.
-    NoVerdict { with: String },
 }
 
 /// One linked flight, carrying enough that a reader judges readiness
@@ -198,7 +170,6 @@ pub fn brief(
     fold: &Fold,
     events: &[Event],
     reads: &Reads,
-    verdicts: &Verdicts,
     id: &EventId,
     now: i64,
     stale_after: i64,
@@ -226,7 +197,7 @@ pub fn brief(
         (Some(mine), Some(here)) => mine == here,
         _ => false,
     };
-    let (standing, beat) = standing_and_beat(fold, reads, verdicts, flight);
+    let standing = standing(reads, flight);
 
     Some(Brief {
         id: flight.id.to_string(),
@@ -279,62 +250,15 @@ pub fn brief(
             .collect(),
         history: history(events, id),
         standing,
-        beat,
     })
 }
 
-/// Whether probes can change this flight's brief.
-///
-/// Probe iff the flight is live, its freshest-op branch resolves in the
-/// branch index, and the board has a branch pair to ask about. When this
-/// says no, `brief` with [`Verdicts::default()`] is byte-identical to the
-/// probed run: a closed flight is not in the walk at all, so its beat is
-/// empty by construction; a branchless or index-absent branch cannot be
-/// gated and is never named by a passed row, because `branch_pairs`
-/// excludes it from every pair; and with no pairs the probe itself is a
-/// zero-spawn no-op. The bar sits exactly here on purpose:
-/// `verdicts.between() == None` reads as *clear* in the walk, so a looser
-/// predicate would not save a spawn — it would silently change the
-/// answer.
-pub fn wants_verdicts(fold: &Fold, reads: &Reads, id: &EventId) -> bool {
-    let Some(flight) = fold.flights.iter().find(|flight| &flight.id == id) else {
-        return false;
-    };
-    if flight.closed() {
-        return false;
-    }
-    let index = reads.branch_index();
-    let resolves = reads
-        .freshest()
-        .get(flight.id.to_string().as_str())
-        .and_then(|op| op.branch.as_deref())
-        .is_some_and(|name| name != "@detached" && index.contains_key(name));
-    resolves && !branch_pairs(fold, reads).is_empty()
-}
-
-/// The full walk, once — the flight's own outcome when it is a pool
-/// candidate, and the beat rows either way. A closed flight is not in
-/// the walk at all, so its beat is empty by construction.
-fn standing_and_beat(
-    fold: &Fold,
-    reads: &Reads,
-    verdicts: &Verdicts,
-    flight: &Flight,
-) -> (Standing, Vec<Passed>) {
+/// Where the flight stands, in enrich's precedence, over the same
+/// per-flight derivation as pick's: branch from the freshest op row,
+/// holds from the branch row. A pool candidate is always ready — there
+/// is no gate for it to lose.
+fn standing(reads: &Reads, flight: &Flight) -> Standing {
     let id = flight.id.to_string();
-    let picks = pick(fold, reads, verdicts, usize::MAX);
-    let mut own = None;
-    let mut beat = Vec::new();
-    for row in picks.passed {
-        if row.flight == id {
-            own = Some(row.reason);
-        } else if names(&row.reason, &id) {
-            beat.push(row);
-        }
-    }
-
-    // enrich's precedence, over the same per-flight derivation as pick's:
-    // branch from the freshest op row, holds from the branch row.
     let freshest = reads.freshest();
     let branches = reads.branch_index();
     let row = freshest
@@ -343,7 +267,7 @@ fn standing_and_beat(
         .filter(|name| *name != "@detached")
         .and_then(|name| branches.get(name).copied());
 
-    let standing = if flight.closed() {
+    if flight.closed() {
         Standing::Done
     } else if flight.question.is_some() {
         Standing::Question
@@ -351,26 +275,10 @@ fn standing_and_beat(
         Standing::Held
     } else if flight.status == "in_progress" {
         Standing::InProgress
-    } else if !flight.pullable() {
-        Standing::Yours
-    } else if picks.picked.iter().any(|pick| pick.flight == id) {
+    } else if flight.pullable() {
         Standing::Ready
     } else {
-        // The full walk never breaks, so a candidate it did not admit has
-        // a passed row.
-        match own.expect("a pool candidate lands in picked or passed") {
-            Skip::Collides { with, paths } => Standing::Collides { with, paths },
-            Skip::NoVerdict { with } => Standing::NoVerdict { with },
-        }
-    };
-    (standing, beat)
-}
-
-/// Whether a passed row's reason names this flight as the competitor it
-/// lost to.
-fn names(reason: &Skip, id: &str) -> bool {
-    match reason {
-        Skip::Collides { with, .. } | Skip::NoVerdict { with } => with == id,
+        Standing::Yours
     }
 }
 
@@ -399,9 +307,8 @@ fn links(fold: &Fold, ids: &[EventId]) -> Vec<LinkView> {
 #[cfg(test)]
 mod tests {
     use super::super::flight::fold;
-    use super::super::reads::BranchPairing;
     use super::*;
-    use crate::ff::{BranchInfo, BranchList, OpEntry, Pairing, UnknownReason};
+    use crate::ff::{BranchInfo, BranchList, OpEntry};
     use crate::log::{Event, EventId, Kind};
 
     /// A filing with the given status and lane stored — the pool gate's
@@ -602,39 +509,14 @@ mod tests {
         }
     }
 
-    fn collide(a: &str, b: &str, paths: &[&str]) -> BranchPairing {
-        BranchPairing {
-            a: a.to_string(),
-            b: b.to_string(),
-            pairing: Pairing::Collide {
-                paths: paths.iter().map(|p| p.to_string()).collect(),
-            },
-        }
-    }
-
-    fn unknown(a: &str, b: &str) -> BranchPairing {
-        BranchPairing {
-            a: a.to_string(),
-            b: b.to_string(),
-            pairing: Pairing::Unknown {
-                reason: UnknownReason::Other,
-            },
-        }
-    }
-
     fn id(text: &str) -> EventId {
         text.parse().expect("id")
     }
 
     /// `brief` over one slice of events — the fold and the history from
     /// the same log, which is the only honest way to pair them.
-    fn brief_of(
-        events: &[Event],
-        reads: &Reads,
-        verdicts: &Verdicts,
-        id: &EventId,
-    ) -> Option<Brief> {
-        brief(&fold(events), events, reads, verdicts, id, NOW, 0)
+    fn brief_of(events: &[Event], reads: &Reads, id: &EventId) -> Option<Brief> {
+        brief(&fold(events), events, reads, id, NOW, 0)
     }
 
     /// The tests' clock: far enough past every fixture time that an age
@@ -646,7 +528,6 @@ mod tests {
         let brief = brief_of(
             &[filed("pi.1", 10, "the subject", "the body\ntwo lines")],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -687,13 +568,8 @@ mod tests {
         *labels = vec!["chore".to_string()];
         *skill = Some("review".to_string());
 
-        let brief = brief_of(
-            &[event],
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
-            &id("pi.1"),
-        )
-        .expect("filed");
+        let brief =
+            brief_of(&[event], &reads(Vec::new(), Vec::new(), None), &id("pi.1")).expect("filed");
         assert_eq!(brief.status, "ready");
         assert_eq!(brief.assignee.as_deref(), Some("agent"));
         assert_eq!(brief.priority, "high");
@@ -729,13 +605,8 @@ mod tests {
             ),
             session(commented("pi.3", "one@b.c", 30, "pi.1", "note"), None),
         ];
-        let brief = brief_of(
-            &events,
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
-            &id("pi.1"),
-        )
-        .expect("filed");
+        let brief =
+            brief_of(&events, &reads(Vec::new(), Vec::new(), None), &id("pi.1")).expect("filed");
         assert_eq!(brief.filed_by, "filer@b.c");
         assert_eq!(brief.filed_session.as_deref(), Some(uuid));
         assert_eq!(brief.status_by.as_deref(), Some("mover@b.c"));
@@ -754,13 +625,8 @@ mod tests {
             .cloned()
             .map(|event| session(event, None))
             .collect();
-        let brief = brief_of(
-            &untagged,
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
-            &id("pi.1"),
-        )
-        .expect("filed");
+        let brief =
+            brief_of(&untagged, &reads(Vec::new(), Vec::new(), None), &id("pi.1")).expect("filed");
         assert!(brief.filed_session.is_none());
         assert!(brief.status_session.is_none());
         assert!(brief.history.iter().all(|moment| moment.session.is_none()));
@@ -775,7 +641,6 @@ mod tests {
                 commented("pi.3", "two@b.c", 30, "pi.1", "second"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -793,7 +658,6 @@ mod tests {
         let plain = brief_of(
             &[filed("pi.1", 10, "s", "")],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -806,7 +670,6 @@ mod tests {
                 edited("pi.2", "editor@b.c", 30, "pi.1", Some("reworded"), None),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -829,7 +692,7 @@ mod tests {
         ];
         let empty = reads(Vec::new(), Vec::new(), None);
 
-        let one = brief_of(&events, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+        let one = brief_of(&events, &empty, &id("pi.1")).expect("filed");
         assert_eq!(one.depends_on.len(), 1);
         assert_eq!(one.depends_on[0].flight, "pi.2");
         assert_eq!(one.depends_on[0].number, 2);
@@ -838,7 +701,7 @@ mod tests {
         assert!(one.depends_on[0].closed);
         assert!(one.blocks.is_empty());
 
-        let two = brief_of(&events, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
+        let two = brief_of(&events, &empty, &id("pi.2")).expect("filed");
         assert_eq!(two.blocks.len(), 1);
         assert_eq!(two.blocks[0].flight, "pi.1");
         assert_eq!(two.blocks[0].number, 1);
@@ -857,7 +720,6 @@ mod tests {
                 vec![branch("work", true, true)],
                 Some("work"),
             ),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -880,7 +742,6 @@ mod tests {
                 vec![branch("@detached", true, true)],
                 None,
             ),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -897,7 +758,6 @@ mod tests {
                 held("pi.2", "asker@b.c", 60, "pi.1", "which?"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -915,13 +775,8 @@ mod tests {
             held("pi.2", "asker@b.c", 60, "pi.1", "which?"),
             canceled("pi.3", "a@b.c", 70, "pi.1", "superseded"),
         ];
-        let brief = brief_of(
-            &events,
-            &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
-            &id("pi.1"),
-        )
-        .expect("filed");
+        let brief =
+            brief_of(&events, &reads(Vec::new(), Vec::new(), None), &id("pi.1")).expect("filed");
         assert!(brief.question.is_none(), "the close took the question");
         assert!(brief.asked_by.is_none());
         assert!(brief.asked_at.is_none());
@@ -947,7 +802,6 @@ mod tests {
                 done("pi.3", "a@b.c", 70, "pi.1"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -965,7 +819,6 @@ mod tests {
                 moved("pi.2", "crew@b.c", 40, "pi.1", "in_progress"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -983,7 +836,6 @@ mod tests {
                 done("pi.2", "closer@b.c", 90, "pi.1"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -992,7 +844,6 @@ mod tests {
         assert_eq!(brief.status_at, Some(90));
         assert_eq!(brief.body, "the body");
         assert!(matches!(brief.standing, Standing::Done));
-        assert!(brief.beat.is_empty(), "not in the walk at all");
     }
 
     #[test]
@@ -1005,7 +856,6 @@ mod tests {
                 answered("pi.4", 80, "pi.1"),
             ],
             &reads(vec![op("pi.1", Some("work"), 50)], Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -1019,16 +869,8 @@ mod tests {
             moved("pi.2", "a@b.c", NOW - 200_000, "pi.1", "in_progress"),
         ];
         let empty = reads(Vec::new(), Vec::new(), None);
-        let stopped = brief(
-            &fold(&stalled),
-            &stalled,
-            &empty,
-            &Verdicts::default(),
-            &id("pi.1"),
-            NOW,
-            172_800,
-        )
-        .expect("filed");
+        let stopped =
+            brief(&fold(&stalled), &stalled, &empty, &id("pi.1"), NOW, 172_800).expect("filed");
         assert!(stopped.stale);
         assert!(!stopped.changed_since_ready);
         assert!(stopped.progress.is_none());
@@ -1041,7 +883,7 @@ mod tests {
             linked("pi.5", 50, "pi.1", "pi.3"),
             done("pi.6", "a@b.c", 60, "pi.2"),
         ];
-        let parent = brief_of(&family, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+        let parent = brief_of(&family, &empty, &id("pi.1")).expect("filed");
         assert_eq!(parent.progress, Some((1, 2)));
 
         let moved_under = [
@@ -1052,7 +894,6 @@ mod tests {
             &fold(&moved_under),
             &moved_under,
             &reads(vec![op("pi.1", Some("work"), 200)], Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
             NOW,
             0,
@@ -1068,7 +909,6 @@ mod tests {
             brief_of(
                 &[filed("pi.1", 10, "s", "")],
                 &reads(Vec::new(), Vec::new(), None),
-                &Verdicts::default(),
                 &id("pi.99"),
             )
             .is_none()
@@ -1089,7 +929,6 @@ mod tests {
                 vec![branch("work", true, false)],
                 None,
             ),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -1107,7 +946,6 @@ mod tests {
                 vec![branch("work", false, true)],
                 None,
             ),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -1126,7 +964,6 @@ mod tests {
                 linked("pi.3", 30, "pi.1", "pi.2"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -1144,7 +981,6 @@ mod tests {
         let brief = brief_of(
             &[filed("pi.1", 10, "s", "")],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -1153,110 +989,12 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_flight_lists_only_the_rows_that_name_it() {
-        // Three candidates, two collide pairs. pi.2 loses to pi.1 on the
-        // first gate hit; pi.3 clears pi.1 and admits — the b/c pair
-        // never fires because a passed row is not on the gate. pi.1's
-        // beat is the naming row alone.
-        let brief = brief_of(
-            &[agent("pi.1", 10), agent("pi.2", 20), agent("pi.3", 30)],
-            &reads(
-                vec![
-                    op("pi.1", Some("a"), 40),
-                    op("pi.2", Some("b"), 50),
-                    op("pi.3", Some("c"), 60),
-                ],
-                vec![
-                    branch("a", false, false),
-                    branch("b", false, false),
-                    branch("c", false, false),
-                ],
-                None,
-            ),
-            &Verdicts {
-                pairs: vec![
-                    collide("a", "b", &["shared.txt"]),
-                    collide("b", "c", &["other.txt"]),
-                ],
-            },
-            &id("pi.1"),
-        )
-        .expect("filed");
-        assert!(matches!(brief.standing, Standing::Ready));
-        assert_eq!(brief.beat.len(), 1);
-        assert_eq!(brief.beat[0].flight, "pi.2");
-        match &brief.beat[0].reason {
-            Skip::Collides { with, paths } => {
-                assert_eq!(with, "pi.1");
-                assert_eq!(paths, &["shared.txt"]);
-            }
-            other => panic!("expected a collides row, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_flying_flights_beat_is_what_its_branch_blocks() {
-        let brief = brief_of(
-            &[
-                agent("pi.1", 10),
-                agent("pi.2", 20),
-                moved("pi.3", "a@b.c", 30, "pi.1", "in_progress"),
-            ],
-            &reads(
-                vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-                vec![branch("left", false, false), branch("right", false, false)],
-                None,
-            ),
-            &Verdicts {
-                pairs: vec![unknown("left", "right")],
-            },
-            &id("pi.1"),
-        )
-        .expect("filed");
-        assert!(matches!(brief.standing, Standing::InProgress));
-        assert_eq!(brief.beat.len(), 1);
-        assert_eq!(brief.beat[0].flight, "pi.2");
-        assert!(matches!(
-            &brief.beat[0].reason,
-            Skip::NoVerdict { with } if with == "pi.1"
-        ));
-    }
-
-    #[test]
-    fn a_passed_flights_beat_is_empty() {
-        // Only gate entries and admitted candidates are ever named, so
-        // the loser blocks nothing.
-        let brief = brief_of(
-            &[agent("pi.1", 10), agent("pi.2", 20)],
-            &reads(
-                vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-                vec![branch("left", false, false), branch("right", false, false)],
-                None,
-            ),
-            &Verdicts {
-                pairs: vec![collide("left", "right", &["shared.txt"])],
-            },
-            &id("pi.2"),
-        )
-        .expect("filed");
-        match &brief.standing {
-            Standing::Collides { with, paths } => {
-                assert_eq!(with, "pi.1");
-                assert_eq!(paths, &["shared.txt"]);
-            }
-            other => panic!("expected collides, got {other:?}"),
-        }
-        assert!(brief.beat.is_empty());
-    }
-
-    #[test]
-    fn the_walk_ignores_want_and_reaches_late_candidates() {
-        // `next`'s default want is 1; the full walk still reaches the
-        // third candidate.
+    fn a_late_agent_flight_briefs_ready() {
+        // `next`'s default want is 1; the standing does not care where in
+        // filed order the flight sits.
         let brief = brief_of(
             &[agent("pi.1", 10), agent("pi.2", 20), agent("pi.3", 30)],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.3"),
         )
         .expect("filed");
@@ -1272,26 +1010,20 @@ mod tests {
         ];
         let empty = reads(Vec::new(), Vec::new(), None);
 
-        // Derived Waiting: not a pool candidate, so not a walk outcome.
-        let dependent =
-            brief_of(&events, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+        // Derived Waiting: not a pool candidate.
+        let dependent = brief_of(&events, &empty, &id("pi.1")).expect("filed");
         assert_eq!(dependent.status, "waiting");
         assert!(matches!(dependent.standing, Standing::Yours));
         assert!(dependent.status_reason.is_none());
 
-        // The dependency was never named as a competitor — its beat
-        // stays empty.
-        let dependency =
-            brief_of(&events, &empty, &Verdicts::default(), &id("pi.2")).expect("filed");
+        let dependency = brief_of(&events, &empty, &id("pi.2")).expect("filed");
         assert!(matches!(dependency.standing, Standing::Ready));
-        assert!(dependency.beat.is_empty());
 
         // The closing releases the dependent, and the brief says whose
         // gesture the Ready is.
         let mut released = events.to_vec();
         released.push(moved("pi.4", "closer@b.c", 40, "pi.2", "canceled"));
-        let dependent =
-            brief_of(&released, &empty, &Verdicts::default(), &id("pi.1")).expect("filed");
+        let dependent = brief_of(&released, &empty, &id("pi.1")).expect("filed");
         assert_eq!(dependent.status, "ready");
         assert!(matches!(dependent.standing, Standing::Ready));
         assert_eq!(dependent.status_by.as_deref(), Some("closer@b.c"));
@@ -1313,7 +1045,6 @@ mod tests {
                 done("pi.2", "closer@b.c", 90, "pi.1"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
@@ -1336,149 +1067,11 @@ mod tests {
                 linked("pi.3", 30, "pi.1", "pi.2"),
             ],
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             &id("pi.1"),
         )
         .expect("filed");
         let json = serde_json::to_value(&brief).expect("serializes");
         assert_eq!(json["depends_on"][0]["flight"], serde_json::json!("pi.2"));
         assert_eq!(json["depends_on"][0]["number"], serde_json::json!(2));
-    }
-
-    #[test]
-    fn wants_verdicts_asks_for_probes_only_when_they_can_matter() {
-        // Live, resolving branch, a second live branch to pair with: yes.
-        let two_branches = [agent("pi.1", 10), agent("pi.2", 20)];
-        let paired = reads(
-            vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-            vec![branch("left", false, false), branch("right", false, false)],
-            None,
-        );
-        assert!(wants_verdicts(&fold(&two_branches), &paired, &id("pi.1")));
-        assert!(wants_verdicts(&fold(&two_branches), &paired, &id("pi.2")));
-
-        // Closed: no — not in the walk at all, whatever the board holds.
-        let with_done = [
-            agent("pi.1", 10),
-            agent("pi.2", 20),
-            agent("pi.3", 30),
-            done("pi.4", "a@b.c", 90, "pi.3"),
-        ];
-        let three = reads(
-            vec![
-                op("pi.1", Some("left"), 40),
-                op("pi.2", Some("right"), 50),
-                op("pi.3", Some("gone"), 60),
-            ],
-            vec![
-                branch("left", false, false),
-                branch("right", false, false),
-                branch("gone", false, false),
-            ],
-            None,
-        );
-        assert!(!wants_verdicts(&fold(&with_done), &three, &id("pi.3")));
-
-        // Branchless: no — cannot be gated, and never named by a row.
-        let one_branchless = [agent("pi.1", 10), agent("pi.2", 20), agent("pi.3", 30)];
-        let branchless = reads(
-            vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-            vec![branch("left", false, false), branch("right", false, false)],
-            None,
-        );
-        assert!(!wants_verdicts(
-            &fold(&one_branchless),
-            &branchless,
-            &id("pi.3")
-        ));
-
-        // `@detached` and an index-absent branch: no — the existing
-        // cannot-be-held idiom.
-        let sentinel = reads(
-            vec![
-                op("pi.1", Some("left"), 40),
-                op("pi.2", Some("right"), 50),
-                op("pi.3", Some("@detached"), 60),
-            ],
-            vec![branch("left", false, false), branch("right", false, false)],
-            None,
-        );
-        assert!(!wants_verdicts(
-            &fold(&one_branchless),
-            &sentinel,
-            &id("pi.3")
-        ));
-        let landed = reads(
-            vec![
-                op("pi.1", Some("left"), 40),
-                op("pi.2", Some("right"), 50),
-                op("pi.3", Some("landed"), 60),
-            ],
-            vec![branch("left", false, false), branch("right", false, false)],
-            None,
-        );
-        assert!(!wants_verdicts(
-            &fold(&one_branchless),
-            &landed,
-            &id("pi.3")
-        ));
-
-        // A solo branch makes no pair: no.
-        let solo = reads(
-            vec![op("pi.1", Some("left"), 40)],
-            vec![branch("left", false, false)],
-            None,
-        );
-        assert!(!wants_verdicts(
-            &fold(&[agent("pi.1", 10)]),
-            &solo,
-            &id("pi.1")
-        ));
-
-        // Unfiled: no.
-        assert!(!wants_verdicts(&fold(&two_branches), &paired, &id("pi.99")));
-    }
-
-    #[test]
-    fn a_skipped_probe_briefs_byte_identically() {
-        // The invariance pin behind the laziness: where `wants_verdicts`
-        // says no, verdicts cannot reach the envelope. A closed flight on
-        // a board whose live branches genuinely collide is the strongest
-        // case — the pairs exist, and the answer must not care.
-        let events = [
-            agent("pi.1", 10),
-            agent("pi.2", 20),
-            agent("pi.3", 30),
-            done("pi.4", "a@b.c", 90, "pi.3"),
-        ];
-        let board = reads(
-            vec![
-                op("pi.1", Some("left"), 40),
-                op("pi.2", Some("right"), 50),
-                op("pi.3", Some("gone"), 60),
-            ],
-            vec![
-                branch("left", false, false),
-                branch("right", false, false),
-                branch("gone", false, false),
-            ],
-            None,
-        );
-        let fold = fold(&events);
-        assert!(!wants_verdicts(&fold, &board, &id("pi.3")));
-
-        let probed = Verdicts {
-            pairs: vec![
-                collide("left", "right", &["shared.txt"]),
-                collide("left", "gone", &["shared.txt"]),
-                collide("right", "gone", &["shared.txt"]),
-            ],
-        };
-        let lazy = brief_of(&events, &board, &Verdicts::default(), &id("pi.3")).expect("filed");
-        let full = brief_of(&events, &board, &probed, &id("pi.3")).expect("filed");
-        assert_eq!(
-            serde_json::to_string(&lazy).expect("serializes"),
-            serde_json::to_string(&full).expect("serializes"),
-        );
     }
 }

@@ -1256,7 +1256,7 @@ fn lifecycle(status: &str) -> u8 {
 mod tests {
     use super::super::flight::fold;
     use super::super::model::{ClosedWindow, enrich, rows};
-    use super::super::reads::{Reads, Verdicts};
+    use super::super::reads::Reads;
     use super::*;
     use crate::ff::BranchList;
     use crate::log::{Event, EventId, Kind};
@@ -1332,7 +1332,7 @@ mod tests {
     }
 
     fn flights(events: &[Event]) -> Vec<FlightView> {
-        rows(fold(events), &reads(), &Verdicts::default(), NOW, 0).flights
+        rows(fold(events), &reads(), NOW, 0).flights
     }
 
     fn ids(views: &[FlightView]) -> Vec<&str> {
@@ -1813,14 +1813,7 @@ mod tests {
                 },
             ),
         ];
-        let board = enrich(
-            fold(&events),
-            &reads(),
-            &Verdicts::default(),
-            NOW,
-            0,
-            ClosedWindow::default(),
-        );
+        let board = enrich(fold(&events), &reads(), NOW, 0, ClosedWindow::default());
         let folded = Query::default().fold(flights(&events), NOW);
 
         // The board's one closed window, dealt by status: the render

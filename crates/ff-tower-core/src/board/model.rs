@@ -7,7 +7,7 @@
 //! its derived status names — the projection the fold already made over
 //! the stored facts, the open question and the edges — and `enrich`
 //! moves it nowhere further; `held`/`resolving` stay fufu's branch
-//! verdicts, printed on the row, deciding no section.
+//! holds, printed on the row, deciding no section.
 //!
 //! What the repository knows lands beside the fields as two independent
 //! facts, never joined under one word: a flight In Progress that its
@@ -23,11 +23,10 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::ff::Pairing;
 use crate::log::Event;
 
 use super::flight::{Flight, Fold};
-use super::reads::{Reads, Verdicts};
+use super::reads::Reads;
 
 /// How much of the closed group a render carries.
 ///
@@ -191,20 +190,6 @@ pub struct FlightView {
     /// the question stood. `null` while the flight is open or when the
     /// close said nothing.
     pub closed_reason: Option<String>,
-    /// Flights this one would conflict with, and where. Filed order.
-    pub collides: Vec<CollideView>,
-    /// Flights whose pairing fufu could not judge — unknown never rounds
-    /// down to clear. Filed order.
-    pub unanswered: Vec<String>,
-}
-
-/// One discovered conflict, as a flight's row carries it.
-#[derive(Debug, Clone, Serialize)]
-pub struct CollideView {
-    /// The other flight's id.
-    pub with: String,
-    /// fufu's verdict, verbatim.
-    pub paths: Vec<String>,
 }
 
 /// The fold's flights as flat rows, enriched with what the repository
@@ -230,31 +215,9 @@ pub struct Rows {
 /// Every flight is enriched the same way — branch from the freshest op
 /// row (`@detached` carried literal), tip and holds from the branch row,
 /// `last_change` from the op row's time.
-///
-/// Verdicts land on every live flight against every other live flight on
-/// a distinct branch — the facts are orthogonal to any grouping.
-/// `Collide` becomes a `collides` entry, `Unknown` an `unanswered` one,
-/// and `Clear` or an unprobed pair adds nothing; entries keep filed
-/// order, so a render is deterministic.
-pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_after: i64) -> Rows {
+pub fn rows(fold: Fold, reads: &Reads, now: i64, stale_after: i64) -> Rows {
     let freshest = reads.freshest();
     let branches = reads.branch_index();
-
-    // The live flight-to-branch assignments, in filed order — what each
-    // flight's verdicts are computed against.
-    let assignments: Vec<(String, String)> = fold
-        .flights
-        .iter()
-        .filter(|flight| !flight.closed())
-        .filter_map(|flight| {
-            let id = flight.id.to_string();
-            let branch = freshest.get(id.as_str())?.branch.as_deref()?;
-            if branch == "@detached" {
-                return None;
-            }
-            Some((id, branch.to_string()))
-        })
-        .collect();
 
     // The progress marks and the since lines, taken before the flights
     // are consumed and carried as owned rows.
@@ -281,7 +244,6 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
         });
         let last_change = op.map(|op| op.time);
         let status_at = flight.status_mark.as_ref().map(|mark| mark.at);
-        let is_closed = flight.closed();
 
         // The first audit: In Progress and the branch has forgotten it.
         // With no capture at all the clock runs from the move itself —
@@ -298,24 +260,6 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
         let changed_since_ready = flight.status == "ready"
             && last_change.is_some_and(|change| change > status_at.unwrap_or(flight.filed_at));
 
-        let mut collides = Vec::new();
-        let mut unanswered = Vec::new();
-        if !is_closed && let Some(branch) = op.and_then(|op| op.branch.as_deref()) {
-            for (other, theirs) in &assignments {
-                if *other == id || theirs == branch {
-                    continue;
-                }
-                match verdicts.between(branch, theirs) {
-                    Some(Pairing::Collide { paths }) => collides.push(CollideView {
-                        with: other.clone(),
-                        paths: paths.clone(),
-                    }),
-                    Some(Pairing::Unknown { .. }) => unanswered.push(other.clone()),
-                    Some(Pairing::Clear) | None => {}
-                }
-            }
-        }
-
         let mut view = view(
             flight,
             reasons.remove(&id),
@@ -328,8 +272,6 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
         view.last_change = last_change;
         view.stale = stale;
         view.changed_since_ready = changed_since_ready;
-        view.collides = collides;
-        view.unanswered = unanswered;
         view.progress = marks.get(&id).copied();
         flights.push(view);
     }
@@ -364,12 +306,11 @@ pub fn rows(fold: Fold, reads: &Reads, verdicts: &Verdicts, now: i64, stale_afte
 pub fn enrich(
     fold: Fold,
     reads: &Reads,
-    verdicts: &Verdicts,
     now: i64,
     stale_after: i64,
     closed: ClosedWindow,
 ) -> Board {
-    let rows = rows(fold, reads, verdicts, now, stale_after);
+    let rows = rows(fold, reads, now, stale_after);
 
     let mut inbox = WaitingOnYou {
         questions: Vec::new(),
@@ -566,15 +507,12 @@ fn view(
         question,
         asked_at,
         closed_reason: flight.closed_reason,
-        collides: Vec::new(),
-        unanswered: Vec::new(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::flight::fold;
-    use super::super::reads::BranchPairing;
     use super::*;
     use crate::ff::{BranchInfo, BranchList, OpEntry};
     use crate::log::{Event, EventId, Kind};
@@ -736,20 +674,13 @@ mod tests {
     /// The common shape: no threshold, so the stale line never fires
     /// where a test is not about it.
     fn board(events: &[Event], reads: &Reads) -> Board {
-        enrich(
-            fold(events),
-            reads,
-            &Verdicts::default(),
-            NOW,
-            0,
-            ClosedWindow::default(),
-        )
+        enrich(fold(events), reads, NOW, 0, ClosedWindow::default())
     }
 
     /// The same board with the closed window named, where a test is
     /// about the window itself.
     fn windowed(events: &[Event], reads: &Reads, closed: ClosedWindow) -> Board {
-        enrich(fold(events), reads, &Verdicts::default(), NOW, 0, closed)
+        enrich(fold(events), reads, NOW, 0, closed)
     }
 
     fn ids(views: &[FlightView]) -> Vec<&str> {
@@ -1071,7 +1002,6 @@ mod tests {
         let board = enrich(
             fold(&events),
             &reads,
-            &Verdicts::default(),
             NOW,
             TWO_DAYS,
             ClosedWindow::default(),
@@ -1079,14 +1009,7 @@ mod tests {
         assert!(board.in_progress[0].stale);
 
         // The threshold off: the same board says nothing.
-        let board = enrich(
-            fold(&events),
-            &reads,
-            &Verdicts::default(),
-            NOW,
-            0,
-            ClosedWindow::default(),
-        );
+        let board = enrich(fold(&events), &reads, NOW, 0, ClosedWindow::default());
         assert!(!board.in_progress[0].stale);
     }
 
@@ -1099,7 +1022,6 @@ mod tests {
         let board = enrich(
             fold(&events),
             &reads(Vec::new(), Vec::new(), None),
-            &Verdicts::default(),
             NOW,
             TWO_DAYS,
             ClosedWindow::default(),
@@ -1133,7 +1055,6 @@ mod tests {
                 vec![branch("work", false, false)],
                 None,
             ),
-            &Verdicts::default(),
             NOW,
             TWO_DAYS,
             ClosedWindow::default(),
@@ -1396,206 +1317,5 @@ mod tests {
         assert_eq!(view.branch.as_deref(), Some("work"));
         assert!(view.tip.is_some());
         assert!(view.held);
-    }
-
-    fn pairing(a: &str, b: &str, pairing: Pairing) -> BranchPairing {
-        BranchPairing {
-            a: a.to_string(),
-            b: b.to_string(),
-            pairing,
-        }
-    }
-
-    fn collide(a: &str, b: &str, paths: &[&str]) -> BranchPairing {
-        pairing(
-            a,
-            b,
-            Pairing::Collide {
-                paths: paths.iter().map(|p| p.to_string()).collect(),
-            },
-        )
-    }
-
-    fn probed(events: &[Event], reads: &Reads, verdicts: Verdicts) -> Board {
-        enrich(
-            fold(events),
-            reads,
-            &verdicts,
-            NOW,
-            0,
-            ClosedWindow::default(),
-        )
-    }
-
-    #[test]
-    fn a_collide_lands_on_both_flights_views_with_its_paths() {
-        let board = probed(
-            &[filed("pi.1", 10), filed("pi.2", 20)],
-            &reads(
-                vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
-                vec![branch("left", false, false), branch("right", false, false)],
-                None,
-            ),
-            Verdicts {
-                pairs: vec![collide("left", "right", &["shared.txt"])],
-            },
-        );
-        let one = board.backlog.iter().find(|v| v.id == "pi.1").unwrap();
-        let two = board.backlog.iter().find(|v| v.id == "pi.2").unwrap();
-        assert_eq!(one.collides.len(), 1);
-        assert_eq!(one.collides[0].with, "pi.2");
-        assert_eq!(one.collides[0].paths, ["shared.txt"]);
-        assert_eq!(two.collides.len(), 1);
-        assert_eq!(two.collides[0].with, "pi.1");
-        assert!(one.unanswered.is_empty() && two.unanswered.is_empty());
-    }
-
-    #[test]
-    fn an_unknown_pairing_is_unanswered_never_a_collide() {
-        let board = probed(
-            &[filed("pi.1", 10), filed("pi.2", 20)],
-            &reads(
-                vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
-                vec![branch("left", false, false), branch("right", false, false)],
-                None,
-            ),
-            Verdicts {
-                pairs: vec![pairing(
-                    "left",
-                    "right",
-                    Pairing::Unknown {
-                        reason: crate::ff::UnknownReason::Other,
-                    },
-                )],
-            },
-        );
-        for view in &board.backlog {
-            assert!(view.collides.is_empty());
-            assert_eq!(view.unanswered.len(), 1);
-        }
-        let one = board.backlog.iter().find(|v| v.id == "pi.1").unwrap();
-        assert_eq!(one.unanswered, ["pi.2"]);
-    }
-
-    #[test]
-    fn clear_and_unprobed_pairs_add_nothing() {
-        let board = probed(
-            &[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)],
-            &reads(
-                vec![
-                    op("pi.1", Some("a"), 50),
-                    op("pi.2", Some("b"), 60),
-                    op("pi.3", Some("c"), 70),
-                ],
-                vec![
-                    branch("a", false, false),
-                    branch("b", false, false),
-                    branch("c", false, false),
-                ],
-                None,
-            ),
-            // (a, b) clear; (a, c) and (b, c) never probed.
-            Verdicts {
-                pairs: vec![pairing("a", "b", Pairing::Clear)],
-            },
-        );
-        for view in &board.backlog {
-            assert!(view.collides.is_empty(), "{view:?}");
-            assert!(view.unanswered.is_empty(), "{view:?}");
-        }
-    }
-
-    #[test]
-    fn two_flights_on_one_branch_get_no_entries_against_each_other() {
-        // A same-name verdict row would be a caller bug; even with one
-        // present, same-branch neighbors are one tree and never listed.
-        let board = probed(
-            &[filed("pi.1", 10), filed("pi.2", 20)],
-            &reads(
-                vec![op("pi.1", Some("work"), 50), op("pi.2", Some("work"), 60)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-            Verdicts {
-                pairs: vec![collide("work", "work", &["shared.txt"])],
-            },
-        );
-        for view in &board.backlog {
-            assert!(view.collides.is_empty());
-            assert!(view.unanswered.is_empty());
-        }
-    }
-
-    #[test]
-    fn a_questioned_flight_keeps_its_collides() {
-        let board = probed(
-            &[
-                filed("pi.1", 10),
-                filed("pi.2", 20),
-                held("pi.3", 70, "pi.1", "which?"),
-            ],
-            &reads(
-                vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
-                vec![branch("left", false, false), branch("right", false, false)],
-                None,
-            ),
-            Verdicts {
-                pairs: vec![collide("left", "right", &["shared.txt"])],
-            },
-        );
-        assert_eq!(board.waiting_on_you.questions[0].collides[0].with, "pi.2");
-        assert_eq!(board.backlog[0].collides[0].with, "pi.1");
-    }
-
-    #[test]
-    fn a_closed_flight_carries_no_collides() {
-        let board = probed(
-            &[
-                filed("pi.1", 10),
-                filed("pi.2", 20),
-                done("pi.3", NOW - 60, "pi.1"),
-            ],
-            &reads(
-                vec![op("pi.1", Some("left"), 50), op("pi.2", Some("right"), 60)],
-                vec![branch("left", false, false), branch("right", false, false)],
-                None,
-            ),
-            Verdicts {
-                pairs: vec![collide("left", "right", &["shared.txt"])],
-            },
-        );
-        assert!(board.closed[0].collides.is_empty());
-        assert!(
-            board.backlog[0].collides.is_empty(),
-            "a closed flight is not a live partner either"
-        );
-    }
-
-    #[test]
-    fn collide_entries_follow_filed_order() {
-        let board = probed(
-            &[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)],
-            &reads(
-                vec![
-                    op("pi.1", Some("a"), 50),
-                    op("pi.2", Some("b"), 60),
-                    op("pi.3", Some("c"), 70),
-                ],
-                vec![
-                    branch("a", false, false),
-                    branch("b", false, false),
-                    branch("c", false, false),
-                ],
-                None,
-            ),
-            // Rows deliberately out of filed order; the view's entries
-            // follow the assignment list, not the verdict list.
-            Verdicts {
-                pairs: vec![collide("c", "b", &["y.txt"]), collide("a", "b", &["x.txt"])],
-            },
-        );
-        let two = board.backlog.iter().find(|v| v.id == "pi.2").unwrap();
-        let withs: Vec<&str> = two.collides.iter().map(|c| c.with.as_str()).collect();
-        assert_eq!(withs, ["pi.1", "pi.3"]);
     }
 }

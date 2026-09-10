@@ -6,7 +6,7 @@
 //! tower. The fakes cover what a healthy fufu will not emit on request: a
 //! contract from the future, a held exit, output that is not an envelope.
 
-use ff_tower_core::ff::{Error, Exit, Ff, Head, Pairing};
+use ff_tower_core::ff::{Error, Exit, Ff, Head};
 use ff_tower_testsupport::{FakeFf, Repo};
 
 // ---------------------------------------------------------------- real fufu
@@ -41,52 +41,6 @@ fn status_sees_work_that_has_not_been_committed() {
     let paths: Vec<&str> = status.changes.iter().map(|c| c.path.as_str()).collect();
     assert_eq!(paths, ["src/main.rs"]);
     assert!(status.insertions > 0);
-}
-
-#[test]
-fn collide_reads_the_sideways_axis() {
-    let repo = Repo::new();
-    repo.ff(&["start", "-b", "left"]);
-    repo.write("shared.txt", "left side\n");
-    repo.ff(&["commit", "-m", "left: touch shared"]);
-
-    repo.ff(&["switch", "main"]);
-    repo.ff(&["start", "-b", "right"]);
-    repo.write("shared.txt", "right side\n");
-    repo.ff(&["commit", "-m", "right: touch shared"]);
-
-    let collision = Ff::at(repo.path())
-        .collide("left", "right")
-        .expect("collide");
-
-    assert_eq!(collision.a.name, "left");
-    assert_eq!(collision.b.name, "right");
-    match &collision.pairing {
-        Pairing::Collide { paths } => assert_eq!(paths, &["shared.txt"]),
-        other => panic!("two edits to one file should collide, got {other:?}"),
-    }
-    assert!(!collision.pairing.is_clear());
-    // The ids a fold caches on: a verdict holds until one of the trees moves.
-    assert!(!collision.a.tip.is_empty());
-    assert!(!collision.a.tree.is_empty());
-}
-
-#[test]
-fn collide_is_clear_when_branches_touch_different_files() {
-    let repo = Repo::new();
-    repo.ff(&["start", "-b", "left"]);
-    repo.write("left.txt", "left\n");
-    repo.ff(&["commit", "-m", "left: its own file"]);
-
-    repo.ff(&["switch", "main"]);
-    repo.ff(&["start", "-b", "right"]);
-    repo.write("right.txt", "right\n");
-    repo.ff(&["commit", "-m", "right: its own file"]);
-
-    let collision = Ff::at(repo.path())
-        .collide("left", "right")
-        .expect("collide");
-    assert!(collision.pairing.is_clear(), "got {:?}", collision.pairing);
 }
 
 #[test]

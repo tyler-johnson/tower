@@ -61,7 +61,7 @@ use axum::http::{HeaderName, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use ff_tower_core::board::{self, Query, ResolveError, Verdicts};
+use ff_tower_core::board::{self, Query, ResolveError};
 use ff_tower_core::config;
 use ff_tower_core::ff::{self, Ff};
 use ff_tower_core::log::{self, Store};
@@ -316,21 +316,8 @@ async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<
         let id = board::resolve(&fold, &flight)?;
         let ff = Ff::at(repo).env_program();
         let reads = board::gather(&ff)?;
-        let verdicts = if board::wants_verdicts(&fold, &reads, &id) {
-            board::probe(&ff, &fold, &reads)?
-        } else {
-            Verdicts::default()
-        };
-        let brief = board::brief(
-            &fold,
-            &events,
-            &reads,
-            &verdicts,
-            &id,
-            board::now(),
-            stale_after(repo),
-        )
-        .expect("resolved to a filed flight");
+        let brief = board::brief(&fold, &events, &reads, &id, board::now(), stale_after(repo))
+            .expect("resolved to a filed flight");
         Ok(machine::emit("brief", &brief))
     })
     .await

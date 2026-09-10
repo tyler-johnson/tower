@@ -1,8 +1,8 @@
-//! The pick: `next`'s fold over the same probe output as the board.
+//! The pick: `next`'s walk over the same reads as the board.
 //!
 //! Pure like `flight.rs` — no `crate::ff` spawns, no `std::process`; the
-//! walk runs over a [`Fold`], a [`Reads`], and a [`Verdicts`] the caller
-//! already fetched, so admission is unit-testable with hand-built rows.
+//! walk runs over a [`Fold`] and a [`Reads`] the caller already fetched,
+//! so the pool is unit-testable with hand-built rows.
 //!
 //! The pool is every Ready flight in the agent lane: the derived status
 //! and the stored assignee, read off the fold — never the registry
@@ -16,27 +16,20 @@
 //! `yours`, the count behind the `yours` outcome; the flights themselves
 //! are silent here because the board is their surface, not this one's.
 //!
-//! Every live flight *not* in the pool keeps its branch on the gate —
-//! waiting and holding flights included, because a held branch holds
-//! real work that will land. Admission is greedy: candidates walk in filed
-//! order, and one joins the pick when its branch is clear against the
-//! gate and every candidate already admitted. Unknown excludes — a
-//! pairing fufu could not judge never rounds down to clear.
+//! Candidates walk in filed order and the first `want` of them are the
+//! pick. Nothing deconflicts here: which branches can fly together is
+//! not tower's question.
 
 use serde::Serialize;
 
-use crate::ff::Pairing;
-
 use super::flight::Fold;
-use super::reads::{Reads, Verdicts};
+use super::reads::Reads;
 
-/// What the walk produced: the admitted set, and every candidate it
-/// examined and skipped. Candidates past the point the walk stopped get
-/// no row — the passed list explains the pick, never the whole board.
+/// What the walk produced: the picked set, and the count of Ready work
+/// the lane kept out of the pool.
 #[derive(Debug, Serialize)]
 pub struct Picks {
     pub picked: Vec<Pick>,
-    pub passed: Vec<Passed>,
     /// Ready, unquestioned, not fufu-held — excluded from the pool by
     /// the lane alone. Work that exists and needs you.
     pub yours: usize,
@@ -74,7 +67,7 @@ impl Picks {
     }
 }
 
-/// One admitted flight, in wire form.
+/// One picked flight, in wire form.
 #[derive(Debug, Serialize)]
 pub struct Pick {
     pub flight: String,
@@ -82,126 +75,53 @@ pub struct Pick {
     /// half, beside the wire id.
     pub number: u64,
     pub subject: String,
-    pub branch: Option<String>,
 }
 
-/// One examined-and-skipped flight, with the machine-matchable reason.
-#[derive(Debug, Serialize)]
-pub struct Passed {
-    pub flight: String,
-    #[serde(flatten)]
-    pub reason: Skip,
-}
-
-/// Why a candidate lost. Readiness is not a reason: a flight with a
-/// live dependency is Waiting, and Waiting is not in the pool.
-#[derive(Debug, Serialize)]
-#[serde(tag = "reason", rename_all = "kebab-case")]
-pub enum Skip {
-    /// A collide against a flying flight or an already-picked candidate;
-    /// the first hit wins.
-    Collides { with: String, paths: Vec<String> },
-    /// A pairing fufu could not judge — unknown never rounds down.
-    NoVerdict { with: String },
-}
-
-/// Walk the candidates in filed order and admit up to `want` of them.
-pub fn pick(fold: &Fold, reads: &Reads, verdicts: &Verdicts, want: usize) -> Picks {
+/// Walk the candidates in filed order and pick the first `want` of them.
+pub fn pick(fold: &Fold, reads: &Reads, want: usize) -> Picks {
     let freshest = reads.freshest();
     let index = reads.branch_index();
 
-    // Per live flight: its branch (non-`@detached`, from the freshest op
-    // row) and whether it is in the pool — Ready, agent lane, no open
-    // question, and its branch row not held or resolving. A branch of
-    // `None`, `@detached`, or a name absent from the index cannot be
-    // held, the existing idiom.
-    let mut candidates = Vec::new();
-    let mut gate: Vec<(String, String)> = Vec::new();
+    // Per live flight: whether it is in the pool — Ready, agent lane, no
+    // open question, and its branch row (non-`@detached`, from the
+    // freshest op row) not held or resolving. A branch of `None`,
+    // `@detached`, or a name absent from the index cannot be held, the
+    // existing idiom.
+    let mut picked: Vec<Pick> = Vec::new();
     let mut yours = 0;
     for flight in &fold.flights {
         if flight.closed() {
             continue;
         }
         let id = flight.id.to_string();
-        let branch = freshest
+        let fufu_held = freshest
             .get(id.as_str())
             .and_then(|op| op.branch.as_deref())
             .filter(|name| *name != "@detached")
-            .map(str::to_string);
-        let fufu_held = branch
-            .as_deref()
             .and_then(|name| index.get(name))
             .is_some_and(|row| row.held || row.resolving);
         let unheld = flight.question.is_none() && !fufu_held;
         if unheld && flight.pullable() {
-            candidates.push((flight, id, branch));
-        } else {
-            if unheld && flight.status == "ready" {
-                yours += 1;
+            if picked.len() < want {
+                picked.push(Pick {
+                    flight: id,
+                    number: flight.number,
+                    subject: flight.subject.clone(),
+                });
             }
-            if let Some(branch) = branch {
-                gate.push((id, branch));
-            }
+        } else if unheld && flight.status == "ready" {
+            yours += 1;
         }
     }
 
-    let mut picked: Vec<Pick> = Vec::new();
-    let mut passed = Vec::new();
-    for (flight, id, branch) in candidates {
-        if picked.len() == want {
-            break;
-        }
-        // Admission, only when the candidate has a tree to conflict:
-        // clear against the gate and everything already admitted, in
-        // that order. Same branch is one tree — no conflict.
-        let skip = branch.as_deref().and_then(|mine| {
-            gate.iter()
-                .map(|(other, theirs)| (other, theirs))
-                .chain(
-                    picked
-                        .iter()
-                        .filter_map(|pick| Some((&pick.flight, pick.branch.as_ref()?))),
-                )
-                .find_map(|(other, theirs)| {
-                    if theirs == mine {
-                        return None;
-                    }
-                    match verdicts.between(mine, theirs) {
-                        Some(Pairing::Collide { paths }) => Some(Skip::Collides {
-                            with: other.clone(),
-                            paths: paths.clone(),
-                        }),
-                        Some(Pairing::Unknown { .. }) => Some(Skip::NoVerdict {
-                            with: other.clone(),
-                        }),
-                        Some(Pairing::Clear) | None => None,
-                    }
-                })
-        });
-        match skip {
-            Some(reason) => passed.push(Passed { flight: id, reason }),
-            None => picked.push(Pick {
-                flight: id,
-                number: flight.number,
-                subject: flight.subject.clone(),
-                branch,
-            }),
-        }
-    }
-
-    Picks {
-        picked,
-        passed,
-        yours,
-    }
+    Picks { picked, yours }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::flight::fold;
-    use super::super::reads::BranchPairing;
     use super::*;
-    use crate::ff::{BranchInfo, BranchList, OpEntry, UnknownReason};
+    use crate::ff::{BranchInfo, BranchList, OpEntry};
     use crate::log::{Event, EventId, Kind};
 
     /// A filing with the given status and lane stored — the shape the
@@ -324,38 +244,10 @@ mod tests {
         }
     }
 
-    fn collide(a: &str, b: &str, paths: &[&str]) -> BranchPairing {
-        BranchPairing {
-            a: a.to_string(),
-            b: b.to_string(),
-            pairing: Pairing::Collide {
-                paths: paths.iter().map(|p| p.to_string()).collect(),
-            },
-        }
-    }
-
-    fn unknown(a: &str, b: &str) -> BranchPairing {
-        BranchPairing {
-            a: a.to_string(),
-            b: b.to_string(),
-            pairing: Pairing::Unknown {
-                reason: UnknownReason::Other,
-            },
-        }
-    }
-
-    fn reasons(picks: &Picks) -> Vec<(&str, &Skip)> {
-        picks
-            .passed
-            .iter()
-            .map(|passed| (passed.flight.as_str(), &passed.reason))
-            .collect()
-    }
-
     #[test]
     fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
-        // The fold derives the dependent Waiting, so it is neither
-        // picked nor passed — it was never a candidate.
+        // The fold derives the dependent Waiting, so it is never a
+        // candidate.
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -363,13 +255,11 @@ mod tests {
                 linked("pi.3", 30, "pi.1", "pi.2"),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             2,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.2");
         assert_eq!(picks.picked[0].number, 2);
-        assert!(picks.passed.is_empty(), "waiting is not a walk outcome");
         assert_eq!(picks.yours, 0, "waiting is not yours either");
     }
 
@@ -383,11 +273,9 @@ mod tests {
                 done("pi.4", 40, "pi.2"),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             1,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
-        assert!(picks.passed.is_empty());
     }
 
     #[test]
@@ -402,15 +290,13 @@ mod tests {
                 moved("pi.4", 40, "pi.2", "canceled"),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             1,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
-        assert!(picks.passed.is_empty());
     }
 
     #[test]
-    fn pulled_questioned_and_fufu_held_flights_are_neither_picked_nor_passed() {
+    fn pulled_questioned_and_fufu_held_flights_are_not_picked() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -423,84 +309,9 @@ mod tests {
                 vec![op("pi.3", Some("work"), 60)],
                 vec![branch("work", true, false)],
             ),
-            &Verdicts::default(),
             3,
         );
         assert!(picks.picked.is_empty());
-        assert!(picks.passed.is_empty());
-    }
-
-    #[test]
-    fn a_collide_against_a_flying_flight_passes_naming_it_and_its_paths() {
-        let picks = pick(
-            &fold(&[
-                filed("pi.1", 10),
-                filed("pi.2", 20),
-                moved("pi.3", 30, "pi.1", "in_progress"),
-            ]),
-            &reads(
-                vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-                vec![branch("left", false, false), branch("right", false, false)],
-            ),
-            &Verdicts {
-                pairs: vec![collide("left", "right", &["shared.txt"])],
-            },
-            1,
-        );
-        assert!(picks.picked.is_empty());
-        match reasons(&picks).as_slice() {
-            [("pi.2", Skip::Collides { with, paths })] => {
-                assert_eq!(with, "pi.1");
-                assert_eq!(paths, &["shared.txt"]);
-            }
-            other => panic!("expected one collides row, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn an_unknown_pairing_against_a_flying_flight_is_no_verdict() {
-        let picks = pick(
-            &fold(&[
-                filed("pi.1", 10),
-                filed("pi.2", 20),
-                moved("pi.3", 30, "pi.1", "in_progress"),
-            ]),
-            &reads(
-                vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-                vec![branch("left", false, false), branch("right", false, false)],
-            ),
-            &Verdicts {
-                pairs: vec![unknown("left", "right")],
-            },
-            1,
-        );
-        assert!(picks.picked.is_empty());
-        match reasons(&picks).as_slice() {
-            [("pi.2", Skip::NoVerdict { with })] => assert_eq!(with, "pi.1"),
-            other => panic!("expected one no-verdict row, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn two_colliding_candidates_admit_the_first_and_pass_the_second_naming_it() {
-        let picks = pick(
-            &fold(&[filed("pi.1", 10), filed("pi.2", 20)]),
-            &reads(
-                vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-                vec![branch("left", false, false), branch("right", false, false)],
-            ),
-            &Verdicts {
-                pairs: vec![collide("left", "right", &["shared.txt"])],
-            },
-            2,
-        );
-        assert_eq!(picks.picked.len(), 1);
-        assert_eq!(picks.picked[0].flight, "pi.1");
-        assert_eq!(picks.picked[0].branch.as_deref(), Some("left"));
-        match reasons(&picks).as_slice() {
-            [("pi.2", Skip::Collides { with, .. })] => assert_eq!(with, "pi.1"),
-            other => panic!("expected one collides row, got {other:?}"),
-        }
     }
 
     #[test]
@@ -508,7 +319,6 @@ mod tests {
         let picks = pick(
             &fold(&[filed("pi.2", 20), filed("pi.1", 10), filed("pi.3", 30)]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             3,
         );
         let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
@@ -517,12 +327,10 @@ mod tests {
             ["pi.2", "pi.1", "pi.3"],
             "fold order, which is filed order"
         );
-        assert!(picks.picked.iter().all(|p| p.branch.is_none()));
-        assert!(picks.passed.is_empty());
     }
 
     #[test]
-    fn the_same_branch_as_a_flying_flight_is_one_tree_and_admits() {
+    fn a_flying_flights_branchmate_still_admits() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -533,28 +341,20 @@ mod tests {
                 vec![op("pi.1", Some("work"), 40), op("pi.2", Some("work"), 50)],
                 vec![branch("work", false, false)],
             ),
-            // A same-name verdict row would be a caller bug; even present,
-            // it must not fire.
-            &Verdicts {
-                pairs: vec![collide("work", "work", &["shared.txt"])],
-            },
             1,
         );
         assert_eq!(picks.picked[0].flight, "pi.2");
-        assert!(picks.passed.is_empty());
     }
 
     #[test]
-    fn the_walk_stops_at_want_and_later_candidates_get_no_row() {
+    fn the_walk_stops_at_want() {
         let picks = pick(
             &fold(&[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             1,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.1");
-        assert!(picks.passed.is_empty(), "unexamined, so unlisted");
     }
 
     #[test]
@@ -570,12 +370,10 @@ mod tests {
                 linked("pi.7", 70, "pi.6", "pi.5"),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             6,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.4");
-        assert!(picks.passed.is_empty(), "excluded silently, never passed");
         assert_eq!(
             picks.yours, 3,
             "Ready off the agent lane counts; Backlog and Waiting do not"
@@ -590,7 +388,6 @@ mod tests {
                 stored("pi.2", 20, "ready", Some("agent")),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             1,
         );
         assert_eq!(work.picked.len(), 1);
@@ -604,7 +401,6 @@ mod tests {
         let yours = pick(
             &fold(&[stored("pi.1", 10, "ready", Some("me"))]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             1,
         );
         assert!(yours.picked.is_empty());
@@ -614,7 +410,6 @@ mod tests {
         let drained = pick(
             &fold(&[stored("pi.1", 10, "backlog", Some("agent"))]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             1,
         );
         assert!(drained.picked.is_empty());
@@ -636,32 +431,10 @@ mod tests {
                 stored("pi.2", 20, "ready", Some("pair")),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             2,
         );
         assert!(picks.picked.is_empty());
         assert_eq!(picks.yours, 1, "the unknown lane's Ready flight is yours");
-    }
-
-    #[test]
-    fn a_me_laned_flights_branch_still_collides_an_agent_candidate_off() {
-        let picks = pick(
-            &fold(&[stored("pi.1", 10, "ready", Some("me")), filed("pi.2", 20)]),
-            &reads(
-                vec![op("pi.1", Some("left"), 40), op("pi.2", Some("right"), 50)],
-                vec![branch("left", false, false), branch("right", false, false)],
-            ),
-            &Verdicts {
-                pairs: vec![collide("left", "right", &["shared.txt"])],
-            },
-            1,
-        );
-        assert!(picks.picked.is_empty());
-        match reasons(&picks).as_slice() {
-            [("pi.2", Skip::Collides { with, .. })] => assert_eq!(with, "pi.1"),
-            other => panic!("expected one collides row, got {other:?}"),
-        }
-        assert_eq!(picks.yours, 1);
     }
 
     #[test]
@@ -674,7 +447,6 @@ mod tests {
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             2,
         );
         assert!(picks.picked.is_empty());
@@ -693,7 +465,6 @@ mod tests {
                 assigned("pi.4", 40, "pi.3", Some("me")),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             2,
         );
         let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
@@ -710,7 +481,6 @@ mod tests {
                 moved("pi.3", 30, "pi.1", "ready"),
             ]),
             &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
             1,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -718,13 +488,7 @@ mod tests {
 
     #[test]
     fn an_empty_fold_picks_nothing() {
-        let picks = pick(
-            &fold(&[]),
-            &reads(Vec::new(), Vec::new()),
-            &Verdicts::default(),
-            1,
-        );
+        let picks = pick(&fold(&[]), &reads(Vec::new(), Vec::new()), 1);
         assert!(picks.picked.is_empty());
-        assert!(picks.passed.is_empty());
     }
 }

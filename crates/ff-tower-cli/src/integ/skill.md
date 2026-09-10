@@ -30,7 +30,7 @@ A flight has two names. The board prints `#3`; when two writers share a board an
 Every read folds the log fresh and never blocks on the network.
 
 - `ff tower`, and `ff tower board` — what needs a person pinned on top: `questions` (held flights, oldest ask first) and `yours` (Ready in the `me` lane); under it backlog, waiting, ready, in progress, held, and the three newest closed. `ff tower --closed 7d` widens that last group to a span; a count, `all`, and `none` work too.
-- `ff tower brief <flight>` (alias `show`) — the whole record plus the reads: branch, tip, last change, the two audit bits, `current` (the invoking worktree's branch), `held` (a fufu hold on the branch), `resolving`, and the standing on `next`'s walk. It runs no collide probe unless a verdict could change the answer, so a brief is instant. A closed flight briefs like any other.
+- `ff tower brief <flight>` (alias `show`) — the whole record plus the reads: branch, tip, last change, the two audit bits, `current` (the invoking worktree's branch), `held` (a fufu hold on the branch), `resolving`, and the standing. A closed flight briefs like any other.
 - `ff tower procedures` and `ff tower skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `ff tower explain <id>` — the prose behind a refusal; `ff tower explain --list` is the whole catalog. A pure lookup, no repository needed.
 - `ff tower config` — every setting with its value and default; `ff tower version`; `ff tower doctor`, which exits 1 on findings so a script can gate on it; `ff tower briefing`, the line fufu shows a new session.
@@ -64,9 +64,9 @@ Hold is the fallback for an unattended run. With a person in the conversation, a
 
 ## Claiming
 
-`ff tower next` pulls from the pool: every Ready flight in the `agent` lane, walked in filed order. `-n 3` admits up to three that collide with neither each other nor anything flying; `--peek` runs the same computation with nothing written, and the envelope's `pulled` says which happened. Three outcomes: `work` (exit 0, something picked), `drained` (exit 1, the board has nothing left), and `yours` (exit 1, Ready work exists that the lane alone kept out of the pool). Both empties are full data envelopes; a JSON reader branches on `outcome`, and a shell loop stops on the code. `-n 0` refuses.
+`ff tower next` pulls from the pool: every Ready flight in the `agent` lane, walked in filed order. `-n 3` admits up to three in filed order; `--peek` runs the same computation with nothing written, and the envelope's `pulled` says which happened. Three outcomes: `work` (exit 0, something picked), `drained` (exit 1, the board has nothing left), and `yours` (exit 1, Ready work exists that the lane alone kept out of the pool). Both empties are full data envelopes; a JSON reader branches on `outcome`, and a shell loop stops on the code. `-n 0` refuses.
 
-Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent when the flight names none). `passed` rows say why a checked candidate lost — `collides`, with the flight and the paths, or `no-verdict` when fufu could not judge the pair — and stop where the walk stopped, so the output is bounded by the ask. The collision rule: only a candidate that already has a branch is checked, against every flying tree and every candidate already admitted, and an unknown verdict excludes. A fresh flight is admitted unchecked, because one tree per flight is the deconfliction. A flight with a live dependency is Waiting, not in the pool, and never reaches the walk.
+Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent when the flight names none). A flight with a live dependency is Waiting, not in the pool, and never reaches the walk.
 
 ## Lanes
 

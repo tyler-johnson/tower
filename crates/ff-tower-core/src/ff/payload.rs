@@ -147,68 +147,6 @@ pub struct Editing {
     pub onto: String,
 }
 
-/// `ff collide --json` — the sideways axis, and tower's earned existence.
-///
-/// One pair, judged. Every discovered conflict, every land order, and the
-/// conflict-free set `ff tower next -n <k>` hands out is a fold over these
-/// verdicts — the fold is tower's, the verdict is fufu's, and tower does
-/// not reimplement the merge to get one. The probe runs in an object-memory
-/// clone and writes nothing, and it judges each side on the open change's
-/// tree when that differs from the tip's — so a branch an agent is editing
-/// right now, with nothing committed, still answers.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Collision {
-    pub a: Side,
-    pub b: Side,
-    pub pairing: Pairing,
-}
-
-/// One branch, as the probe judged it. The ids are what make a verdict
-/// cacheable: it is a pure function of the two trees and the base between
-/// them, so a verdict stays good until one of these moves.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Side {
-    pub name: String,
-    /// The branch tip, lowercase hex.
-    pub tip: String,
-    /// The tree it was judged on.
-    pub tree: String,
-    /// True when that tree is uncommitted work the operation log holds.
-    pub open: bool,
-}
-
-/// How two branches answer each other.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum Pairing {
-    /// A three-way merge leaves no conflicts.
-    Clear,
-    /// It would conflict, on exactly these paths.
-    Collide { paths: Vec<String> },
-    /// No base to merge against: refused, not guessed. Distinct from
-    /// `Clear`, and tower must never round it down to one — an unknown
-    /// pairing is a reason to leave a flight out of a fan-out set.
-    Unknown { reason: UnknownReason },
-}
-
-impl Pairing {
-    /// True only for a verdict that says these two do not touch. `Unknown`
-    /// is not clear; it is unanswered.
-    pub fn is_clear(&self) -> bool {
-        matches!(self, Pairing::Clear)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum UnknownReason {
-    UnrelatedHistories,
-    MergeCommits,
-    TooManyCommits,
-    #[serde(other)]
-    Other,
-}
-
 /// `ff op log --json` — one operation row.
 ///
 /// The row that ties a flight to a branch: `session` is the tag tower rode

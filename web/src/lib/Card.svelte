@@ -27,7 +27,7 @@
     ondragend: () => void;
   } = $props();
 
-  let phrases = $derived(notePhrases(view, refs));
+  let phrases = $derived(notePhrases(view));
   let canDrag = $derived(grabbable(field, view));
 
   // The cells of `show`, the grouped field's left out: the column the

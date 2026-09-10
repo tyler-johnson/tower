@@ -1,19 +1,15 @@
 //! `ff tower brief <flight>` — everything known about one flight, for
-//! whoever picks it up: the full record, its standing on `next`'s walk,
-//! and what it beat.
+//! whoever picks it up: the full record and where it stands.
 //!
 //! The read half of the handoff: `next` hands out a flight id and a
 //! subject, and the brief is what an agent reads next. Fold plus gather,
-//! and the collide probes only where `wants_verdicts` says they can
-//! change the answer — the laziness lives here because the fold stays
-//! spawn-free, and a closed or branchless flight briefs with zero
-//! probes, byte-identical to the probed run. Not `ensure_active`: a
-//! closed flight briefs, the log keeps the record, and the render
-//! carries the closing move alongside everything else.
+//! nothing more. Not `ensure_active`: a closed flight briefs, the log
+//! keeps the record, and the render carries the closing move alongside
+//! everything else.
 
 use crate::error::CliError;
 use crate::{machine, render};
-use ff_tower_core::board::{self, Brief, Detail, Fold, Moment, Skip, Standing, Verdicts};
+use ff_tower_core::board::{self, Brief, Detail, Fold, Moment, Standing};
 use ff_tower_core::config::{self, Config};
 
 pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
@@ -26,17 +22,12 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 
     let ff = super::ff()?;
     let reads = board::gather(&ff)?;
-    let verdicts = if board::wants_verdicts(&fold, &reads, &id) {
-        board::probe(&ff, &fold, &reads)?
-    } else {
-        Verdicts::default()
-    };
     let stale_after = Config::open(ff.repo())
         .as_ref()
         .map(config::stale_flight_threshold)
         .unwrap_or(config::DEFAULT_STALE_FLIGHT);
     let now = board::now();
-    let brief = board::brief(&fold, &events, &reads, &verdicts, &id, now, stale_after)
+    let brief = board::brief(&fold, &events, &reads, &id, now, stale_after)
         .expect("resolved to a filed flight");
 
     if json {
@@ -52,8 +43,7 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 
 /// The detail page: head and note in the board's grammar, then the body
 /// verbatim, the family, the comments in reading order, and the history
-/// last — the record before the log of how it got that way. The beat rows
-/// land right after the routing line — one dim line per row.
+/// last — the record before the log of how it got that way.
 fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
     let mut out = String::new();
     let mut subject = brief.subject.clone();
@@ -64,10 +54,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
         "{}  {subject}\n",
         render::paint_id(&show(fold, &brief.id), colored),
     ));
-    out.push_str(&format!(
-        "    {}\n",
-        note(fold, brief, now, stale_after, colored)
-    ));
+    out.push_str(&format!("    {}\n", note(brief, now, stale_after, colored)));
     out.push_str(&format!("    {}\n", fields_line(brief, colored)));
     // The last edit, comment rewords included — the record has been
     // touched, and the mark says by whom.
@@ -80,22 +67,6 @@ fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
             )
         ));
     }
-    for beaten in &brief.beat {
-        let reason = match &beaten.reason {
-            Skip::Collides { paths, .. } => {
-                format!("collides on {}", render::paths_phrase(paths))
-            }
-            Skip::NoVerdict { .. } => "no verdict".to_string(),
-        };
-        out.push_str(&format!(
-            "    {}\n",
-            render::paint_dim(
-                &format!("beat {} · {reason}", show(fold, &beaten.flight)),
-                colored
-            )
-        ));
-    }
-
     if !brief.body.is_empty() {
         out.push('\n');
         out.push_str(&brief.body);
@@ -224,7 +195,7 @@ fn fields_line(brief: &Brief, colored: bool) -> String {
 /// before the branch: precedence makes it exclusive with the mark
 /// phrases — a walk standing only exists with no closing move, question,
 /// hold, or pull — so the line never says a thing twice.
-fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
+fn note(brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
     let status = brief.status.replace('_', " ");
     phrases.push(render::paint_dim(
@@ -264,18 +235,6 @@ fn note(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
             colored,
         )),
         Standing::Ready => phrases.push(render::paint_dim("ready", colored)),
-        Standing::Collides { with, paths } => phrases.push(render::paint_warn(
-            &format!(
-                "collides with {} on {}",
-                show(fold, with),
-                render::paths_phrase(paths)
-            ),
-            colored,
-        )),
-        Standing::NoVerdict { with } => phrases.push(render::paint_warn(
-            &format!("no verdict vs {}", show(fold, with)),
-            colored,
-        )),
     }
     if brief.stale {
         phrases.push(render::paint_warn(

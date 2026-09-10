@@ -49,8 +49,6 @@ function flight(number: number, status: string, labels: string[] = []): FlightVi
     question: null,
     asked_at: null,
     closed_reason: null,
-    collides: [],
-    unanswered: [],
   };
 }
 
@@ -80,7 +78,6 @@ function brief(number: number, depends_on: LinkView[], blocks: LinkView[] = []):
     comments: [],
     history: [],
     standing: "ready",
-    beat: [],
   };
 }
 

@@ -158,13 +158,6 @@ export interface FlightView {
   /// A close's `-m` — a cancel's reason, most often — standing where the
   /// question stood; `null` while open or when the close said nothing.
   closed_reason: string | null;
-  collides: CollideView[];
-  unanswered: string[];
-}
-
-export interface CollideView {
-  with: string;
-  paths: string[];
 }
 
 /// The staleness threshold's rendering, `config::DEFAULT_STALE_FLIGHT`
@@ -191,11 +184,6 @@ export function shortIds(ids: string[]): boolean {
 /// otherwise — the long form takes no leading `#`.
 export function flightRef(writer: string, number: number, short: boolean): string {
   return short ? `#${number}` : `${writer}#${number}`;
-}
-
-/// The collide path phrase: the one path, or a count.
-export function pathsPhrase(paths: string[]): string {
-  return paths.length === 1 ? paths[0] : `${paths.length} paths`;
 }
 
 /// `4m ago`, `2d ago` — s/m/h/d/w. `now` is an argument so a render is a
@@ -317,10 +305,9 @@ export function subjectColumn(view: FlightView): string {
 }
 
 /// Wire id to display form, over every row of the fold at once — the
-/// walk reaches the subgroups, so a sub-grouped fold names every row —
-/// and a verdict partner is always a live flight, so the map answers for
-/// `collides` and `unanswered` entries too. Also the live flight count,
-/// for the footer: every live row once, however the fold dealt it.
+/// walk reaches the subgroups, so a sub-grouped fold names every row.
+/// Also the live flight count, for the footer: every live row once,
+/// however the fold dealt it.
 export function buildRefs(folded: Folded): { refs: Map<string, string>; flights: number } {
   const views = foldRows(folded);
   const short = shortIds(views.map((view) => view.id));
@@ -349,13 +336,12 @@ export interface NotePhrase {
 }
 
 /// The note line's phrases, in render.rs's urgency order: question, held,
-/// resolving, collides, no-verdicts, the two audits, the pilot, branch,
-/// comments.
+/// resolving, the two audits, the pilot, branch, comments.
 ///
 /// The one deliberate divergence from `note()`: the trailing age phrase is
 /// omitted, because the web row has a column for the age and the CLI has
 /// no room for one. `ageColumn` is that phrase's other half.
-export function notePhrases(view: FlightView, refs: Map<string, string>): NotePhrase[] {
+export function notePhrases(view: FlightView): NotePhrase[] {
   const phrases: NotePhrase[] = [];
   const warn = (text: string) => phrases.push({ text, tone: "warn" });
   const dim = (text: string) => phrases.push({ text, tone: "dim" });
@@ -363,12 +349,6 @@ export function notePhrases(view: FlightView, refs: Map<string, string>): NotePh
   else if (view.closed_reason !== null) dim(view.closed_reason);
   if (view.held) warn("held");
   if (view.resolving) warn("resolving");
-  for (const collide of view.collides) {
-    warn(`collides ${show(refs, collide.with)} on ${pathsPhrase(collide.paths)}`);
-  }
-  for (const with_ of view.unanswered) {
-    dim(`no verdict vs ${show(refs, with_)}`);
-  }
   // The two audits, each its own phrase and neither under a shared word:
   // one says the branch has forgotten a flight that claims to be flying,
   // the other says a branch moved under one that claims not to be.
@@ -391,18 +371,8 @@ export function notePhrases(view: FlightView, refs: Map<string, string>): NotePh
 }
 
 /// Where one flight stands, `Standing`'s tag — flattened onto the brief
-/// beside the facts it arbitrates, so the variant's own keys (`on`,
-/// `with`, `paths`) sit at the top level too.
-export type StandingTag =
-  | "done"
-  | "question"
-  | "held"
-  | "in-progress"
-  | "yours"
-  | "ready"
-  | "waiting"
-  | "collides"
-  | "no-verdict";
+/// beside the facts it arbitrates. Every variant is a bare tag.
+export type StandingTag = "done" | "question" | "held" | "in-progress" | "yours" | "ready";
 
 /// One linked flight, as the brief carries it. `status` is the stored
 /// word; `closed` is the arbitrated fact, since done and canceled are two
@@ -504,16 +474,6 @@ export function momentPhrase(moment: Moment, briefId: string): { line: string; n
   }
 }
 
-/// One examined-and-skipped flight from `next`'s walk, `Skip` flattened
-/// under `reason`.
-export interface Passed {
-  flight: string;
-  reason: "waiting" | "collides" | "no-verdict";
-  on?: string[];
-  with?: string;
-  paths?: string[];
-}
-
 export interface Brief {
   id: string;
   number: number;
@@ -558,10 +518,6 @@ export interface Brief {
   comments: CommentView[];
   history: Moment[];
   standing: StandingTag;
-  on?: string[];
-  with?: string;
-  paths?: string[];
-  beat: Passed[];
 }
 
 /// One procedure as the registry holds it, mirroring
@@ -618,20 +574,13 @@ export interface Listing {
   procedures: Definition[];
 }
 
-/// A flight's display form, or its wire id when the board has no entry —
-/// a linked or beat flight outside the closed window has left the board,
-/// and its wire id is still a name that resolves.
-function show(refs: Map<string, string>, id: string): string {
-  return refs.get(id) ?? id;
-}
-
 /// The brief's note line, ported from cmd/brief.rs's `note()`: the status
 /// ahead of everything, because a reader must know first where the flight
 /// stands and who put it there, then the question, the holds, the
 /// standing, the audits, the branch, and the age. Precedence makes the
 /// standing exclusive with the mark phrases, so the line never says a
 /// thing twice.
-export function briefNote(brief: Brief, refs: Map<string, string>, now: number): NotePhrase[] {
+export function briefNote(brief: Brief, now: number): NotePhrase[] {
   const phrases: NotePhrase[] = [];
   const warn = (text: string) => phrases.push({ text, tone: "warn" });
   const dim = (text: string) => phrases.push({ text, tone: "dim" });
@@ -659,15 +608,6 @@ export function briefNote(brief: Brief, refs: Map<string, string>, now: number):
     case "ready":
       dim("ready");
       break;
-    case "waiting":
-      dim(`waiting on ${(brief.on ?? []).map((dep) => show(refs, dep)).join(", ")}`);
-      break;
-    case "collides":
-      warn(`collides with ${show(refs, brief.with ?? "")} on ${pathsPhrase(brief.paths ?? [])}`);
-      break;
-    case "no-verdict":
-      warn(`no verdict vs ${show(refs, brief.with ?? "")}`);
-      break;
   }
   if (brief.stale) warn(`no changes on the branch for ${STALE_AFTER}`);
   if (brief.changed_since_ready) warn("changes on the branch since it was set ready");
@@ -692,15 +632,6 @@ export function fieldsLine(brief: Brief): string {
   if (brief.skill !== null) phrases.push(`skill ${brief.skill}`);
   if (brief.procedure !== null) phrases.push(`under ${brief.procedure}`);
   return phrases.join(" · ");
-}
-
-/// One beat row — a candidate this flight kept out of `next`'s walk.
-/// Waiting rows name dependencies rather than competitors, so they never
-/// reach `beat`.
-export function beatLine(beaten: Passed, refs: Map<string, string>): string {
-  const reason =
-    beaten.reason === "collides" ? `collides on ${pathsPhrase(beaten.paths ?? [])}` : "no verdict";
-  return `beat ${show(refs, beaten.flight)} · ${reason}`;
 }
 
 /// A refusal as lines, in main.rs's `report()` shape minus the
@@ -739,9 +670,7 @@ export function allowedVerbs(brief: Brief): Verb[] {
 ///
 /// A newer tower's brief carries fields this page has never heard of, and
 /// showing them badly beats dropping them silently — the same promise
-/// `Kind::Unknown` makes the fold. `standing`'s own variant keys are
-/// known, not unknown: `Standing` is flattened onto the payload, so `on`,
-/// `with` and `paths` arrive at the top level too.
+/// `Kind::Unknown` makes the fold.
 const KNOWN_BRIEF_KEYS = new Set([
   "id",
   "number",
@@ -780,10 +709,6 @@ const KNOWN_BRIEF_KEYS = new Set([
   "comments",
   "history",
   "standing",
-  "on",
-  "with",
-  "paths",
-  "beat",
 ]);
 
 export function unknownRows(brief: Brief): { label: string; value: string }[] {

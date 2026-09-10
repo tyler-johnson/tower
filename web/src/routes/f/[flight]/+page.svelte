@@ -89,7 +89,7 @@
         <Record {brief} {refs} />
       </div>
       <div class="shrink-0 lg:w-72">
-        <Rail {brief} {refs} />
+        <Rail {brief} />
       </div>
     </div>
   {:else if panel.error !== null}

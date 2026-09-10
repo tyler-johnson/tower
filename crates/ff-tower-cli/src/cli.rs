@@ -112,8 +112,7 @@ pub enum Command {
         #[command(flatten)]
         args: BoardArgs,
     },
-    /// Claim the next ready flight, or a set of `k` that collide with
-    /// neither each other nor anything already flying.
+    /// Claim the next ready flight, or the next `k` in filed order.
     #[command(long_about = help::NEXT, after_long_help = help::NEXT_EXAMPLES)]
     Next {
         /// How many flights to hand out; one when unsaid.

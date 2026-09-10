@@ -44,7 +44,6 @@ function brief(comments: CommentView[], history: Moment[]): Brief {
     comments,
     history,
     standing: "ready",
-    beat: [],
   };
 }
 

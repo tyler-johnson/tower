@@ -1,11 +1,10 @@
 //! The human render, in fufu's list grammar: a head line per flight, then
 //! an indented dim note joining phrases with ` · ` in urgency order —
-//! the open question first, then held/resolving, then a `collides` warn
-//! per conflicting neighbor and a `no verdict` dim per unanswered one,
-//! then the two audit lines, then the pilot phrase — `in progress —
-//! <by>` — then `on <branch>`, then the comment count, then age. No
-//! affirmative "lands clean" phrase: absence of a warn is the verdict,
-//! and board noise is the enemy.
+//! the open question first, then held/resolving, then the two audit
+//! lines, then the pilot phrase — `in progress — <by>` — then `on
+//! <branch>`, then the comment count, then age. No affirmative "all
+//! well" phrase: absence of a warn is the answer, and board noise is the
+//! enemy.
 //!
 //! The board is the inbox pinned above the status groups, and the groups
 //! are the stored model in lifecycle order. Glyphs carry the meaning
@@ -85,15 +84,6 @@ pub fn flight_ref(writer: &str, number: u64, short: bool) -> String {
     }
 }
 
-/// The collide path phrase: the one path, or a count — `next`'s grammar,
-/// shared with the brief's beat rows and the board's warn.
-pub fn paths_phrase(paths: &[String]) -> String {
-    match paths {
-        [path] => path.clone(),
-        paths => format!("{} paths", paths.len()),
-    }
-}
-
 /// `4m`, `2h`, `2d` — a duration in seconds, s/m/h/d/w, with no trailing
 /// "ago". The threshold phrases print a span; the row's own age prints
 /// the same span with the word.
@@ -161,20 +151,7 @@ fn subject_column(view: &FlightView) -> String {
     text
 }
 
-/// The display form for a flight the board is showing, or the wire id for
-/// one it is not: a collide partner can be a flight outside the closed
-/// window, and a note must still name it.
-fn reference(refs: &HashMap<&str, String>, id: &str) -> String {
-    refs.get(id).cloned().unwrap_or_else(|| id.to_string())
-}
-
-fn note(
-    view: &FlightView,
-    refs: &HashMap<&str, String>,
-    now: i64,
-    stale_after: i64,
-    colored: bool,
-) -> String {
+fn note(view: &FlightView, now: i64, stale_after: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
     if let Some(question) = view.question.as_deref() {
         phrases.push(paint_warn(question, colored));
@@ -187,17 +164,6 @@ fn note(
     }
     if view.resolving {
         phrases.push(paint_warn("resolving", colored));
-    }
-    for collide in &view.collides {
-        let with = reference(refs, &collide.with);
-        let on = paths_phrase(&collide.paths);
-        phrases.push(paint_warn(&format!("collides {with} on {on}"), colored));
-    }
-    for with in &view.unanswered {
-        phrases.push(paint_dim(
-            &format!("no verdict vs {}", reference(refs, with)),
-            colored,
-        ));
     }
     // The two audits, each its own phrase and neither under a shared
     // word: one says the branch has forgotten a flight that claims to be
@@ -341,10 +307,7 @@ pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String
                 subject,
                 paint_dim(&tip_column(view), colored),
             ));
-            out.push_str(&format!(
-                "    {}\n",
-                note(view, &refs, now, stale_after, colored)
-            ));
+            out.push_str(&format!("    {}\n", note(view, now, stale_after, colored)));
         }
         out.push('\n');
     }
@@ -418,8 +381,6 @@ mod tests {
             question: None,
             asked_at: None,
             closed_reason: None,
-            collides: Vec::new(),
-            unanswered: Vec::new(),
         }
     }
 

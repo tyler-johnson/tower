@@ -75,20 +75,14 @@ in one command: each picked flight is set In Progress with your byline
 as the pilot. --peek is the same computation with nothing written, and
 the envelope says which happened either way.
 
-A flight that already has a tree — one requeued or answered — is
-checked against every flying tree with `ff collide` before it is
-admitted, and a pairing fufu could not judge excludes.
-
 An empty pick exits 1 with a full data envelope, and `outcome` on it
 says which of `drained` and `yours` it was: `drained` is a board with
 nothing left, and `yours` is Ready work kept out of the pool by the
 lane alone — it needs you. A --json reader branches on the word; a
 shell loop stops on the code.
 
-The passed rows are why a checked flight lost — collides, no-verdict —
-and nothing past where the walk stopped, so the output stays bounded
-by the ask rather than the board. A flight with a live dependency is
-Waiting, not in the pool, and never reaches the walk.";
+A flight with a live dependency is Waiting, not in the pool, and never
+reaches the walk.";
 
 pub const NEXT_EXAMPLES: &str = "\
 Examples:
@@ -103,17 +97,14 @@ read: subject and body, every stored field, the comments in reading
 order, each link with the linked flight's subject and status, the
 open question, and the reads' facts — branch, tip, holds, whether the
 branch is yours.
-The standing says where the flight sits on `ff tower next`'s walk and
-what it beat. The history lists every gesture on the record in log
+The history lists every gesture on the record in log
 order, and each row carries the words the verb took: the status word,
 the lane, the fields an edit touched, the other end of the edge.
 `show` is the same verb under fufu's spelling for reading one thing,
 and the envelope says `brief` either way.
 
-Collide probes ride it only where a verdict can change the answer, so
-a brief stays instant, and a done or branchless flight briefs with
-zero probes. A done flight briefs like any other — the log keeps the
-record, and reading is never a lifecycle move.";
+A done flight briefs like any other — the log keeps the record, and
+reading is never a lifecycle move.";
 
 pub const BRIEF_EXAMPLES: &str = "\
 Examples:
@@ -210,8 +201,7 @@ mark and no event of its own. The brief renders both directions as
 depends on and blocks.
 
 The identical edge declared twice is refused: the fold would render
-it twice, and nothing in the log means it twice. Discovered conflicts
-need no edge — verdicts are probed fresh per render, never stored.
+it twice, and nothing in the log means it twice.
 `ff tower unlink <a> <b>` takes the edge back.";
 
 pub const LINK_EXAMPLES: &str = "\

@@ -1,6 +1,5 @@
 //! `ff tower brief` against real repositories: the full record in one
-//! read, the standing and beat rows — one flight's slice of `next`'s
-//! walk — the JSON round-trip, the lazy probes, and the refusals.
+//! read, the standing, the JSON round-trip, and the refusals.
 //!
 //! The pool fixtures share `next.rs`'s grammar: the pool is Ready
 //! flights in the agent lane, so bare filings — born Ready but laned to
@@ -14,28 +13,18 @@ use std::process::{Command, Output};
 
 use ff_tower_core::ff::Ff;
 use ff_tower_core::log::{Kind, Store};
-use ff_tower_testsupport::{FakeFf, Repo};
+use ff_tower_testsupport::Repo;
 
 fn ff_tower(repo: &Path, args: &[&str]) -> Output {
-    ff_tower_via(repo, args, None)
-}
-
-/// The spawn, with the `TOWER_FF` seam: a named program reaches the
-/// binary's `ff()` through the environment, the way `cmd/mod.rs` reads
-/// it back.
-fn ff_tower_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_ff-tower"));
-    command
+    Command::new(env!("CARGO_BIN_EXE_ff-tower"))
         .args(args)
         .env("FF_REPO", repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
         // A developer's own fufu session must not tag the fixture's
         // events: the bylines below assert the bare email.
-        .env_remove("FF_SESSION");
-    if let Some(program) = program {
-        command.env("TOWER_FF", program);
-    }
-    command.output().expect("spawn ff-tower")
+        .env_remove("FF_SESSION")
+        .output()
+        .expect("spawn ff-tower")
 }
 
 /// The spawn under a fufu session tag, the way `ff mcp` hands one down.
@@ -130,43 +119,6 @@ fn install_review(repo: &Repo) {
 
 fn file_pipeline(repo: &Repo, subject: &str) {
     stdout(&ff_tower(repo.path(), &["file", "pipeline", subject]));
-}
-
-/// Two agent flights on branches that edit the same file — the walk admits
-/// #2 and passes #5 naming it.
-fn colliding(repo: &Repo) {
-    file_pipeline(repo, "left work");
-    file_pipeline(repo, "right work");
-
-    repo.ff(&["start", "-b", "left"]);
-    repo.write("shared.txt", "left side\n");
-    Ff::at(repo.path())
-        .session("pi.2")
-        .status()
-        .expect("status");
-    repo.ff(&["commit", "-m", "left: touch shared"]);
-
-    repo.ff(&["switch", "main"]);
-    repo.ff(&["start", "-b", "right"]);
-    repo.write("shared.txt", "right side\n");
-    Ff::at(repo.path())
-        .session("pi.8")
-        .status()
-        .expect("status");
-    repo.ff(&["commit", "-m", "right: touch shared"]);
-}
-
-/// A fake `ff` that records every argv it was asked before answering with
-/// the real one — the probe-laziness assertions read the log back.
-fn logging_ff() -> FakeFf {
-    FakeFf::script(concat!(
-        "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/calls.log\"\n",
-        "exec ff \"$@\"\n",
-    ))
-}
-
-fn calls(fake: &FakeFf) -> String {
-    std::fs::read_to_string(fake.dir().join("calls.log")).unwrap_or_default()
 }
 
 /// Two linked flights, a body on the first, a comment on the first.
@@ -678,42 +630,6 @@ fn a_malformed_reference_refuses_bad_flight() {
 }
 
 #[test]
-fn a_ready_flight_briefs_ready_and_what_it_beat() {
-    let repo = repo();
-    colliding(&repo);
-
-    let out = ff_tower(repo.path(), &["brief", "2"]);
-    assert_eq!(out.status.code(), Some(0));
-    let text = stdout(&out);
-    assert!(text.contains("#2  left work · pass"), "{text}");
-    assert!(text.contains("ready"), "{text}");
-    assert!(text.contains("beat #5 · collides on shared.txt"), "{text}");
-    assert!(text.contains("board: ff tower"), "{text}");
-
-    let out = ff_tower(repo.path(), &["brief", "5"]);
-    assert_eq!(out.status.code(), Some(0));
-    let text = stdout(&out);
-    assert!(text.contains("collides with #2 on shared.txt"), "{text}");
-    assert!(
-        !text.contains("beat"),
-        "a passed flight blocks nothing: {text}"
-    );
-}
-
-#[test]
-fn a_pulled_flights_beat_is_what_its_branch_blocks() {
-    let repo = repo();
-    colliding(&repo);
-    stdout(&ff_tower(repo.path(), &["next"]));
-
-    let out = ff_tower(repo.path(), &["brief", "2"]);
-    assert_eq!(out.status.code(), Some(0));
-    let text = stdout(&out);
-    assert!(text.contains("in progress — tests@tower.invalid"), "{text}");
-    assert!(text.contains("beat #5 · collides on shared.txt"), "{text}");
-}
-
-#[test]
 fn a_bare_filing_briefs_as_yours() {
     // Bare `file` lands Ready with no lane — the lane is what keeps it
     // out of the pool, and the brief says so.
@@ -744,11 +660,11 @@ fn a_me_laned_ready_flight_briefs_as_yours_with_its_lane() {
 #[test]
 fn the_json_pins_the_merged_envelope() {
     let repo = repo();
-    colliding(&repo);
+    file_pipeline(&repo, "left work");
+    file_pipeline(&repo, "right work");
 
     // The flattened standing rides beside the brief's own record — one
-    // envelope, no inner nesting, and the walk payload keys only where
-    // the variant carries them.
+    // envelope, no inner nesting, and a bare tag with no payload keys.
     let out = ff_tower(repo.path(), &["brief", "5", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
@@ -757,10 +673,7 @@ fn the_json_pins_the_merged_envelope() {
     let data = &envelope["data"];
     assert_eq!(data["id"], serde_json::json!("pi.8"));
     assert_eq!(data["number"], serde_json::json!(5));
-    assert_eq!(data["standing"], serde_json::json!("collides"));
-    assert_eq!(data["with"], serde_json::json!("pi.2"));
-    assert_eq!(data["paths"], serde_json::json!(["shared.txt"]));
-    assert_eq!(data["beat"], serde_json::json!([]));
+    assert_eq!(data["standing"], serde_json::json!("ready"));
     assert_eq!(data["procedure"], serde_json::json!("pipeline"));
     assert_eq!(data["subject"], serde_json::json!("right work · pass"));
     let data = data.as_object().expect("data is an object");
@@ -776,16 +689,13 @@ fn the_json_pins_the_merged_envelope() {
     ] {
         assert!(data.contains_key(key), "data is missing `{key}`");
     }
+    for key in ["beat", "with", "paths"] {
+        assert!(!data.contains_key(key), "`{key}` is gone: {envelope}");
+    }
 
     let out = ff_tower(repo.path(), &["brief", "2", "--json"]);
     let envelope = serde_json::from_str::<serde_json::Value>(&stdout(&out)).expect("an envelope");
-    let data = &envelope["data"];
-    assert_eq!(data["standing"], serde_json::json!("ready"));
-    let beat = data["beat"].as_array().expect("beat");
-    assert_eq!(beat.len(), 1);
-    assert_eq!(beat[0]["flight"], serde_json::json!("pi.8"));
-    assert_eq!(beat[0]["reason"], serde_json::json!("collides"));
-    assert_eq!(beat[0]["with"], serde_json::json!("pi.2"));
+    assert_eq!(envelope["data"]["standing"], serde_json::json!("ready"));
 }
 
 #[test]
@@ -807,42 +717,6 @@ fn a_closed_flights_standing_carries_no_duplicate_payload() {
     assert_eq!(data["status_by"], serde_json::json!("tests@tower.invalid"));
     let data = data.as_object().expect("data is an object");
     for key in ["with", "paths", "on"] {
-        assert!(
-            !data.contains_key(key),
-            "`{key}` belongs to the walk variants alone"
-        );
+        assert!(!data.contains_key(key), "`{key}` is not a brief key");
     }
-}
-
-#[test]
-fn a_live_on_branch_flight_probes_and_a_closed_one_does_not() {
-    // The laziness seam, end to end: `wants_verdicts` decides whether
-    // the render spawns `ff collide` at all. Two live branches collide,
-    // so a live candidate's brief must probe — and a done flight on the
-    // same board must not, because probes cannot change its answer.
-    let repo = repo();
-    colliding(&repo);
-
-    let probing = logging_ff();
-    let out = ff_tower_via(repo.path(), &["brief", "2"], Some(probing.path()));
-    let text = stdout(&out);
-    assert!(text.contains("beat #5 · collides on shared.txt"), "{text}");
-    assert!(
-        calls(&probing).lines().any(|line| line.contains("collide")),
-        "a live on-branch brief rides the probes: {}",
-        calls(&probing)
-    );
-
-    stdout(&ff_tower(repo.path(), &["file", "extra"]));
-    stdout(&ff_tower(repo.path(), &["done", "7"]));
-
-    let lazy = logging_ff();
-    let out = ff_tower_via(repo.path(), &["brief", "7"], Some(lazy.path()));
-    let text = stdout(&out);
-    assert!(text.contains("done — tests@tower.invalid"), "{text}");
-    assert!(
-        !calls(&lazy).lines().any(|line| line.contains("collide")),
-        "a done flight briefs with zero probes: {}",
-        calls(&lazy)
-    );
 }
