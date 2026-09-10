@@ -12,7 +12,7 @@
 //!
 //! The engine ships empty, so nothing installed is the normal state of a
 //! fresh box rather than a fault: the empty list says where a definition
-//! goes and where the worked examples are. DESIGN.md:338's warning rides
+//! goes and where the worked examples are. DESIGN.md's *Procedures* warning, a procedure should end with you, rides
 //! both renders — a definition whose terminal flights are all
 //! agent-assigned carries a line saying so, by name and by flight.
 //!
@@ -134,12 +134,6 @@ fn detail(definition: &Definition, colored: bool) -> String {
         render::paint_id(&definition.name, colored),
         render::paint_dim(definition.source.layer(), colored),
     ));
-    if let Some(subject) = definition.subject.as_deref() {
-        out.push_str(&format!(
-            "    {}\n",
-            render::paint_dim(&format!("subject {subject}"), colored)
-        ));
-    }
 
     if !definition.matches.is_empty() {
         out.push('\n');
@@ -227,7 +221,7 @@ fn detail(definition: &Definition, colored: bool) -> String {
     out
 }
 
-/// DESIGN.md:338's warning, as a line: a procedure should end with you,
+/// DESIGN.md's *Procedures* warning, as a line: a procedure should end with you,
 /// and it fires only when no terminal flight does. Advice, never a
 /// refusal — the file is the owner's, and the boundary that actually
 /// holds is `never auto-outward`.

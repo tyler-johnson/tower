@@ -18,7 +18,10 @@
 //! struct means a typo'd key is a refusal rather than a silently ignored
 //! line — the discipline that keeps a config format from drifting into a
 //! language; an old `[[part]]` file refuses loudly by path for the same
-//! reason. And `assignee`/`done` are closed enums *here* while staying
+//! reason. Two retired keys are the exception: a top-level `subject` and
+//! a flight's `bay` are accepted and dropped, so a file written before
+//! they left still loads and nothing downstream ever sees them. And
+//! `assignee`/`done` are closed enums *here* while staying
 //! free strings in the log: a known kind whose body does not parse is an
 //! error by design (`log/event.rs`), so one closed enum on the wire
 //! would let a newer tower's value take an older tower's whole board
@@ -28,6 +31,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 
 pub use crate::model::Assignee;
@@ -42,9 +46,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone, Serialize)]
 pub struct Definition {
     pub name: String,
-    /// What the flight's subject resolves against later; `branch` on
-    /// `review`. Nothing derives from it yet.
-    pub subject: Option<String>,
     /// Intake rules, matched against a bare filing's fields at file
     /// time; first match wins, and the routing event stores which rule
     /// fired.
@@ -59,9 +60,10 @@ impl Definition {
     /// `None` otherwise. Derived, never stored: nothing on the wire says
     /// this, and the surfaces that warn re-derive it from the flights.
     ///
-    /// Terminal: nothing waits on it. DESIGN.md:338 — a procedure should
-    /// end with you, and the warning fires only when no terminal flight
-    /// does, because one human close is the boundary the rule is about.
+    /// Terminal: nothing waits on it. DESIGN.md's *Procedures*, a
+    /// procedure should end with you: the warning fires only when no
+    /// terminal flight does, because one human close is the boundary the
+    /// rule is about.
     pub fn no_human_end(&self) -> Option<Vec<&str>> {
         let waited_on: HashSet<&str> = self
             .flights
@@ -143,9 +145,10 @@ pub struct FlightDef {
     pub after: Vec<String>,
     #[serde(default)]
     pub done: Done,
-    /// Whether filing should build a tree ahead of whoever flies this.
-    #[serde(default)]
-    pub bay: Option<Bay>,
+    /// The retired `bay` key. Accepted and dropped: a file written before
+    /// #125 still loads, and nothing reads or serializes what it said.
+    #[serde(default, rename = "bay", skip_serializing)]
+    _bay: IgnoredAny,
     /// The priority the flight is born with; the field's default when
     /// unsaid. Free here because it is free on the flight.
     #[serde(default)]
@@ -173,14 +176,6 @@ pub enum Done {
     Landed,
 }
 
-/// The `bay` key a procedure file may still carry. Parsed and read by
-/// nothing: retired with #125, and #129 decides the format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Bay {
-    Warm,
-}
-
 impl Done {
     pub fn name(&self) -> &'static str {
         match self {
@@ -188,14 +183,6 @@ impl Done {
             Done::Committed => "committed",
             Done::Promoted => "promoted",
             Done::Landed => "landed",
-        }
-    }
-}
-
-impl Bay {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Bay::Warm => "warm",
         }
     }
 }
@@ -404,7 +391,6 @@ pub fn load(text: &str, source: Source) -> Result<Definition> {
     })?;
     let definition = Definition {
         name: wire.name,
-        subject: wire.subject,
         matches: wire.matches,
         flights: wire.flights,
         source,
@@ -414,13 +400,15 @@ pub fn load(text: &str, source: Source) -> Result<Definition> {
 }
 
 /// The TOML file's shape, exactly. `[[match]]` and `[[flight]]` are
-/// TOML's array-of-tables spelling of the two plural fields.
+/// TOML's array-of-tables spelling of the two plural fields. `subject`
+/// is the retired top-level key: accepted so an older file still loads,
+/// and dropped, since nothing ever derived from it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Wire {
     name: String,
-    #[serde(default)]
-    subject: Option<String>,
+    #[serde(default, rename = "subject")]
+    _subject: IgnoredAny,
     #[serde(default, rename = "match")]
     matches: Vec<Match>,
     #[serde(default, rename = "flight")]
@@ -689,6 +677,27 @@ mod tests {
     /// same way a real file's would.
     fn at(name: &str) -> Source {
         Source::Repo(PathBuf::from(name))
+    }
+
+    /// The two retired keys, `subject` at the top and `bay` on a flight,
+    /// still load — an older file must not refuse by path — and neither
+    /// survives to the wire: the definition serializes without them.
+    #[test]
+    fn retired_subject_and_bay_keys_load_and_leave_nothing_on_the_wire() {
+        let text = r#"
+name = "review"
+subject = "branch"
+
+[[flight]]
+id = "smoke"
+assignee = "me"
+bay = "warm"
+"#;
+        let definition = load(text, at("review.toml")).expect("an older file loads");
+        assert_eq!(definition.flights.len(), 1);
+        let wire = serde_json::to_value(&definition).expect("serializes");
+        assert!(wire.get("subject").is_none(), "{wire}");
+        assert!(wire["flights"][0].get("bay").is_none(), "{wire}");
     }
 
     #[test]

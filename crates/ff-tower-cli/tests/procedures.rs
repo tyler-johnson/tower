@@ -17,7 +17,6 @@ use ff_tower_testsupport::Repo;
 /// `docs/procedures/review.toml`, verbatim enough to assert against.
 const REVIEW: &str = "\
 name    = \"review\"
-subject = \"branch\"
 
 [[match]]
 name   = \"github-reviews\"
@@ -33,7 +32,6 @@ done     = \"asserted\"
 [[flight]]
 id       = \"smoke\"
 assignee = \"me\"
-bay      = \"warm\"
 done     = \"asserted\"
 
 [[flight]]
@@ -160,7 +158,6 @@ fn the_detail_carries_the_flights_the_inert_rule_and_the_file() {
     let repo = stocked();
     let out = stdout(&ff_tower(repo.path(), &["procedures", "review"]));
     assert!(out.starts_with("review  repo\n"), "{out}");
-    assert!(out.contains("    subject branch\n"), "{out}");
     // The rule prints by name with its predicates, and an adapter-keyed
     // one says outright that it cannot fire — a rule that looks live and
     // never runs is an hour of debugging.
@@ -221,7 +218,6 @@ fn the_json_form_is_the_registry_as_data() {
     let one = envelope(&ff_tower(repo.path(), &["procedures", "review", "--json"]));
     let review = &one["data"]["procedure"];
     assert_eq!(review["name"], serde_json::json!("review"));
-    assert_eq!(review["subject"], serde_json::json!("branch"));
     assert_eq!(
         review["matches"],
         serde_json::json!([{
@@ -245,7 +241,6 @@ fn the_json_form_is_the_registry_as_data() {
             "skill": "review",
             "after": [],
             "done": "asserted",
-            "bay": null,
             "priority": null,
             "labels": [],
             "status": null,
@@ -338,7 +333,7 @@ fn a_repo_definition_overrides_the_user_layers_and_says_so() {
 
 #[test]
 fn a_shape_that_ends_on_an_agent_loads_and_warns_on_both_renders() {
-    // DESIGN.md:338, as a warning: the definition still loads, still
+    // DESIGN.md's *Procedures*, a procedure should end with you, as a warning: the definition still loads, still
     // lists, still files — and both renders say, by name and by flight,
     // that it comes back to no one.
     let repo = repo();

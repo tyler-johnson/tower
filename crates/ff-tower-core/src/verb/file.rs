@@ -336,7 +336,6 @@ mod tests {
     /// together, and `verdict` waits on both.
     const REVIEW: &str = r#"
 name    = "review"
-subject = "branch"
 
 [[flight]]
 id       = "pass"
@@ -346,7 +345,6 @@ skill    = "review"
 [[flight]]
 id       = "smoke"
 assignee = "me"
-bay      = "warm"
 
 [[flight]]
 id       = "verdict"

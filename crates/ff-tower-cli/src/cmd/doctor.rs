@@ -96,7 +96,7 @@ pub fn run(json: bool) -> Result<i32, CliError> {
 }
 
 /// The registry rows: principle 5's half of the skill seam, and
-/// DESIGN.md:338's warning.
+/// DESIGN.md's *Procedures* warning, a procedure should end with you.
 ///
 /// A procedure naming a skill nothing installs still loads and flies —
 /// nothing validates the link at load — so doctor is where the

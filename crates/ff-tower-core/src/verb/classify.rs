@@ -123,8 +123,7 @@ pub fn classify(
 
 /// One definition flight as the log carries it: the closed enums become
 /// their names, and the caller's flags win where an overlay rides. The
-/// `branch` field is retired with #124 and kept for reading — the
-/// definition's `subject = "branch"` rule no longer resolves here, and a
+/// `branch` field is retired with #124 and kept for reading — a
 /// filing writes `None`.
 fn filed(
     definition: &Definition,

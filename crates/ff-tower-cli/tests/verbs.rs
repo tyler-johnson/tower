@@ -108,9 +108,9 @@ fn install_review(repo: &Repo) {
     repo.write(
         ".tower/procedures/review.toml",
         concat!(
-            "name    = \"review\"\nsubject = \"branch\"\n\n",
+            "name    = \"review\"\n\n",
             "[[flight]]\nid       = \"pass\"\nassignee = \"agent\"\nskill    = \"review\"\n\n",
-            "[[flight]]\nid       = \"smoke\"\nassignee = \"me\"\nbay      = \"warm\"\n\n",
+            "[[flight]]\nid       = \"smoke\"\nassignee = \"me\"\n\n",
             "[[flight]]\nid       = \"verdict\"\nassignee = \"me\"\nafter    = [\"pass\", \"smoke\"]\n",
         ),
     );

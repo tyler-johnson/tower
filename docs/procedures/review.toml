@@ -2,7 +2,6 @@
 # worked: `pass` and `smoke` fly together because neither names the other,
 # and `verdict` waits on both.
 name    = "review"
-subject = "branch"            # may resolve to a PR later
 
 [[match]]                     # adapter-keyed, so inert until an adapter can fire it
 name   = "github-reviews"
@@ -18,7 +17,6 @@ done     = "asserted"
 [[flight]]
 id       = "smoke"
 assignee = "me"
-bay      = "warm"             # build the tree ahead of me
 done     = "asserted"
 
 [[flight]]

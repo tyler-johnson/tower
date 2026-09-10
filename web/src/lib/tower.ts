@@ -482,9 +482,6 @@ export interface Brief {
 /// procedure's name, as provenance.
 export interface Definition {
   name: string;
-  /// What the flight's subject resolves against later; `branch` on
-  /// `review`. Nothing derives from it yet.
-  subject: string | null;
   matches: ProcedureMatch[];
   flights: FlightDef[];
   source: Source;
@@ -512,7 +509,6 @@ export interface FlightDef {
   skill: string | null;
   after: string[];
   done: string;
-  bay: string | null;
   /// The priority and labels the flight is born with — free here because
   /// they are free on the flight.
   priority: string | null;

@@ -219,7 +219,7 @@ fn a_procedure_naming_a_ghost_skill_is_a_finding() {
 
 #[test]
 fn a_procedure_that_ends_on_an_agent_is_a_finding() {
-    // DESIGN.md:338 warns rather than refuses, so the definition loads
+    // DESIGN.md's *Procedures*, a procedure should end with you, warns rather than refuses, so the definition loads
     // and doctor is where it surfaces — by name and by flight.
     let repo = repo();
     repo.write(

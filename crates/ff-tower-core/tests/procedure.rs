@@ -16,7 +16,6 @@ use ff_tower_core::procedure::{self, Assignee, Done, Source};
 /// DESIGN.md's *Procedures* block, verbatim.
 const REVIEW: &str = r#"
 name    = "review"
-subject = "branch"            # may resolve to a PR later
 
 [[match]]                     # adapter-keyed, so inert until an adapter can fire it
 name   = "github-reviews"
@@ -31,7 +30,6 @@ skill    = "review"
 [[flight]]
 id       = "smoke"
 assignee = "me"
-bay      = "warm"             # build the tree ahead of me
 
 [[flight]]
 id    = "verdict"
@@ -64,7 +62,6 @@ fn at(name: &str) -> Source {
 fn designs_review_block_loads_to_its_flights_and_edges() {
     let definition = procedure::load(REVIEW, at("review.toml")).expect("loads");
     assert_eq!(definition.name, "review");
-    assert_eq!(definition.subject.as_deref(), Some("branch"));
 
     assert_eq!(definition.matches.len(), 1);
     assert_eq!(definition.matches[0].name, "github-reviews");
@@ -182,7 +179,7 @@ after    = ["only"]
 
 #[test]
 fn a_procedure_that_does_not_end_with_you_loads_and_warns() {
-    // DESIGN.md:338, and it warns rather than refuses: the file is
+    // DESIGN.md's *Procedures*, a procedure should end with you, and it warns rather than refuses: the file is
     // personal, and the boundary that actually holds is
     // `never auto-outward`.
     let definition = procedure::load(
@@ -313,7 +310,6 @@ assignee = "me"
         .map(|flight| flight.id.as_str())
         .collect();
     assert_eq!(ids, ["ours"]);
-    assert!(review.subject.is_none());
     assert_eq!(installed.names(), ["review", "ticket"]);
     // A name the repository layer does not carry is the user's still.
     assert_eq!(

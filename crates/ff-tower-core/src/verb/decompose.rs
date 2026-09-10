@@ -155,7 +155,6 @@ mod tests {
             ".tower/procedures/review.toml",
             r#"
 name    = "review"
-subject = "branch"
 
 [[flight]]
 id       = "pass"
@@ -165,7 +164,6 @@ skill    = "review"
 [[flight]]
 id       = "smoke"
 assignee = "me"
-bay      = "warm"
 
 [[flight]]
 id       = "verdict"
