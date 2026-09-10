@@ -17,8 +17,7 @@ export type Cell =
   | { kind: "dot"; status: string }
   | { kind: "subject"; text: string }
   | { kind: "chips"; words: string[] }
-  | { kind: "dim"; text: string }
-  | { kind: "flag"; text: string; on: boolean };
+  | { kind: "dim"; text: string };
 
 /// The cell a field draws for a row. `refs` is the board's id map, `now`
 /// the clock every age reads against, so a cell is a pure function of
@@ -47,19 +46,10 @@ export function cell(field: Field, view: FlightView, refs: Map<string, string>, 
       return { kind: "dim", text: view.skill ?? "" };
     case "procedure":
       return { kind: "dim", text: view.procedure ?? "" };
-    case "branch":
-      // The sentinel printed as a branch name would read as a real
-      // branch, the same rule `tipColumn` keeps.
-      return {
-        kind: "dim",
-        text: view.branch === "@detached" ? "(detached)" : (view.branch ?? ""),
-      };
     case "filed":
       return { kind: "dim", text: age(now, view.filed_at) };
     case "moved":
       return { kind: "dim", text: view.status_at !== null ? age(now, view.status_at) : "" };
-    case "changed":
-      return { kind: "dim", text: view.last_change !== null ? age(now, view.last_change) : "" };
     case "comments":
       return { kind: "dim", text: view.comments > 0 ? String(view.comments) : "" };
     case "progress":
@@ -67,12 +57,6 @@ export function cell(field: Field, view: FlightView, refs: Map<string, string>, 
         kind: "dim",
         text: view.progress !== null ? `${view.progress[0]}/${view.progress[1]}` : "",
       };
-    case "stale":
-      return { kind: "flag", text: "stale", on: view.stale };
-    case "changed_since_ready":
-      return { kind: "flag", text: "changed", on: view.changed_since_ready };
-    case "held":
-      return { kind: "flag", text: "held", on: view.held };
     case "body":
     case "for":
       // Not showable, and the switch needs a leg.

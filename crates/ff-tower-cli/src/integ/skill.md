@@ -23,7 +23,7 @@ The MCP server `ff mcp` serves four tower tools beside fufu's own: `tower__next`
 
 ## Naming a flight
 
-A flight has two names. The board prints `#3`; when two writers share a board and the numbers clash it prints `pi-8c2e#3`; the wire carries `pi-8c2e.140`, the id of the event that filed it, and that is the string on every `--session` tag fufu records for it. Every verb that takes a flight accepts all three: `<n>`, `<writer>#<n>`, or `<writer>.<seq>`, with one leading `#` stripped so what tower prints pastes back in. A bare number must match exactly one filed flight, or the verb refuses with `tower/flight/ambiguous` and lists the full forms. Event seqs are shared by every event kind on a writer's chain, so wire ids are sparse: `pi-8c2e.140` and `pi-8c2e.146` can be neighbors.
+A flight has two names. The board prints `#3`; when two writers share a board and the numbers clash it prints `pi-8c2e#3`; the wire carries `pi-8c2e.140`, the id of the event that filed it. Every verb that takes a flight accepts all three: `<n>`, `<writer>#<n>`, or `<writer>.<seq>`, with one leading `#` stripped so what tower prints pastes back in. A bare number must match exactly one filed flight, or the verb refuses with `tower/flight/ambiguous` and lists the full forms. Event seqs are shared by every event kind on a writer's chain, so wire ids are sparse: `pi-8c2e.140` and `pi-8c2e.146` can be neighbors.
 
 ## Reading
 
@@ -52,11 +52,11 @@ Procedures and skills live in two layers keyed by name, `~/.config/tower/procedu
 
 Seven words, and you can type five of them: `ff tower status <flight> backlog`, `ready`, `in_progress`, `done`, or `canceled`. `waiting` comes from links and `held` from a question, and typing either is refused with the verb that gets you there. The record derives the word a flight shows, first rule winning: a foreign word stands verbatim; closed is closed whatever the edges say; an open question is Held; backlog; started is In Progress, and a pull beats an open dependency; any dependency not closed is Waiting; else Ready. The echo says where the word landed and how many dependencies it waits on, so `ff tower status <flight> ready` on a gated flight answers `waiting`.
 
-A closed flight refuses every move; the log keeps its record, and comments and edits still land. An open question refuses every move except `done` and `canceled`. `ff tower done <flight>` finishes; bare `ff tower done` finishes the invoking worktree's flight, derived from its newest session-tagged operation. `ff tower cancel <flight> -m "<why>"` closes without the finish, and the reason is stored on the move.
+A closed flight refuses every move; the log keeps its record, and comments and edits still land. An open question refuses every move except `done` and `canceled`. `ff tower done <flight>` finishes. `ff tower cancel <flight> -m "<why>"` closes without the finish, and the reason is stored on the move.
 
 ## Holds and answers
 
-`ff tower hold <flight> -m "<question>"` stops a flight with the question on its record. The exit is 3, an outcome and not an error: the envelope is a full success envelope carrying the held event, and only the code says the flight stopped with a question. One question per flight; a second hold refuses with `tower/hold/exists`. Holding clears started, so the flight is no longer In Progress, and nothing is torn down: the branch stays, and it and its tip stay on the row.
+`ff tower hold <flight> -m "<question>"` stops a flight with the question on its record. The exit is 3, an outcome and not an error: the envelope is a full success envelope carrying the held event, and only the code says the flight stopped with a question. One question per flight; a second hold refuses with `tower/hold/exists`. Holding clears started, so the flight is no longer In Progress, and nothing is torn down.
 
 `ff tower answer <flight> -m "<answer>"` clears the question. The answer counts as the flight's freshest motion and the record derives Ready, or Waiting when a dependency is still live, never straight back to In Progress; the next pull is a fresh claim, and the answer is on the brief for whoever makes it. `next` never picks a held flight, and `yours` never counts one.
 
@@ -93,7 +93,7 @@ Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent whe
 
 The log is `refs/tower/log/<author>/<writer>`, one orphan chain per writer; `tower.writer` is minted at the first append and is not a setting to copy between machines. Sync is a `git push` or `git fetch` of that refspec; there is no verb, and a chain this repository has not fetched shows in `ff tower doctor` as events off the board. `ff tower serve` answers the same envelopes at `/api/…` and streams changes at `/api/feed`; a person starts it, and every other interface works with it down.
 
-Every fufu read tower makes captures first, like every fufu verb, so folding a board against a dirty tree appends a snapshot to that worktree's fufu chain. Under `ff tower <verb>` the child inherits `FF_REPO`, `FF_CONTRACT`, and `FF_SESSION` from fufu's dispatch, and bare `ff tower done` reads the session.
+Under `ff tower <verb>` the child inherits `FF_REPO` and `FF_CONTRACT` from fufu's dispatch.
 
 ## Landmines
 

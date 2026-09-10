@@ -1,18 +1,11 @@
-//! The board: the fold's flights, enriched with the repository's answer
-//! to "where is each one" and grouped by the status each record derives.
+//! The board: the fold's flights, flattened to rows and grouped by the
+//! status each record derives.
 //!
-//! `enrich` is pure — it runs over a [`Reads`] the caller already
-//! gathered, plus the two scalars it refuses to read for itself: `now`,
-//! and the threshold behind the stale line. A flight sits in the group
-//! its derived status names — the projection the fold already made over
-//! the stored facts, the open question and the edges — and `enrich`
-//! moves it nowhere further; `held`/`resolving` stay fufu's branch
-//! holds, printed on the row, deciding no section.
-//!
-//! What the repository knows lands beside the fields as two independent
-//! facts, never joined under one word: a flight In Progress that its
-//! branch has forgotten, and a Ready flight whose branch moved after it
-//! was set Ready. One is staleness and one is its opposite.
+//! `enrich` is pure — it runs over the fold, plus the one scalar it
+//! refuses to read for itself: `now`, which the closed window's span
+//! reads. A flight sits in the group its derived status names — the
+//! projection the fold already made over the stored facts, the open
+//! question and the edges — and `enrich` moves it nowhere further.
 //!
 //! Above the groups sits the inbox — questions and yours — a view of the
 //! same rows rather than a seventh group. Having a parent is not a
@@ -26,7 +19,6 @@ use serde::Serialize;
 use crate::log::Event;
 
 use super::flight::{Flight, Fold};
-use super::reads::Reads;
 
 /// How much of the closed group a render carries.
 ///
@@ -163,27 +155,10 @@ pub struct FlightView {
     pub priority: String,
     pub labels: Vec<String>,
     pub skill: Option<String>,
-    /// `@detached` is a real literal value here, carried as fufu emitted
-    /// it; a render decides how to print it.
-    pub branch: Option<String>,
-    /// That branch's tip, when the branch resolves to a row in the index.
-    pub tip: Option<String>,
-    /// The freshest session-tagged capture on this flight's branch — the
-    /// repository's fact, and nothing the record itself did.
-    pub last_change: Option<i64>,
-    /// In Progress, and the branch has not changed for the threshold.
-    pub stale: bool,
-    /// Ready, and the branch changed after the flight was set Ready.
-    pub changed_since_ready: bool,
     /// Closed children over total, whenever this flight has children at
     /// all — what a render prints as `(2/6)`.
     pub progress: Option<(usize, usize)>,
-    pub held: bool,
-    pub resolving: bool,
-    /// The branch is the one this render's own worktree sits on.
-    pub current: bool,
-    /// The open question tower's own `hold` attached — distinct from
-    /// `held`/`resolving`, which stay fufu's branch verdicts.
+    /// The open question tower's own `hold` attached.
     pub question: Option<String>,
     pub asked_at: Option<i64>,
     /// A close's `-m` — a cancel's reason, most often — standing where
@@ -192,8 +167,8 @@ pub struct FlightView {
     pub closed_reason: Option<String>,
 }
 
-/// The fold's flights as flat rows, enriched with what the repository
-/// knows — everything [`enrich`] does before it sections anything.
+/// The fold's flights as flat rows — everything [`enrich`] does before
+/// it sections anything.
 ///
 /// The flat half exists on its own because two folds read it: the
 /// board's sectioning below, and [`Query::fold`](super::Query::fold),
@@ -206,19 +181,11 @@ pub struct Rows {
     pub retired: Vec<Event>,
 }
 
-/// Enrich every folded flight into a row, routing nothing.
+/// Flatten every folded flight into a row, routing nothing.
 ///
-/// `now` and `stale_after` are arguments so the module stays pure and
-/// reads no clock and no config: rows are a function of their inputs,
-/// and `stale_after` of `0` turns the stale line off entirely.
-///
-/// Every flight is enriched the same way — branch from the freshest op
-/// row (`@detached` carried literal), tip and holds from the branch row,
-/// `last_change` from the op row's time.
-pub fn rows(fold: Fold, reads: &Reads, now: i64, stale_after: i64) -> Rows {
-    let freshest = reads.freshest();
-    let branches = reads.branch_index();
-
+/// Every flight is flattened the same way: the stored fields, the derived
+/// status and its mark, the progress mark, and the open question.
+pub fn rows(fold: Fold) -> Rows {
     // The progress marks and the since lines, taken before the flights
     // are consumed and carried as owned rows.
     let marks: HashMap<String, (usize, usize)> = fold
@@ -235,43 +202,7 @@ pub fn rows(fold: Fold, reads: &Reads, now: i64, stale_after: i64) -> Rows {
     let mut flights = Vec::with_capacity(fold.flights.len());
     for flight in fold.flights {
         let id = flight.id.to_string();
-        let op = freshest.get(id.as_str()).copied();
-        let row = op.and_then(|op| {
-            op.branch
-                .as_deref()
-                .filter(|name| *name != "@detached")
-                .and_then(|name| branches.get(name).copied())
-        });
-        let last_change = op.map(|op| op.time);
-        let status_at = flight.status_mark.as_ref().map(|mark| mark.at);
-
-        // The first audit: In Progress and the branch has forgotten it.
-        // With no capture at all the clock runs from the move itself —
-        // a flight declared In Progress and never touched is exactly the
-        // case the line exists for.
-        let stale = flight.status == "in_progress"
-            && stale_after > 0
-            && now - last_change.or(status_at).unwrap_or(flight.filed_at) >= stale_after;
-        // The second: Ready, and the branch moved *after* it was set
-        // Ready. After, not merely at all — the answer that releases a
-        // hold is the Ready mark, so every resumed hold carries a full
-        // branch and a flat check would be pure noise. A flight born
-        // Ready has no mark: the filing is the moment.
-        let changed_since_ready = flight.status == "ready"
-            && last_change.is_some_and(|change| change > status_at.unwrap_or(flight.filed_at));
-
-        let mut view = view(
-            flight,
-            reasons.remove(&id),
-            op.and_then(|op| op.branch.clone()),
-            row.and_then(|row| row.tip.clone()),
-            row.is_some_and(|row| row.held),
-            row.is_some_and(|row| row.resolving),
-            reads.current_branch.as_deref(),
-        );
-        view.last_change = last_change;
-        view.stale = stale;
-        view.changed_since_ready = changed_since_ready;
+        let mut view = view(flight, reasons.remove(&id));
         view.progress = marks.get(&id).copied();
         flights.push(view);
     }
@@ -283,15 +214,12 @@ pub fn rows(fold: Fold, reads: &Reads, now: i64, stale_after: i64) -> Rows {
     }
 }
 
-/// Group the fold's flights by their derived status, using
-/// already-fetched reads.
+/// Group the fold's flights by their derived status.
 ///
-/// `now`, `stale_after`, and `closed` are arguments so the module stays
-/// pure and reads no clock, no config, and no command line: a board is a
-/// function of its inputs, and `stale_after` of `0` turns the stale line
-/// off entirely.
+/// `now` and `closed` are arguments so the module stays pure and reads
+/// no clock and no command line: a board is a function of its inputs.
 ///
-/// [`rows`] does the enrichment; what happens here is the routing. A row
+/// [`rows`] does the flattening; what happens here is the routing. A row
 /// lands in the group its `status` field names and a status string this
 /// binary has never heard of routes nowhere rather than being invented
 /// into a group. The inbox is a second view over the same rows: an open
@@ -303,14 +231,8 @@ pub fn rows(fold: Fold, reads: &Reads, now: i64, stale_after: i64) -> Rows {
 /// What says a row is a family is the parent's progress mark, closed
 /// children over total, which every parent carries. The family itself is
 /// the projects view's shape, not this list's.
-pub fn enrich(
-    fold: Fold,
-    reads: &Reads,
-    now: i64,
-    stale_after: i64,
-    closed: ClosedWindow,
-) -> Board {
-    let rows = rows(fold, reads, now, stale_after);
+pub fn enrich(fold: Fold, now: i64, closed: ClosedWindow) -> Board {
+    let rows = rows(fold);
 
     let mut inbox = WaitingOnYou {
         questions: Vec::new(),
@@ -454,19 +376,7 @@ pub(super) fn rank(priority: &str) -> u8 {
     }
 }
 
-fn view(
-    flight: Flight,
-    status_reason: Option<String>,
-    branch: Option<String>,
-    tip: Option<String>,
-    held: bool,
-    resolving: bool,
-    current_branch: Option<&str>,
-) -> FlightView {
-    let current = match (branch.as_deref(), current_branch) {
-        (Some(a), Some(b)) => a == b,
-        _ => false,
-    };
+fn view(flight: Flight, status_reason: Option<String>) -> FlightView {
     let (question, asked_at) = match flight.question {
         Some(question) => (Some(question.text), Some(question.at)),
         None => (None, None),
@@ -495,15 +405,7 @@ fn view(
         priority: flight.priority,
         labels: flight.labels,
         skill: flight.skill,
-        branch,
-        tip,
-        last_change: None,
-        stale: false,
-        changed_since_ready: false,
         progress: None,
-        held,
-        resolving,
-        current,
         question,
         asked_at,
         closed_reason: flight.closed_reason,
@@ -514,14 +416,11 @@ fn view(
 mod tests {
     use super::super::flight::fold;
     use super::*;
-    use crate::ff::{BranchInfo, BranchList, OpEntry};
     use crate::log::{Event, EventId, Kind};
 
     /// The tests' clock: far enough past every fixture time that an age
     /// is whatever the fixture says it is.
     const NOW: i64 = 1_000_000;
-    /// The registry's default, in seconds.
-    const TWO_DAYS: i64 = 2 * 24 * 60 * 60;
 
     fn filing(status: &str, priority: &str, assignee: Option<&str>, subject: &str) -> Kind {
         Kind::Filed {
@@ -617,17 +516,6 @@ mod tests {
         )
     }
 
-    fn answered(id: &str, time: i64, flight: &str) -> Event {
-        lifecycle(
-            id,
-            time,
-            Kind::Answered {
-                flight: flight.parse().expect("id"),
-                answer: "an answer".to_string(),
-            },
-        )
-    }
-
     fn linked(id: &str, time: i64, from: &str, to: &str) -> Event {
         lifecycle(
             id,
@@ -643,44 +531,15 @@ mod tests {
         moved(id, time, flight, "done")
     }
 
-    fn op(session: &str, branch: Option<&str>, time: i64) -> OpEntry {
-        OpEntry {
-            branch: branch.map(str::to_string),
-            session: Some(session.to_string()),
-            time,
-        }
-    }
-
-    fn branch(name: &str, held: bool, resolving: bool) -> BranchInfo {
-        BranchInfo {
-            name: name.to_string(),
-            tip: Some("3c8f91686a9e35a10ae8ebb6f0d6f9bbbfdd6940".to_string()),
-            held,
-            resolving,
-        }
-    }
-
-    fn reads(ops: Vec<OpEntry>, named: Vec<BranchInfo>, current: Option<&str>) -> Reads {
-        Reads {
-            ops,
-            branches: BranchList {
-                named,
-                anonymous: Vec::new(),
-            },
-            current_branch: current.map(str::to_string),
-        }
-    }
-
-    /// The common shape: no threshold, so the stale line never fires
-    /// where a test is not about it.
-    fn board(events: &[Event], reads: &Reads) -> Board {
-        enrich(fold(events), reads, NOW, 0, ClosedWindow::default())
+    /// The common shape: the default closed window.
+    fn board(events: &[Event]) -> Board {
+        enrich(fold(events), NOW, ClosedWindow::default())
     }
 
     /// The same board with the closed window named, where a test is
     /// about the window itself.
-    fn windowed(events: &[Event], reads: &Reads, closed: ClosedWindow) -> Board {
-        enrich(fold(events), reads, NOW, 0, closed)
+    fn windowed(events: &[Event], closed: ClosedWindow) -> Board {
+        enrich(fold(events), NOW, closed)
     }
 
     fn ids(views: &[FlightView]) -> Vec<&str> {
@@ -688,46 +547,33 @@ mod tests {
     }
 
     #[test]
-    fn every_status_routes_to_its_own_group_and_nothing_from_the_reads_moves_it() {
+    fn every_status_routes_to_its_own_group() {
         // Waiting and Held are never words a filing sets: the edge and
         // the question are what put a row in those groups.
-        let board = board(
-            &[
-                filed_as("pi.1", 10, "backlog", "none", None),
-                filed_as("pi.2", 20, "ready", "none", None),
-                filed_as("pi.3", 30, "ready", "none", None),
-                filed_as("pi.4", 40, "in_progress", "none", None),
-                filed_as("pi.5", 50, "ready", "none", None),
-                linked("pi.6", 60, "pi.2", "pi.1"),
-                held("pi.7", 70, "pi.5", "which?"),
-            ],
-            // A held branch under every one of them: fufu's verdict is a
-            // fact on the row, not a section.
-            &reads(
-                vec![op("pi.1", Some("work"), 60)],
-                vec![branch("work", true, true)],
-                None,
-            ),
-        );
+        let board = board(&[
+            filed_as("pi.1", 10, "backlog", "none", None),
+            filed_as("pi.2", 20, "ready", "none", None),
+            filed_as("pi.3", 30, "ready", "none", None),
+            filed_as("pi.4", 40, "in_progress", "none", None),
+            filed_as("pi.5", 50, "ready", "none", None),
+            linked("pi.6", 60, "pi.2", "pi.1"),
+            held("pi.7", 70, "pi.5", "which?"),
+        ]);
         assert_eq!(ids(&board.backlog), ["pi.1"]);
         assert_eq!(ids(&board.waiting), ["pi.2"]);
         assert_eq!(ids(&board.ready), ["pi.3"]);
         assert_eq!(ids(&board.in_progress), ["pi.4"]);
         assert_eq!(ids(&board.held), ["pi.5"]);
         assert!(board.closed.is_empty());
-        assert!(board.backlog[0].held && board.backlog[0].resolving);
     }
 
     #[test]
     fn the_old_word_triage_lands_in_the_backlog_group() {
-        let board = board(
-            &[
-                filed_as("pi.1", 10, "triage", "none", None),
-                filed_as("pi.2", 20, "ready", "none", None),
-                moved("pi.3", 30, "pi.2", "triage"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed_as("pi.1", 10, "triage", "none", None),
+            filed_as("pi.2", 20, "ready", "none", None),
+            moved("pi.3", 30, "pi.2", "triage"),
+        ]);
         assert_eq!(ids(&board.backlog), ["pi.1", "pi.2"]);
         assert!(
             board.ready.is_empty(),
@@ -737,10 +583,7 @@ mod tests {
 
     #[test]
     fn an_unknown_status_routes_nowhere() {
-        let board = board(
-            &[filed("pi.1", 10), moved("pi.2", 20, "pi.1", "parked")],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[filed("pi.1", 10), moved("pi.2", 20, "pi.1", "parked")]);
         assert!(board.backlog.is_empty());
         assert!(board.waiting.is_empty());
         assert!(board.ready.is_empty());
@@ -751,17 +594,14 @@ mod tests {
 
     #[test]
     fn a_group_sorts_by_priority_then_oldest_first() {
-        let board = board(
-            &[
-                filed_as("pi.1", 10, "backlog", "low", None),
-                filed_as("pi.2", 20, "backlog", "urgent", None),
-                filed_as("pi.3", 30, "backlog", "none", None),
-                filed_as("pi.4", 40, "backlog", "high", None),
-                filed_as("pi.5", 50, "backlog", "urgent", None),
-                filed_as("pi.6", 60, "backlog", "medium", None),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed_as("pi.1", 10, "backlog", "low", None),
+            filed_as("pi.2", 20, "backlog", "urgent", None),
+            filed_as("pi.3", 30, "backlog", "none", None),
+            filed_as("pi.4", 40, "backlog", "high", None),
+            filed_as("pi.5", 50, "backlog", "urgent", None),
+            filed_as("pi.6", 60, "backlog", "medium", None),
+        ]);
         assert_eq!(
             ids(&board.backlog),
             ["pi.2", "pi.5", "pi.4", "pi.6", "pi.1", "pi.3"],
@@ -771,31 +611,25 @@ mod tests {
 
     #[test]
     fn an_unknown_priority_sorts_after_none() {
-        let board = board(
-            &[
-                filed_as("pi.1", 10, "backlog", "blocker", None),
-                filed_as("pi.2", 20, "backlog", "none", None),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed_as("pi.1", 10, "backlog", "blocker", None),
+            filed_as("pi.2", 20, "backlog", "none", None),
+        ]);
         assert_eq!(ids(&board.backlog), ["pi.2", "pi.1"]);
     }
 
     #[test]
     fn the_closed_group_carries_the_three_newest_by_default() {
-        let board = board(
-            &[
-                filed("pi.1", 10),
-                filed("pi.2", 20),
-                filed("pi.3", 30),
-                filed("pi.4", 40),
-                done("pi.5", NOW - 3_600, "pi.1"),
-                moved("pi.6", NOW - 60, "pi.2", "canceled"),
-                done("pi.7", NOW - 600, "pi.3"),
-                done("pi.8", NOW - 10, "pi.4"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed("pi.1", 10),
+            filed("pi.2", 20),
+            filed("pi.3", 30),
+            filed("pi.4", 40),
+            done("pi.5", NOW - 3_600, "pi.1"),
+            moved("pi.6", NOW - 60, "pi.2", "canceled"),
+            done("pi.7", NOW - 600, "pi.3"),
+            done("pi.8", NOW - 10, "pi.4"),
+        ]);
         assert_eq!(
             ids(&board.closed),
             ["pi.4", "pi.2", "pi.3"],
@@ -815,12 +649,11 @@ mod tests {
             done("pi.3", 100, "pi.1"),
             done("pi.4", NOW - 60, "pi.2"),
         ];
-        let reads = reads(Vec::new(), Vec::new(), None);
 
-        let board = windowed(&events, &reads, ClosedWindow::All);
+        let board = windowed(&events, ClosedWindow::All);
         assert_eq!(ids(&board.closed), ["pi.2", "pi.1"]);
 
-        let board = windowed(&events, &reads, ClosedWindow::None);
+        let board = windowed(&events, ClosedWindow::None);
         assert!(board.closed.is_empty());
     }
 
@@ -836,12 +669,11 @@ mod tests {
             done("pi.5", NOW - 2_000, "pi.2"),
             done("pi.6", NOW - 1_000, "pi.3"),
         ];
-        let reads = reads(Vec::new(), Vec::new(), None);
 
-        let board = windowed(&events, &reads, ClosedWindow::Count(2));
+        let board = windowed(&events, ClosedWindow::Count(2));
         assert_eq!(ids(&board.closed), ["pi.3", "pi.2"]);
 
-        let board = windowed(&events, &reads, ClosedWindow::Count(0));
+        let board = windowed(&events, ClosedWindow::Count(0));
         assert!(board.closed.is_empty());
     }
 
@@ -855,7 +687,6 @@ mod tests {
                 done("pi.3", NOW - DAY + 1, "pi.1"),
                 done("pi.4", NOW - DAY - 1, "pi.2"),
             ],
-            &reads(Vec::new(), Vec::new(), None),
             ClosedWindow::Span(DAY),
         );
         assert_eq!(
@@ -899,18 +730,15 @@ mod tests {
 
     #[test]
     fn the_inbox_holds_questions_oldest_first_and_the_me_lane() {
-        let board = board(
-            &[
-                filed("pi.1", 10),
-                filed("pi.2", 20),
-                filed_as("pi.3", 30, "ready", "none", Some("me")),
-                filed_as("pi.4", 40, "ready", "none", Some("agent")),
-                filed_as("pi.5", 50, "ready", "none", None),
-                held("pi.6", 70, "pi.2", "later"),
-                held("pi.7", 60, "pi.1", "sooner"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed("pi.1", 10),
+            filed("pi.2", 20),
+            filed_as("pi.3", 30, "ready", "none", Some("me")),
+            filed_as("pi.4", 40, "ready", "none", Some("agent")),
+            filed_as("pi.5", 50, "ready", "none", None),
+            held("pi.6", 70, "pi.2", "later"),
+            held("pi.7", 60, "pi.1", "sooner"),
+        ]);
         assert_eq!(ids(&board.waiting_on_you.questions), ["pi.1", "pi.2"]);
         assert_eq!(
             ids(&board.waiting_on_you.yours),
@@ -927,28 +755,22 @@ mod tests {
 
     #[test]
     fn a_closed_flight_with_a_question_still_on_the_record_stays_out_of_the_inbox() {
-        let board = board(
-            &[
-                filed("pi.1", 10),
-                held("pi.2", 20, "pi.1", "which?"),
-                done("pi.3", NOW - 60, "pi.1"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed("pi.1", 10),
+            held("pi.2", 20, "pi.1", "which?"),
+            done("pi.3", NOW - 60, "pi.1"),
+        ]);
         assert!(board.waiting_on_you.questions.is_empty());
         assert_eq!(ids(&board.closed), ["pi.1"]);
     }
 
     #[test]
     fn a_canceled_rows_question_is_gone_and_its_reason_stands_in_its_place() {
-        let board = board(
-            &[
-                filed("pi.1", 10),
-                held("pi.2", 20, "pi.1", "which?"),
-                canceled("pi.3", NOW - 60, "pi.1", "superseded"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed("pi.1", 10),
+            held("pi.2", 20, "pi.1", "which?"),
+            canceled("pi.3", NOW - 60, "pi.1", "superseded"),
+        ]);
         assert!(board.waiting_on_you.questions.is_empty());
         let row = &board.closed[0];
         assert_eq!(row.id, "pi.1");
@@ -958,184 +780,13 @@ mod tests {
     }
 
     #[test]
-    fn last_change_is_the_op_row_alone_and_no_record_gesture() {
-        // The audit's whole point: commenting on a stalled flight, or
-        // moving its status, must not silence its own line.
-        let board = board(
-            &[
-                filed("pi.1", 10),
-                moved("pi.2", NOW - 10, "pi.1", "in_progress"),
-                lifecycle(
-                    "pi.3",
-                    NOW - 5,
-                    Kind::Edited {
-                        target: "pi.1".parse().expect("id"),
-                        subject: Some("reworded".to_string()),
-                        body: None,
-                        priority: None,
-                        labels: None,
-                        skill: None,
-                        bay: None,
-                    },
-                ),
-            ],
-            &reads(
-                vec![op("pi.1", Some("work"), NOW - 5_000)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-        );
-        assert_eq!(board.in_progress[0].last_change, Some(NOW - 5_000));
-    }
-
-    #[test]
-    fn an_in_progress_flight_the_branch_forgot_is_stale() {
-        let events = [
-            filed("pi.1", 10),
-            moved("pi.2", NOW - TWO_DAYS - 10, "pi.1", "in_progress"),
-        ];
-        let reads = reads(
-            vec![op("pi.1", Some("work"), NOW - TWO_DAYS - 5)],
-            vec![branch("work", false, false)],
-            None,
-        );
-        let board = enrich(
-            fold(&events),
-            &reads,
-            NOW,
-            TWO_DAYS,
-            ClosedWindow::default(),
-        );
-        assert!(board.in_progress[0].stale);
-
-        // The threshold off: the same board says nothing.
-        let board = enrich(fold(&events), &reads, NOW, 0, ClosedWindow::default());
-        assert!(!board.in_progress[0].stale);
-    }
-
-    #[test]
-    fn an_in_progress_flight_never_captured_runs_the_clock_from_the_move() {
-        let events = [
-            filed("pi.1", 10),
-            moved("pi.2", NOW - TWO_DAYS - 1, "pi.1", "in_progress"),
-        ];
-        let board = enrich(
-            fold(&events),
-            &reads(Vec::new(), Vec::new(), None),
-            NOW,
-            TWO_DAYS,
-            ClosedWindow::default(),
-        );
-        assert!(board.in_progress[0].stale);
-        assert!(board.in_progress[0].last_change.is_none());
-    }
-
-    #[test]
-    fn an_edit_does_not_clear_staleness() {
-        let board = enrich(
-            fold(&[
-                filed("pi.1", 10),
-                moved("pi.2", NOW - TWO_DAYS - 10, "pi.1", "in_progress"),
-                lifecycle(
-                    "pi.3",
-                    NOW - 1,
-                    Kind::Edited {
-                        target: "pi.1".parse().expect("id"),
-                        subject: Some("reworded".to_string()),
-                        body: None,
-                        priority: None,
-                        labels: None,
-                        skill: None,
-                        bay: None,
-                    },
-                ),
-            ]),
-            &reads(
-                vec![op("pi.1", Some("work"), NOW - TWO_DAYS - 5)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-            NOW,
-            TWO_DAYS,
-            ClosedWindow::default(),
-        );
-        assert!(board.in_progress[0].stale, "a reword is not a change");
-    }
-
-    #[test]
-    fn a_ready_flight_the_branch_moved_under_says_so() {
-        let board = board(
-            &[filed("pi.1", 10), moved("pi.2", 100, "pi.1", "ready")],
-            &reads(
-                vec![op("pi.1", Some("work"), 200)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-        );
-        assert!(board.ready[0].changed_since_ready);
-    }
-
-    #[test]
-    fn a_flight_born_ready_takes_the_filing_as_its_mark() {
-        // No status mark at all — `file`'s default — so the filing is
-        // the moment: a change after it is news, a change before it (a
-        // branch that already existed) is not.
-        let after = board(
-            &[filed_as("pi.1", 100, "ready", "none", None)],
-            &reads(
-                vec![op("pi.1", Some("work"), 200)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-        );
-        assert!(after.ready[0].status_at.is_none());
-        assert!(after.ready[0].changed_since_ready);
-
-        let before = board(
-            &[filed_as("pi.1", 300, "ready", "none", None)],
-            &reads(
-                vec![op("pi.1", Some("work"), 200)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-        );
-        assert!(!before.ready[0].changed_since_ready);
-    }
-
-    #[test]
-    fn a_resumed_hold_does_not_flag_changes_since_ready() {
-        // The answer is the Ready mark of a released hold, so the branch
-        // is full of the work that preceded the question. Only a change
-        // *after* the release is news.
-        let board = board(
-            &[
-                filed("pi.1", 10),
-                moved("pi.2", 50, "pi.1", "ready"),
-                held("pi.3", 100, "pi.1", "which?"),
-                answered("pi.4", 300, "pi.1"),
-            ],
-            &reads(
-                vec![op("pi.1", Some("work"), 200)],
-                vec![branch("work", false, false)],
-                None,
-            ),
-        );
-        assert_eq!(board.ready[0].status, "ready");
-        assert_eq!(board.ready[0].status_at, Some(300));
-        assert!(!board.ready[0].changed_since_ready);
-    }
-
-    #[test]
     fn a_canceled_child_lifts_the_parent_to_ready_with_the_reason() {
-        let board = board(
-            &[
-                filed_as("pi.1", 10, "ready", "none", None),
-                filed("pi.2", 20),
-                linked("pi.3", 30, "pi.1", "pi.2"),
-                moved("pi.4", 40, "pi.2", "canceled"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            filed_as("pi.1", 10, "ready", "none", None),
+            filed("pi.2", 20),
+            linked("pi.3", 30, "pi.1", "pi.2"),
+            moved("pi.4", 40, "pi.2", "canceled"),
+        ]);
         assert_eq!(ids(&board.waiting), [] as [&str; 0]);
         let parent = &board.ready[0];
         assert_eq!(parent.id, "pi.1");
@@ -1155,20 +806,17 @@ mod tests {
     /// rows rather than a filter on them.
     #[test]
     fn a_sub_flight_lands_in_its_own_status_group_beside_its_parent() {
-        let board = board(
-            &[
-                subjected("pi.1", 10, "top"),
-                event(
-                    "pi.2",
-                    20,
-                    filing("ready", "none", Some("agent"), "top · middle"),
-                ),
-                subjected("pi.3", 30, "leaf"),
-                linked("pi.4", 40, "pi.1", "pi.2"),
-                linked("pi.5", 50, "pi.2", "pi.3"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            subjected("pi.1", 10, "top"),
+            event(
+                "pi.2",
+                20,
+                filing("ready", "none", Some("agent"), "top · middle"),
+            ),
+            subjected("pi.3", 30, "leaf"),
+            linked("pi.4", 40, "pi.1", "pi.2"),
+            linked("pi.5", 50, "pi.2", "pi.3"),
+        ]);
         assert_eq!(
             ids(&board.backlog),
             ["pi.1", "pi.3"],
@@ -1186,17 +834,14 @@ mod tests {
     /// other closed flight.
     #[test]
     fn a_parent_keeps_its_progress_mark() {
-        let board = board(
-            &[
-                subjected("pi.1", 10, "a broad task"),
-                subjected("pi.2", 20, "part one"),
-                subjected("pi.3", 30, "part two"),
-                linked("pi.4", 40, "pi.1", "pi.2"),
-                linked("pi.5", 50, "pi.1", "pi.3"),
-                done("pi.6", NOW - 60, "pi.2"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            subjected("pi.1", 10, "a broad task"),
+            subjected("pi.2", 20, "part one"),
+            subjected("pi.3", 30, "part two"),
+            linked("pi.4", 40, "pi.1", "pi.2"),
+            linked("pi.5", 50, "pi.1", "pi.3"),
+            done("pi.6", NOW - 60, "pi.2"),
+        ]);
         assert_eq!(ids(&board.backlog), ["pi.1", "pi.3"]);
         assert_eq!(board.backlog[0].progress, Some((1, 2)));
         assert!(
@@ -1210,15 +855,12 @@ mod tests {
     /// sub-flight reaches it on the same terms as any flight.
     #[test]
     fn a_questioned_sub_flight_reaches_the_inbox_and_its_group() {
-        let board = board(
-            &[
-                subjected("pi.1", 10, "check the PR"),
-                subjected("pi.2", 20, "check the PR · verdict"),
-                linked("pi.3", 30, "pi.1", "pi.2"),
-                held("pi.4", 40, "pi.2", "which flow wins?"),
-            ],
-            &reads(Vec::new(), Vec::new(), None),
-        );
+        let board = board(&[
+            subjected("pi.1", 10, "check the PR"),
+            subjected("pi.2", 20, "check the PR · verdict"),
+            linked("pi.3", 30, "pi.1", "pi.2"),
+            held("pi.4", 40, "pi.2", "which flow wins?"),
+        ]);
         assert_eq!(ids(&board.waiting_on_you.questions), ["pi.2"]);
         assert_eq!(ids(&board.held), ["pi.2"]);
         assert_eq!(ids(&board.backlog), ["pi.1"]);
@@ -1226,39 +868,16 @@ mod tests {
 
     #[test]
     fn a_flight_with_no_children_carries_no_progress_mark() {
-        let board = board(&[filed("pi.1", 10)], &reads(Vec::new(), Vec::new(), None));
+        let board = board(&[filed("pi.1", 10)]);
         assert!(board.backlog[0].progress.is_none());
     }
 
     #[test]
-    fn a_tagged_flight_keeps_its_branch_tip_and_current_mark() {
-        let board = board(
-            &[filed("pi.1", 10)],
-            &reads(
-                vec![op("pi.1", Some("main"), 50)],
-                vec![branch("main", false, false)],
-                Some("main"),
-            ),
-        );
+    fn an_untouched_flight_carries_its_stored_fields_and_nothing_else() {
+        let board = board(&[filed("pi.1", 10)]);
         let view = &board.backlog[0];
         assert_eq!(view.id, "pi.1");
         assert_eq!(view.number, 1);
-        assert_eq!(view.branch.as_deref(), Some("main"));
-        assert_eq!(view.tip.as_deref().map(|t| &t[..8]), Some("3c8f9168"));
-        assert_eq!(view.last_change, Some(50));
-        assert!(view.current);
-    }
-
-    #[test]
-    fn an_untouched_flight_carries_its_stored_fields_and_nothing_else() {
-        let board = board(
-            &[filed("pi.1", 10)],
-            &reads(Vec::new(), Vec::new(), Some("main")),
-        );
-        let view = &board.backlog[0];
-        assert!(view.branch.is_none() && view.tip.is_none() && view.last_change.is_none());
-        assert!(!view.held && !view.resolving && !view.current);
-        assert!(!view.stale && !view.changed_since_ready);
         assert_eq!(view.status, "backlog");
         assert!(view.status_by.is_none() && view.status_at.is_none());
         assert!(view.assignee.is_none());
@@ -1266,56 +885,5 @@ mod tests {
         assert!(view.labels.is_empty());
         assert!(view.skill.is_none());
         assert!(view.procedure.is_none());
-    }
-
-    #[test]
-    fn a_detached_flight_is_never_held() {
-        // Even with a held branch in the index — `@detached` names nothing
-        // and must not accidentally resolve to a row.
-        let board = board(
-            &[filed("pi.1", 10)],
-            &reads(
-                vec![op("pi.1", Some("@detached"), 50)],
-                vec![branch("@detached", true, true)],
-                None,
-            ),
-        );
-        let view = &board.backlog[0];
-        assert_eq!(view.branch.as_deref(), Some("@detached"));
-        assert!(view.tip.is_none());
-        assert!(!view.held && !view.resolving);
-    }
-
-    #[test]
-    fn the_freshest_op_row_wins_per_tag() {
-        let board = board(
-            &[filed("pi.1", 10)],
-            &reads(
-                vec![op("pi.1", Some("old"), 40), op("pi.1", Some("new"), 60)],
-                vec![branch("new", false, false)],
-                None,
-            ),
-        );
-        assert_eq!(board.backlog[0].branch.as_deref(), Some("new"));
-        assert_eq!(board.backlog[0].last_change, Some(60));
-    }
-
-    #[test]
-    fn a_question_keeps_the_branch() {
-        let board = board(
-            &[filed("pi.1", 10), held("pi.2", 60, "pi.1", "which?")],
-            &reads(
-                vec![op("pi.1", Some("work"), 50)],
-                vec![branch("work", true, false)],
-                None,
-            ),
-        );
-        let view = &board.waiting_on_you.questions[0];
-        assert_eq!(view.question.as_deref(), Some("which?"));
-        assert_eq!(view.asked_at, Some(60));
-        assert_eq!(view.status, "held", "the hold is a status move too");
-        assert_eq!(view.branch.as_deref(), Some("work"));
-        assert!(view.tip.is_some());
-        assert!(view.held);
     }
 }

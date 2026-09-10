@@ -41,22 +41,6 @@ fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-/// Block until the wall clock's second changes — under a second, and the
-/// only way an event and a capture taken back to back land on distinct
-/// stamps.
-fn next_second() {
-    let second = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("after the epoch")
-            .as_secs()
-    };
-    let started = second();
-    while second() == started {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-}
-
 /// A repository with one filed flight on its log.
 fn repo_with_a_filing() -> Repo {
     let repo = Repo::new();
@@ -108,12 +92,6 @@ fn json_emits_towers_envelope_and_round_trips() {
         assert!(inbox.contains_key(key), "the inbox is missing `{key}`");
     }
     assert_eq!(data["backlog"][0]["id"], serde_json::json!("pi.1"));
-    assert_eq!(data["backlog"][0]["stale"], serde_json::json!(false));
-    assert_eq!(
-        data["backlog"][0]["changed_since_ready"],
-        serde_json::json!(false)
-    );
-    assert!(data["backlog"][0]["last_change"].is_null());
     assert!(data["backlog"][0]["progress"].is_null());
 }
 
@@ -383,84 +361,6 @@ fn an_empty_repository_renders_the_empty_board_hint() {
     let repo = Repo::new();
     let out = stdout(&ff_tower(repo.path(), &[]));
     assert_eq!(out, "nothing on the board · ff tower file to add one\n");
-}
-
-#[test]
-fn a_missing_ff_exits_one_and_names_fufu() {
-    let repo = Repo::new();
-    let output = Command::new(env!("CARGO_BIN_EXE_ff-tower"))
-        .env("FF_REPO", repo.path())
-        .env("TOWER_FF", "/nonexistent/ff")
-        .output()
-        .expect("spawn ff-tower");
-
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.starts_with("ff-tower: "), "got {stderr:?}");
-    assert!(stderr.contains("fufu"), "the dependency is named: {stderr}");
-
-    // The same failure under --json is an error envelope on stdout — slice
-    // 3's scoped omission, closed.
-    let output = Command::new(env!("CARGO_BIN_EXE_ff-tower"))
-        .args(["--json"])
-        .env("FF_REPO", repo.path())
-        .env("TOWER_FF", "/nonexistent/ff")
-        .output()
-        .expect("spawn ff-tower");
-
-    assert_eq!(output.status.code(), Some(1));
-    let envelope: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("an envelope");
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
-    assert_eq!(
-        envelope["error"]["id"],
-        serde_json::json!("tower/ff/not-installed")
-    );
-    // The raise site says nothing, so `exits_for` falls back to naming
-    // the registry lookup — a coded failure always has prose behind it.
-    assert_eq!(
-        envelope["error"]["exits"],
-        serde_json::json!(["ff tower explain tower/ff/not-installed"])
-    );
-    assert!(envelope.get("data").is_none(), "data and error, never both");
-}
-
-#[test]
-fn a_ready_flight_whose_branch_moved_carries_the_audit_line() {
-    use ff_tower_core::ff::Ff;
-
-    let repo = Repo::new();
-    repo.pin_writer("pi");
-    stdout(&ff_tower(repo.path(), &["file", "cleared work"]));
-
-    // The capture has to land after the flight became Ready — the
-    // filing itself, born cleared — which is the whole test: a branch
-    // that moved *before* then is the resumed hold, and says nothing.
-    // Epoch seconds are the log's granularity, so wait out the current
-    // one first.
-    next_second();
-    repo.write("work.txt", "an agent was here\n");
-    Ff::at(repo.path())
-        .session("pi.1")
-        .status()
-        .expect("status");
-
-    let out = stdout(&ff_tower(repo.path(), &[]));
-    assert!(
-        out.contains("changes on the branch since it was set ready"),
-        "{out}"
-    );
-    let envelope = envelope(&ff_tower(repo.path(), &["--json"]));
-    assert_eq!(
-        envelope["data"]["ready"][0]["changed_since_ready"],
-        serde_json::json!(true)
-    );
-    assert_eq!(
-        envelope["data"]["ready"][0]["stale"],
-        serde_json::json!(false),
-        "the two audits are independent facts"
-    );
 }
 
 #[test]

@@ -11,7 +11,6 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use ff_tower_core::ff::Ff;
 use ff_tower_core::log::{Kind, Store};
 use ff_tower_testsupport::Repo;
 
@@ -217,7 +216,6 @@ fn json_round_trips_the_brief() {
         "born Ready, gated by the edge"
     );
     // Absent facts are null, never missing keys.
-    assert!(data["branch"].is_null(), "{data}");
     assert!(data["status_by"].is_null(), "{data}");
     assert!(data["question"].is_null(), "{data}");
 }
@@ -234,28 +232,6 @@ fn show_and_brief_agree_byte_for_byte() {
     let show = ff_tower(repo.path(), &["show", "1", "--json"]);
     assert_eq!(stdout(&show), stdout(&brief));
     assert_eq!(envelope(&show)["cmd"], serde_json::json!("tower brief"));
-}
-
-#[test]
-fn a_session_tagged_flight_carries_its_branch_and_tip() {
-    let repo = repo();
-    stdout(&ff_tower(repo.path(), &["file", "branch work"]));
-
-    repo.ff(&["start", "-b", "work"]);
-    repo.write("work.txt", "work\n");
-    Ff::at(repo.path())
-        .session("pi.1")
-        .status()
-        .expect("status");
-    repo.ff(&["commit", "-m", "work: a commit"]);
-
-    let out = ff_tower(repo.path(), &["brief", "1", "--json"]);
-    let envelope = envelope(&out);
-    assert_eq!(envelope["data"]["branch"], serde_json::json!("work"));
-    let tip = envelope["data"]["tip"].as_str().expect("a tip").to_string();
-
-    let text = stdout(&ff_tower(repo.path(), &["brief", "1"]));
-    assert!(text.contains(&format!("on work {}", &tip[..8])), "{text}");
 }
 
 #[test]

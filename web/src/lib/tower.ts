@@ -138,34 +138,15 @@ export interface FlightView {
   priority: string;
   labels: string[];
   skill: string | null;
-  branch: string | null;
-  tip: string | null;
-  /// The freshest session-tagged capture on this flight's branch — the
-  /// repository's fact, and nothing the record itself did.
-  last_change: number | null;
-  /// In Progress, and the branch has not changed for the threshold.
-  stale: boolean;
-  /// Ready, and the branch changed after the flight was set Ready.
-  changed_since_ready: boolean;
   /// Closed children over total, a JSON array — Rust's `(usize, usize)`
   /// serializes as one, not as an object.
   progress: [number, number] | null;
-  held: boolean;
-  resolving: boolean;
-  current: boolean;
   question: string | null;
   asked_at: number | null;
   /// A close's `-m` — a cancel's reason, most often — standing where the
   /// question stood; `null` while open or when the close said nothing.
   closed_reason: string | null;
 }
-
-/// The staleness threshold's rendering, `config::DEFAULT_STALE_FLIGHT`
-/// through `render::span`. The board envelope carries neither a clock nor
-/// the config, so a repo that set `tower.staleFlightThreshold` to
-/// something else will read wrong here until the envelope carries it —
-/// the flag itself is the server's, and only the word is guessed.
-const STALE_AFTER = "2d";
 
 /// The writer half of a wire id — everything before the last `.`.
 export function writerOf(id: string): string {
@@ -210,14 +191,6 @@ export function byline(session: string | null, by: string): string {
 /// everywhere else.
 function isUuid(text: string): boolean {
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(text);
-}
-
-/// The tip column: the branch tip short, `—` for a flight with no tip, and
-/// the literal `(detached)` for `@detached` — printing the sentinel as a
-/// branch name would read as a real branch.
-export function tipColumn(view: FlightView): string {
-  if (view.branch === "@detached") return "(detached)";
-  return view.tip ? view.tip.slice(0, 8) : "—";
 }
 
 /// The priority glyph, urgent first. A word this build has never heard of
@@ -289,10 +262,9 @@ export function groupTitle(key: string | null): string {
 }
 
 /// The right-aligned age column, on `note()`'s own precedence: the ask if
-/// there is one, else the branch's last change, else the filing.
+/// there is one, else the filing.
 export function ageColumn(view: FlightView, now: number): string {
   if (view.asked_at !== null) return age(now, view.asked_at);
-  if (view.last_change !== null) return age(now, view.last_change);
   return age(now, view.filed_at);
 }
 
@@ -335,8 +307,8 @@ export interface NotePhrase {
   tone: "warn" | "dim";
 }
 
-/// The note line's phrases, in render.rs's urgency order: question, held,
-/// resolving, the two audits, the pilot, branch, comments.
+/// The note line's phrases, in render.rs's urgency order: question, the
+/// pilot, comments.
 ///
 /// The one deliberate divergence from `note()`: the trailing age phrase is
 /// omitted, because the web row has a column for the age and the CLI has
@@ -347,15 +319,8 @@ export function notePhrases(view: FlightView): NotePhrase[] {
   const dim = (text: string) => phrases.push({ text, tone: "dim" });
   if (view.question !== null) warn(view.question);
   else if (view.closed_reason !== null) dim(view.closed_reason);
-  if (view.held) warn("held");
-  if (view.resolving) warn("resolving");
-  // The two audits, each its own phrase and neither under a shared word:
-  // one says the branch has forgotten a flight that claims to be flying,
-  // the other says a branch moved under one that claims not to be.
-  if (view.stale) warn(`no changes on the branch for ${STALE_AFTER}`);
-  if (view.changed_since_ready) warn("changes on the branch since it was set ready");
-  // The pilot, ahead of the branch: the stored In Progress and who set
-  // it — the byline and its session are the pilot, the field is the chip.
+  // The pilot: the stored In Progress and who set it — the byline and
+  // its session are the pilot, the field is the chip.
   if (view.status === "in_progress") {
     dim(
       view.status_by !== null
@@ -363,7 +328,6 @@ export function notePhrases(view: FlightView): NotePhrase[] {
         : "in progress",
     );
   }
-  if (view.branch !== null && view.branch !== "@detached") dim(`on ${view.branch}`);
   if (view.comments > 0) {
     dim(`${view.comments} ${view.comments === 1 ? "comment" : "comments"}`);
   }
@@ -372,7 +336,7 @@ export function notePhrases(view: FlightView): NotePhrase[] {
 
 /// Where one flight stands, `Standing`'s tag — flattened onto the brief
 /// beside the facts it arbitrates. Every variant is a bare tag.
-export type StandingTag = "done" | "question" | "held" | "in-progress" | "yours" | "ready";
+export type StandingTag = "done" | "question" | "in-progress" | "yours" | "ready";
 
 /// One linked flight, as the brief carries it. `status` is the stored
 /// word; `closed` is the arbitrated fact, since done and canceled are two
@@ -504,14 +468,6 @@ export interface Brief {
   asked_by: string | null;
   asked_at: number | null;
   closed_reason: string | null;
-  branch: string | null;
-  tip: string | null;
-  held: boolean;
-  resolving: boolean;
-  current: boolean;
-  last_change: number | null;
-  stale: boolean;
-  changed_since_ready: boolean;
   progress: [number, number] | null;
   depends_on: LinkView[];
   blocks: LinkView[];
@@ -576,10 +532,9 @@ export interface Listing {
 
 /// The brief's note line, ported from cmd/brief.rs's `note()`: the status
 /// ahead of everything, because a reader must know first where the flight
-/// stands and who put it there, then the question, the holds, the
-/// standing, the audits, the branch, and the age. Precedence makes the
-/// standing exclusive with the mark phrases, so the line never says a
-/// thing twice.
+/// stands and who put it there, then the question, the standing, and the
+/// age. Precedence makes the standing exclusive with the mark phrases,
+/// so the line never says a thing twice.
 export function briefNote(brief: Brief, now: number): NotePhrase[] {
   const phrases: NotePhrase[] = [];
   const warn = (text: string) => phrases.push({ text, tone: "warn" });
@@ -593,13 +548,10 @@ export function briefNote(brief: Brief, now: number): NotePhrase[] {
   if (brief.status_reason !== null) dim(brief.status_reason);
   if (brief.question !== null) warn(brief.question);
   else if (brief.closed_reason !== null) dim(brief.closed_reason);
-  if (brief.held) warn("held");
-  if (brief.resolving) warn("resolving");
   switch (brief.standing) {
     // Said above, from the brief's own flat facts.
     case "done":
     case "question":
-    case "held":
     case "in-progress":
       break;
     case "yours":
@@ -609,14 +561,7 @@ export function briefNote(brief: Brief, now: number): NotePhrase[] {
       dim("ready");
       break;
   }
-  if (brief.stale) warn(`no changes on the branch for ${STALE_AFTER}`);
-  if (brief.changed_since_ready) warn("changes on the branch since it was set ready");
-  if (brief.branch === "@detached") dim("(detached)");
-  else if (brief.branch !== null) {
-    dim(`on ${brief.branch}${brief.tip !== null ? ` ${brief.tip.slice(0, 8)}` : ""}`);
-  }
   if (brief.asked_at !== null) dim(`asked ${age(now, brief.asked_at)}`);
-  else if (brief.last_change !== null) dim(`changed ${age(now, brief.last_change)}`);
   else dim(`filed ${age(now, brief.filed_at)}`);
   return phrases;
 }
@@ -695,14 +640,6 @@ const KNOWN_BRIEF_KEYS = new Set([
   "asked_by",
   "asked_at",
   "closed_reason",
-  "branch",
-  "tip",
-  "held",
-  "resolving",
-  "current",
-  "last_change",
-  "stale",
-  "changed_since_ready",
   "progress",
   "depends_on",
   "blocks",

@@ -141,15 +141,6 @@ pub static ENTRIES: &[Entry] = &[
         exits: &["ff tower edit <target> -m <msg>"],
     },
     Entry {
-        id: "usage/needs-flight",
-        summary: "bare `done` could not derive the flight",
-        detail: "`done` with no argument reads the invoking worktree's newest session-tagged \
-                 work and finishes the flight that tag names. No tagged work here, or a tag that \
-                 names no filed flight, means the derivation has nothing to stand on — name the \
-                 flight yourself.",
-        exits: &["ff tower done <flight>"],
-    },
-    Entry {
         id: "usage/empty-subject",
         summary: "the subject is empty",
         detail: "`file`, `decompose`, and `edit -s` trim each subject, and one trimmed to \

@@ -60,10 +60,6 @@
       >
         {c.text}
       </span>
-    {:else if c.kind === "flag"}
-      <span class="text-sm {c.on ? 'text-warning' : ''}" title={fieldLabel(field)}>
-        {c.on ? c.text : ""}
-      </span>
     {/if}
   {/each}
 

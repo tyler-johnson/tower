@@ -25,13 +25,8 @@ export type Field =
   | "subject"
   | "body"
   | "procedure"
-  | "branch"
   | "filed"
   | "moved"
-  | "changed"
-  | "stale"
-  | "changed_since_ready"
-  | "held"
   | "for"
   | "ref"
   | "age"
@@ -48,13 +43,8 @@ export const FIELDS: Field[] = [
   "subject",
   "body",
   "procedure",
-  "branch",
   "filed",
   "moved",
-  "changed",
-  "stale",
-  "changed_since_ready",
-  "held",
   "for",
   "ref",
   "age",
@@ -150,10 +140,6 @@ export function shape(field: Field): Shape {
     case "label":
     case "skill":
     case "procedure":
-    case "branch":
-    case "stale":
-    case "changed_since_ready":
-    case "held":
     case "for":
       return "words";
     case "subject":
@@ -161,7 +147,6 @@ export function shape(field: Field): Shape {
       return "text";
     case "filed":
     case "moved":
-    case "changed":
       return "time";
     case "ref":
     case "age":
@@ -200,7 +185,6 @@ export function orderable(field: Field): boolean {
     case "subject":
     case "filed":
     case "moved":
-    case "changed":
       return true;
     default:
       return false;
@@ -650,9 +634,8 @@ function nibble(byte: number): number | null {
 
 // ---- the words a chip reads ------------------------------------------
 
-/// A field as a person reads it: `changed_since_ready` prints as
-/// `changed since ready`, through the same underscore rule a status
-/// takes.
+/// A field as a person reads it, through the same underscore rule a
+/// status takes.
 export function fieldLabel(field: Field): string {
   return statusWord(field);
 }

@@ -273,7 +273,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Answer { flight, message }) => {
             cmd::answer::run(cli.json, flight, message.clone())?
         }
-        Some(Command::Done { flight }) => cmd::done::run(cli.json, flight.as_deref())?,
+        Some(Command::Done { flight }) => cmd::done::run(cli.json, flight)?,
         Some(Command::Explain { id, list }) => cmd::explain::run(cli.json, id.as_deref(), *list)?,
         Some(Command::Config {
             key,

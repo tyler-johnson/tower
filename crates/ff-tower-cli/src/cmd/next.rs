@@ -13,8 +13,8 @@
 //! pool that needs you. The code never says 3: 3 belongs to `held/*`,
 //! which an empty pool is not. `while ff tower next` terminates on the
 //! code alone; a harness that needs to know why reads the field, not the
-//! status. The pipeline is the board's — store, fold, gather — with
-//! `pick` in place of `enrich`. `--peek` is the same computation
+//! status. The pipeline is the board's — store, fold — with `pick` in
+//! place of `enrich`. `--peek` is the same computation
 //! with the append left out, and reports the pick alone.
 
 use serde::Serialize;
@@ -22,7 +22,7 @@ use serde::Serialize;
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, Fold, Outcome};
-use ff_tower_core::log::{Kind, Store};
+use ff_tower_core::log::Kind;
 
 /// One shape either way: `pulled` is `false` under `--peek`, so the
 /// envelope never lies about whether the write happened.
@@ -60,12 +60,10 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         ));
     }
 
-    let ff = super::ff()?;
-    let store = Store::open(ff.repo())?;
+    let store = super::store()?;
     let events = store.read_all()?;
     let fold = board::fold(&events);
-    let reads = board::gather(&ff)?;
-    let picks = board::pick(&fold, &reads, count);
+    let picks = board::pick(&fold, count);
     let outcome = picks.outcome();
 
     let pulled = !peek && !picks.picked.is_empty();

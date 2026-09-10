@@ -138,6 +138,28 @@ printf '%s\n' '{"ff":99,"cmd":"version","data":{"version":"9.9.9"}}'
 }
 
 #[test]
+fn a_missing_ff_is_a_finding_that_names_fufu() {
+    // The board spawns nothing, so a missing `ff` surfaces here alone:
+    // exit 1, one warn row, and the dependency named.
+    let repo = repo();
+    let out = ff_tower_via(
+        repo.path(),
+        &["doctor", "--json"],
+        Some(Path::new("/nonexistent/ff")),
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let (all, findings) = rows(&out);
+    let missing = row(&all, "ff/not-installed");
+    assert_eq!(missing["level"], serde_json::json!("warn"));
+    let message = missing["message"].as_str().expect("message");
+    assert!(
+        message.contains("fufu"),
+        "the dependency is named: {message}"
+    );
+    assert_eq!(findings, 1);
+}
+
+#[test]
 fn a_procedure_naming_a_ghost_skill_is_a_finding() {
     let repo = repo();
     repo.write(

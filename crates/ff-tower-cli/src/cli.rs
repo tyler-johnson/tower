@@ -301,10 +301,9 @@ pub enum Command {
     /// Finish a flight — off the board, on the record.
     #[command(long_about = help::DONE, after_long_help = help::DONE_EXAMPLES)]
     Done {
-        /// The flight to finish; the invoking worktree's flight when
-        /// unsaid, derived from its newest session-tagged work.
+        /// The flight to finish.
         #[arg(value_name = "flight")]
-        flight: Option<String>,
+        flight: String,
     },
     /// Look up an error id and see what it means.
     #[command(long_about = help::EXPLAIN, after_long_help = help::EXPLAIN_EXAMPLES)]

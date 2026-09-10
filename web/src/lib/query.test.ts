@@ -21,7 +21,7 @@ describe("the query codec", () => {
   it("a query round trips through its own codec", () => {
     const raw =
       "status=ready,in_progress&priority=high&label=infra&subject=contains:parser" +
-      "&filed=after:3d&group=assignee&sub=priority&order=-changed&closed=10d" +
+      "&filed=after:3d&group=assignee&sub=priority&order=-moved&closed=10d" +
       "&empty=true&mode=board&show=ref,status,assignee,label,age";
     const query = parse(raw);
     expect(query).not.toBeNull();
@@ -45,7 +45,7 @@ describe("the query codec", () => {
     });
     expect(query.group).toBe("assignee");
     expect(query.subgroup).toBe("priority");
-    expect(query.order).toEqual({ field: "changed", descending: true });
+    expect(query.order).toEqual({ field: "moved", descending: true });
     expect(query.closed).toEqual({ span: 10 * DAY });
     expect(query.emptyGroups).toBe(true);
     expect(query.mode).toBe("board");
@@ -83,12 +83,12 @@ describe("the query codec", () => {
   });
 
   it("a relative date stays relative", () => {
-    const query = parse("filed=after:3d&changed=before:2w");
+    const query = parse("filed=after:3d&moved=before:2w");
     expect(query).not.toBeNull();
     if (query === null) return;
     expect(query.filters[0].value).toEqual({ when: { ago: 3 * DAY } });
     expect(query.filters[1].value).toEqual({ when: { ago: 14 * DAY } });
-    expect(render(query)).toBe("filed=after:3d&changed=before:2w");
+    expect(render(query)).toBe("filed=after:3d&moved=before:2w");
 
     const epoch = parse("filed=after:@1700000000");
     expect(epoch).not.toBeNull();

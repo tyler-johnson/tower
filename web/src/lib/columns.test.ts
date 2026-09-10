@@ -28,15 +28,7 @@ const view: FlightView = {
   priority: "high",
   labels: ["web", "ui"],
   skill: null,
-  branch: "@detached",
-  tip: null,
-  last_change: null,
-  stale: false,
-  changed_since_ready: false,
   progress: [1, 3],
-  held: true,
-  resolving: false,
-  current: false,
   question: null,
   asked_at: null,
   closed_reason: null,
@@ -63,10 +55,7 @@ describe("the columns", () => {
     expect(at("assignee")).toEqual({ kind: "chips", words: [] });
     expect(at("moved")).toEqual({ kind: "dim", text: "" });
     expect(at("filed")).toEqual({ kind: "dim", text: age(now, view.filed_at) });
-    expect(at("held")).toEqual({ kind: "flag", text: "held", on: true });
-    expect(at("stale")).toEqual({ kind: "flag", text: "stale", on: false });
     expect(at("comments")).toEqual({ kind: "dim", text: "" });
     expect(at("progress")).toEqual({ kind: "dim", text: "1/3" });
-    expect(at("branch")).toEqual({ kind: "dim", text: "(detached)" });
   });
 });

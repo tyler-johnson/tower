@@ -13,13 +13,12 @@ export interface Facet {
 
 const SECTIONS = ["backlog", "waiting", "ready", "in_progress", "held", "done", "canceled"];
 const PRIORITIES = ["urgent", "high", "medium", "low", "none"];
-const FLAGS = ["true", "false"];
 
 /// The values a words-shaped field takes on these rows, with counts.
 /// `status` counts by section and lists the seven status words in
 /// lifecycle order, zeros kept;
-/// `priority` lists its five in rank order, zeros kept; the three flags
-/// list `true` then `false`; `for` offers `me` alone, zero kept; every
+/// `priority` lists its five in rank order, zeros kept; `for` offers
+/// `me` alone, zero kept; every
 /// other field lists what the rows
 /// carry, alphabetically, and nothing for a row with no value. An absent
 /// value has no filter — core's `one()` never matches `None` — so there
@@ -46,20 +45,8 @@ export function facets(field: Field, rows: FlightView[]): Facet[] {
       case "procedure":
         hit(row.procedure);
         break;
-      case "branch":
-        hit(row.branch);
-        break;
       case "label":
         for (const label of row.labels) hit(label);
-        break;
-      case "stale":
-        hit(String(row.stale));
-        break;
-      case "changed_since_ready":
-        hit(String(row.changed_since_ready));
-        break;
-      case "held":
-        hit(String(row.held));
         break;
       case "for":
         // The rows only a person can handle: an open question in
@@ -77,10 +64,6 @@ export function facets(field: Field, rows: FlightView[]): Facet[] {
       return listed(SECTIONS);
     case "priority":
       return listed(PRIORITIES);
-    case "stale":
-    case "changed_since_ready":
-    case "held":
-      return listed(FLAGS);
     case "for":
       return listed(["me"]);
     default:

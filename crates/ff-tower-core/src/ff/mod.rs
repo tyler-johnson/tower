@@ -21,14 +21,6 @@
 //! beside the payload rather than being treated as a failure, and only an
 //! `error` envelope (or no envelope at all) is an [`Error`].
 //!
-//! # Reads are not side-effect-free
-//!
-//! `ff status --json` takes a capture first, like every fufu verb. Folding
-//! the board against a dirty tree appends an operation to that worktree's
-//! chain. It is a no-op when nothing changed, and when something did change
-//! it is fufu's floor doing its job — but "tower only reads" is true of
-//! tower's own store and not of the repository underneath it.
-//!
 //! # The streaming half
 //!
 //! `ff watch` is newline-delimited JSON over a process that does not exit,
@@ -45,10 +37,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub use error::{Error, Refusal, Result};
-pub use payload::{
-    At, BranchInfo, BranchList, ChangeKind, Editing, FileStat, Head, Held, OpEntry, OpLog, Open,
-    Status, Version,
-};
+pub use payload::Version;
 
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -110,7 +99,6 @@ impl Exit {
 pub struct Ff {
     program: OsString,
     repo: PathBuf,
-    session: Option<String>,
 }
 
 impl Ff {
@@ -143,21 +131,7 @@ impl Ff {
         Ff {
             program: OsString::from("ff"),
             repo: repo.into(),
-            session: None,
         }
-    }
-
-    /// Tag every call from this handle with a session name.
-    ///
-    /// The design's rule verbatim: every fufu call tower makes carries
-    /// `--session <flight>`, so a flight's captures group into one `ff undo`
-    /// step and `ff watch --session` narrows to that flight's own motion.
-    /// Per-flight capture chains fall out of the tagging and cost nothing
-    /// else.
-    #[must_use]
-    pub fn session(mut self, name: impl Into<String>) -> Ff {
-        self.session = Some(name.into());
-        self
     }
 
     /// Point at a different `ff`. For tests, and for the day a config key
@@ -189,36 +163,6 @@ impl Ff {
         &self.repo
     }
 
-    /// `ff status --json` for this worktree.
-    ///
-    /// Returns the payload rather than a [`Run`]: status reports a hold, it
-    /// never *is* one, so there is no exit code here a caller could act on.
-    pub fn status(&self) -> Result<Status> {
-        Ok(self.run::<Status>("status", &[] as &[&str])?.data)
-    }
-
-    /// `ff op log --json <revset> -n 0` — operation rows, filtered by a
-    /// revset.
-    ///
-    /// The only verb whose rows carry both `session` and `branch`, which
-    /// makes it the flight-to-branch derivation: one call with
-    /// `session(glob:*)` answers for every tagged operation at once — on
-    /// *this* worktree's chain, which is all `session(...)` scans. `-n 0`
-    /// lifts the default cap of 25 rows — a fold over a truncated log
-    /// would quietly park old flights.
-    pub fn op_log(&self, revset: &str) -> Result<Vec<OpEntry>> {
-        Ok(self.run::<OpLog>("op log", &[revset, "-n", "0"])?.data.ops)
-    }
-
-    /// `ff branch list --json` — every branch fufu knows, with its holds.
-    ///
-    /// `held`/`resolving` here are fufu's own, per branch — the only
-    /// "holding" signal that exists — and the list covers the unborn
-    /// current branch, which turns up with `tip: None`.
-    pub fn branch_list(&self) -> Result<BranchList> {
-        Ok(self.run::<BranchList>("branch list", &[] as &[&str])?.data)
-    }
-
     /// `ff version --json` — what is installed, repo-independent.
     ///
     /// The doctor's drift check: a fufu speaking another contract fails
@@ -234,10 +178,9 @@ impl Ff {
     /// spawn cannot carry it and the caller owns the child.
     ///
     /// It mirrors the buffered spawn's conventions where they apply —
-    /// `-C <repo>`, `FF_NONINTERACTIVE=1`, and `FF_SESSION` scrubbed
-    /// unconditionally — and drops the two that do not: no `--json`,
-    /// because watch is always JSON, and never `--session`, because on
-    /// watch it is a filter and a feed subscribes to everything.
+    /// `-C <repo>`, `FF_NONINTERACTIVE=1`, and `FF_SESSION` scrubbed —
+    /// and drops the one that does not: no `--json`, because watch is
+    /// always JSON.
     #[must_use]
     pub fn watch_all(&self) -> Command {
         let mut command = Command::new(&self.program);
@@ -314,17 +257,14 @@ impl Ff {
     fn spawn(&self, verb: &str, args: &[impl AsRef<OsStr>]) -> Result<std::process::Output> {
         let mut command = Command::new(&self.program);
 
-        // fufu's own flags first, the verb's after it. `-C` and `--session`
-        // are global and would parse in either place; `--json` is the verb's
-        // and would not, so it goes directly after the verb where no
-        // positional argument can ever swallow it.
+        // fufu's own flags first, the verb's after it. `-C` is global and
+        // would parse in either place; `--json` is the verb's and would
+        // not, so it goes directly after the verb where no positional
+        // argument can ever swallow it.
         command.arg("-C").arg(&self.repo);
-        if let Some(session) = &self.session {
-            command.arg("--session").arg(session);
-        }
-        // A verb can be two words — `op log`, `branch list` — and each
-        // word is its own argv token. The envelope still answers with the
-        // full string, which is what `run` compares against.
+        // A verb can be two words — `op log` — and each word is its own
+        // argv token. The envelope still answers with the full string,
+        // which is what `run` compares against.
         for word in verb.split(' ') {
             command.arg(word);
         }
@@ -338,15 +278,10 @@ impl Ff {
         // nobody types twice.
         command.env("FF_NONINTERACTIVE", "1");
 
-        // fufu emits `FF_SESSION` and never reads it back, so the flag above
-        // is what actually tags the call. This keeps the environment from
-        // disagreeing with it anyway: an inherited tag from tower's own
+        // tower tags nothing: an inherited `FF_SESSION` from tower's own
         // dispatch would otherwise reach an adapter two processes down,
         // naming a flight that is not the one being flown.
-        match &self.session {
-            Some(session) => command.env("FF_SESSION", session),
-            None => command.env_remove("FF_SESSION"),
-        };
+        command.env_remove("FF_SESSION");
 
         command.output().map_err(|source| {
             let program = self.program.to_string_lossy().into_owned();
@@ -395,12 +330,10 @@ mod tests {
 
     /// The watch command line, read back without a spawn: the argv is
     /// exactly `-C <repo> watch --all`, the environment is
-    /// noninteractive, and the session is scrubbed even when the handle
-    /// carries one — on watch it would be a filter, and the feed
-    /// subscribes to everything.
+    /// noninteractive, and the session is scrubbed.
     #[test]
     fn watch_all_builds_the_argv_and_spawns_nothing() {
-        let command = Ff::at("/somewhere").session("s-flight").watch_all();
+        let command = Ff::at("/somewhere").watch_all();
 
         let args: Vec<String> = command
             .get_args()

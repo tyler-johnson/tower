@@ -50,8 +50,6 @@
         return c.words.length === 0;
       case "dim":
         return c.text === "";
-      case "flag":
-        return !c.on;
       default:
         return false;
     }
@@ -76,7 +74,7 @@
 	the same `show`, drawn from the same cells the row draws. Three
 	lines rather than columns — the glyph, ref, dot and the age on the
 	first; the subject wrapping on the second; the chips and every other
-	dim and flag on the third — and the note phrases underneath, warn
+	dim on the third — and the note phrases underneath, warn
 	ones in the warn tone. The tile is a link to the flight, and it picks
 	up only where the grouping has a verb for the drop.
 -->
@@ -123,8 +121,6 @@
           <span class="text-base-content/40 text-sm" title={fieldLabel(c.field)}>
             {c.cell.text}
           </span>
-        {:else if c.cell.kind === "flag"}
-          <span class="text-warning text-sm" title={fieldLabel(c.field)}>{c.cell.text}</span>
         {/if}
       {/each}
     </div>

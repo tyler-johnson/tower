@@ -269,10 +269,7 @@ mod tests {
         assert!(hold.input_schema.properties.get("message").is_some());
         let done = all.iter().find(|d| d.name == "done").expect("done");
         assert_eq!(done.input_schema.positional, ["flight"]);
-        assert!(
-            done.input_schema.required.is_empty(),
-            "bare done derives the flight"
-        );
+        assert_eq!(done.input_schema.required, ["flight"]);
     }
 
     /// The generator covers the whole grammar, served or not: the

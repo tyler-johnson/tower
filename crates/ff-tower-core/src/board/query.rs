@@ -59,13 +59,8 @@ pub enum Field {
     Subject,
     Body,
     Procedure,
-    Branch,
     Filed,
     Moved,
-    Changed,
-    Stale,
-    ChangedSinceReady,
-    Held,
     For,
     Ref,
     Age,
@@ -74,7 +69,7 @@ pub enum Field {
 }
 
 /// Every field, in the order the refusals list them.
-pub const FIELDS: [Field; 20] = [
+pub const FIELDS: [Field; 15] = [
     Field::Status,
     Field::Assignee,
     Field::Priority,
@@ -83,13 +78,8 @@ pub const FIELDS: [Field; 20] = [
     Field::Subject,
     Field::Body,
     Field::Procedure,
-    Field::Branch,
     Field::Filed,
     Field::Moved,
-    Field::Changed,
-    Field::Stale,
-    Field::ChangedSinceReady,
-    Field::Held,
     Field::For,
     Field::Ref,
     Field::Age,
@@ -123,13 +113,8 @@ impl Field {
             Field::Subject => "subject",
             Field::Body => "body",
             Field::Procedure => "procedure",
-            Field::Branch => "branch",
             Field::Filed => "filed",
             Field::Moved => "moved",
-            Field::Changed => "changed",
-            Field::Stale => "stale",
-            Field::ChangedSinceReady => "changed_since_ready",
-            Field::Held => "held",
             Field::For => "for",
             Field::Ref => "ref",
             Field::Age => "age",
@@ -168,7 +153,6 @@ impl Field {
                 | Field::Subject
                 | Field::Filed
                 | Field::Moved
-                | Field::Changed
         )
     }
 
@@ -187,13 +171,9 @@ impl Field {
             | Field::Label
             | Field::Skill
             | Field::Procedure
-            | Field::Branch
-            | Field::Stale
-            | Field::ChangedSinceReady
-            | Field::Held
             | Field::For => Shape::Words,
             Field::Subject | Field::Body => Shape::Text,
-            Field::Filed | Field::Moved | Field::Changed => Shape::Time,
+            Field::Filed | Field::Moved => Shape::Time,
             Field::Ref | Field::Age | Field::Comments | Field::Progress => Shape::Column,
         }
     }
@@ -990,7 +970,7 @@ fn window(flights: Vec<FlightView>, closed: ClosedWindow, now: i64) -> (Vec<Flig
 }
 
 /// Whether one filter holds of one row. A field the row does not carry
-/// — no assignee, no branch, never moved — fails `is` and passes `not`,
+/// — no assignee, never moved — fails `is` and passes `not`,
 /// which is what "the value is not one of these" has to mean.
 ///
 /// `status` is the one field with its own predicate, because it is the
@@ -1003,25 +983,16 @@ fn holds(filter: &Filter, view: &FlightView, now: i64) -> bool {
         Field::Assignee => one(filter, view.assignee.as_deref()),
         Field::Skill => one(filter, view.skill.as_deref()),
         Field::Procedure => one(filter, view.procedure.as_deref()),
-        Field::Branch => one(filter, view.branch.as_deref()),
         Field::Label => many(filter, &view.labels),
-        Field::Stale => one(filter, Some(spelled(view.stale))),
-        Field::ChangedSinceReady => one(filter, Some(spelled(view.changed_since_ready))),
-        Field::Held => one(filter, Some(spelled(view.held))),
         Field::For => for_holds(filter, view),
         Field::Subject => contains(filter, &view.subject),
         Field::Body => contains(filter, &view.body),
         Field::Filed => moment_holds(filter, Some(view.filed_at), now),
         Field::Moved => moment_holds(filter, view.status_at, now),
-        Field::Changed => moment_holds(filter, view.last_change, now),
         // A column carries no predicate; the constructor refuses one,
         // and a hand-built filter naming one matches nothing.
         Field::Ref | Field::Age | Field::Comments | Field::Progress => false,
     }
-}
-
-fn spelled(flag: bool) -> &'static str {
-    if flag { "true" } else { "false" }
 }
 
 fn one(filter: &Filter, held: Option<&str>) -> bool {
@@ -1216,7 +1187,6 @@ fn compare(field: Field, a: &FlightView, b: &FlightView) -> Ordering {
             .then(a.filed_at.cmp(&b.filed_at)),
         Field::Filed => a.filed_at.cmp(&b.filed_at),
         Field::Moved => absent_last(a.status_at, b.status_at),
-        Field::Changed => absent_last(a.last_change, b.last_change),
         Field::Subject => a.subject.cmp(&b.subject),
         Field::Assignee => absent_last(a.assignee.as_deref(), b.assignee.as_deref()),
         Field::Status => lifecycle(&a.status)
@@ -1256,9 +1226,7 @@ fn lifecycle(status: &str) -> u8 {
 mod tests {
     use super::super::flight::fold;
     use super::super::model::{ClosedWindow, enrich, rows};
-    use super::super::reads::Reads;
     use super::*;
-    use crate::ff::BranchList;
     use crate::log::{Event, EventId, Kind};
 
     /// The tests' clock: far enough past every fixture time that an age
@@ -1318,21 +1286,8 @@ mod tests {
         )
     }
 
-    /// A repository that knows nothing: every axis under test is a
-    /// stored field, so the reads stay out of the way.
-    fn reads() -> Reads {
-        Reads {
-            ops: Vec::new(),
-            branches: BranchList {
-                named: Vec::new(),
-                anonymous: Vec::new(),
-            },
-            current_branch: None,
-        }
-    }
-
     fn flights(events: &[Event]) -> Vec<FlightView> {
-        rows(fold(events), &reads(), NOW, 0).flights
+        rows(fold(events)).flights
     }
 
     fn ids(views: &[FlightView]) -> Vec<&str> {
@@ -1354,7 +1309,7 @@ mod tests {
         // The card's own example, plus the two flags, spelled the way a
         // person would type it into the address bar.
         let raw = "status=ready,in_progress&priority=high&label=infra&subject=contains:parser\
-                   &filed=after:3d&group=assignee&sub=priority&order=-changed&closed=10d\
+                   &filed=after:3d&group=assignee&sub=priority&order=-moved&closed=10d\
                    &empty=true&mode=board&show=ref,status,assignee,label,age";
         let query = Query::parse(raw).expect("the example parses");
 
@@ -1370,7 +1325,7 @@ mod tests {
         assert_eq!(
             query.order,
             Order {
-                field: Field::Changed,
+                field: Field::Moved,
                 descending: true
             }
         );
@@ -1432,14 +1387,14 @@ mod tests {
 
     #[test]
     fn a_relative_date_stays_relative_through_a_round_trip() {
-        let query = Query::parse("filed=after:3d&changed=before:2w").expect("two moments");
+        let query = Query::parse("filed=after:3d&moved=before:2w").expect("two moments");
         assert_eq!(
             query.filters[0].value,
             Value::When(When::Ago(3 * DAY)),
             "a span stays a span — resolving it at parse would freeze a saved view"
         );
         assert_eq!(query.filters[1].value, Value::When(When::Ago(14 * DAY)));
-        assert_eq!(query.render(), "filed=after:3d&changed=before:2w");
+        assert_eq!(query.render(), "filed=after:3d&moved=before:2w");
 
         // The absolute form is the other spelling, and it round-trips
         // as itself.
@@ -1813,7 +1768,7 @@ mod tests {
                 },
             ),
         ];
-        let board = enrich(fold(&events), &reads(), NOW, 0, ClosedWindow::default());
+        let board = enrich(fold(&events), NOW, ClosedWindow::default());
         let folded = Query::default().fold(flights(&events), NOW);
 
         // The board's one closed window, dealt by status: the render

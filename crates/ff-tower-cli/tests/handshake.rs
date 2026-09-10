@@ -215,7 +215,7 @@ fn the_tools_are_the_loops_four_gestures() {
 
     let done = &tool("done")["inputSchema"];
     assert_eq!(done["positional"], serde_json::json!(["flight"]));
-    assert!(done.get("required").is_none(), "bare done: {done}");
+    assert_eq!(done["required"], serde_json::json!(["flight"]));
 }
 
 /// The handshakes are compiled in: a repository that does not exist

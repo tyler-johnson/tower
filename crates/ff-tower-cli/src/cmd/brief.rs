@@ -2,15 +2,14 @@
 //! whoever picks it up: the full record and where it stands.
 //!
 //! The read half of the handoff: `next` hands out a flight id and a
-//! subject, and the brief is what an agent reads next. Fold plus gather,
-//! nothing more. Not `ensure_active`: a closed flight briefs, the log
+//! subject, and the brief is what an agent reads next. A fold, nothing
+//! more. Not `ensure_active`: a closed flight briefs, the log
 //! keeps the record, and the render carries the closing move alongside
 //! everything else.
 
 use crate::error::CliError;
 use crate::{machine, render};
 use ff_tower_core::board::{self, Brief, Detail, Fold, Moment, Standing};
-use ff_tower_core::config::{self, Config};
 
 pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     super::parse_ref(flight)?;
@@ -20,23 +19,13 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     let fold = board::fold(&events);
     let id = super::resolve(&fold, flight)?;
 
-    let ff = super::ff()?;
-    let reads = board::gather(&ff)?;
-    let stale_after = Config::open(ff.repo())
-        .as_ref()
-        .map(config::stale_flight_threshold)
-        .unwrap_or(config::DEFAULT_STALE_FLIGHT);
     let now = board::now();
-    let brief = board::brief(&fold, &events, &reads, &id, now, stale_after)
-        .expect("resolved to a filed flight");
+    let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
 
     if json {
         println!("{}", machine::emit("brief", &brief));
     } else {
-        print!(
-            "{}",
-            page(&fold, &brief, now, stale_after, render::colored())
-        );
+        print!("{}", page(&fold, &brief, now, render::colored()));
     }
     Ok(())
 }
@@ -44,7 +33,7 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 /// The detail page: head and note in the board's grammar, then the body
 /// verbatim, the family, the comments in reading order, and the history
 /// last — the record before the log of how it got that way.
-fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
+fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     let mut out = String::new();
     let mut subject = brief.subject.clone();
     if let Some((closed, total)) = brief.progress {
@@ -54,7 +43,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, stale_after: i64, colored: bool) -
         "{}  {subject}\n",
         render::paint_id(&show(fold, &brief.id), colored),
     ));
-    out.push_str(&format!("    {}\n", note(brief, now, stale_after, colored)));
+    out.push_str(&format!("    {}\n", note(brief, now, colored)));
     out.push_str(&format!("    {}\n", fields_line(brief, colored)));
     // The last edit, comment rewords included — the record has been
     // touched, and the mark says by whom.
@@ -191,11 +180,11 @@ fn fields_line(brief: &Brief, colored: bool) -> String {
 /// everything — a reader must know first where the flight stands, and
 /// who put it there when someone did; when that someone closed a
 /// dependency rather than moving this flight, the since line says so
-/// right after. The standing joins as one phrase
-/// before the branch: precedence makes it exclusive with the mark
-/// phrases — a walk standing only exists with no closing move, question,
-/// hold, or pull — so the line never says a thing twice.
-fn note(brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
+/// right after. The standing joins as one phrase before the age:
+/// precedence makes it exclusive with the mark phrases — a walk standing
+/// only exists with no closing move, question, or pull — so the line
+/// never says a thing twice.
+fn note(brief: &Brief, now: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
     let status = brief.status.replace('_', " ");
     phrases.push(render::paint_dim(
@@ -218,15 +207,9 @@ fn note(brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
         // The same slot, dim: a close's reason needs nobody.
         phrases.push(render::paint_dim(reason, colored));
     }
-    if brief.held {
-        phrases.push(render::paint_warn("held", colored));
-    }
-    if brief.resolving {
-        phrases.push(render::paint_warn("resolving", colored));
-    }
     match &brief.standing {
         // Said above, from the brief's own flat facts.
-        Standing::Done | Standing::Question | Standing::Held | Standing::InProgress => {}
+        Standing::Done | Standing::Question | Standing::InProgress => {}
         Standing::Yours => phrases.push(render::paint_dim(
             &match brief.assignee.as_deref() {
                 Some(lane) => format!("yours — assigned {lane}"),
@@ -236,40 +219,12 @@ fn note(brief: &Brief, now: i64, stale_after: i64, colored: bool) -> String {
         )),
         Standing::Ready => phrases.push(render::paint_dim("ready", colored)),
     }
-    if brief.stale {
-        phrases.push(render::paint_warn(
-            &format!("no changes on the branch for {}", render::span(stale_after)),
-            colored,
-        ));
-    }
-    if brief.changed_since_ready {
-        phrases.push(render::paint_warn(
-            "changes on the branch since it was set ready",
-            colored,
-        ));
-    }
-    match brief.branch.as_deref() {
-        Some("@detached") => phrases.push(render::paint_dim("(detached)", colored)),
-        Some(branch) => {
-            let mut phrase = format!("on {branch}");
-            if let Some(tip) = brief.tip.as_deref() {
-                phrase.push(' ');
-                phrase.extend(tip.chars().take(8));
-            }
-            phrases.push(render::paint_dim(&phrase, colored));
-        }
-        None => {}
-    }
-    match (brief.asked_at, brief.last_change) {
-        (Some(asked), _) => phrases.push(render::paint_dim(
+    match brief.asked_at {
+        Some(asked) => phrases.push(render::paint_dim(
             &format!("asked {}", render::age(now, asked)),
             colored,
         )),
-        (None, Some(change)) => phrases.push(render::paint_dim(
-            &format!("changed {}", render::age(now, change)),
-            colored,
-        )),
-        (None, None) => phrases.push(render::paint_dim(
+        None => phrases.push(render::paint_dim(
             &format!("filed {}", render::age(now, brief.filed_at)),
             colored,
         )),

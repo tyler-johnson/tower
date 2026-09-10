@@ -6,42 +6,10 @@
 //! tower. The fakes cover what a healthy fufu will not emit on request: a
 //! contract from the future, a held exit, output that is not an envelope.
 
-use ff_tower_core::ff::{Error, Exit, Ff, Head};
-use ff_tower_testsupport::{FakeFf, Repo};
+use ff_tower_core::ff::{Error, Exit, Ff};
+use ff_tower_testsupport::FakeFf;
 
 // ---------------------------------------------------------------- real fufu
-
-#[test]
-fn status_reads_a_real_repository() {
-    let repo = Repo::new();
-    let status = Ff::at(repo.path()).status().expect("status");
-
-    assert_eq!(status.head.branch(), Some("main"));
-    assert!(status.open.clean, "a fresh commit leaves a clean tree");
-    assert!(status.changes.is_empty());
-    assert!(status.conflicts.is_empty());
-    assert!(status.held.is_none());
-    assert!(status.editing.is_none());
-}
-
-#[test]
-fn status_sees_work_that_has_not_been_committed() {
-    // The thesis, at the smallest scale that can prove it: an edit with no
-    // commit behind it is visible, and it is visible in `open`.
-    let repo = Repo::new();
-    repo.write("src/main.rs", "fn main() {}\n");
-
-    let status = Ff::at(repo.path()).status().expect("status");
-
-    assert!(!status.open.clean);
-    assert!(
-        status.open.time.is_some(),
-        "an uncommitted edit still has a snapshot time"
-    );
-    let paths: Vec<&str> = status.changes.iter().map(|c| c.path.as_str()).collect();
-    assert_eq!(paths, ["src/main.rs"]);
-    assert!(status.insertions > 0);
-}
 
 #[test]
 fn a_refusal_comes_back_with_its_id() {
@@ -49,7 +17,9 @@ fn a_refusal_comes_back_with_its_id() {
     // a repository. The id is the stable half and the part tower may match
     // on; the message is fufu's wording and is not asserted.
     let empty = tempfile::tempdir().expect("tempdir");
-    let err = Ff::at(empty.path()).status().expect_err("not a repository");
+    let err = Ff::at(empty.path())
+        .run::<serde_json::Value>("status", &[] as &[&str])
+        .expect_err("not a repository");
 
     assert_eq!(err.ff_id(), Some("repo/not-found"));
     match err {
@@ -63,26 +33,6 @@ fn a_refusal_comes_back_with_its_id() {
         }
         other => panic!("expected a fufu refusal, got {other:?}"),
     }
-}
-
-#[test]
-fn the_session_tag_reaches_the_capture_chain() {
-    // The design's rule: every fufu call tower makes carries `--session
-    // <flight>`. This proves the flag arrives where it is supposed to —
-    // fufu records it on the operation the call captured.
-    let repo = Repo::new();
-    repo.write("tagged.txt", "work an agent did\n");
-
-    Ff::at(repo.path())
-        .session("flight-7")
-        .status()
-        .expect("status");
-
-    let evolog = repo.ff(&["evolog", "--json", "--session", "flight-7"]);
-    assert!(
-        evolog.contains("flight-7"),
-        "the session tag never reached the log: {evolog}"
-    );
 }
 
 // --------------------------------------------------------------- fake fufu
@@ -113,20 +63,6 @@ fn every_call_addresses_its_repository_and_puts_json_after_the_verb() {
         args[verb + 1],
         "--json",
         "--json belongs to the verb, so nothing positional can swallow it"
-    );
-}
-
-#[test]
-fn a_session_handle_tags_every_call() {
-    let args = argv(&Ff::at("/some/bay").session("flight-7"), "status");
-    let at = args
-        .iter()
-        .position(|a| a == "--session")
-        .expect("the session flag");
-    assert_eq!(args[at + 1], "flight-7");
-    assert!(
-        at < args.iter().position(|a| a == "status").unwrap(),
-        "--session is fufu's flag and sits before the verb"
     );
 }
 
@@ -174,7 +110,7 @@ fn a_contract_tower_does_not_read_is_refused_before_the_payload() {
     let fake = FakeFf::saying(r#"{"ff":99,"cmd":"status","data":{"nothing":true}}"#, 0);
     let err = Ff::at("/repo")
         .program(fake.path())
-        .status()
+        .run::<serde_json::Value>("status", &[] as &[&str])
         .expect_err("contract 99");
 
     match err {
@@ -193,7 +129,7 @@ fn an_envelope_answering_for_another_verb_is_refused() {
     let fake = FakeFf::saying(r#"{"ff":1,"cmd":"collide","data":{}}"#, 0);
     let err = Ff::at("/repo")
         .program(fake.path())
-        .status()
+        .run::<serde_json::Value>("status", &[] as &[&str])
         .expect_err("wrong verb");
 
     match err {
@@ -227,7 +163,7 @@ fn a_usage_error_with_no_envelope_says_what_the_process_said() {
     let fake = FakeFf::script("echo 'error: unrecognized subcommand' >&2\nexit 2\n");
     let err = Ff::at("/repo")
         .program(fake.path())
-        .status()
+        .run::<serde_json::Value>("status", &[] as &[&str])
         .expect_err("no envelope");
 
     match err {
@@ -243,7 +179,7 @@ fn a_usage_error_with_no_envelope_says_what_the_process_said() {
 fn a_missing_ff_says_so_in_its_own_words() {
     let err = Ff::at("/repo")
         .program("/nonexistent/ff")
-        .status()
+        .run::<serde_json::Value>("status", &[] as &[&str])
         .expect_err("no such program");
 
     match err {
@@ -267,10 +203,9 @@ fn an_unknown_field_does_not_break_a_parse() {
     );
     let status = Ff::at("/repo")
         .program(fake.path())
-        .status()
+        .run::<serde_json::Value>("status", &[] as &[&str])
         .expect("unknown fields are ignored");
-    assert_eq!(status.head.branch(), Some("main"));
-    assert!(matches!(status.head, Head::Branch { .. }));
+    assert_eq!(status.data["head"]["name"], serde_json::json!("main"));
 }
 
 #[test]

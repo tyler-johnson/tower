@@ -5,11 +5,13 @@
 //! writing down here before the first line of code lands on either side of
 //! it.
 //!
-//! **tower spawns fufu; it does not link it.** Everything tower knows about
-//! a repository arrives as `ff <verb> --json` over the machine contract —
-//! the envelope's version checked against `FF_CONTRACT`, the payload parsed
-//! as data. tower holds no fufu type, and there is no `ff-core` in this
-//! dependency tree.
+//! **tower spawns fufu; it does not link it.** Everything tower asks of
+//! fufu arrives as `ff <verb> --json` over the machine contract — the
+//! envelope's version checked against `FF_CONTRACT`, the payload parsed
+//! as data — and the board asks nothing: it is a fold of tower's own log.
+//! Two calls remain. `ff version` is the doctor's seam check, and
+//! `ff watch` is serve's change feed. tower holds no fufu type, and there
+//! is no `ff-core` in this dependency tree.
 //!
 //! The weaker reason is the obvious one. `ff-core` is `publish = false` and
 //! deliberately unfrozen — fufu's DESIGN says publishing it waits until
@@ -21,14 +23,6 @@
 //! extension has to use. An extension that reached past it would be the
 //! consumer proving the contract while exempt from it, and whatever the
 //! seam was missing would stay missing.
-//!
-//! One property of that seam worth knowing before it surprises someone: a
-//! fufu read verb is not side-effect-free. `ff status --json` takes a
-//! capture first, like every fufu verb, so tower rendering a board against
-//! a dirty tree appends an operation to that worktree's chain. It is a
-//! no-op when nothing changed, and when something did change the snapshot
-//! is fufu's floor doing exactly its job — but "tower only reads" is true
-//! of tower's own store and not of the repository underneath it.
 //!
 //! What tower does need a git library for is that own store.
 //! `refs/tower/log/<author>/<writer>` is an orphan commit chain with its

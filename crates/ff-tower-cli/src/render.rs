@@ -1,9 +1,8 @@
 //! The human render, in fufu's list grammar: a head line per flight, then
 //! an indented dim note joining phrases with ` · ` in urgency order —
-//! the open question first, then held/resolving, then the two audit
-//! lines, then the pilot phrase — `in progress — <by>` — then `on
-//! <branch>`, then the comment count, then age. No affirmative "all
-//! well" phrase: absence of a warn is the answer, and board noise is the
+//! the open question first, then the pilot phrase — `in progress —
+//! <by>` — then the comment count, then age. No affirmative "all well"
+//! phrase: absence of a warn is the answer, and board noise is the
 //! enemy.
 //!
 //! The board is the inbox pinned above the status groups, and the groups
@@ -85,8 +84,7 @@ pub fn flight_ref(writer: &str, number: u64, short: bool) -> String {
 }
 
 /// `4m`, `2h`, `2d` — a duration in seconds, s/m/h/d/w, with no trailing
-/// "ago". The threshold phrases print a span; the row's own age prints
-/// the same span with the word.
+/// "ago". The row's own age prints the span with the word.
 pub fn span(seconds: i64) -> String {
     let delta = seconds.max(0);
     match delta {
@@ -126,19 +124,6 @@ fn is_uuid(text: &str) -> bool {
         })
 }
 
-/// The tip column: the branch tip short, `—` for a flight with no tip, and
-/// the literal `(detached)` for `@detached` — printing the sentinel as a
-/// branch name would read as a real branch.
-fn tip_column(view: &FlightView) -> String {
-    if view.branch.as_deref() == Some("@detached") {
-        return "(detached)".to_string();
-    }
-    match &view.tip {
-        Some(tip) => tip.chars().take(8).collect(),
-        None => "—".to_string(),
-    }
-}
-
 /// The subject column: the subject, then the progress mark for a flight
 /// that has children. The mark is where "waiting on 2 flights" used to
 /// be — one fact, one place — and on a flat board it is the whole of
@@ -151,7 +136,7 @@ fn subject_column(view: &FlightView) -> String {
     text
 }
 
-fn note(view: &FlightView, now: i64, stale_after: i64, colored: bool) -> String {
+fn note(view: &FlightView, now: i64, colored: bool) -> String {
     let mut phrases = Vec::new();
     if let Some(question) = view.question.as_deref() {
         phrases.push(paint_warn(question, colored));
@@ -159,32 +144,8 @@ fn note(view: &FlightView, now: i64, stale_after: i64, colored: bool) -> String 
         // The same slot, dim: a close's reason needs nobody.
         phrases.push(paint_dim(reason, colored));
     }
-    if view.held {
-        phrases.push(paint_warn("held", colored));
-    }
-    if view.resolving {
-        phrases.push(paint_warn("resolving", colored));
-    }
-    // The two audits, each its own phrase and neither under a shared
-    // word: one says the branch has forgotten a flight that claims to be
-    // flying, the other says a branch moved under one that claims not to
-    // be. The stale phrase names the threshold, which is what the row's
-    // own age cannot say.
-    if view.stale {
-        phrases.push(paint_warn(
-            &format!("no changes on the branch for {}", span(stale_after)),
-            colored,
-        ));
-    }
-    if view.changed_since_ready {
-        phrases.push(paint_warn(
-            "changes on the branch since it was set ready",
-            colored,
-        ));
-    }
-    // The pilot, ahead of the branch: the stored In Progress and who set
-    // it — the byline and its session are the pilot, the field is the
-    // chip.
+    // The pilot: the stored In Progress and who set it — the byline and
+    // its session are the pilot, the field is the chip.
     if view.status == "in_progress" {
         phrases.push(paint_dim(
             &match view.status_by.as_deref() {
@@ -197,11 +158,6 @@ fn note(view: &FlightView, now: i64, stale_after: i64, colored: bool) -> String 
             colored,
         ));
     }
-    if let Some(branch) = view.branch.as_deref()
-        && branch != "@detached"
-    {
-        phrases.push(paint_dim(&format!("on {branch}"), colored));
-    }
     if view.comments > 0 {
         let noun = if view.comments == 1 {
             "comment"
@@ -210,12 +166,9 @@ fn note(view: &FlightView, now: i64, stale_after: i64, colored: bool) -> String 
         };
         phrases.push(paint_dim(&format!("{} {noun}", view.comments), colored));
     }
-    match (view.asked_at, view.last_change) {
-        (Some(asked), _) => phrases.push(paint_dim(&format!("asked {}", age(now, asked)), colored)),
-        (None, Some(change)) => {
-            phrases.push(paint_dim(&format!("changed {}", age(now, change)), colored))
-        }
-        (None, None) => phrases.push(paint_dim(
+    match view.asked_at {
+        Some(asked) => phrases.push(paint_dim(&format!("asked {}", age(now, asked)), colored)),
+        None => phrases.push(paint_dim(
             &format!("filed {}", age(now, view.filed_at)),
             colored,
         )),
@@ -231,7 +184,7 @@ fn note(view: &FlightView, now: i64, stale_after: i64, colored: bool) -> String 
 /// canceled one, each keeping the window's newest-first order. The
 /// columns are measured across every group at once, so the board aligns
 /// down its whole height rather than per section.
-pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String {
+pub fn board(board: &Board, now: i64, colored: bool) -> String {
     let closed = |status: &str| -> Vec<&FlightView> {
         board
             .closed
@@ -301,13 +254,8 @@ pub fn board(board: &Board, now: i64, stale_after: i64, colored: bool) -> String
         for view in views {
             let id = format!("{:<id_width$}", refs[view.id.as_str()]);
             let subject = format!("{:<subject_width$}", subject_column(view));
-            out.push_str(&format!(
-                "{glyph} {}  {}  {}\n",
-                paint_id(&id, colored),
-                subject,
-                paint_dim(&tip_column(view), colored),
-            ));
-            out.push_str(&format!("    {}\n", note(view, now, stale_after, colored)));
+            out.push_str(&format!("{glyph} {}  {subject}\n", paint_id(&id, colored)));
+            out.push_str(&format!("    {}\n", note(view, now, colored)));
         }
         out.push('\n');
     }
@@ -345,7 +293,6 @@ mod tests {
     use ff_tower_core::board::WaitingOnYou;
 
     const NOW: i64 = 1_000_000;
-    const TWO_DAYS: i64 = 2 * 24 * 60 * 60;
 
     fn view(id: &str, number: u64, status: &str, subject: &str) -> FlightView {
         FlightView {
@@ -369,15 +316,7 @@ mod tests {
             priority: "none".to_string(),
             labels: Vec::new(),
             skill: None,
-            branch: None,
-            tip: None,
-            last_change: None,
-            stale: false,
-            changed_since_ready: false,
             progress: None,
-            held: false,
-            resolving: false,
-            current: false,
             question: None,
             asked_at: None,
             closed_reason: None,
@@ -419,35 +358,6 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_row_names_the_threshold_it_passed() {
-        let mut flight = view("pi.1", 1, "in_progress", "the stalled work");
-        flight.stale = true;
-        flight.last_change = Some(NOW - 300_000);
-        let mut rendered = empty();
-        rendered.in_progress.push(flight);
-
-        let out = board(&rendered, NOW, TWO_DAYS, false);
-        assert!(out.contains("no changes on the branch for 2d"), "{out}");
-    }
-
-    #[test]
-    fn a_ready_row_the_branch_moved_under_says_so() {
-        let mut flight = view("pi.1", 1, "ready", "cleared, and moving");
-        flight.changed_since_ready = true;
-        flight.last_change = Some(NOW - 30);
-        let mut rendered = empty();
-        rendered.ready.push(flight);
-
-        let out = board(&rendered, NOW, TWO_DAYS, false);
-        assert!(
-            out.contains("changes on the branch since it was set ready"),
-            "{out}"
-        );
-        assert!(out.contains("changed 30s ago"), "{out}");
-        assert!(!out.contains("no changes on the branch"), "{out}");
-    }
-
-    #[test]
     fn a_parent_prints_its_mark_and_a_sub_flight_its_own_subject() {
         let mut parent = view("pi.1", 1, "waiting", "check the PR");
         parent.progress = Some((2, 6));
@@ -456,7 +366,7 @@ mod tests {
         rendered.waiting.push(parent);
         rendered.ready.push(child);
 
-        let out = board(&rendered, NOW, TWO_DAYS, false);
+        let out = board(&rendered, NOW, false);
         assert!(out.contains("check the PR (2/6)"), "{out}");
         assert!(out.contains("check the PR · verdict"), "{out}");
         assert!(

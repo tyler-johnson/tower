@@ -24,8 +24,8 @@
 //! CLI.
 //!
 //! Every handler runs its whole pipeline inside `spawn_blocking` — the
-//! folds spawn ff processes and `Store` is not `Sync` — opening a fresh
-//! `Ff` and `Store` per request, exactly what [`run`](crate::run)'s doc
+//! store reads a git repository and `Store` is not `Sync` — opening a
+//! fresh `Store` per request, exactly what [`run`](crate::run)'s doc
 //! promised. The state is the repository path and the feed's receiving
 //! end, and only `/api/feed` reads the channel: every GET stays a fresh
 //! fold, so serving stale data on the pull side is impossible by
@@ -62,8 +62,6 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use ff_tower_core::board::{self, Query, ResolveError};
-use ff_tower_core::config;
-use ff_tower_core::ff::{self, Ff};
 use ff_tower_core::log::{self, Store};
 use ff_tower_core::machine;
 use ff_tower_core::{procedure, verb};
@@ -170,17 +168,12 @@ async fn act<Body: DeserializeOwned + Send + 'static>(
 }
 
 /// A refusal as a reply: the id's status, and the error envelope.
-/// tower's own ids go out namespaced `tower/<id>`; a refusal fufu shaped
-/// itself keeps fufu's id verbatim, the way the CLI's does.
+/// Every id goes out namespaced `tower/<id>`: no route spawns fufu, so
+/// no refusal here is one fufu shaped itself.
 fn refusal(cmd: &str, err: &ApiError) -> Reply {
-    let emit = if err.forwarded() {
-        machine::emit_forwarded
-    } else {
-        machine::emit_error
-    };
     reply(
         err.status(),
-        emit(cmd, err.id(), &err.to_string(), &err.exits()),
+        machine::emit_error(cmd, err.id(), &err.to_string(), &err.exits()),
     )
 }
 
@@ -194,26 +187,14 @@ fn reply(status: StatusCode, line: String) -> Reply {
     )
 }
 
-/// The board audit's threshold for this repository — the CLI's read,
-/// made once per request so a served board says the same thing a typed
-/// one does. A repository whose config will not open gets the compiled
-/// default rather than a failed request.
-fn stale_after(repo: &Path) -> i64 {
-    config::Config::open(repo)
-        .as_ref()
-        .map(config::stale_flight_threshold)
-        .unwrap_or(config::DEFAULT_STALE_FLIGHT)
-}
-
 /// The board's envelope for one query, folded fresh. Shared verbatim
 /// between the `/api/board` handler and every feed subscriber, so a
 /// pushed frame and a pulled body under one query can only ever be the
 /// same bytes.
 pub(crate) fn board_envelope(repo: &Path, query: &Query) -> Result<String, ApiError> {
-    let ff = Ff::at(repo).env_program();
     let store = Store::open(repo)?;
     let events = store.read_all()?;
-    let folded = board::answer(&ff, &events, board::now(), stale_after(repo), query)?;
+    let folded = board::answer(&events, board::now(), query);
     Ok(machine::emit("board", &folded))
 }
 
@@ -314,10 +295,7 @@ async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<
         let events = store.read_all()?;
         let fold = board::fold(&events);
         let id = board::resolve(&fold, &flight)?;
-        let ff = Ff::at(repo).env_program();
-        let reads = board::gather(&ff)?;
-        let brief = board::brief(&fold, &events, &reads, &id, board::now(), stale_after(repo))
-            .expect("resolved to a filed flight");
+        let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
         Ok(machine::emit("brief", &brief))
     })
     .await
@@ -654,8 +632,6 @@ pub(crate) enum ApiError {
     #[error(transparent)]
     Log(#[from] log::Error),
     #[error(transparent)]
-    Ff(#[from] ff::Error),
-    #[error(transparent)]
     Procedure(#[from] procedure::Error),
     /// A write verb refusing its input — core's table, the CLI's words.
     #[error(transparent)]
@@ -677,7 +653,6 @@ impl ApiError {
         match self {
             ApiError::Resolve(err) => err.id(),
             ApiError::Log(err) => err.id(),
-            ApiError::Ff(err) => err.id(),
             ApiError::Procedure(err) => err.id(),
             ApiError::Verb(err) => err.id(),
             ApiError::Query(err) => err.id(),
@@ -685,30 +660,19 @@ impl ApiError {
         }
     }
 
-    /// Whether this is a refusal fufu shaped itself rather than one of
-    /// tower's own. Only those pass the `tower/` namespace by: their id
-    /// is fufu's, `ff explain` routes it back to fufu's registry, and
-    /// tower has no entry for it.
-    fn forwarded(&self) -> bool {
-        matches!(self, ApiError::Ff(err) if err.ff_id().is_some())
-    }
-
     /// The CLI's `exits_for` fallback, without its registry: the site's
-    /// own exits when it has any; a refusal fufu shaped itself keeps
-    /// fufu's verbatim, empty included, because its prose lives in
-    /// fufu's registry; anything else points at the lookup that holds
-    /// the prose.
+    /// own exits when it has any; anything else points at the lookup
+    /// that holds the prose.
     fn exits(&self) -> Vec<String> {
         let own = match self {
             ApiError::Resolve(err) => err.exits(),
             ApiError::Log(err) => err.exits(),
-            ApiError::Ff(err) => err.exits(),
             ApiError::Procedure(err) => err.exits(),
             ApiError::Verb(err) => err.exits(),
             ApiError::Query(err) => err.exits(),
             ApiError::Body { .. } => Vec::new(),
         };
-        if own.is_empty() && !self.forwarded() {
+        if own.is_empty() {
             vec![format!(
                 "ff tower explain {}",
                 machine::namespaced(self.id())

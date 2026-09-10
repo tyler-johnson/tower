@@ -25,9 +25,7 @@ it the flights group by the status the record derives: backlog,
 waiting, ready, in progress, held, and the three newest closed.
 --closed takes
 more or less of that last group: a count, a span like 7d, `all`, or
-`none`. The repository audits those fields as it goes: a flight In
-Progress its branch has forgotten says so, and so does a Ready flight
-the branch moved under. A sub-flight is a flight: it files into its
+`none`. A sub-flight is a flight: it files into its
 own status group like anything else, and what says a row is a family
 is the parent's progress mark, (1/3), closed children over total.
 Type it often; it is the fastest way to learn what to do next.
@@ -94,9 +92,8 @@ Examples:
 pub const BRIEF: &str = "\
 Everything the log and the repository know about one flight, in one
 read: subject and body, every stored field, the comments in reading
-order, each link with the linked flight's subject and status, the
-open question, and the reads' facts — branch, tip, holds, whether the
-branch is yours.
+order, each link with the linked flight's subject and status, and the
+open question.
 The history lists every gesture on the record in log
 order, and each row carries the words the verb took: the status word,
 the lane, the fields an edit touched, the other end of the edge.
@@ -244,7 +241,7 @@ reader works on both unchanged — and the filings and the edges land
 in one append, so no sub-flight is ever live, unlinked, and pullable.
 Every sub-flight closed, canceled included, makes the parent Ready,
 not finished: whether the broad task is over is a judgment, and
-`ff tower done` is where it gets made.";
+`ff tower done <flight>` is where it gets made.";
 
 pub const DECOMPOSE_EXAMPLES: &str = "\
 Examples:
@@ -367,9 +364,7 @@ Examples:
 
 pub const HOLD: &str = "\
 Stop a flight with a question attached. The hold moves it to waiting
-on you with its branch intact — branch and tip stay on the row,
-because keeping the work is the point of holding rather than
-abandoning — and the
+on you, and the
 exit is 3: an outcome, not an error, fufu's precedent. The envelope
 is a full success envelope with the held event in it; only the code
 says the flight stopped with a question. Holding is stopping: the
@@ -378,7 +373,7 @@ or waiting for whoever pulls it next.
 
 -m carries the question, and a missing one is tower's coded refusal,
 never clap usage. `ff tower answer <flight> -m <answer>` releases
-the hold, and `ff tower done` finishes a waiting flight anyway —
+the hold, and `ff tower done <flight>` finishes a waiting flight anyway —
 abandoning the question is deliberate when the flight itself is
 over.";
 
@@ -410,11 +405,6 @@ and on the record, in full. Comments and links still land on a done
 flight, its id still resolves, and it still briefs; the board shows
 what is live and the log keeps everything else.
 
-Bare `ff tower done` derives the flight from the invoking worktree:
-the newest session-tagged operation on its own chain names it — the
-one place this verb spawns fufu. Run it from the worktree the work
-happened in, or name the flight from anywhere.
-
 Finishing a waiting flight is allowed: abandoning the question is
 deliberate when the flight itself is over. Done is asserted, never
 derived — a smoke test that went fine leaves no trace for tower to
@@ -422,7 +412,6 @@ read.";
 
 pub const DONE_EXAMPLES: &str = "\
 Examples:
-  ff tower done                  the invoking worktree's flight
   ff tower done 17               by name, from anywhere
   ff tower brief 17              a done flight still briefs";
 
@@ -462,9 +451,8 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: servePort, tower.servePort, and SERVEPORT all
 name one setting.
 
-Six settings ship — defaultFileStatus, where a bare `ff tower file`
-lands; staleFlightThreshold, how long an In Progress flight sits
-quiet before the board says so; serveHost and servePort, the address
+Five settings ship — defaultFileStatus, where a bare `ff tower file`
+lands; serveHost and servePort, the address
 and the port `ff tower serve` binds; updateCheck, how often the
 background release check runs; autoUpdate, whether a new release
 installs itself silently. This verb opens no store and spawns no
