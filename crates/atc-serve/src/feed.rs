@@ -2,7 +2,7 @@
 //! moves and stamps motion for every SSE stream to fold against.
 //!
 //! The rule this module exists to keep: all board updates flow through
-//! this loop, whoever wrote — GUI, CLI, MCP, adapters, agents.
+//! this loop, whoever wrote — GUI, CLI, adapters, agents.
 //! The only stamp is the loop below, and its only triggers are the
 //! repository moving; a POST handler publishes nothing directly, so its
 //! write reaches the feed through the same watcher every other writer's

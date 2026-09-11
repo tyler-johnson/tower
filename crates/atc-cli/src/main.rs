@@ -24,7 +24,6 @@ mod integ;
 mod machine;
 mod render;
 mod selfupdate;
-mod tools;
 
 use clap::Parser;
 

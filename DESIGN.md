@@ -27,7 +27,6 @@ The contract:
 ```
 reached   atc, in the current directory
 envelope  {"atc": 1, "cmd": "<verb>", data | error} — bare ids, fufu's exit codes
-serves    next · brief · hold · done, as tower__<verb>, descriptors compiled in for #19's server
 stores    refs/tower/log/<author>/<writer>
 spawns    ff --version in doctor · ff watch --all in serve
 writes    nothing under refs/fufu/*, ever
@@ -143,13 +142,13 @@ Adapters are the same fractal as tower itself: `tower-<adapter>` on PATH, reache
 
 ## Surfaces
 
-One model, every renderer — fufu's principle 14, so the MCP server is a thin shell over the same contract the CLI renders, never a second implementation.
+One model, every renderer — fufu's principle 14, so every surface is a thin shell over the same contract the CLI renders, never a second implementation.
 
 ```
 caller          surface        what it does
 ────────────────────────────────────────────────────────────────
 a person        CLI            decide, answer, route, publish
-an agent        MCP            pull, read a brief, hold, finish
+an agent        CLI            pull, read a brief, hold, finish
 the clock       serve          refold on motion; no verb a caller
                                did not ask for
 nothing         —              one sanctioned self-spawn, the
@@ -160,7 +159,7 @@ The CLI pins **waiting on you** above a list grouped by status: the inbox, every
 
 The row is the recognizable anatomy: priority glyph, flight ref, status dot, subject, label chips, assignee, age right-aligned. Filters compose over the stored fields, encode into the URL so a filtered board is a shareable link, and fold server-side: the query is one type in core, parsed from that URL and answered against the same rows the board is built from. The web app adds the views the model earns: a kanban board whose columns are the statuses, where a drag is a verb or it is not offered — to In Progress is pull, to Done is done, to Canceled is cancel, and a drop with no verb behind it does not land; a command palette over verbs, flights, and navigation; single-key movement and verbs on the selected row; projects, the family as an indented tree over the same rows; and search over subjects and bodies, nothing semantic. The CLI renders the same model with the same vocabulary and the same two closed groups. Filters are a system rather than a flag — composable predicates, saved defaults, saved views — so both surfaces wait on it together rather than half of one landing early in one of them.
 
-tower answers no handshakes; the tool descriptors for the loop's four gestures — `next`, `brief`, `hold`, `done`, generated from the command line's own grammar — stay compiled in for #19's server.
+tower answers no handshakes and serves no tools: an agent reaches every verb from the shell, with the same contract a typed tool would carry, and fufu's own `ff mcp` went for the same reason.
 
 The whole design is aimed at one reflex: bare `atc`, often, because it is the fastest way to learn what to do next. Two things have to hold or the reflex never forms. It has to be honest, which is what deriving the board from the record is for: the word a row shows is a word someone set, folded, never a guess. And **render must never block on the network** — fold the local log, draw, note the age, refresh on the cadence stamp. A board that is fresh and slow loses to one that is instant and honest about how stale it is.
 
@@ -341,7 +340,7 @@ The sketch designed tower around what fufu could tell it: which branch a flight 
 6. **Conflict-free by construction.** Union-merged event logs, not a synced database.
 7. **Local work stays local until promoted.** Sub-flights are anonymous branches; promotion is the publish boundary.
 8. **Deferred requires loud.** Inherited whole from fufu: a held flight is announced, pinned, and blocks its exits.
-9. **One model, every surface.** CLI, MCP, and anything later consume one contract.
+9. **One model, every surface.** CLI, the web, and anything later consume one contract.
 10. **Facts, not consensus.** tower is authoritative over what you alone authored, on your own writer's chain. It holds no negotiated state, because it has no way to negotiate.
 11. **Judgment is stored, never recomputed.** A model's verdict is written to the log as authored intent, attributed and overridable. The board is a pure function of the log, or it flickers and is not believed.
 12. **The engine ships empty.** No built-in procedures, no built-in workflow, no default opinions about how work flows. Structure and judgment are the owner's files, and the documentation teaches by example.

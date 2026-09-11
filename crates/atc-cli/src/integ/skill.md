@@ -9,10 +9,6 @@ description: Advanced use of tower (atc), the board over fufu. Use when driving 
 
 tower is called and never calls. It runs no dispatch and no loop; the harness a session runs in is the scheduler, and tower is the queue and the record. The once-per-session briefing already gave the agent bare `atc` and the loop's four gestures. This is the rest.
 
-## The tools
-
-Everything on this page is the shell.
-
 ## The model
 
 **A flight is a record, and the board is derived from it.** The stored fields are subject, body, status word, assignee lane, priority (a free string, `none` when unsaid), labels, skill, the edges it depends on, its comments, and a history of every gesture with the byline and session that made it. A sub-flight is a flight: it files into its own status group, and what says a row is a family is the parent's progress mark, `(1/3)`, closed children over total.

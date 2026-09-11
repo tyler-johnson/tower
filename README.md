@@ -24,7 +24,6 @@ tower is a separate program with its own authority, its own store, and its own c
 ```
 reached   atc, in the current directory
 envelope  {"atc": 1, "cmd": "<verb>", data | error} — bare ids, fufu's exit codes
-serves    next · brief · hold · done, as tower__<verb>, descriptors compiled in for #19's server
 stores    refs/tower/log/<author>/<writer>
 spawns    ff --version in doctor · ff watch --all in serve
 writes    nothing under refs/fufu/*, ever

@@ -385,10 +385,9 @@ fn an_empty_pick_under_json_is_a_data_envelope_not_an_error() {
 
 #[test]
 fn next_never_exits_three() {
-    // fufu's served-extension contract reserves 3 for `held/*` error
-    // envelopes, and the MCP relay reads `isError` off the status alone.
-    // All three outcomes ride a data envelope at 0 or 1, and the word —
-    // not the code — says which empty pick it was.
+    // 3 is `hold`'s outcome and the `held/*` namespace's, so an empty
+    // pick never borrows it. All three outcomes ride a data envelope at 0
+    // or 1, and the word — not the code — says which empty pick it was.
     let repo = repo();
     file_pipeline(&repo, "the one flight");
 
