@@ -1,4 +1,4 @@
-// The query codec, ported from crates/ff-tower-core/src/board/query.rs
+// The query codec, ported from crates/atc-core/src/board/query.rs
 // so the two stay comparable — one function here per function there,
 // same names in camelCase. All seven axes and not only the filters: the
 // display menu edits the other six against this same parser, and a

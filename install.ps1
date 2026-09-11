@@ -2,13 +2,13 @@
 #   irm https://raw.githubusercontent.com/tyler-johnson/tower/main/install.ps1 | iex
 #
 # Downloads the latest release binary, verifies its sha256 against the
-# release's checksums.txt, installs to %LOCALAPPDATA%\Programs\ff-tower,
+# release's checksums.txt, installs to %LOCALAPPDATA%\Programs\atc,
 # and adds that directory to your user PATH. Pin a version by setting
-# $env:TOWER_VERSION (e.g. v0.1.0) first.
+# $env:ATC_VERSION (e.g. v0.1.0) first.
 $ErrorActionPreference = 'Stop'
 
 $repo = 'tyler-johnson/tower'
-$installDir = Join-Path $env:LOCALAPPDATA 'Programs\ff-tower'
+$installDir = Join-Path $env:LOCALAPPDATA 'Programs\atc'
 
 $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     'AMD64' { 'amd64' }
@@ -16,14 +16,14 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     default { throw "tower installer: unsupported architecture $env:PROCESSOR_ARCHITECTURE" }
 }
 
-$version = $env:TOWER_VERSION
+$version = $env:ATC_VERSION
 if (-not $version) {
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'tower-installer' }
     $version = $release.tag_name
 }
 if (-not $version) { throw 'tower installer: could not determine the latest release' }
 
-$archive = "ff-tower_$($version.TrimStart('v'))_windows_$arch.zip"
+$archive = "atc_$($version.TrimStart('v'))_windows_$arch.zip"
 $base = "https://github.com/$repo/releases/download/$version"
 
 $tmp = Join-Path $env:TEMP "tower-install-$PID"
@@ -41,14 +41,14 @@ try {
 
     Expand-Archive -Path (Join-Path $tmp $archive) -DestinationPath $tmp -Force
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    Copy-Item (Join-Path $tmp 'ff-tower.exe') (Join-Path $installDir 'ff-tower.exe') -Force
+    Copy-Item (Join-Path $tmp 'atc.exe') (Join-Path $installDir 'atc.exe') -Force
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
-Write-Host "installed tower $version to $installDir\ff-tower.exe"
+Write-Host "installed tower $version to $installDir\atc.exe"
 
-# Put the install directory on the user PATH so new terminals find ff-tower.
+# Put the install directory on the user PATH so new terminals find atc.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $installDir) {
     [Environment]::SetEnvironmentVariable('Path', "$userPath;$installDir", 'User')
@@ -60,11 +60,11 @@ if (($env:Path -split ';') -notcontains $installDir) {
 
 if (-not (Get-Command ff -ErrorAction SilentlyContinue)) {
     Write-Host ''
-    Write-Host 'tower is reached through fufu (`ff tower`), and no `ff` is on your PATH.'
+    Write-Host 'tower is reached through fufu (`atc`), and no `ff` is on your PATH.'
     Write-Host 'install fufu first:'
     Write-Host '  irm https://raw.githubusercontent.com/tyler-johnson/fufu/main/install.ps1 | iex'
 }
 
 Write-Host ''
 Write-Host 'next steps:'
-Write-Host "  ff tower                       # the board"
+Write-Host "  atc    # the board"

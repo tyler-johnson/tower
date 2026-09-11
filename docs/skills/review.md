@@ -13,8 +13,8 @@ Sort what you find into two piles. Mechanical: the fix is smaller than the comme
 
 Apply the mechanical pile as `ff commit`s on the flight's branch, one concern per commit, each message saying it is a review fix and what it fixes.
 
-Write the pass as one `ff tower comment <flight> -m "<findings>"` — severity order, a file and line for each, split into what was fixed here and what is left for the verdict.
+Write the pass as one `atc comment <flight> -m "<findings>"` — severity order, a file and line for each, split into what was fixed here and what is left for the verdict.
 
-Close your part. Judgment pile non-empty: `ff tower hold <flight> -m "<question>"` — the one question whose answer unblocks the verdict. Empty: `ff tower done <flight>`. Never guess past the pile to reach done.
+Close your part. Judgment pile non-empty: `atc hold <flight> -m "<question>"` — the one question whose answer unblocks the verdict. Empty: `atc done <flight>`. Never guess past the pile to reach done.
 
 The push boundary holds here too: no forge review, no PR comment, nothing pushed. Your commits and your comment are the whole output.

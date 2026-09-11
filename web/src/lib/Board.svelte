@@ -34,9 +34,9 @@
 {#if b}
   <footer class="text-base-content/60 flex flex-wrap items-center gap-2 text-sm">
     {#if flights === 0}
-      <span>nothing on the board · ff tower file to add one</span>
+      <span>nothing on the board · atc file to add one</span>
     {:else}
-      <span>{flights} {flights === 1 ? "flight" : "flights"} · ff tower file to add one</span>
+      <span>{flights} {flights === 1 ? "flight" : "flights"} · atc file to add one</span>
     {/if}
     {#if hidden > 0}
       <span>·</span>

@@ -1,0 +1,201 @@
+//! What a write verb can refuse with, and the id every refusal answers
+//! to.
+//!
+//! One table for both surfaces: the CLI wraps this whole in its
+//! `CliError` and the server in its `ApiError`, and each reads id,
+//! message, and exits from here, so the two envelopes cannot drift. The
+//! wrapped errors keep naming themselves — a resolver, log, or registry
+//! refusal carries its own id and exits through transparently.
+//!
+//! The exits below are what the CLI envelope actually carries today, the
+//! raise site's or the registry's — stated here because the server has no
+//! registry to fall back on, and the fallback rule on both surfaces is
+//! "the site's exits when it has any."
+
+use crate::board::{QueryError, ResolveError};
+use crate::{log, procedure};
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// A flight reference refused by the resolver — its own id and
+    /// exits, carried through.
+    #[error(transparent)]
+    Resolve(#[from] ResolveError),
+    #[error(transparent)]
+    Log(#[from] log::Error),
+    /// A definition the loader or the lookup declined — its own id,
+    /// carried through.
+    #[error(transparent)]
+    Procedure(#[from] procedure::Error),
+    /// A query the codec declined — its own id and exits, carried
+    /// through.
+    #[error(transparent)]
+    Query(#[from] QueryError),
+
+    #[error("the subject is empty")]
+    EmptySubject,
+    /// `decompose` with no procedure and no subjects — nothing to mint.
+    #[error("there is nothing to split into")]
+    NoParts,
+    #[error("the procedure name is empty")]
+    EmptyProcedure,
+    #[error("no question given")]
+    NeedsQuestion,
+    #[error("no answer given")]
+    NeedsAnswer,
+    #[error("no note given")]
+    NeedsNote,
+    /// A word the status vocabulary does not carry.
+    #[error(
+        "`{word}` is not a status — backlog, waiting, ready, in_progress, held, done, or canceled"
+    )]
+    BadStatus { word: String },
+    /// `waiting` typed as a move — the fold derives it from the edges.
+    #[error(
+        "`{display}` cannot be set waiting — waiting comes from links: `atc link <flight> <dependency>`"
+    )]
+    StatusWaiting { display: String },
+    /// `held` typed as a move — the fold derives it from a question.
+    #[error(
+        "`{display}` cannot be set held — held comes from a question: `atc hold <flight> -m <question>`"
+    )]
+    StatusHold { display: String },
+    /// A word the assignee vocabulary does not carry.
+    #[error("`{word}` is not a lane — me, agent, or none")]
+    BadAssignee { word: String },
+    /// `--status` with a word a flight cannot be filed with: not a
+    /// status at all, one the fold derives, or one that is closed.
+    #[error("`{word}` cannot be filed — backlog, ready, or in_progress")]
+    FileStatus { word: String },
+    /// A lifecycle verb reaching a flight that is already off the board.
+    #[error("`{display}` is done — the log keeps its record")]
+    FlightDone { display: String },
+    /// `done` twice — the same id, with "already" wording.
+    #[error("`{display}` is already done")]
+    AlreadyDone { display: String },
+    /// `answer` on a closed flight whose close took an open question off
+    /// the record — the same id as [`Error::FlightDone`], with wording
+    /// that names what became of the question.
+    #[error("`{display}` is done — the close abandoned its question")]
+    QuestionAbandoned { display: String },
+    /// A status move over an open question — only `done` and `canceled`
+    /// may override it.
+    #[error("`{display}` is held on a question: {question}")]
+    StatusHeld { display: String, question: String },
+    #[error("`{display}` is already held: {question}")]
+    AlreadyHeld { display: String, question: String },
+    #[error("`{display}` has no open question")]
+    NotHeld { display: String },
+
+    /// `link a b` with both references resolving to one flight — a
+    /// cycle of length one, visible only after resolution.
+    #[error("`{display}` cannot depend on itself")]
+    SelfLink { display: String },
+    /// The identical edge declared twice.
+    #[error("`{from}` already depends on `{to}`")]
+    LinkExists { from: String, to: String },
+    /// `unlink` of an edge that is not on the record.
+    #[error("`{from}` does not depend on `{to}`")]
+    LinkMissing { from: String, to: String },
+    /// `edit` with every flag left unsaid.
+    #[error(
+        "nothing to change — `-s` rewords the subject, `-m` the body or comment text, and `--priority`, `--label`, `--skill` reset a field"
+    )]
+    NeedsEdit,
+    /// A field flag on a comment target — only flights carry fields.
+    #[error("a comment carries no fields — `-m` rewords its text")]
+    SubjectOnComment,
+    /// A full event id that is neither a flight nor a comment.
+    #[error("`{text}` names neither a flight nor a comment")]
+    EditTargetNotFound { text: String },
+
+    /// `view save` with a blank name.
+    #[error("the view name is empty")]
+    EmptyName,
+    /// A view reference that is not a wire id.
+    #[error("`{text}` is not a view id — `<writer>.<seq>`")]
+    BadView { text: String },
+    /// A view id naming nothing this viewer sees — another author's
+    /// personal view lands here too, since personal is a rendering
+    /// rule and never a permission.
+    #[error("no view `{text}` is visible to you")]
+    ViewNotFound { text: String },
+    /// `view edit` with every field left unsaid.
+    #[error("the edit changes nothing — give a name, a query, or shared")]
+    NeedsViewEdit,
+}
+
+impl Error {
+    /// The stable id, tower's `category/kebab-case`.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Error::Resolve(err) => err.id(),
+            Error::Log(err) => err.id(),
+            Error::Procedure(err) => err.id(),
+            Error::Query(err) => err.id(),
+            Error::EmptySubject => "usage/empty-subject",
+            Error::NoParts => "usage/no-parts",
+            Error::EmptyProcedure => "usage/empty-procedure",
+            Error::NeedsQuestion | Error::NeedsAnswer | Error::NeedsNote => "usage/needs-message",
+            Error::BadStatus { .. } => "usage/bad-status",
+            Error::StatusWaiting { .. } => "usage/status-waiting",
+            Error::StatusHold { .. } => "usage/status-held",
+            Error::BadAssignee { .. } => "usage/bad-assignee",
+            Error::FileStatus { .. } => "usage/file-status",
+            Error::FlightDone { .. }
+            | Error::AlreadyDone { .. }
+            | Error::QuestionAbandoned { .. } => "flight/done",
+            Error::StatusHeld { .. } => "status/held",
+            Error::AlreadyHeld { .. } => "hold/exists",
+            Error::NotHeld { .. } => "answer/not-held",
+            Error::SelfLink { .. } => "usage/self-link",
+            Error::LinkExists { .. } => "link/exists",
+            Error::LinkMissing { .. } => "link/missing",
+            Error::NeedsEdit => "usage/needs-edit",
+            Error::SubjectOnComment => "usage/subject-on-comment",
+            Error::EditTargetNotFound { .. } => "flight/not-found",
+            Error::EmptyName => "usage/empty-name",
+            Error::BadView { .. } => "usage/bad-view",
+            Error::ViewNotFound { .. } => "view/not-found",
+            Error::NeedsViewEdit => "usage/needs-edit",
+        }
+    }
+
+    /// Commands that lead out of it. Empty where no command helps — the
+    /// envelope carries `[]`, never null.
+    pub fn exits(&self) -> Vec<String> {
+        let exits: &[&str] = match self {
+            Error::Resolve(err) => return err.exits(),
+            Error::Log(err) => return err.exits(),
+            Error::Procedure(err) => return err.exits(),
+            Error::Query(err) => return err.exits(),
+            Error::EmptySubject
+            | Error::NoParts
+            | Error::EmptyName
+            | Error::BadView { .. }
+            | Error::SelfLink { .. } => &[],
+            Error::LinkExists { .. } | Error::LinkMissing { .. } => &["atc brief <flight>"],
+            Error::NeedsEdit => &[
+                "atc edit <target> -s <subject>",
+                "atc edit <target> -m <msg>",
+            ],
+            Error::SubjectOnComment => &["atc edit <target> -m <msg>"],
+            Error::EmptyProcedure => &["atc procedures"],
+            Error::NeedsQuestion | Error::StatusHold { .. } => &["atc hold <flight> -m <question>"],
+            Error::StatusWaiting { .. } => &["atc link <flight> <dependency>"],
+            Error::NeedsAnswer | Error::AlreadyHeld { .. } | Error::StatusHeld { .. } => {
+                &["atc answer <flight> -m <answer>"]
+            }
+            Error::NeedsNote => &["atc comment <flight> -m <note>"],
+            Error::FlightDone { .. }
+            | Error::AlreadyDone { .. }
+            | Error::QuestionAbandoned { .. }
+            | Error::NotHeld { .. }
+            | Error::ViewNotFound { .. }
+            | Error::NeedsViewEdit
+            | Error::EditTargetNotFound { .. } => &["atc"],
+            Error::BadStatus { .. } | Error::BadAssignee { .. } | Error::FileStatus { .. } => &[],
+        };
+        exits.iter().map(|exit| (*exit).to_string()).collect()
+    }
+}

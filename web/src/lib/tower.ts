@@ -1,5 +1,5 @@
 // The wire types and the pure render helpers, ported from
-// crates/ff-tower-cli's render.rs and cmd/brief.rs so the two stay
+// crates/atc-cli's render.rs and cmd/brief.rs so the two stay
 // comparable — one function here per function there, same names in
 // camelCase, same order of phrases.
 
@@ -477,7 +477,7 @@ export interface Brief {
 }
 
 /// One procedure as the registry holds it, mirroring
-/// ff-tower-core/src/procedure/mod.rs. This is the *definition* — a file
+/// atc-core/src/procedure/mod.rs. This is the *definition* — a file
 /// on disk, and nothing a flight carries: a filing keeps only the
 /// procedure's name, as provenance.
 export interface Definition {
@@ -576,7 +576,7 @@ export function fieldsLine(brief: Brief): string {
 }
 
 /// A refusal as lines, in main.rs's `report()` shape minus the
-/// `ff-tower:` prefix — a terminal artifact, and this is not a terminal.
+/// `atc:` prefix — a terminal artifact, and this is not a terminal.
 export function refusalLines(error: TowerError): string[] {
   const lines = [error.message];
   if (error.exits.length > 0) {
@@ -589,7 +589,7 @@ export function refusalLines(error: TowerError): string[] {
 export type Verb = "assign" | "status" | "hold" | "answer" | "done" | "cancel" | "comment";
 
 /// The verbs this flight's state accepts, from the guards in
-/// ff-tower-core/src/verb/.
+/// atc-core/src/verb/.
 ///
 /// A closed flight is what `ensure_active` refuses on, so it keeps only
 /// `comment` — a note on a closed record is fine, and comment.rs runs no

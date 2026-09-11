@@ -80,6 +80,63 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
+name = "atc-cli"
+version = "0.1.0"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "atc-core",
+ "atc-serve",
+ "atc-testsupport",
+ "clap",
+ "flate2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "ureq",
+ "zip",
+]
+
+[[package]]
+name = "atc-core"
+version = "0.1.0"
+dependencies = [
+ "atc-testsupport",
+ "gix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "atc-serve"
+version = "0.1.0"
+dependencies = [
+ "atc-core",
+ "axum",
+ "include_dir",
+ "notify",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "atc-testsupport"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -384,63 +441,6 @@ name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
-
-[[package]]
-name = "ff-tower-cli"
-version = "0.1.0"
-dependencies = [
- "anstream",
- "anstyle",
- "clap",
- "ff-tower-core",
- "ff-tower-serve",
- "ff-tower-testsupport",
- "flate2",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "thiserror",
- "ureq",
- "zip",
-]
-
-[[package]]
-name = "ff-tower-core"
-version = "0.1.0"
-dependencies = [
- "ff-tower-testsupport",
- "gix",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "toml",
-]
-
-[[package]]
-name = "ff-tower-serve"
-version = "0.1.0"
-dependencies = [
- "axum",
- "ff-tower-core",
- "include_dir",
- "notify",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
-name = "ff-tower-testsupport"
-version = "0.1.0"
-dependencies = [
- "tempfile",
-]
 
 [[package]]
 name = "filetime"

@@ -4,23 +4,23 @@
 #
 # Downloads the latest release binary for this platform, verifies its
 # sha256 against the release's checksums.txt, and installs it to
-# ~/.local/bin (override with TOWER_INSTALL_DIR; pin a version with
-# TOWER_VERSION, e.g. TOWER_VERSION=v0.1.0). Windows: use install.ps1.
+# ~/.local/bin (override with ATC_INSTALL_DIR; pin a version with
+# ATC_VERSION, e.g. ATC_VERSION=v0.1.0). Windows: use install.ps1.
 set -eu
 
 REPO="tyler-johnson/tower"
-INSTALL_DIR="${TOWER_INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${ATC_INSTALL_DIR:-$HOME/.local/bin}"
 
 case "$(uname -s)" in
   Linux)  os=linux ;;
   Darwin) os=darwin ;;
-  *) echo "tower installer: unsupported OS $(uname -s) — on Windows use install.ps1; elsewhere: cargo install --git https://github.com/$REPO ff-tower-cli" >&2
+  *) echo "tower installer: unsupported OS $(uname -s) — on Windows use install.ps1; elsewhere: cargo install --git https://github.com/$REPO atc-cli" >&2
      exit 1 ;;
 esac
 case "$(uname -m)" in
   x86_64|amd64)  arch=amd64 ;;
   aarch64|arm64) arch=arm64 ;;
-  *) echo "tower installer: unsupported architecture $(uname -m) — try: cargo install --git https://github.com/$REPO ff-tower-cli" >&2
+  *) echo "tower installer: unsupported architecture $(uname -m) — try: cargo install --git https://github.com/$REPO atc-cli" >&2
      exit 1 ;;
 esac
 
@@ -38,13 +38,13 @@ else
   exit 1
 fi
 
-version="${TOWER_VERSION:-$(latest)}"
+version="${ATC_VERSION:-$(latest)}"
 if [ -z "$version" ]; then
-  echo "tower installer: could not determine the latest release — set TOWER_VERSION=vX.Y.Z and re-run" >&2
+  echo "tower installer: could not determine the latest release — set ATC_VERSION=vX.Y.Z and re-run" >&2
   exit 1
 fi
 
-archive="ff-tower_${version#v}_${os}_${arch}.tar.gz"
+archive="atc_${version#v}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/$version"
 
 tmp="$(mktemp -d)"
@@ -69,15 +69,15 @@ if [ "$got" != "$want" ]; then
   exit 1
 fi
 
-tar -xzf "$tmp/$archive" -C "$tmp" ff-tower
+tar -xzf "$tmp/$archive" -C "$tmp" atc
 mkdir -p "$INSTALL_DIR"
 if command -v install >/dev/null 2>&1; then
-  install -m 0755 "$tmp/ff-tower" "$INSTALL_DIR/ff-tower"
+  install -m 0755 "$tmp/atc" "$INSTALL_DIR/atc"
 else
-  cp "$tmp/ff-tower" "$INSTALL_DIR/ff-tower" && chmod 0755 "$INSTALL_DIR/ff-tower"
+  cp "$tmp/atc" "$INSTALL_DIR/atc" && chmod 0755 "$INSTALL_DIR/atc"
 fi
 
-echo "installed tower $version to $INSTALL_DIR/ff-tower"
+echo "installed tower $version to $INSTALL_DIR/atc"
 case ":$PATH:" in
   *:"$INSTALL_DIR":*) ;;
   *) echo ""
@@ -86,10 +86,10 @@ case ":$PATH:" in
 esac
 if ! command -v ff >/dev/null 2>&1; then
   echo ""
-  echo "tower is reached through fufu (\`ff tower\`), and no \`ff\` is on your PATH."
+  echo "tower is reached through fufu (\`atc\`), and no \`ff\` is on your PATH."
   echo "install fufu first:"
   echo "  curl -fsSL https://raw.githubusercontent.com/tyler-johnson/fufu/main/install.sh | sh"
 fi
 echo ""
 echo "next steps:"
-echo "  ff tower                       # the board"
+echo "  atc    # the board"

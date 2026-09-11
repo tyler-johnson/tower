@@ -22,10 +22,10 @@ describe("the markdown render", () => {
   });
 
   it("makes a fence a code block", () => {
-    const html = render("```sh\nff tower brief\n```");
+    const html = render("```sh\natc brief\n```");
     expect(html).toContain("<pre>");
     expect(html).toContain("<code");
-    expect(html).toContain("ff tower brief");
+    expect(html).toContain("atc brief");
   });
 
   it("makes backticks inline code", () => {

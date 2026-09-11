@@ -1,7 +1,7 @@
 # Daily driver: `make` = fast dogfood build. With cargo's target dir shared
 # machine-wide (`[build] target-dir` in ~/.cargo/config.toml) and its dogfood/
-# on PATH, fufu's `ff-<name>` dispatch finds ff-tower the moment it links;
-# there is nothing to install. `make release` is the honest fat-LTO build.
+# on PATH, `atc` is live the moment it links; the build is the install.
+# `make release` is the honest fat-LTO build.
 
 .PHONY: build release test fmt fmt-check lint clean
 
@@ -29,4 +29,4 @@ lint:
 # Only this workspace's own crates: the target dir is shared with every
 # other workspace on the machine, so a bare `cargo clean` would take theirs.
 clean:
-	cargo clean -p ff-tower-core -p ff-tower-cli -p ff-tower-serve -p ff-tower-testsupport
+	cargo clean -p atc-core -p atc-cli -p atc-serve -p atc-testsupport

@@ -2,7 +2,7 @@
 
 *The design of the tower that shipped, September 2026. It began as a sketch in August, and #123 untangled it from fufu; this is what stands.*
 
-**tower** is project management for people and agents, built on fufu. It lives in its own repository and installs one binary, `ff-tower`, which is what fufu's `ff-<name>` dispatch finds for `ff tower`. There is no bare `tower` command: the dependency on fufu is real rather than decorative, so the verb is reached through fufu or not at all.
+**tower** is project management for people and agents, built on fufu. It lives in its own repository and installs one binary, `atc`, which is what fufu's `ff-<name>` dispatch finds for `atc`. There is no bare `tower` command: the dependency on fufu is real rather than decorative, so the verb is reached through fufu or not at all.
 
 The name comes from fufu's own metaphor. fufu is the pilot — it flies the repository. tower flies nothing; it assigns work and keeps the record.
 
@@ -20,12 +20,12 @@ So the shape of the product is a boring model with an interesting engine. The mo
 
 ## The seam
 
-tower is a separate program in a separate repository. Issue tracking is not a version control operation, and fufu's principle 10 — verbs must earn their existence — kills it as a native verb on its own merits. It is discovered as `ff tower` through fufu's extension dispatch, and has its own release, its own authority, its own store, and its own cadence. It links no fufu crate: the contract below is the entire surface between the two, and it is the same surface every other declared extension gets.
+tower is a separate program in a separate repository. Issue tracking is not a version control operation, and fufu's principle 10 — verbs must earn their existence — kills it as a native verb on its own merits. It is discovered as `atc` through fufu's extension dispatch, and has its own release, its own authority, its own store, and its own cadence. It links no fufu crate: the contract below is the entire surface between the two, and it is the same surface every other declared extension gets.
 
 The contract:
 
 ```
-reached   ff tower, through ff-<name> dispatch, with FF_REPO and FF_CONTRACT on every spawn
+reached   atc, through ff-<name> dispatch, with FF_REPO and FF_CONTRACT on every spawn
 answers   --ff-manifest (verbs · undoable: false · briefing: true · skills: ["tower"] · tools: true)
           --ff-tools · --ff-skill tower · briefing · help · explain <id>
 envelope  fufu's shape — {"ff": <contract>, "cmd": "tower <verb>", data | error} — ids under tower/, fufu's exit codes
@@ -41,9 +41,9 @@ That last line is fufu's extension rule, unmodified: extensions read fufu state 
 
 **tower is a thing agents call. It never calls agents.**
 
-Passive is a statement about initiative, not about process count. tower starts no agent work and owns no agent lifecycle; it does not claim that no tower process runs. Every verb is a read plus a local write, and there is no dispatch and no iteration verb. If work should loop, the agent harness loops and calls `ff tower next` again — the harness is the scheduler, tower is only the queue.
+Passive is a statement about initiative, not about process count. tower starts no agent work and owns no agent lifecycle; it does not claim that no tower process runs. Every verb is a read plus a local write, and there is no dispatch and no iteration verb. If work should loop, the agent harness loops and calls `atc next` again — the harness is the scheduler, tower is only the queue.
 
-`ff tower serve` is a standing process, a daemon by any honest reading, and it stays inside the line because it is a clock and a subscriber rather than an actor. It refolds when the repository moves, pulls upstream on a cadence, and everything it learns lands in the log as the same events a lazy pull would have written. It holds no state the log does not, decides nothing, and dispatches nothing. Every interface works without it, just staler — an accelerant, never a dependency. A person starts it; tower never starts it for them.
+`atc serve` is a standing process, a daemon by any honest reading, and it stays inside the line because it is a clock and a subscriber rather than an actor. It refolds when the repository moves, pulls upstream on a cadence, and everything it learns lands in the log as the same events a lazy pull would have written. It holds no state the log does not, decides nothing, and dispatches nothing. Every interface works without it, just staler — an accelerant, never a dependency. A person starts it; tower never starts it for them.
 
 The reasons to stay passive compound. Initiating means owning agent lifecycle: keys, model selection, retries, context limits, per-vendor quirks — a second product, and a moving one. Staying passive makes tower vendor-neutral by construction, because it never learns who is calling beyond the byline on an event. And a queue that dispatches on its own is a background process making outward-facing decisions nobody asked for that minute, which fufu's principle 9 already forbids in its own domain.
 
@@ -51,7 +51,7 @@ Assignment is routing, not dispatch. Assigning a flight to the agent lane puts i
 
 Sync follows the same discipline. Upstream is pulled lazily at invocation, gated by a cadence stamp, the way fufu's auto-trim and update check already work. With the standing process up, that same pull runs on its cadence and appends the same events — the cadence is config it reads, never authority it holds. The board is fresh because you just asked for it, or because a subscriber refolded it, and the fold is identical either way. Anything that needs to reach you unasked belongs in fufu's ambient shell channel — a heartbeat the user started — or in a process the user started, never in one tower spawned behind them.
 
-The passive update lane remains the one process tower starts for itself, fufu's carve-out carried over verbatim: official binaries (never dev, dogfood, or test builds; never under CI) spawn a detached `ff tower update --check` at most once per `tower.updateCheck` (default daily) — the one sanctioned self-spawn. It refreshes a small cache file under the user cache dir and exits; foreground commands read the cache, and with `tower.autoUpdate` on (the default) a newer release installs itself silently in the background, or with it off a one-line notice lands on stderr instead. Three throttles keep it polite: the cadence gates the checks, auto-install probes retry at most daily, and a release is announced at most once, ever. `tower.updateCheck false` kills the whole lane. The trust root is deliberately plain — HTTPS to GitHub plus the release's sha256, the same root the install scripts rely on.
+The passive update lane remains the one process tower starts for itself, fufu's carve-out carried over verbatim: official binaries (never dev, dogfood, or test builds; never under CI) spawn a detached `atc update --check` at most once per `tower.updateCheck` (default daily) — the one sanctioned self-spawn. It refreshes a small cache file under the user cache dir and exits; foreground commands read the cache, and with `tower.autoUpdate` on (the default) a newer release installs itself silently in the background, or with it off a one-line notice lands on stderr instead. Three throttles keep it polite: the cadence gates the checks, auto-install probes retry at most daily, and a release is announced at most once, ever. `tower.updateCheck false` kills the whole lane. The trust root is deliberately plain — HTTPS to GitHub plus the release's sha256, the same root the install scripts rely on.
 
 tower enforces nothing. It stores the word and shows it: a flight set In Progress is In Progress because someone said so, and the record says who and when. tower hooks nothing, vetoes nothing, and never reaches into the tree to check. That is fufu's regime boundary, inherited.
 
@@ -86,7 +86,7 @@ A flight is an issue, and it carries what every issue carries:
 | edges | depends-on and blocks, declared with `link`, taken back with `unlink`; a parent depends on its sub-flights |
 | comments, history | the record, append-only |
 
-Every field is settable directly at filing — `ff tower file "subject" -p high --label chore --skill review --assignee agent` — and editable after. A procedure (below) is nothing more than those same fields saved across a graph of flights.
+Every field is settable directly at filing — `atc file "subject" -p high --label chore --skill review --assignee agent` — and editable after. A procedure (below) is nothing more than those same fields saved across a graph of flights.
 
 **Assignee is deliberately coarse.** Two values, me or agent, because that is the routing decision — whose queue is this in — and the routing decision is all the field has to carry. The finer fact, *which* agent is actually flying it, needs no field at all: every event in the log carries the byline of the identity that wrote it, so the board shows the chip and the history shows the pilot — "In Progress — claude, 4m ago." Addressing work to a named agent is the wrong primitive anyway: describe the work with `skill` and labels, and let workers pull what they know how to fly. tower stays vendor-neutral because it never stores who will answer, only who did.
 
@@ -109,9 +109,9 @@ Only one stamp happens without a hand on it, and it is deterministic, attributed
 
 ## Held — the question piece
 
-An agent mid-flight that hits something it genuinely cannot decide — an ambiguous requirement, a design fork, anything where guessing is worse than stopping — holds the flight: `ff tower hold <flight> -m "<the question>"`, exit code 3. The flight's status becomes Held with the question attached, and nothing is torn down: the record keeps the question, the tree is the harness's and sits wherever the harness left it, and nothing was guessed. Holding is stopping, not abandoning.
+An agent mid-flight that hits something it genuinely cannot decide — an ambiguous requirement, a design fork, anything where guessing is worse than stopping — holds the flight: `atc hold <flight> -m "<the question>"`, exit code 3. The flight's status becomes Held with the question attached, and nothing is torn down: the record keeps the question, the tree is the harness's and sits wherever the harness left it, and nothing was guessed. Holding is stopping, not abandoning.
 
-A question is a blocking comment — that is the whole object. It lands in the comment stream flagged as holding the flight, the answer is the reply that releases it, and both survive on the record permanently, which is what makes the resume work: `ff tower answer <flight> -m "<the answer>"` clears the question and the record derives the flight Ready, or Waiting if a dependency is still live, and whichever agent pulls it next reads the brief — which now carries the question and the answer — and continues. The original asker may be long gone, context wiped, session over. That is fine and expected: tower is the durable half, the agent is disposable, the flight is not.
+A question is a blocking comment — that is the whole object. It lands in the comment stream flagged as holding the flight, the answer is the reply that releases it, and both survive on the record permanently, which is what makes the resume work: `atc answer <flight> -m "<the answer>"` clears the question and the record derives the flight Ready, or Waiting if a dependency is still live, and whichever agent pulls it next reads the brief — which now carries the question and the answer — and continues. The original asker may be long gone, context wiped, session over. That is fine and expected: tower is the durable half, the agent is disposable, the flight is not.
 
 One open question per flight. A hold means "I cannot proceed," and an agent with four blocking questions on one flight has a decomposition problem, not a Q&A problem. Questions that do not block are comments.
 
@@ -164,7 +164,7 @@ The row is the recognizable anatomy: priority glyph, flight ref, status dot, sub
 
 tower is a declared extension of fufu's, and three flags answer fufu's handshakes ahead of any verb: `--ff-manifest` says what tower is — its verbs, that nothing it writes is undoable, that it offers a briefing line and tools, and that it ships one skill, `tower`; `--ff-tools` describes the loop's four gestures — `next`, `brief`, `hold`, `done` — as typed tools generated from the command line's own grammar, so `ff mcp` serves them as `tower__<verb>`, and nothing else: fufu's rule for its own seven, a verb is a tool only where the shell adds nothing, and an agent with a shell in hand reaches for the shell anyway, so everything a person types and everything the skills teach as a command line stays the command line; and `--ff-skill tower` hands `ff hook` the manual's files, which it installs beside fufu's own skill in every client it wires. All three are answered from what is compiled in, outside any repository, because that is where `ff extension add tower` asks.
 
-The whole design is aimed at one reflex: bare `ff tower`, often, because it is the fastest way to learn what to do next. Two things have to hold or the reflex never forms. It has to be honest, which is what deriving the board from the record is for: the word a row shows is a word someone set, folded, never a guess. And **render must never block on the network** — fold the local log, draw, note the age, refresh on the cadence stamp. A board that is fresh and slow loses to one that is instant and honest about how stale it is.
+The whole design is aimed at one reflex: bare `atc`, often, because it is the fastest way to learn what to do next. Two things have to hold or the reflex never forms. It has to be honest, which is what deriving the board from the record is for: the word a row shows is a word someone set, folded, never a guess. And **render must never block on the network** — fold the local log, draw, note the age, refresh on the cadence stamp. A board that is fresh and slow loses to one that is instant and honest about how stale it is.
 
 ### Projects
 
@@ -184,21 +184,21 @@ On input, any verb taking a flight accepts either name. A bare number resolves a
 
 ### Next
 
-`ff tower next` is the agent queue's Ready check and the claim in one command. The pool is every Ready flight assigned to the agent lane, walked in filed order, and `-n <k>` admits up to `k` of them the same way. Each picked flight is set In Progress in one append, and the byline on the event is the pilot: the pick is the claim, and nothing else. `next` hands out no branch and no tree — where the work happens is the harness's to arrange, one tree per flight when it fans out — and a flight with a live dependency is Waiting, never in the pool. `--peek` is the same computation with nothing written, and the envelope's `pulled` says which happened.
+`atc next` is the agent queue's Ready check and the claim in one command. The pool is every Ready flight assigned to the agent lane, walked in filed order, and `-n <k>` admits up to `k` of them the same way. Each picked flight is set In Progress in one append, and the byline on the event is the pilot: the pick is the claim, and nothing else. `next` hands out no branch and no tree — where the work happens is the harness's to arrange, one tree per flight when it fans out — and a flight with a live dependency is Waiting, never in the pool. `--peek` is the same computation with nothing written, and the envelope's `pulled` says which happened.
 
 Three outcomes, and the envelope names each on `outcome`. `work`, exit 0, is a pick: the `picked` rows carry `flight`, `number`, `subject`, and the `skill` the flight names when it names one. `drained`, exit 1, is a board with nothing left. `yours`, exit 1, is Ready work that exists and that the lane alone kept out of the pool — it needs you. Both empties are full data envelopes, fufu's "no": a shell loop stops on the code, and a JSON reader branches on the word.
 
 ### Brief
 
-`ff tower brief` is the read half of the handoff: `next` hands an agent a flight id and a subject, and the brief is what it reads next — everything the log knows about one flight, in one read over the fold. It is the record and nothing but: subject, body, every field, the comments with any question and answer among them, links carrying each linked flight's subject and status, the history with the byline and the words each verb took, and the standing. No repository facts and no probes, so the brief is instant and reads the same from any tree. A closed flight briefs like any other, because the log keeps the record and reading it is never a lifecycle move. `show` is accepted as a second spelling of `brief`, fufu's own word for reading one thing; the envelope says `brief` either way.
+`atc brief` is the read half of the handoff: `next` hands an agent a flight id and a subject, and the brief is what it reads next — everything the log knows about one flight, in one read over the fold. It is the record and nothing but: subject, body, every field, the comments with any question and answer among them, links carrying each linked flight's subject and status, the history with the byline and the words each verb took, and the standing. No repository facts and no probes, so the brief is instant and reads the same from any tree. A closed flight briefs like any other, because the log keeps the record and reading it is never a lifecycle move. `show` is accepted as a second spelling of `brief`, fufu's own word for reading one thing; the envelope says `brief` either way.
 
 The skill named on the flight is what the agent flies it with; the brief is what the agent flies it *from*, and it is why the asker of a held question does not need to be its resumer. The body and the comments are authored prose, and the reader decides how it reads: the web board renders them as markdown, the terminal prints the source text.
 
 ### Decompose
 
-`ff tower decompose <flight> [<procedure> | <part>…]` makes a flight a parent: under a procedure, the definition's flights are minted beneath it; by hand, each argument files as one sub-flight. Either way the children are `linked` edges and nothing else — no container kind, no parent type — so a sub-flight is indistinguishable from a hand-declared dependency, and that is the point: Waiting derivations, `depends_on`/`blocks`, and the brief's link sections all work on it unchanged. The filings and their edges land in one append, because two would leave a window where the parent is live, unlinked, and pullable — exactly the state the Waiting gate exists to prevent.
+`atc decompose <flight> [<procedure> | <part>…]` makes a flight a parent: under a procedure, the definition's flights are minted beneath it; by hand, each argument files as one sub-flight. Either way the children are `linked` edges and nothing else — no container kind, no parent type — so a sub-flight is indistinguishable from a hand-declared dependency, and that is the point: Waiting derivations, `depends_on`/`blocks`, and the brief's link sections all work on it unchanged. The filings and their edges land in one append, because two would leave a window where the parent is live, unlinked, and pullable — exactly the state the Waiting gate exists to prevent.
 
-A parent's Done stays asserted. Every sub-flight closing makes the parent Ready, not finished — whether the broad task is over is a judgment, and `ff tower done` is where it gets made.
+A parent's Done stays asserted. Every sub-flight closing makes the parent Ready, not finished — whether the broad task is over is a judgment, and `atc done` is where it gets made.
 
 ### The verbs
 
@@ -206,30 +206,30 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 
 | verb | what it does | caller |
 |---|---|---|
-| `ff tower` (alias `board`) | the board: what needs you, then the list by status; `--closed` widens or narrows the closed group for one render | you |
-| `ff tower next [-n <k>] [--peek]` | claim the next Ready flight from the agent lane, or `k` of them in filed order; the pick sets In Progress under your byline; `--peek` is the same computation with nothing written | an agent |
-| `ff tower brief <flight>` (alias `show`) | everything the record knows about one flight, for whoever picks it up | either |
-| `ff tower file [<procedure>] <subject>` | put work on the board — bare, or under a procedure; every field a procedure sets is a flag here (`-m`, `-p`, `--label`, `--skill`, `--assignee`, `--status`) | either |
-| `ff tower status <flight> <status>` | move a flight; the lifecycle verbs below are this verb carrying a payload | either |
-| `ff tower assign <flight> <me\|agent\|none>` | route the flight's queue | either |
-| `ff tower hold <flight> -m <question>` | stop with a blocking question — exit 3 | an agent |
-| `ff tower answer <flight> -m <answer>` | answer the question and release the flight | you |
-| `ff tower done <flight>` | finish it — off the board, on the record | either |
-| `ff tower cancel <flight> [-m <why>]` | close it unfinished, reason on the record | you |
-| `ff tower link <a> <b>` | declare that one flight depends on another | either |
-| `ff tower unlink <a> <b>` | take back a declared dependency — the only way to disagree with a derived Waiting | either |
-| `ff tower comment <flight> -m <note>` | a note on the record, local; saying it to the team is a separate, deliberate gesture | either |
-| `ff tower edit <target> [-s <subject>] [-m <msg>] [-p <priority>] [--label <label>] [--skill <name>]` | reword a flight's fields, or a comment's text by its event id — an overlay event, the log keeps every prior word | either |
-| `ff tower decompose <flight> [<procedure> \| <part>…]` | make a flight a parent — a procedure's flights, or parts by hand | either |
-| `ff tower explain <error-id>` | look up an error id and see what it means — the prose behind every coded refusal; ids are namespaced `tower/<id>` on the wire and the lookup takes either spelling; `--list` is the whole catalog | either |
-| `ff tower procedures [<name>]` | what is installed, what each matches, and where it came from | you |
-| `ff tower skills [<name>]` | what is installed; a name prints one raw, byte for byte, to fork or pipe | either |
-| `ff tower config` | settings, on fufu's typed-registry model | you |
-| `ff tower version` | which tower this is: the release, the commit it was built from, and — read from the update lane's cache, without touching the network — whether it is still the current one. `--json` reports the three as fields | either |
-| `ff tower update` | move this binary to the latest release: verified download, atomic swap; a passive lane checks ~daily and auto-installs, or prints a one-line notice | you |
-| `ff tower doctor` | the seam, the log, and the registries: fufu's version first, then every event the fold could not place, then the installed procedures and skills and the update lane's cache; observes and complains, never enforces, and exits 1 on findings | you |
-| `ff tower serve` | run the standing process: a server the browser board and its API mount into, in the foreground until Ctrl-C; `--host`, then `TOWER_HOST`, then `tower.serveHost`, then 127.0.0.1, and `--port`, then `TOWER_PORT`, then `tower.servePort`, then 7420. The default is the loopback; a wider bind works and says once that the board has no authentication in front of it. Mounted: the board itself — the web app embedded in the binary at build time, every path outside `/api` answering a build file or the app shell, the client router taking it from there; the read API — GET /api/board, /api/brief/<flight>, /api/procedures, /api/views — each a fresh fold answering the same envelope the verb emits under `--json`, fufu's own shape: `{"ff": <contract>, "cmd": "tower <verb>", …}`, and `/api/board?<query>` taking the query string the views store, answering the groups plus the hidden and filtered counts, and refusing one it cannot parse as a 400; the verb API — POST /api/file, /api/status, /api/assign, /api/hold, /api/answer, /api/done, /api/cancel, /api/comment, /api/decompose, /api/edit, /api/link, /api/unlink, /api/views/save, /api/views/edit, /api/views/delete — each taking the verb's arguments as a JSON body, appending to the log, and answering the verb's own envelope; and the change feed — GET /api/feed, one SSE stream per query, taking the same query on its URL and pushing each subscriber's own fold whenever the repository moves, whoever moved it, every frame being `/api/board?<query>`'s body minus the newline: the server stamps motion when its watcher sees the log refs or `ff watch --all` sees the repository, each subscriber folds against its own query, and a POST publishes nothing directly, so every writer's board arrives the same way | you |
-| `ff tower briefing` | one line for fufu's session briefing — the Ready count, pointing at `ff tower` when there is something to pull; fufu asks for it with a one-second box and drops anything past 240 characters | fufu |
+| `atc` (alias `board`) | the board: what needs you, then the list by status; `--closed` widens or narrows the closed group for one render | you |
+| `atc next [-n <k>] [--peek]` | claim the next Ready flight from the agent lane, or `k` of them in filed order; the pick sets In Progress under your byline; `--peek` is the same computation with nothing written | an agent |
+| `atc brief <flight>` (alias `show`) | everything the record knows about one flight, for whoever picks it up | either |
+| `atc file [<procedure>] <subject>` | put work on the board — bare, or under a procedure; every field a procedure sets is a flag here (`-m`, `-p`, `--label`, `--skill`, `--assignee`, `--status`) | either |
+| `atc status <flight> <status>` | move a flight; the lifecycle verbs below are this verb carrying a payload | either |
+| `atc assign <flight> <me\|agent\|none>` | route the flight's queue | either |
+| `atc hold <flight> -m <question>` | stop with a blocking question — exit 3 | an agent |
+| `atc answer <flight> -m <answer>` | answer the question and release the flight | you |
+| `atc done <flight>` | finish it — off the board, on the record | either |
+| `atc cancel <flight> [-m <why>]` | close it unfinished, reason on the record | you |
+| `atc link <a> <b>` | declare that one flight depends on another | either |
+| `atc unlink <a> <b>` | take back a declared dependency — the only way to disagree with a derived Waiting | either |
+| `atc comment <flight> -m <note>` | a note on the record, local; saying it to the team is a separate, deliberate gesture | either |
+| `atc edit <target> [-s <subject>] [-m <msg>] [-p <priority>] [--label <label>] [--skill <name>]` | reword a flight's fields, or a comment's text by its event id — an overlay event, the log keeps every prior word | either |
+| `atc decompose <flight> [<procedure> \| <part>…]` | make a flight a parent — a procedure's flights, or parts by hand | either |
+| `atc explain <error-id>` | look up an error id and see what it means — the prose behind every coded refusal; ids are namespaced `tower/<id>` on the wire and the lookup takes either spelling; `--list` is the whole catalog | either |
+| `atc procedures [<name>]` | what is installed, what each matches, and where it came from | you |
+| `atc skills [<name>]` | what is installed; a name prints one raw, byte for byte, to fork or pipe | either |
+| `atc config` | settings, on fufu's typed-registry model | you |
+| `atc version` | which tower this is: the release, the commit it was built from, and — read from the update lane's cache, without touching the network — whether it is still the current one. `--json` reports the three as fields | either |
+| `atc update` | move this binary to the latest release: verified download, atomic swap; a passive lane checks ~daily and auto-installs, or prints a one-line notice | you |
+| `atc doctor` | the seam, the log, and the registries: fufu's version first, then every event the fold could not place, then the installed procedures and skills and the update lane's cache; observes and complains, never enforces, and exits 1 on findings | you |
+| `atc serve` | run the standing process: a server the browser board and its API mount into, in the foreground until Ctrl-C; `--host`, then `ATC_HOST`, then `tower.serveHost`, then 127.0.0.1, and `--port`, then `ATC_PORT`, then `tower.servePort`, then 7420. The default is the loopback; a wider bind works and says once that the board has no authentication in front of it. Mounted: the board itself — the web app embedded in the binary at build time, every path outside `/api` answering a build file or the app shell, the client router taking it from there; the read API — GET /api/board, /api/brief/<flight>, /api/procedures, /api/views — each a fresh fold answering the same envelope the verb emits under `--json`, fufu's own shape: `{"ff": <contract>, "cmd": "tower <verb>", …}`, and `/api/board?<query>` taking the query string the views store, answering the groups plus the hidden and filtered counts, and refusing one it cannot parse as a 400; the verb API — POST /api/file, /api/status, /api/assign, /api/hold, /api/answer, /api/done, /api/cancel, /api/comment, /api/decompose, /api/edit, /api/link, /api/unlink, /api/views/save, /api/views/edit, /api/views/delete — each taking the verb's arguments as a JSON body, appending to the log, and answering the verb's own envelope; and the change feed — GET /api/feed, one SSE stream per query, taking the same query on its URL and pushing each subscriber's own fold whenever the repository moves, whoever moved it, every frame being `/api/board?<query>`'s body minus the newline: the server stamps motion when its watcher sees the log refs or `ff watch --all` sees the repository, each subscriber folds against its own query, and a POST publishes nothing directly, so every writer's board arrives the same way | you |
+| `atc briefing` | one line for fufu's session briefing — the Ready count, pointing at `atc` when there is something to pull; fufu asks for it with a one-second box and drops anything past 240 characters | fufu |
 
 Every one of them is a read plus a local write — `serve` excepted, which is a process rather than an answer, and still decides nothing. Nothing in the column on the right is a dispatch target.
 
@@ -237,7 +237,7 @@ Two verbs the sketch named are not in the table because they are not built. Prom
 
 ## Intake
 
-**Every signal comes through one front door.** A GitHub review request, a Linear assignment, and a hallway conversation are one event with different provenance, and `ff tower file` is the same intake path an adapter takes. If the human-originated signal is second class, a large fraction of most people's week is invisible and the board lies about the day.
+**Every signal comes through one front door.** A GitHub review request, a Linear assignment, and a hallway conversation are one event with different provenance, and `atc file` is the same intake path an adapter takes. If the human-originated signal is second class, a large fraction of most people's week is invisible and the board lies about the day.
 
 Intake is a read, not a subscription — upstream is pulled lazily at invocation, as everything else here is. So it does not matter where work was born: file the ticket by hand in Linear, and the next call picks it up with no webhook and nothing running in between.
 
@@ -282,7 +282,7 @@ assignee = "me"
 after = ["pass", "smoke"]
 ```
 
-Filing under it mints the parent plus every flight in the graph, in one atomic append — the whole family exists from the first second, and "where we are" is only ever which of those flights are closed. Order is a DAG through `after` — the same edges `ff tower link` writes — so concurrency is the absence of a declaration rather than a keyword: `pass` and `smoke` fly together because neither names the other. Every flight in the graph is born cleared, and the edges make Waiting: a flight with an `after` waits on it, and the parent waits on them all, at every fold rather than at the mint. A single-flight procedure collapses onto the flight itself — filing under it mints one flight carrying those fields, never a parent and a lone child, because `ff tower file "fix the typo"` must not cost two flights to say one thing.
+Filing under it mints the parent plus every flight in the graph, in one atomic append — the whole family exists from the first second, and "where we are" is only ever which of those flights are closed. Order is a DAG through `after` — the same edges `atc link` writes — so concurrency is the absence of a declaration rather than a keyword: `pass` and `smoke` fly together because neither names the other. Every flight in the graph is born cleared, and the edges make Waiting: a flight with an `after` waits on it, and the parent waits on them all, at every fold rather than at the mint. A single-flight procedure collapses onto the flight itself — filing under it mints one flight carrying those fields, never a parent and a lone child, because `atc file "fix the typo"` must not cost two flights to say one thing.
 
 **A procedure is not required.** A bare flight defaults to the minimal shape — assigned to me, no skill, done when I say so — and every verb works on it: file it, work it, finish it, and no procedure is ever involved. The procedure is for work worth decomposing, and the default assignee being me is what keeps agents out of shapeless work: the queue draws only from the agent lane, so nothing unshaped is ever handed out.
 
@@ -304,13 +304,13 @@ A skill is the agent's flight manual: instructions a harness executes, never a p
 
 It is also the right home for judgment. tower reports facts and what is Ready; a skill decides what to do when a flight holds, when a review comment needs a person, when to stop, when to ask in conversation instead of holding. Policy in markdown the user can fork beats policy compiled into Rust.
 
-tower ships one skill and one mechanism, and no workflow. The skill is the manual, `tower`: the manifest lists it, `--ff-skill tower` hands `ff hook` its files, and it lands beside fufu's own skill in every client `ff hook` wires — the model, the envelope, the exit codes, the landmines, and where every verb's own `--help` is the last word. The mechanism is the `skill` field on a flight, the shelf that field names into — user, then repository, the same name replacing wholesale, like procedures — and `ff tower skills <name>`, which prints one raw, byte for byte. Nothing on the shelf is the binary's, and the manual never appears there. The documentation's examples cover the recurring three: **plan** (decompose a goal into a tree of flights — solo mode's entry point), **work** (claim, fly, hold or finish, repeat — the loop that pairs with `next`), and **review** (first-pass someone else's branch: commit the mechanical fixes, write the pass as a comment, hold the judgment for a person's verdict). They are one workflow among many, and the shape of the loop is the owner's to fork.
+tower ships one skill and one mechanism, and no workflow. The skill is the manual, `tower`: the manifest lists it, `--ff-skill tower` hands `ff hook` its files, and it lands beside fufu's own skill in every client `ff hook` wires — the model, the envelope, the exit codes, the landmines, and where every verb's own `--help` is the last word. The mechanism is the `skill` field on a flight, the shelf that field names into — user, then repository, the same name replacing wholesale, like procedures — and `atc skills <name>`, which prints one raw, byte for byte. Nothing on the shelf is the binary's, and the manual never appears there. The documentation's examples cover the recurring three: **plan** (decompose a goal into a tree of flights — solo mode's entry point), **work** (claim, fly, hold or finish, repeat — the loop that pairs with `next`), and **review** (first-pass someone else's branch: commit the mechanical fixes, write the pass as a comment, hold the judgment for a person's verdict). They are one workflow among many, and the shape of the loop is the owner's to fork.
 
-The bridge to an agent is the pick, not a redirect. Each agent-assigned flight names the skill it is flown with, `next` hands out that name on the picked row, and the agent prints it with `ff tower skills <name>` and follows it for that flight. The user never typed the name; the flight carried it, which is the seam that keeps structure in data and judgment in prose.
+The bridge to an agent is the pick, not a redirect. Each agent-assigned flight names the skill it is flown with, `next` hands out that name on the picked row, and the agent prints it with `atc skills <name>` and follows it for that flight. The user never typed the name; the flight carried it, which is the seam that keeps structure in data and judgment in prose.
 
 Loop control: 0 is work and 1 stops the loop. `outcome` on the envelope — `work`, `drained`, `yours` — is what the loop reports, and the CLI's exit is that field's rendering. No timeout, no sentinel.
 
-Fan-out is `ff tower next -n 3` handing out three flights. One tree per flight is the harness's to arrange; tower says nothing about where the work happens, and the pick is the same claim whether one worker takes it or three.
+Fan-out is `atc next -n 3` handing out three flights. One tree per flight is the harness's to arrange; tower says nothing about where the work happens, and the pick is the same claim whether one worker takes it or three.
 
 An example skill stops short of the push boundary — committed on a branch, PR unopened — because principle 3 is easy to state and easy for an unattended loop to violate fourteen times before anyone looks. Where a person's fork draws that line is the person's call, and visibly theirs.
 
@@ -357,7 +357,7 @@ The seam, and every piece of it exists.
 - **Dispatch and the three variables.** `ff <name>` runs `ff-<name>` from PATH with `FF_REPO`, `FF_CONTRACT`, and `FF_SESSION` on the child — the worktree it was invoked against, absolute and resolved; the envelope version; the session tag when one was set. tower reads which repository it is in rather than rediscovering it, and reads the contract number before printing an envelope under it.
 - **The manifest and `ff hook`.** `--ff-manifest` declares tower — its verbs, `undoable: false`, a briefing, the one skill `tower`, tools — and `ff extension add tower` records it. `ff hook` then asks `--ff-skill tower` for the manual's files and installs them beside fufu's own skill in every client it wires, and reruns refresh them from the binary.
 - **`ff mcp`.** `--ff-tools` describes the loop's four gestures as typed tools from the command line's own grammar, and fufu serves them as `tower__next`, `tower__brief`, `tower__hold`, and `tower__done` beside its own seven, each taking the verb's flags as fields.
-- **The briefing.** `briefing: true` in the manifest, and fufu runs `ff tower briefing` when a session starts: one line, a one-second box, 240 characters, dropped whole past either.
+- **The briefing.** `briefing: true` in the manifest, and fufu runs `atc briefing` when a session starts: one line, a one-second box, 240 characters, dropped whole past either.
 - **`ff watch --all`** for serve's feed: one stream over every chain in the repository, so the server stamps motion when the repository moves, whoever moved it, and refolds each subscriber's query. It is the one fufu read a standing tower makes, and the render never waits on it.
 
 ## What it waits on
@@ -378,4 +378,4 @@ Everything the record needs exists today: the store, the fold, the seam, the pic
 - **Whether the `done` enum stays at four.** It is closed on purpose, and the first genuinely missing value is the moment to check whether the answer is a fifth constant or a flight nobody wanted to own.
 - **What a flight means after a rewrite** folds its snapshots into a commit — fufu's open session-boundary question, made urgent rather than theoretical the day an event carries a snapshot id.
 - **How much orchestration belongs in a documented example skill** before it is a scheduler with extra steps and principle 2 has been defeated by paperwork.
-- **Naming.** `ff tower` against crates.io, npm, and Homebrew. Almost certainly taken; the metaphor is what matters, not the word.
+- **Naming.** `atc` against crates.io, npm, and Homebrew. Almost certainly taken; the metaphor is what matters, not the word.

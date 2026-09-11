@@ -1,10 +1,10 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/ff-tower-core",
-    "crates/ff-tower-cli",
-    "crates/ff-tower-serve",
-    "crates/ff-tower-testsupport",
+    "crates/atc-core",
+    "crates/atc-cli",
+    "crates/atc-serve",
+    "crates/atc-testsupport",
 ]
 
 [workspace.package]
@@ -14,9 +14,9 @@ license = "MIT"
 repository = "https://github.com/tyler-johnson/tower"
 
 [workspace.dependencies]
-ff-tower-core = { path = "crates/ff-tower-core" }
-ff-tower-serve = { path = "crates/ff-tower-serve" }
-ff-tower-testsupport = { path = "crates/ff-tower-testsupport" }
+atc-core = { path = "crates/atc-core" }
+atc-serve = { path = "crates/atc-serve" }
+atc-testsupport = { path = "crates/atc-testsupport" }
 
 # For tower's own store, and for nothing else. `refs/tower/log/<author>/<writer>`
 # is an orphan commit chain tower writes itself; everything tower knows about
@@ -29,7 +29,7 @@ gix = { version = "0.73.0", default-features = false, features = [
 serde = { version = "1", features = ["derive"] }
 # `raw_value` is the seam's: the envelope's version and verb are checked
 # before its payload is parsed, so `data` has to survive one pass
-# unparsed. See crates/ff-tower-core/src/ff/mod.rs.
+# unparsed. See crates/atc-core/src/ff/mod.rs.
 serde_json = { version = "1", features = ["raw_value"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
@@ -46,7 +46,7 @@ sha2 = "0.10"
 tar = { version = "0.4", default-features = false }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 
-# `ff tower serve`, and nothing else. One route over HTTP/1.1 on the
+# `atc serve`, and nothing else. One route over HTTP/1.1 on the
 # loopback needs routing and a listener; it needs no tracing, no
 # multipart, no compression, so the default set is off and the two
 # features the server actually reaches for are named. Note that axum's own

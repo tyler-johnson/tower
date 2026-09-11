@@ -19,7 +19,7 @@ Both kinds layer the same way, keyed by name, the more specific replacing the le
 
 The user layer roams with your config; the repository layer is the team's, and it is anchored to the main worktree so every worktree sees the same set. `$XDG_CONFIG_HOME` replaces `~/.config` when it is set. A missing directory is an empty layer; a file that does not parse is a refusal naming the path.
 
-`ff tower procedures` and `ff tower skills` list what is installed and name the layer each came from.
+`atc procedures` and `atc skills` list what is installed and name the layer each came from.
 
 ## Copy one in
 
@@ -36,14 +36,14 @@ cp docs/skills/work.md         .tower/skills/         # claim, do, hold or commi
 
 For yourself, `~/.config/tower/procedures/` and `~/.config/tower/skills/` take the same files.
 
-The name a procedure is filed under is the `name =` line inside the file, not the file name — rename `ticket.toml` freely, and rename what is inside it to change the word `ff tower file` takes.
+The name a procedure is filed under is the `name =` line inside the file, not the file name — rename `ticket.toml` freely, and rename what is inside it to change the word `atc file` takes.
 
 ## Reaching an agent
 
 The manual is fufu's to install: `ff extension add tower` declares tower, and `ff hook` asks the binary for the `tower` skill and installs it beside fufu's own in every client it wires. Nothing here is the manual, and the manual never appears on the shelf.
 
-A shelf skill reaches an agent by name. An agent-assigned flight names the skill it is flown with, `ff tower next` hands that name out on the picked row, and the agent prints it with `ff tower skills <name>` and follows it for that flight. tower writes no other program's config, so there is no redirect to set up: the flight carries the name, and the pick delivers it.
+A shelf skill reaches an agent by name. An agent-assigned flight names the skill it is flown with, `atc next` hands that name out on the picked row, and the agent prints it with `atc skills <name>` and follows it for that flight. tower writes no other program's config, so there is no redirect to set up: the flight carries the name, and the pick delivers it.
 
 ## A procedure should end with you
 
-The boundary where work becomes visible to the team is a human gesture. `ff tower procedures` and `ff tower doctor` warn — by name and by flight — when every terminal flight of a definition is agent-assigned. It is a warning and not a refusal, because the file is yours and the boundary that actually holds is `never auto-outward`: whatever an agent finishes, nothing leaves the machine without a person's verb.
+The boundary where work becomes visible to the team is a human gesture. `atc procedures` and `atc doctor` warn — by name and by flight — when every terminal flight of a definition is agent-assigned. It is a warning and not a refusal, because the file is yours and the boundary that actually holds is `never auto-outward`: whatever an agent finishes, nothing leaves the machine without a person's verb.

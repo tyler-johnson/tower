@@ -1,0 +1,436 @@
+//! The binary, spawned the way fufu's dispatch spawns it: `FF_REPO` in the
+//! environment — the production handshake, not a test-only door.
+
+use std::path::Path;
+use std::process::{Command, Output};
+
+use atc_core::log::{Kind, Store};
+use atc_testsupport::Repo;
+
+fn atc(repo: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_atc"))
+        .args(args)
+        .env("FF_REPO", repo)
+        .env("XDG_CONFIG_HOME", xdg(repo))
+        .output()
+        .expect("spawn atc")
+}
+
+/// The fixture's own config root, beside the repository inside the
+/// tempdir and never created — an empty user layer. A suite that read the
+/// developer's real `~/.config/tower/procedures` would pass or fail by
+/// whose machine it is running on.
+fn xdg(repo: &Path) -> std::path::PathBuf {
+    repo.parent()
+        .expect("the fixture nests the repository")
+        .join("xdg")
+}
+
+fn envelope(output: &Output) -> serde_json::Value {
+    serde_json::from_str(&stdout(output)).expect("an envelope")
+}
+
+fn stdout(output: &Output) -> String {
+    assert!(
+        output.status.success(),
+        "exit {:?}\nstdout: {}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// A repository with one filed flight on its log.
+fn repo_with_a_filing() -> Repo {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    Store::open(repo.path())
+        .expect("open")
+        .append(vec![Kind::Filed {
+            procedure: None,
+            subject: "write the doctor verb".to_string(),
+            body: String::new(),
+            status: "backlog".to_string(),
+            assignee: None,
+            priority: "none".to_string(),
+            labels: Vec::new(),
+            skill: None,
+            bay: None,
+            done: "asserted".to_string(),
+            branch: None,
+        }])
+        .expect("append");
+    repo
+}
+
+#[test]
+fn json_emits_towers_envelope_and_round_trips() {
+    let repo = repo_with_a_filing();
+    let out = stdout(&atc(repo.path(), &["--json"]));
+
+    let envelope: serde_json::Value = serde_json::from_str(&out).expect("an envelope");
+    assert_eq!(envelope["ff"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
+    let data = envelope["data"].as_object().expect("data is an object");
+    for key in [
+        "waiting_on_you",
+        "backlog",
+        "waiting",
+        "ready",
+        "in_progress",
+        "held",
+        "closed",
+        "unrouted",
+    ] {
+        assert!(data.contains_key(key), "data is missing `{key}`");
+    }
+    let inbox = data["waiting_on_you"]
+        .as_object()
+        .expect("the inbox is an object");
+    for key in ["questions", "yours"] {
+        assert!(inbox.contains_key(key), "the inbox is missing `{key}`");
+    }
+    assert_eq!(data["backlog"][0]["id"], serde_json::json!("pi.1"));
+    assert!(data["backlog"][0]["progress"].is_null());
+}
+
+#[test]
+fn bare_and_the_board_alias_agree_byte_for_byte() {
+    let repo = repo_with_a_filing();
+    let bare = stdout(&atc(repo.path(), &["--json"]));
+    let alias = stdout(&atc(repo.path(), &["board", "--json"]));
+    assert_eq!(bare, alias);
+
+    // The flag is declared once and flattened into both spellings, so
+    // the two agree carrying it too.
+    let bare = stdout(&atc(repo.path(), &["--closed", "2", "--json"]));
+    let alias = stdout(&atc(repo.path(), &["board", "--closed", "2", "--json"]));
+    assert_eq!(bare, alias);
+}
+
+/// A repository with four closed flights, filed and closed through the
+/// verbs — every one of them just closed, which is why span expiry is a
+/// core test and not this one.
+fn repo_with_four_closed() -> Repo {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    for subject in ["one", "two", "three", "four"] {
+        stdout(&atc(repo.path(), &["file", subject]));
+    }
+    for n in ["1", "2", "3", "4"] {
+        stdout(&atc(repo.path(), &["done", n]));
+    }
+    repo
+}
+
+fn closed_ids(repo: &Repo, args: &[&str]) -> Vec<String> {
+    let envelope = envelope(&atc(repo.path(), args));
+    envelope["data"]["closed"]
+        .as_array()
+        .expect("the closed group is an array")
+        .iter()
+        .map(|view| view["id"].as_str().expect("an id").to_string())
+        .collect()
+}
+
+#[test]
+fn the_closed_flag_takes_a_count_a_word_or_the_whole_group() {
+    let repo = repo_with_four_closed();
+
+    assert_eq!(
+        closed_ids(&repo, &["--json"]).len(),
+        3,
+        "the compiled default is the three newest"
+    );
+    assert_eq!(closed_ids(&repo, &["--json", "--closed", "4"]).len(), 4);
+    assert_eq!(closed_ids(&repo, &["--json", "--closed", "all"]).len(), 4);
+    assert!(closed_ids(&repo, &["--json", "--closed", "none"]).is_empty());
+
+    let out = stdout(&atc(repo.path(), &["--closed", "none"]));
+    assert!(
+        !out.contains("done\n") && !out.contains("canceled\n"),
+        "no closed section at all: {out}"
+    );
+}
+
+#[test]
+fn a_bare_closed_flag_is_all() {
+    let repo = repo_with_four_closed();
+    assert_eq!(
+        stdout(&atc(repo.path(), &["--json", "--closed"])),
+        stdout(&atc(repo.path(), &["--json", "--closed", "all"])),
+    );
+}
+
+#[test]
+fn a_closed_window_the_grammar_does_not_cover_is_a_coded_refusal() {
+    let repo = repo_with_a_filing();
+    let out = atc(repo.path(), &["--json", "--closed", "soon"]);
+    assert_eq!(out.status.code(), Some(2), "a usage refusal exits 2");
+    let envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
+    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!("tower/usage/bad-closed")
+    );
+    assert!(envelope.get("data").is_none(), "data and error, never both");
+}
+
+#[test]
+fn the_closed_flag_does_not_ride_another_verb() {
+    let repo = repo_with_a_filing();
+    let out = atc(repo.path(), &["--json", "--closed", "7d", "brief", "1"]);
+    assert_eq!(out.status.code(), Some(2), "a usage refusal exits 2");
+    let envelope: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
+    assert_eq!(
+        envelope["error"]["id"],
+        serde_json::json!("tower/usage/bad-flags")
+    );
+}
+
+#[test]
+fn a_piped_render_is_plain_text_and_names_its_groups() {
+    let repo = repo_with_a_filing();
+    let out = stdout(&atc(repo.path(), &[]));
+
+    assert!(
+        !out.contains('\x1b'),
+        "piped output has escape bytes: {out:?}"
+    );
+    assert!(
+        out.contains("backlog\n"),
+        "the group header is the derived status: {out}"
+    );
+    assert!(out.contains("#1"));
+    assert!(out.contains("write the doctor verb"));
+    assert!(out.contains("1 flight · atc file to add one"));
+}
+
+#[test]
+fn the_groups_are_the_derived_statuses_in_lifecycle_order() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "one", "--status", "backlog"]));
+    for subject in ["two", "three", "four"] {
+        stdout(&atc(repo.path(), &["file", subject]));
+    }
+    // Waiting is derived: a cleared flight with a live dependency.
+    stdout(&atc(repo.path(), &["link", "2", "1"]));
+    stdout(&atc(repo.path(), &["status", "4", "in_progress"]));
+
+    let out = stdout(&atc(repo.path(), &[]));
+    let order: Vec<usize> = ["backlog\n", "waiting\n", "ready\n", "in progress\n"]
+        .iter()
+        .map(|title| {
+            out.find(title)
+                .unwrap_or_else(|| panic!("{title} in {out}"))
+        })
+        .collect();
+    assert!(
+        order.windows(2).all(|pair| pair[0] < pair[1]),
+        "lifecycle order: {out}"
+    );
+
+    let envelope = envelope(&atc(repo.path(), &["--json"]));
+    let data = &envelope["data"];
+    assert_eq!(data["backlog"][0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(data["waiting"][0]["id"], serde_json::json!("pi.2"));
+    assert_eq!(data["ready"][0]["id"], serde_json::json!("pi.3"));
+    assert_eq!(data["in_progress"][0]["id"], serde_json::json!("pi.4"));
+}
+
+#[test]
+fn a_closed_flight_lands_in_the_closed_group_and_out_of_the_count() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "finished"]));
+    stdout(&atc(repo.path(), &["file", "still going"]));
+    stdout(&atc(repo.path(), &["done", "1"]));
+
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(out.contains("done\n"), "{out}");
+    assert!(!out.contains("canceled\n"), "nothing canceled: {out}");
+    assert!(
+        out.contains("1 flight · atc file to add one"),
+        "closed is on the record, not in the count: {out}"
+    );
+
+    let envelope = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["closed"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(
+        envelope["data"]["closed"][0]["status"],
+        serde_json::json!("done")
+    );
+    assert_eq!(
+        envelope["data"]["ready"][0]["id"],
+        serde_json::json!("pi.2")
+    );
+}
+
+#[test]
+fn a_held_flight_is_pinned_in_the_inbox_and_keeps_its_group() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "stuck"]));
+    atc(repo.path(), &["hold", "1", "-m", "which flow wins?"]);
+
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(out.contains("questions\n"), "{out}");
+    assert!(out.contains("held\n"), "{out}");
+    assert!(out.contains("which flow wins?"), "{out}");
+
+    let envelope = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["waiting_on_you"]["questions"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(envelope["data"]["held"][0]["id"], serde_json::json!("pi.1"));
+}
+
+#[test]
+fn a_canceled_row_shows_the_reason_where_the_question_stood() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "stuck"]));
+    atc(repo.path(), &["hold", "1", "-m", "which flow wins?"]);
+    stdout(&atc(repo.path(), &["cancel", "1", "-m", "superseded"]));
+
+    let out = stdout(&atc(repo.path(), &["--closed", "all"]));
+    assert!(out.contains("canceled\n"), "{out}");
+    // The note is the indented line under the row.
+    let lines: Vec<&str> = out.lines().collect();
+    let row = lines
+        .iter()
+        .position(|line| line.contains("stuck"))
+        .expect("the canceled row");
+    let note = lines[row + 1];
+    assert!(note.contains("superseded"), "{note}");
+    assert!(!note.contains("which flow wins?"), "{note}");
+    assert!(!note.contains("asked"), "{note}");
+    assert!(!out.contains("questions\n"), "nothing is open: {out}");
+
+    let envelope = envelope(&atc(repo.path(), &["--json", "--closed", "all"]));
+    let row = &envelope["data"]["closed"][0];
+    assert_eq!(row["id"], serde_json::json!("pi.1"));
+    assert!(row["question"].is_null(), "{row}");
+    assert!(row["asked_at"].is_null(), "{row}");
+    assert_eq!(row["closed_reason"], serde_json::json!("superseded"));
+    assert!(
+        envelope["data"]["waiting_on_you"]["questions"]
+            .as_array()
+            .expect("an inbox")
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_ready_flight_in_the_me_lane_is_the_inboxs_second_group() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "mine to do"]));
+    stdout(&atc(repo.path(), &["assign", "1", "me"]));
+
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(out.contains("yours\n"), "{out}");
+
+    let envelope = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["waiting_on_you"]["yours"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(
+        envelope["data"]["ready"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+}
+
+#[test]
+fn an_empty_repository_renders_the_empty_board_hint() {
+    let repo = Repo::new();
+    let out = stdout(&atc(repo.path(), &[]));
+    assert_eq!(out, "nothing on the board · atc file to add one\n");
+}
+
+#[test]
+fn a_decomposed_parent_carries_its_familys_progress_and_the_children_are_rows() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "a broad task"]));
+    stdout(&atc(
+        repo.path(),
+        &["decompose", "1", "part one", "part two"],
+    ));
+
+    // Decomposing creates three things and the board says so: the
+    // parent's mark is what marks it a family, and the children are
+    // rows of their own beside it.
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(out.contains("a broad task (0/2)"), "{out}");
+    assert!(out.contains("part one"), "{out}");
+    assert!(out.contains("part two"), "{out}");
+    assert!(
+        out.contains("3 flights · atc file to add one"),
+        "the count counts every live flight: {out}"
+    );
+
+    stdout(&atc(repo.path(), &["done", "2"]));
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(out.contains("a broad task (1/2)"), "{out}");
+
+    let envelope = envelope(&atc(repo.path(), &["--json"]));
+    // The parent is born Ready and its live child folds it Waiting.
+    assert_eq!(
+        envelope["data"]["waiting"][0]["progress"],
+        serde_json::json!([1, 2])
+    );
+    assert_eq!(
+        envelope["data"]["closed"][0]["subject"],
+        serde_json::json!("part one"),
+        "a closed child is a closed row like any other"
+    );
+}
+
+/// The flat board: a sub-flight files into the group its own status
+/// names whether or not it needs anyone, and it carries the subject it
+/// was filed with — nothing is prefixed onto it. The parts are born
+/// cleared, so they are Ready beside their parent, which the edges fold
+/// Waiting.
+#[test]
+fn a_sub_flight_is_a_row_in_its_own_status_group() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "a broad task"]));
+    stdout(&atc(
+        repo.path(),
+        &["decompose", "1", "part one", "part two"],
+    ));
+    stdout(&atc(repo.path(), &["assign", "2", "agent"]));
+
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(out.contains("part one"), "{out}");
+    assert!(out.contains("part two"), "{out}");
+    assert!(
+        !out.contains("\u{203a}"),
+        "no crumb rides the subject: {out}"
+    );
+
+    let envelope = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["ready"][0]["subject"],
+        serde_json::json!("part one")
+    );
+    assert_eq!(
+        envelope["data"]["waiting"][0]["subject"],
+        serde_json::json!("a broad task")
+    );
+    assert_eq!(
+        envelope["data"]["ready"][1]["subject"],
+        serde_json::json!("part two")
+    );
+}

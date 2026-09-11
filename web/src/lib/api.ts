@@ -8,7 +8,7 @@ import type { Envelope } from "./tower";
 /// A failure the server never got to answer — the request itself did not
 /// complete, or the body is not an envelope. Its id sits in a `web/`
 /// namespace on purpose: it is the page's own failure, not one of
-/// tower's refusals, and `ff tower explain` has nothing to say about it,
+/// tower's refusals, and `atc explain` has nothing to say about it,
 /// so it carries no exits.
 function unreachable(cmd: string, detail: string): Envelope<never> {
   return {
