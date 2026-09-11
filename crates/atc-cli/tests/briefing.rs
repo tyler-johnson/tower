@@ -9,9 +9,9 @@ use atc_testsupport::Repo;
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        .env_remove("FF_SESSION")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .output()
         .expect("spawn atc")
 }
@@ -56,8 +56,8 @@ fn an_empty_board_has_nothing_ready() {
 
     let out = atc(repo.path(), &["briefing", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("an envelope");
-    assert_eq!(v["ff"], 1);
-    assert_eq!(v["cmd"], "tower briefing");
+    assert_eq!(v["atc"], 1);
+    assert_eq!(v["cmd"], "briefing");
     assert_eq!(v["data"]["line"], line);
 }
 
@@ -77,9 +77,9 @@ fn outside_a_repository_the_failure_is_the_ordinary_one() {
         Command::new(env!("CARGO_BIN_EXE_atc"))
             .args(args)
             .current_dir(dir.path())
+            .env_remove("CLAUDE_CODE_SESSION_ID")
             .env("ATC_FF", "/nonexistent")
             .env("HOME", dir.path())
-            .env_remove("FF_REPO")
             .output()
             .expect("spawn atc")
     };
@@ -96,9 +96,9 @@ fn outside_a_repository_the_failure_is_the_ordinary_one() {
     assert!(!out.status.success());
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
-    assert_eq!(v["cmd"], "tower briefing");
+    assert_eq!(v["cmd"], "briefing");
     assert!(
-        v["error"]["id"].as_str().unwrap().starts_with("tower/"),
-        "{v}"
+        v["error"]["id"].as_str().unwrap().contains('/'),
+        "a coded id: {v}"
     );
 }

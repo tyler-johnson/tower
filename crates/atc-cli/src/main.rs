@@ -1,11 +1,8 @@
 //! `atc` — the board, and the verbs around it.
 //!
-//! One binary under one name, and the name is fufu's dispatch name: `ff
-//! tower <verb>` finds `atc` on PATH the way git finds a subcommand.
-//! There is no bare `tower` binary. The verb is reached through fufu
-//! because the dependency is real — tower has nothing to say about a
-//! machine with no fufu on it — and one spelling means no question about
-//! which one is canonical.
+//! One binary under one name, `atc`, run in the repository it reports
+//! on. There is no bare `tower` binary: one spelling means no question
+//! about which one is canonical.
 //!
 //! Exit codes follow the error id, fufu's derivation: `usage/*` exits 2,
 //! `ref/contended` exits 4, anything else 1. `hold`'s 3 is not among
@@ -22,27 +19,20 @@ mod cli;
 mod cmd;
 mod error;
 mod explain;
-mod handshake;
 mod help;
 mod integ;
 mod machine;
 mod render;
 mod selfupdate;
+mod tools;
 
 use clap::Parser;
 
 use atc_core::board::{self, ClosedWindow};
-use atc_core::ff::Ff;
 use cli::{BoardArgs, Cli, Command};
 use error::CliError;
 
 fn main() {
-    // fufu's handshakes come before clap and before every lane: they are
-    // answered from what is compiled in, outside any repository, and a
-    // machine is on the other end of stdout.
-    if let Some(code) = handshake::answer(std::env::args_os()) {
-        std::process::exit(code);
-    }
     let cli = Cli::parse();
     // `-V` is the version flag every other tool has; here it is lowercase.
     // Answered rather than parsed, so the person who typed the habit is
@@ -104,7 +94,7 @@ fn main() {
     // change what a command does, so the repository is best-effort — no
     // repo, no lane, never an error.
     let repo = if lanes.update {
-        Ff::here().ok().map(|ff| ff.repo().to_path_buf())
+        std::env::current_dir().ok()
     } else {
         None
     };

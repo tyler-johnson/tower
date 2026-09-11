@@ -337,11 +337,11 @@ fn resolve_author(repo: &gix::Repository) -> Result<String> {
     Ok(author)
 }
 
-/// The session an append is tagged with, by three rules in order: fufu's
-/// tag when it handed one down, the login name when a person is at the
-/// terminal, else none.
+/// The session an append is tagged with, by three rules in order: the
+/// client's tag when it handed one down, the login name when a person is
+/// at the terminal, else none.
 ///
-/// `tag` is `FF_SESSION`, accepted under fufu's own rule: trimmed,
+/// `tag` is [`SESSION_VAR`], accepted under one rule: trimmed,
 /// non-empty, no control characters, at most 128 bytes. An unusable value
 /// is ignored rather than fatal — the session is a byline, not identity.
 /// `login` is the first set login variable, and `git_name` the committer's
@@ -366,13 +366,15 @@ pub(crate) fn resolve_session(
     login.and_then(usable).or_else(|| git_name.and_then(usable))
 }
 
-/// [`resolve_session`] over the process: `FF_SESSION`, then fufu's own
-/// interactive rule — `FF_NONINTERACTIVE` unset or empty and stdin a
-/// terminal — with `USER`, `LOGNAME`, or `USERNAME` as the login name.
+/// The variable the client tags a session with: Claude Code's own, set
+/// on every process it spawns.
+pub const SESSION_VAR: &str = "CLAUDE_CODE_SESSION_ID";
+
+/// [`resolve_session`] over the process: [`SESSION_VAR`], then stdin a
+/// terminal, with `USER`, `LOGNAME`, or `USERNAME` as the login name.
 fn session_from_environment(repo: &gix::Repository) -> Option<String> {
-    let tag = std::env::var("FF_SESSION").ok();
-    let forced_off = std::env::var_os("FF_NONINTERACTIVE").is_some_and(|value| !value.is_empty());
-    let interactive = !forced_off && std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let tag = std::env::var(SESSION_VAR).ok();
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
     let login = ["USER", "LOGNAME", "USERNAME"]
         .iter()
         .filter_map(|name| std::env::var(name).ok())
@@ -592,7 +594,7 @@ mod tests {
 
     /// The three rules in order: a tag beats everything, a terminal gives
     /// the login name or the git name behind it, and a non-terminal with
-    /// no tag gives none. A tag fufu would refuse is ignored, not fatal.
+    /// no tag gives none. An unusable tag is ignored, not fatal.
     #[test]
     fn a_session_resolves_by_tag_then_terminal_then_none() {
         struct Case {

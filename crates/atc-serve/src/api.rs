@@ -136,10 +136,7 @@ async fn respond(
                 cmd,
                 "serve/failed",
                 &format!("the fold behind `{cmd}` panicked"),
-                &[format!(
-                    "atc explain {}",
-                    machine::namespaced("serve/failed")
-                )],
+                &["atc explain serve/failed".to_string()],
             ),
         ),
     }
@@ -168,8 +165,8 @@ async fn act<Body: DeserializeOwned + Send + 'static>(
 }
 
 /// A refusal as a reply: the id's status, and the error envelope.
-/// Every id goes out namespaced `tower/<id>`: no route spawns fufu, so
-/// no refusal here is one fufu shaped itself.
+/// Every id is tower's own: no route spawns fufu, so no refusal here is
+/// one fufu shaped itself.
 fn refusal(cmd: &str, err: &ApiError) -> Reply {
     reply(
         err.status(),
@@ -673,7 +670,7 @@ impl ApiError {
             ApiError::Body { .. } => Vec::new(),
         };
         if own.is_empty() {
-            vec![format!("atc explain {}", machine::namespaced(self.id()))]
+            vec![format!("atc explain {}", self.id())]
         } else {
             own
         }

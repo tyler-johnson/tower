@@ -1,5 +1,5 @@
-//! The binary, spawned the way fufu's dispatch spawns it: `FF_REPO` in the
-//! environment — the production handshake, not a test-only door.
+//! The binary, spawned the way a person runs it: in the repository, argv
+//! carrying the verb — the production door, not a test-only one.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -10,7 +10,8 @@ use atc_testsupport::Repo;
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn atc")
@@ -70,8 +71,8 @@ fn json_emits_towers_envelope_and_round_trips() {
     let out = stdout(&atc(repo.path(), &["--json"]));
 
     let envelope: serde_json::Value = serde_json::from_str(&out).expect("an envelope");
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
+    assert_eq!(envelope["atc"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("board"));
     let data = envelope["data"].as_object().expect("data is an object");
     for key in [
         "waiting_on_you",
@@ -170,10 +171,10 @@ fn a_closed_window_the_grammar_does_not_cover_is_a_coded_refusal() {
     assert_eq!(out.status.code(), Some(2), "a usage refusal exits 2");
     let envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
-    assert_eq!(envelope["cmd"], serde_json::json!("tower board"));
+    assert_eq!(envelope["cmd"], serde_json::json!("board"));
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("tower/usage/bad-closed")
+        serde_json::json!("usage/bad-closed")
     );
     assert!(envelope.get("data").is_none(), "data and error, never both");
 }
@@ -187,7 +188,7 @@ fn the_closed_flag_does_not_ride_another_verb() {
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("tower/usage/bad-flags")
+        serde_json::json!("usage/bad-flags")
     );
 }
 

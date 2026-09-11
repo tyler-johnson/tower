@@ -11,7 +11,8 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
     let root = repo.parent().expect("the fixture nests the repository");
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", root.join("xdg"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.
@@ -44,10 +45,10 @@ fn the_refusal_envelope_names_the_id_and_the_exit() {
     assert_eq!(out.status.code(), Some(1));
     let envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("an envelope");
-    assert_eq!(envelope["cmd"], serde_json::json!("tower update"));
+    assert_eq!(envelope["cmd"], serde_json::json!("update"));
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("tower/update/source-build")
+        serde_json::json!("update/source-build")
     );
     let message = envelope["error"]["message"].as_str().expect("message");
     assert!(

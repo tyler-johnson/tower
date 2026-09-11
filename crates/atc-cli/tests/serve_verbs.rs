@@ -776,14 +776,10 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
         assert_eq!(status, 400, "{path} {body}: {answered}");
         let envelope: serde_json::Value =
             serde_json::from_str(&answered).expect("an error envelope");
-        assert_eq!(
-            envelope["error"]["id"],
-            json!("tower/usage/bad-body"),
-            "{body}"
-        );
+        assert_eq!(envelope["error"]["id"], json!("usage/bad-body"), "{body}");
         assert_eq!(
             envelope["error"]["exits"],
-            json!(["atc explain tower/usage/bad-body"]),
+            json!(["atc explain usage/bad-body"]),
             "{body}"
         );
     }

@@ -17,22 +17,22 @@ use atc_testsupport::Repo;
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        // A developer's own fufu session must not tag the fixture's
+        // A developer's own Claude Code session must not tag the fixture's
         // events: the bylines below assert the bare email.
-        .env_remove("FF_SESSION")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .output()
         .expect("spawn atc")
 }
 
-/// The spawn under a fufu session tag, the way `ff mcp` hands one down.
+/// The spawn under a session tag, the way Claude Code hands one down.
 fn atc_tagged(repo: &Path, args: &[&str], tag: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        .env("FF_SESSION", tag)
+        .env("CLAUDE_CODE_SESSION_ID", tag)
         .output()
         .expect("spawn atc")
 }
@@ -63,9 +63,6 @@ fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
-/// The id is passed bare and asserted namespaced — `tower/<id>` is what
-/// the wire carries, and every call site goes on naming the id the
-/// registry keys on.
 fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -75,10 +72,7 @@ fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(
-        envelope["error"]["id"],
-        serde_json::json!(format!("tower/{id}"))
-    );
+    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
     envelope
 }
 
@@ -191,8 +185,8 @@ fn json_round_trips_the_brief() {
     let out = atc(repo.path(), &["brief", "1", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower brief"));
+    assert_eq!(envelope["atc"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("brief"));
     let data = &envelope["data"];
     assert_eq!(data["id"], serde_json::json!("pi.1"));
     assert_eq!(data["subject"], serde_json::json!("the dependent"));
@@ -228,7 +222,7 @@ fn show_and_brief_agree_byte_for_byte() {
     let brief = atc(repo.path(), &["brief", "1", "--json"]);
     let show = atc(repo.path(), &["show", "1", "--json"]);
     assert_eq!(stdout(&show), stdout(&brief));
-    assert_eq!(envelope(&show)["cmd"], serde_json::json!("tower brief"));
+    assert_eq!(envelope(&show)["cmd"], serde_json::json!("brief"));
 }
 
 #[test]
@@ -635,8 +629,8 @@ fn the_json_pins_the_merged_envelope() {
     let out = atc(repo.path(), &["brief", "5", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower brief"));
+    assert_eq!(envelope["atc"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("brief"));
     let data = &envelope["data"];
     assert_eq!(data["id"], serde_json::json!("pi.8"));
     assert_eq!(data["number"], serde_json::json!(5));

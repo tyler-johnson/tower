@@ -8,11 +8,10 @@
 //! not clap's usage text.
 //!
 //! The short-only flags — the six `-m` and `next`'s `-n` — carry a hidden
-//! alias (`message`, `count`) so fufu's tool spelling has a long form to
-//! emit: `ff mcp` serves each verb from `--ff-tools`'s schema and spells
-//! every key as `--key`. Clap resolves an alias as a long flag whether or
-//! not the arg has a `long`, and a hidden one leaves the help pages as
-//! they were.
+//! alias (`message`, `count`) so the tool descriptors in `tools.rs` have
+//! a long form to emit: #19's MCP server spells every key as `--key`.
+//! Clap resolves an alias as a long flag whether or not the arg has a
+//! `long`, and a hidden one leaves the help pages as they were.
 
 use clap::{Parser, Subcommand};
 
@@ -21,11 +20,8 @@ use crate::help;
 /// The name the tool has, as opposed to what it is typed as. The version
 /// is the one place the project name is worth a line: it is what somebody
 /// searches for — it matches the release titles and the README — and
-/// `atc` is dispatch plumbing, not a name.
-///
-/// One spelling, from core: the same constant prefixes `cmd` and
-/// namespaces every id on the wire.
-pub use atc_core::machine::NAME;
+/// `atc` is the command, not a name.
+pub const NAME: &str = "tower";
 
 /// What `atc -v` and `atc version` both print: the release, the
 /// commit it was built from, and the project's home under it. Both
@@ -366,7 +362,7 @@ pub enum Command {
         #[arg(long, value_name = "n")]
         port: Option<String>,
     },
-    /// One line for fufu's session briefing: what is in flight here.
+    /// One line for a session-start hook: what is in flight here.
     #[command(long_about = help::BRIEFING, after_long_help = help::BRIEFING_EXAMPLES)]
     Briefing,
 }
@@ -402,8 +398,9 @@ impl Command {
                 update: false,
                 notice: false,
             },
-            // fufu spawns it with nobody in front of it, under a one-second
-            // box: no child to fork, and no one to read a notice.
+            // A session-start hook spawns it with nobody in front of it,
+            // under a short box: no child to fork, and no one to read a
+            // notice.
             Command::Briefing => Lanes {
                 update: false,
                 notice: false,

@@ -40,17 +40,14 @@ against the board's filed flights, and an ambiguous one refuses with
 the full forms — and a leading # is stripped, so what tower prints
 pastes back in.
 
---json swaps the human render for the machine envelope: fufu's own
-shape, one line of JSON keyed ff with the contract number, cmd naming
-the verb as `tower <verb>`, and either data or error, never both —
-success and failure alike. A refusal's error id is namespaced
-tower/<id> and reads back through `atc explain <id>`, which takes
-it with the namespace or without.
+--json swaps the human render for the machine envelope: one line of
+JSON keyed atc with the contract number, cmd naming the bare verb,
+and either data or error, never both — success and failure alike. A
+refusal's error id is bare, and `atc explain <id>` reads it back.
 
-There is no bare tower binary. `atc` reaches atc through
-fufu's ff-<name> dispatch, git-style, so the verb is typed through
-fufu — the dependency made honest: tower has nothing to say about a
-machine with no fufu on it.";
+The repository is the current directory; there is no bare tower
+binary. fufu on PATH is optional: the board is tower's own log, and
+`atc doctor` reports whether fufu is there.";
 
 pub const ROOT_EXAMPLES: &str = "\
 Examples:
@@ -420,19 +417,17 @@ of exits. --list is the whole catalog, one line per id.
 
 A pure registry lookup: no store, no repository, no fufu spawn — it
 answers on a machine where nothing else does. Every refusal tower
-prints carries an id shaped tower/namespace/name, and either spelling
-finds it: paste the id whole out of an envelope, or drop the tower/
-the way fufu does before it forwards the lookup here. The namespace
-past tower/ picks the exit code: usage/* exits 2, ref/contended
-exits 4 — run it again — and everything else 1. hold's 3 is not among
-them — an outcome, not an error. A refusal fufu shaped itself keeps
-fufu's own bare id, and `ff explain <id>` is where its prose lives.";
+prints carries an id shaped namespace/name, pasted whole out of an
+envelope. The namespace picks the exit code: usage/* exits 2,
+ref/contended exits 4 — run it again — and everything else 1. hold's
+3 is not among them — an outcome, not an error. A refusal fufu shaped
+itself keeps fufu's own id, and `ff explain <id>` is where its prose
+lives.";
 
 pub const EXPLAIN_EXAMPLES: &str = "\
 Examples:
-  atc explain tower/flight/not-found  one id, in full
-  atc explain --list                  every id tower knows
-  atc explain usage/needs-message     the bare spelling works too";
+  atc explain flight/not-found  one id, in full
+  atc explain --list            every id tower knows";
 
 pub const CONFIG: &str = "\
 Settings, on fufu's typed-registry model. No subcommands — arity
@@ -514,7 +509,9 @@ Examples:
 pub const DOCTOR: &str = "\
 The seam, the log, and the registries: doctor observes and
 complains, never enforces — read-only, with no --fix and no writes.
-The seam comes first: fufu's version runs before anything else,
+The seam row comes first: whether ff is on PATH, its version, and
+whether it speaks the contract tower reads. Absent is information —
+fufu is optional, and the board runs without it; drift is a finding,
 because a drifted contract fails every spawn, and doctor is the verb
 that reports the broken seam rather than dying of it.
 
@@ -611,24 +608,23 @@ Examples:
   atc serve --json          the address as an envelope, then serve";
 
 pub const BRIEFING: &str = "\
-One line for fufu's session briefing, which is the paragraph fufu puts
-in front of an agent when a session starts. fufu asks every declared
-extension that offers one, takes stdout verbatim, and keeps a line
-only if it is one line of at most 240 characters — anything longer is
-dropped whole, so the subject is elided here rather than there.
+One line for a session-start hook: the paragraph put in front of an
+agent when a session starts. The hook takes stdout verbatim and keeps
+a line only if it is one short line — anything longer is dropped
+whole, so the subject is elided here rather than there.
 
 The line counts what is Ready across the board, and points at
 `atc` when there is something to pull; otherwise it says nothing
 is ready.
 
-fufu runs it with a one-second box and stderr discarded, so a failure
-— no repository, no fufu, a drifted seam — costs nothing but the
-line. Run by hand, the failure reports the way every verb's does.
---json carries the line as `data.line`.";
+The hook runs it under a short box with stderr discarded, so a
+failure — no repository, a store that will not open — costs nothing
+but the line. Run by hand, the failure reports the way every verb's
+does. --json carries the line as `data.line`.";
 
 pub const BRIEFING_EXAMPLES: &str = "\
 Examples:
-  atc briefing              the line fufu would show
+  atc briefing              the line the hook would show
   atc briefing --json       the same, as a field";
 
 #[cfg(test)]

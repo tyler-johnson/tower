@@ -7,7 +7,7 @@
 //!
 //! **tower spawns fufu; it does not link it.** Everything tower asks of
 //! fufu arrives as `ff <verb> --json` over the machine contract — the
-//! envelope's version checked against `FF_CONTRACT`, the payload parsed
+//! envelope's version checked against the contract tower reads, the payload parsed
 //! as data — and the board asks nothing: it is a fold of tower's own log.
 //! Two calls remain. `ff version` is the doctor's seam check, and
 //! `ff watch` is serve's change feed. tower holds no fufu type, and there

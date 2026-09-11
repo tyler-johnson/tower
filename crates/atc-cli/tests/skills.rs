@@ -41,7 +41,8 @@ Turn a goal into flights tower stores.
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn atc")
@@ -180,7 +181,7 @@ fn a_named_skill_is_the_raw_file_byte_for_byte() {
 fn the_json_forms_carry_summary_and_text() {
     let repo = stocked();
     let all = envelope(&atc(repo.path(), &["skills", "--json"]));
-    assert_eq!(all["cmd"], serde_json::json!("tower skills"));
+    assert_eq!(all["cmd"], serde_json::json!("skills"));
     let skills = all["data"]["skills"].as_array().expect("skills");
     assert_eq!(skills.len(), 2);
     assert_eq!(skills[0]["name"], serde_json::json!("plan"));
@@ -212,7 +213,7 @@ fn a_name_that_is_not_installed_is_refused_naming_the_set() {
     let envelope = envelope(&out);
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("tower/skill/not-found")
+        serde_json::json!("skill/not-found")
     );
     assert_eq!(
         envelope["error"]["message"],

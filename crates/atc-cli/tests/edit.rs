@@ -10,7 +10,8 @@ use atc_testsupport::Repo;
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn atc")
@@ -42,9 +43,6 @@ fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
-/// The id is passed bare and asserted namespaced — `tower/<id>` is what
-/// the wire carries, and every call site goes on naming the id the
-/// registry keys on.
 fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -54,10 +52,7 @@ fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(
-        envelope["error"]["id"],
-        serde_json::json!(format!("tower/{id}"))
-    );
+    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
     envelope
 }
 
@@ -158,8 +153,8 @@ fn the_envelope_carries_the_overlay_as_appended() {
     let out = atc(repo.path(), &["edit", "1", "-m", "the new body", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower edit"));
+    assert_eq!(envelope["atc"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("edit"));
     let edited = &envelope["data"]["edited"];
     assert_eq!(edited["kind"], serde_json::json!("edited"));
     assert_eq!(edited["body"]["target"], serde_json::json!("pi.1"));

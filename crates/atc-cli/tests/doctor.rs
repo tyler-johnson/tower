@@ -17,7 +17,8 @@ fn atc_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     command
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", xdg(repo));
     if let Some(program) = program {
         command.env("ATC_FF", program);
@@ -59,7 +60,7 @@ fn repo() -> Repo {
 /// The doctor rows out of a `--json` run, with the findings count.
 fn rows(output: &Output) -> (Vec<serde_json::Value>, u64) {
     let envelope = envelope(output);
-    assert_eq!(envelope["cmd"], serde_json::json!("tower doctor"));
+    assert_eq!(envelope["cmd"], serde_json::json!("doctor"));
     let rows = envelope["data"]["rows"].as_array().expect("rows").clone();
     let findings = envelope["data"]["findings"].as_u64().expect("findings");
     (rows, findings)
@@ -88,7 +89,7 @@ fn a_fresh_repository_is_healthy() {
     let (rows, findings) = rows(&out);
     assert_eq!(rows.len(), 2, "{rows:?}");
     assert_eq!(rows[0]["level"], serde_json::json!("ok"));
-    assert_eq!(rows[0]["check"], serde_json::json!("ff/version"));
+    assert_eq!(rows[0]["check"], serde_json::json!("ff"));
     let message = rows[0]["message"].as_str().expect("message");
     assert!(message.contains("contract 1"), "{message}");
     // The update row: test binaries are never official, so the passive
@@ -120,7 +121,7 @@ printf '%s\n' '{"ff":99,"cmd":"version","data":{"version":"9.9.9"}}'
         "the seam row and the seamless update row: {all:?}"
     );
     assert_eq!(all[0]["level"], serde_json::json!("warn"));
-    assert_eq!(all[0]["check"], serde_json::json!("ff/contract"));
+    assert_eq!(all[0]["check"], serde_json::json!("ff"));
     row(&all, "tower/update");
     let message = all[0]["message"].as_str().expect("message");
     assert!(message.contains("99") && message.contains('1'), "{message}");
@@ -138,25 +139,24 @@ printf '%s\n' '{"ff":99,"cmd":"version","data":{"version":"9.9.9"}}'
 }
 
 #[test]
-fn a_missing_ff_is_a_finding_that_names_fufu() {
-    // The board spawns nothing, so a missing `ff` surfaces here alone:
-    // exit 1, one warn row, and the dependency named.
+fn a_missing_ff_is_information_not_a_finding() {
+    // The board spawns nothing, so a missing `ff` is news rather than a
+    // problem: exit 0, one info row naming fufu, and the other checks
+    // still run beside it.
     let repo = repo();
     let out = atc_via(
         repo.path(),
         &["doctor", "--json"],
         Some(Path::new("/nonexistent/ff")),
     );
-    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(out.status.code(), Some(0));
     let (all, findings) = rows(&out);
-    let missing = row(&all, "ff/not-installed");
-    assert_eq!(missing["level"], serde_json::json!("warn"));
+    let missing = row(&all, "ff");
+    assert_eq!(missing["level"], serde_json::json!("info"));
     let message = missing["message"].as_str().expect("message");
-    assert!(
-        message.contains("fufu"),
-        "the dependency is named: {message}"
-    );
-    assert_eq!(findings, 1);
+    assert!(message.contains("fufu"), "the optional is named: {message}");
+    row(&all, "tower/update");
+    assert_eq!(findings, 0);
 }
 
 #[test]

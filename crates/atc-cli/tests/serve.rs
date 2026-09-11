@@ -101,8 +101,8 @@ fn the_startup_envelope_names_the_address_it_bound() {
     let server = Server::start(repo.path(), &["--port", &port.to_string()], &[]);
 
     let envelope = &server.startup;
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower serve"));
+    assert_eq!(envelope["atc"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("serve"));
     assert_eq!(envelope["data"]["host"], serde_json::json!("127.0.0.1"));
     assert_eq!(envelope["data"]["port"], serde_json::json!(port));
     assert_eq!(
@@ -190,10 +190,10 @@ fn outside_a_repository_it_refuses_before_it_binds() {
             &port.to_string(),
         ])
         .current_dir(dir.path())
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .env("XDG_CONFIG_HOME", dir.path().join("xdg"))
-        .env_remove("FF_REPO")
         .env_remove("ATC_HOST")
         .env_remove("ATC_PORT")
         .env_remove("GIT_CONFIG_GLOBAL")

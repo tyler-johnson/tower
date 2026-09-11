@@ -11,7 +11,7 @@ tower is called and never calls. It runs no dispatch and no loop; the harness a 
 
 ## The tools
 
-The MCP server `ff mcp` serves four tower tools beside fufu's own: `tower__next`, `tower__brief`, `tower__hold`, and `tower__done`, the loop's four gestures. Each takes the verb's own flags as fields — `{"count": 3, "peek": true}` on `next` is `atc next -n 3 --peek` — plus a `cwd`, and returns the envelope as structured content. Everything else on this page is the shell.
+Everything on this page is the shell.
 
 ## The model
 
@@ -23,7 +23,7 @@ The MCP server `ff mcp` serves four tower tools beside fufu's own: `tower__next`
 
 ## Naming a flight
 
-A flight has two names. The board prints `#3`; when two writers share a board and the numbers clash it prints `pi-8c2e#3`; the wire carries `pi-8c2e.140`, the id of the event that filed it. Every verb that takes a flight accepts all three: `<n>`, `<writer>#<n>`, or `<writer>.<seq>`, with one leading `#` stripped so what tower prints pastes back in. A bare number must match exactly one filed flight, or the verb refuses with `tower/flight/ambiguous` and lists the full forms. Event seqs are shared by every event kind on a writer's chain, so wire ids are sparse: `pi-8c2e.140` and `pi-8c2e.146` can be neighbors.
+A flight has two names. The board prints `#3`; when two writers share a board and the numbers clash it prints `pi-8c2e#3`; the wire carries `pi-8c2e.140`, the id of the event that filed it. Every verb that takes a flight accepts all three: `<n>`, `<writer>#<n>`, or `<writer>.<seq>`, with one leading `#` stripped so what tower prints pastes back in. A bare number must match exactly one filed flight, or the verb refuses with `flight/ambiguous` and lists the full forms. Event seqs are shared by every event kind on a writer's chain, so wire ids are sparse: `pi-8c2e.140` and `pi-8c2e.146` can be neighbors.
 
 ## Reading
 
@@ -56,7 +56,7 @@ A closed flight refuses every move; the log keeps its record, and comments and e
 
 ## Holds and answers
 
-`atc hold <flight> -m "<question>"` stops a flight with the question on its record. The exit is 3, an outcome and not an error: the envelope is a full success envelope carrying the held event, and only the code says the flight stopped with a question. One question per flight; a second hold refuses with `tower/hold/exists`. Holding clears started, so the flight is no longer In Progress, and nothing is torn down.
+`atc hold <flight> -m "<question>"` stops a flight with the question on its record. The exit is 3, an outcome and not an error: the envelope is a full success envelope carrying the held event, and only the code says the flight stopped with a question. One question per flight; a second hold refuses with `hold/exists`. Holding clears started, so the flight is no longer In Progress, and nothing is torn down.
 
 `atc answer <flight> -m "<answer>"` clears the question. The answer counts as the flight's freshest motion and the record derives Ready, or Waiting when a dependency is still live, never straight back to In Progress; the next pull is a fresh claim, and the answer is on the brief for whoever makes it. `next` never picks a held flight, and `yours` never counts one.
 
@@ -77,23 +77,21 @@ The pick is the claim and nothing else: each picked flight is set In Progress wi
 `--json` on every verb, success and failure alike, emits one line on stdout:
 
 ```
-{"ff":1,"cmd":"tower next","data":{…}}
-{"ff":1,"cmd":"tower status","error":{"id":"tower/status/held","message":"…","exits":["…"]}}
+{"atc":1,"cmd":"next","data":{…}}
+{"atc":1,"cmd":"status","error":{"id":"status/held","message":"…","exits":["…"]}}
 ```
 
-`data` and `error` never appear together. A refusal fufu shaped itself is forwarded verbatim under fufu's bare id, and `ff explain <id>` holds its prose; everything of tower's is under `tower/`, and `atc explain <id>` takes it with the namespace or without.
+`data` and `error` never appear together. A refusal fufu shaped itself is forwarded verbatim under fufu's id, and `ff explain <id>` holds its prose; `atc explain <id>` holds tower's.
 
 | Exit | Meaning |
 | --- | --- |
 | 0 | success, an empty board included |
 | 1 | a refusal; also `next`'s empty pick and `doctor`'s findings, each with a data envelope |
-| 2 | `tower/usage/*`, and clap's own refusal of a command line |
+| 2 | `usage/*`, and clap's own refusal of a command line |
 | 3 | `hold` succeeded; the flight stopped with a question |
-| 4 | `tower/ref/contended`; another writer had the lock, run it again |
+| 4 | `ref/contended`; another writer had the lock, run it again |
 
 The log is `refs/tower/log/<author>/<writer>`, one orphan chain per writer; `tower.writer` is minted at the first append and is not a setting to copy between machines. Sync is a `git push` or `git fetch` of that refspec; there is no verb, and a chain this repository has not fetched shows in `atc doctor` as events off the board. `atc serve` answers the same envelopes at `/api/…` and streams changes at `/api/feed`; a person starts it, and every other interface works with it down.
-
-Under `atc <verb>` the child inherits `FF_REPO` and `FF_CONTRACT` from fufu's dispatch.
 
 ## Landmines
 
@@ -104,7 +102,6 @@ Under `atc <verb>` the child inherits `FF_REPO` and `FF_CONTRACT` from fufu's di
 - **Labels cannot be cleared through `edit`.** `--label` replaces the set; with no `--label` the set stands.
 - **`atc skills` is the store's shelf.** It lists what is installed under `.tower/skills/` and `~/.config/tower/skills/`, the policy a flight carries. This manual is the binary's and never appears there.
 - **Only tower writes tower state.** Never hand-edit `refs/tower/*`, and never `refs/fufu/*`; `atc doctor` names what a hand-edited log produces.
-- **A handshake flag is argv[1] or nothing.** `--ff-manifest` behind a verb is clap's unknown argument, not a handshake.
 
 ## The authority
 

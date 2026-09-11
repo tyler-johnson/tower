@@ -4,7 +4,7 @@
 // camelCase, same order of phrases.
 
 export interface Envelope<T> {
-  ff: number;
+  atc: number;
   cmd: string;
   data?: T;
   error?: TowerError;

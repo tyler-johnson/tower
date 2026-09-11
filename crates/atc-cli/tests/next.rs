@@ -24,11 +24,11 @@ use atc_testsupport::Repo;
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        // A developer's own fufu session must not tag the fixture's
+        // A developer's own Claude Code session must not tag the fixture's
         // events: the bylines below assert the bare email.
-        .env_remove("FF_SESSION")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .output()
         .expect("spawn atc")
 }
@@ -361,7 +361,7 @@ fn a_zero_count_is_a_usage_refusal() {
     let envelope = envelope(&out);
     assert_eq!(
         envelope["error"]["id"],
-        serde_json::json!("tower/usage/bad-count")
+        serde_json::json!("usage/bad-count")
     );
 }
 
@@ -371,8 +371,8 @@ fn an_empty_pick_under_json_is_a_data_envelope_not_an_error() {
     let out = atc(repo.path(), &["next", "--json"]);
     assert_eq!(out.status.code(), Some(1));
     let envelope = envelope(&out);
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower next"));
+    assert_eq!(envelope["atc"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("next"));
     assert_eq!(envelope["data"]["outcome"], serde_json::json!("drained"));
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));

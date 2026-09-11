@@ -12,15 +12,17 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-/// The binary, addressed at a fixture: `FF_REPO` is the production
-/// handshake, `HOME` and `XDG_CONFIG_HOME` point into the fixture so
+/// The binary, addressed at a fixture: the current directory is the
+/// repository, `HOME` and `XDG_CONFIG_HOME` point into the fixture so
 /// neither the developer's git config nor their environment can reach a
-/// spawn, and the serve lanes' variables are cleared for the same
-/// reason.
+/// spawn, the session variable is scrubbed so their own Claude Code
+/// session cannot tag a fixture event, and the serve lanes' variables
+/// are cleared for the same reason.
 pub fn command(repo: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     command
-        .env("FF_REPO", repo)
+        .current_dir(repo)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", root(repo).join("xdg"))
         .env("HOME", root(repo))
         // Windows' `HOME`: gix and git.exe read the profile from it, so
@@ -49,9 +51,6 @@ pub fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
-/// The id is passed bare and asserted namespaced — `tower/<id>` is what
-/// the wire carries, and every call site goes on naming the id the
-/// registry keys on.
 pub fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -61,10 +60,7 @@ pub fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(
-        envelope["error"]["id"],
-        serde_json::json!(format!("tower/{id}"))
-    );
+    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
     envelope
 }
 
@@ -92,7 +88,7 @@ pub fn matches_cli(served: &str, cli: &str) {
     let served: serde_json::Value =
         serde_json::from_str(served.trim_end()).expect("the served envelope");
     let cli: serde_json::Value = serde_json::from_str(cli.trim_end()).expect("the CLI envelope");
-    assert_eq!(served["cmd"], serde_json::json!("tower board"));
+    assert_eq!(served["cmd"], serde_json::json!("board"));
     for key in ["backlog", "waiting", "ready", "in_progress", "held"] {
         let rows = cli["data"][key]
             .as_array()

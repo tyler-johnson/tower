@@ -5,7 +5,6 @@
 use crate::error::CliError;
 use crate::{machine, selfupdate};
 use atc_core::config::Config;
-use atc_core::ff::Ff;
 
 pub fn run(json: bool, check: bool) -> Result<(), CliError> {
     if check {
@@ -66,8 +65,8 @@ fn refresh_cache() -> Result<(), CliError> {
     state.checked_at = now;
 
     // Re-read cadence if we can discover a repo
-    if let Ok(ff) = Ff::here()
-        && let Ok(config) = Config::open(ff.repo())
+    if let Ok(repo) = std::env::current_dir()
+        && let Ok(config) = Config::open(&repo)
     {
         state.interval_secs = selfupdate::notify::read_cadence(&config);
     }

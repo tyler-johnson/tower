@@ -3,9 +3,10 @@
 //!
 //! Seam-first: `ff version` runs before anything else, because a
 //! drifted contract fails every spawn — doctor is the verb that reports
-//! the broken seam instead of dying of it. On a healthy seam the
-//! pipeline is the board's — store, fold — with the doctor fold in
-//! place of `enrich`.
+//! the broken seam instead of dying of it. The pipeline is then the
+//! board's regardless — store, fold — with the doctor fold in place of
+//! `enrich`: the board is tower's own log, so a missing or drifted `ff`
+//! hides none of the other checks.
 //!
 //! The exit is fufu's doctor precedent: 0 healthy, 1 findings, an
 //! outcome riding the success path with a full envelope.
@@ -33,22 +34,11 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         Err(err) => return Err(err.into()),
     };
 
-    let mut report = match &seam {
-        SeamHealth::Ok { .. } => {
-            let store = Store::open(ff.repo())?;
-            let fold = board::fold(&store.read_all()?);
-            board::doctor(&fold, &seam)
-        }
-        // A broken seam: no store — the seam row alone, and absence of
-        // a log row asserts nothing.
-        _ => board::doctor(&board::fold(&[]), &seam),
-    };
-    // The registries ride both arms too: they read files, never the
-    // seam, so a drifted contract cannot hide an unresolved skill or a
-    // shape that never comes back to a person.
-    let root = Store::open(ff.repo())
-        .ok()
-        .and_then(|store| store.main_worktree());
+    let store = Store::open(ff.repo())?;
+    let fold = board::fold(&store.read_all()?);
+    let mut report = board::doctor(&fold, &seam);
+    // The registries read files, never the seam.
+    let root = store.main_worktree();
     for row in registry_rows(root.as_deref()) {
         if row.level == Level::Warn {
             report.findings += 1;
@@ -59,9 +49,8 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         report.findings += 1;
         report.rows.push(row);
     }
-    // The update row rides both arms: the passive lane's cache answers
-    // without a seam, and its own row is why doctor suppresses the
-    // generic notice. Info level — never a finding.
+    // The update row: the passive lane's cache, whose own row is why
+    // doctor suppresses the generic notice. Info level — never a finding.
     report.rows.push(update_row());
 
     if json {

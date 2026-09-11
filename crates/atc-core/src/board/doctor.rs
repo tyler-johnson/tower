@@ -34,8 +34,9 @@ use crate::log::{EventId, Kind};
 use super::flight::Fold;
 
 /// What `ff version` said about the seam, decided by the caller before
-/// anything else: a drifted contract fails every spawn, so doctor is
-/// the verb that reports the break instead of dying of it.
+/// anything else. A drifted contract fails every spawn, so doctor is the
+/// verb that reports the break instead of dying of it; a missing `ff` is
+/// information, because the board folds tower's own log without one.
 #[derive(Debug)]
 pub enum SeamHealth {
     /// The call answered: the seam speaks tower's contract.
@@ -72,31 +73,25 @@ pub struct Doctor {
     pub findings: usize,
 }
 
-/// The checks, over facts the caller fetched. On a broken seam the
-/// caller passes an empty fold — only the seam row emerges, and absence
-/// of a row asserts nothing.
+/// The checks, over facts the caller fetched. One seam row first, at
+/// the level the seam earned, then the log's.
 pub fn doctor(fold: &Fold, seam: &SeamHealth) -> Doctor {
     let mut rows = Vec::new();
 
-    match seam {
-        SeamHealth::Ok { version } => rows.push(row(
-            Level::Ok,
-            "ff/version",
-            format!("ff {version} · contract {CONTRACT}"),
-        )),
-        SeamHealth::Drift { found } => rows.push(row(
+    let (level, message) = match seam {
+        SeamHealth::Ok { version } => (Level::Ok, format!("ff {version} · contract {CONTRACT}")),
+        SeamHealth::Drift { found } => (
             Level::Warn,
-            "ff/contract",
             format!(
                 "ff speaks contract {found}; tower reads {CONTRACT} — upgrade whichever is behind"
             ),
-        )),
-        SeamHealth::Missing => rows.push(row(
-            Level::Warn,
-            "ff/not-installed",
-            "`ff` is not on PATH — tower runs on fufu".to_string(),
-        )),
-    }
+        ),
+        SeamHealth::Missing => (
+            Level::Info,
+            "no `ff` on PATH — fufu is optional; the board runs without it".to_string(),
+        ),
+    };
+    rows.push(row(level, "ff", message));
 
     rows.extend(log_rows(fold));
 
@@ -319,23 +314,24 @@ mod tests {
     #[test]
     fn a_healthy_seam_is_one_ok_row_and_zero_findings() {
         let report = doctor(&fold(&[]), &healthy());
-        assert_eq!(checks(&report), [("ff/version", Level::Ok)]);
+        assert_eq!(checks(&report), [("ff", Level::Ok)]);
         assert_eq!(report.findings, 0);
         assert!(report.rows[0].message.contains("0.9.0"));
         assert!(report.rows[0].message.contains("contract 1"));
     }
 
     #[test]
-    fn drift_and_not_installed_are_findings() {
+    fn drift_is_a_finding_and_absence_is_not() {
         let report = doctor(&fold(&[]), &SeamHealth::Drift { found: 99 });
-        assert_eq!(checks(&report), [("ff/contract", Level::Warn)]);
+        assert_eq!(checks(&report), [("ff", Level::Warn)]);
         assert_eq!(report.findings, 1);
         let message = &report.rows[0].message;
         assert!(message.contains("99") && message.contains('1'), "{message}");
 
         let report = doctor(&fold(&[]), &SeamHealth::Missing);
-        assert_eq!(checks(&report), [("ff/not-installed", Level::Warn)]);
-        assert_eq!(report.findings, 1);
+        assert_eq!(checks(&report), [("ff", Level::Info)]);
+        assert_eq!(report.findings, 0);
+        assert!(report.rows[0].message.contains("fufu is optional"));
     }
 
     fn unknown(id: &str, time: i64, kind: &str) -> Event {
@@ -380,7 +376,7 @@ mod tests {
         let report = over(&[filed("pi.1", 10), unknown("pi.2", 20, "claimed")]);
         assert_eq!(
             checks(&report),
-            [("ff/version", Level::Ok), ("log/retired-kind", Level::Info)]
+            [("ff", Level::Ok), ("log/retired-kind", Level::Info)]
         );
         assert_eq!(report.findings, 0);
         let message = &report.rows[1].message;
@@ -394,7 +390,7 @@ mod tests {
         let report = over(&[filed("pi.1", 10), unknown("pi.2", 20, "promoted")]);
         assert_eq!(
             checks(&report),
-            [("ff/version", Level::Ok), ("log/newer-tower", Level::Warn)]
+            [("ff", Level::Ok), ("log/newer-tower", Level::Warn)]
         );
         assert_eq!(report.findings, 1);
         let message = &report.rows[1].message;
@@ -407,7 +403,7 @@ mod tests {
         let report = over(&[filed("pi.1", 10), commented("pi.2", 20, "qi.1")]);
         assert_eq!(
             checks(&report),
-            [("ff/version", Level::Ok), ("log/absent-chain", Level::Warn)]
+            [("ff", Level::Ok), ("log/absent-chain", Level::Warn)]
         );
         assert_eq!(report.findings, 1);
         let message = &report.rows[1].message;
@@ -421,10 +417,7 @@ mod tests {
         let report = over(&[filed("pi.1", 10), done("pi.3", 30, "pi.9")]);
         assert_eq!(
             checks(&report),
-            [
-                ("ff/version", Level::Ok),
-                ("log/absent-filing", Level::Warn)
-            ]
+            [("ff", Level::Ok), ("log/absent-filing", Level::Warn)]
         );
         let message = &report.rows[1].message;
         assert!(message.contains("hand-edited"), "{message}");
@@ -454,7 +447,7 @@ mod tests {
         let report = over(&[filed("pi.1", 10), filed("pi.1", 20)]);
         assert_eq!(
             checks(&report),
-            [("ff/version", Level::Ok), ("log/refiled", Level::Warn)]
+            [("ff", Level::Ok), ("log/refiled", Level::Warn)]
         );
         assert_eq!(report.findings, 1);
         assert!(report.rows[1].message.contains("pi.1"));

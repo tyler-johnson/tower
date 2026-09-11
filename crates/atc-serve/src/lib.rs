@@ -115,9 +115,9 @@ impl Bound {
 
 /// Validate the repository, build the runtime, and bind the socket.
 ///
-/// The repository comes first and on purpose: `Ff::here()` answers with
-/// the current directory outside a worktree, and `Store::open` resolves
-/// the author and refuses without `user.email`. Both are startup facts,
+/// The repository comes first and on purpose: the repository is the
+/// current directory, which may be outside a worktree, and `Store::open`
+/// resolves the author and refuses without `user.email`. Both are startup facts,
 /// and a person who typed the verb in the wrong directory should hear it
 /// now rather than from a blank page. The store is opened and dropped —
 /// it never writes, it holds a `gix::Repository` and is not `Sync`, and a

@@ -1,9 +1,9 @@
 //! The verbs, in fufu's shape: one file per verb, the shared plumbing
 //! here.
 //!
-//! A write verb is a read plus a local write. `Ff::here()` resolves the
-//! repository — constructing the handle spawns nothing — and the store
-//! opens on it. The lifecycle verbs live in core's `verb` module, where
+//! A write verb is a read plus a local write. The repository is the
+//! current directory — [`repo`] reads it and nothing spawns — and the
+//! store opens on it. The lifecycle verbs live in core's `verb` module, where
 //! the server mounts them too; their files here are argument handling
 //! and the human render around one core call. What stays in this module
 //! is the CLI's own half: the repository handles and the echo tail.
@@ -33,6 +33,8 @@ pub mod unlink;
 pub mod update;
 pub mod version;
 
+use std::path::PathBuf;
+
 use crate::error::CliError;
 use crate::render;
 // The reference grammar, its resolution, and the display form live in
@@ -43,16 +45,27 @@ pub use atc_core::board::{count, display, flight, parse_ref, resolve};
 use atc_core::ff::Ff;
 use atc_core::log::Store;
 
+/// The repository tower was invoked in: the current directory. The
+/// store discovers the worktree from it, so a subdirectory works.
+pub fn repo() -> Result<PathBuf, CliError> {
+    std::env::current_dir().map_err(|err| {
+        CliError::coded(
+            "repo/error",
+            format!("cannot read the current directory: {err}"),
+            vec![],
+        )
+    })
+}
+
 /// The repository handle for the verbs that spawn fufu, with core's
 /// `ATC_FF` test seam applied.
 pub fn ff() -> Result<Ff, CliError> {
-    Ok(Ff::here()?.env_program())
+    Ok(Ff::at(repo()?).env_program())
 }
 
-/// The store, opened on the repository fufu's dispatch handed us.
+/// The store, opened on the current directory.
 pub fn store() -> Result<Store, CliError> {
-    let ff = Ff::here()?;
-    Ok(Store::open(ff.repo())?)
+    Ok(Store::open(&repo()?)?)
 }
 
 /// The standard dim tail — one string, every write verb.

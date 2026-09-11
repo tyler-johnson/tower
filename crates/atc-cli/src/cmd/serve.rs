@@ -26,12 +26,12 @@ use crate::{machine, render};
 use atc_core::config::{self, Config, DEFAULT_HOST, DEFAULT_PORT};
 
 pub fn run(json: bool, host: Option<&str>, port: Option<&str>) -> Result<(), CliError> {
-    let ff = super::ff()?;
-    let (host, port) = resolve(host, port, ff.repo())?;
+    let repo = super::repo()?;
+    let (host, port) = resolve(host, port, &repo)?;
 
     // Bound, not yet serving: the address is settled and nothing has been
     // answered, which is what makes one startup envelope possible.
-    let bound = atc_serve::run(ff.repo(), host, port)?;
+    let bound = atc_serve::run(&repo, host, port)?;
     let addr = bound.addr();
 
     if json {

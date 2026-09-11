@@ -1,12 +1,15 @@
-//! What the binary answers `--ff-skill` with: one skill, `tower`, the
-//! manual a session loads on its own. Nothing here touches disk.
+//! The manual the binary ships, which `atc hook` writes out: one skill,
+//! `tower`, the manual a session loads on its own. Nothing here touches
+//! disk.
 //!
 //! It lives as markdown next to the Rust, embedded whole. The embedded
 //! constant is the staleness fingerprint — byte drift on disk reads as
 //! "an older tower wrote it" — so the file carries no version or hash
 //! of its own.
 
-/// The `tower` skill: the advanced manual, on fufu's model.
+/// The `tower` skill: the advanced manual, on fufu's model. #134's
+/// `atc hook` is the writer; until it lands only the tests read it.
+#[allow(dead_code)]
 pub const SKILL: &str = include_str!("skill.md");
 
 #[cfg(test)]

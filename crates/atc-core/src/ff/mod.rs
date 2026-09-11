@@ -102,29 +102,6 @@ pub struct Ff {
 }
 
 impl Ff {
-    /// The repository tower was invoked against.
-    ///
-    /// `FF_REPO` when fufu's dispatch set it — absolute, resolved, and
-    /// absent rather than empty outside a worktree — and the current
-    /// directory otherwise, which is the case when `atc` is run
-    /// directly instead of through `atc`.
-    ///
-    /// Reading it back is what the handshake is for: an extension that had
-    /// to rediscover its own repository would be guessing at the answer
-    /// fufu already told it. This is not git's `GIT_DIR` footgun in
-    /// reverse — tower re-exports nothing, and passes what it read as an
-    /// explicit `-C` on each call rather than through the environment.
-    pub fn here() -> Result<Ff> {
-        let repo = match std::env::var_os("FF_REPO") {
-            Some(path) if !path.is_empty() => PathBuf::from(path),
-            _ => std::env::current_dir().map_err(|source| Error::Spawn {
-                program: "ff".into(),
-                source,
-            })?,
-        };
-        Ok(Ff::at(repo))
-    }
-
     /// A specific worktree — a repository under test, or the one a verb
     /// was invoked from.
     pub fn at(repo: impl Into<PathBuf>) -> Ff {

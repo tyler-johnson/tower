@@ -1,5 +1,5 @@
-//! The write verbs, spawned the way fufu's dispatch spawns them: `FF_REPO`
-//! in the environment, argv carrying the verb. file/comment/link never
+//! The write verbs, spawned the way a person runs them: in the
+//! repository, argv carrying the verb. file/comment/link never
 //! spawn fufu, so no `ATC_FF` appears here — a wrong `ff` on PATH could
 //! not break these even if it tried. `file` does read the procedure
 //! registry, so every spawn points `XDG_CONFIG_HOME` at the fixture's own
@@ -13,11 +13,11 @@ use atc_testsupport::Repo;
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        // A developer's own fufu session must not tag the fixture's
+        // A developer's own Claude Code session must not tag the fixture's
         // events: the bylines below assert the bare email.
-        .env_remove("FF_SESSION")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .output()
         .expect("spawn atc")
 }
@@ -74,9 +74,6 @@ fn family(brief: &serde_json::Value, key: &str) -> Vec<String> {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
-/// The id is passed bare and asserted namespaced — `tower/<id>` is what
-/// the wire carries, and every call site goes on naming the id the
-/// registry keys on.
 fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -86,10 +83,7 @@ fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(
-        envelope["error"]["id"],
-        serde_json::json!(format!("tower/{id}"))
-    );
+    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
     envelope
 }
 
@@ -150,8 +144,8 @@ fn file_json_round_trips_body_and_procedure() {
     );
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["ff"], serde_json::json!(1));
-    assert_eq!(envelope["cmd"], serde_json::json!("tower file"));
+    assert_eq!(envelope["atc"], serde_json::json!(1));
+    assert_eq!(envelope["cmd"], serde_json::json!("file"));
     let filed = &envelope["data"]["filed"];
     assert_eq!(filed["id"], serde_json::json!("pi.1"));
     assert_eq!(filed["kind"], serde_json::json!("filed"));
@@ -273,7 +267,7 @@ fn file_under_review_json_carries_the_parent_three_flights_and_five_edges() {
     );
     let filing = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(filing["cmd"], serde_json::json!("tower file"));
+    assert_eq!(filing["cmd"], serde_json::json!("file"));
     let data = &filing["data"];
 
     // The parent keeps the procedure stamp and the body, and is filed
@@ -501,7 +495,7 @@ fn an_unfileable_status_at_filing_is_a_usage_refusal() {
         );
         assert_eq!(
             envelope["error"]["exits"],
-            serde_json::json!(["atc explain tower/usage/file-status"]),
+            serde_json::json!(["atc explain usage/file-status"]),
             "no exit of its own, so the registry lookup rides"
         );
     }
@@ -558,7 +552,7 @@ fn comment_json_carries_the_appended_event() {
     let out = atc(repo.path(), &["comment", "pi.1", "-m", "a note", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("tower comment"));
+    assert_eq!(envelope["cmd"], serde_json::json!("comment"));
     let commented = &envelope["data"]["commented"];
     assert_eq!(commented["id"], serde_json::json!("pi.2"));
     assert_eq!(commented["body"]["flight"], serde_json::json!("pi.1"));
@@ -732,7 +726,8 @@ fn a_missing_identity_is_a_coded_envelope() {
     repo.git(&["config", "--unset", "user.email"]);
     let output = Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(["file", "a subject", "--json"])
-        .env("FF_REPO", repo.path())
+        .current_dir(repo.path())
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         // The machine's own git config must not answer for the fixture.
         .env("GIT_CONFIG_GLOBAL", atc_testsupport::null_device())
         .env("GIT_CONFIG_SYSTEM", atc_testsupport::null_device())
@@ -815,7 +810,7 @@ fn a_status_move_puts_the_flight_in_progress_with_the_pilots_byline() {
 
 #[test]
 fn the_pilot_line_names_the_session_over_the_email() {
-    // A move under fufu's tag: the row keeps the email as `status_by`
+    // A move under the client's tag: the row keeps the email as `status_by`
     // and carries the full id as `status_session`; the pilot phrase
     // renders the id's first eight characters in brackets.
     let repo = repo();
@@ -823,9 +818,9 @@ fn the_pilot_line_names_the_session_over_the_email() {
     let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
     let out = Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(["status", "1", "in_progress"])
-        .env("FF_REPO", repo.path())
+        .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
-        .env("FF_SESSION", uuid)
+        .env("CLAUDE_CODE_SESSION_ID", uuid)
         .output()
         .expect("spawn atc");
     stdout(&out);
@@ -854,7 +849,7 @@ fn status_json_carries_the_appended_move() {
     let out = atc(repo.path(), &["status", "1", "ready", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("tower status"));
+    assert_eq!(envelope["cmd"], serde_json::json!("status"));
     let moved = &envelope["data"]["status"];
     assert_eq!(moved["id"], serde_json::json!("pi.2"));
     assert_eq!(moved["kind"], serde_json::json!("status"));
@@ -981,7 +976,7 @@ fn assign_json_carries_the_appended_event() {
     let out = atc(repo.path(), &["assign", "1", "me", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("tower assign"));
+    assert_eq!(envelope["cmd"], serde_json::json!("assign"));
     let assigned = &envelope["data"]["assigned"];
     assert_eq!(assigned["kind"], serde_json::json!("assigned"));
     assert_eq!(assigned["body"]["flight"], serde_json::json!("pi.1"));
@@ -1044,7 +1039,7 @@ fn hold_exits_three_with_a_data_envelope() {
     );
     assert_eq!(out.status.code(), Some(3), "hold's success exits 3");
     let envelope = envelope(&out);
-    assert_eq!(envelope["cmd"], serde_json::json!("tower hold"));
+    assert_eq!(envelope["cmd"], serde_json::json!("hold"));
     assert!(envelope["error"].is_null());
     let held = &envelope["data"]["held"];
     assert_eq!(held["body"]["flight"], serde_json::json!("pi.1"));
@@ -1235,7 +1230,7 @@ fn done_json_lands_under_its_own_cmd_name() {
     let out = atc(repo.path(), &["done", "1", "--json"]);
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("tower done"));
+    assert_eq!(envelope["cmd"], serde_json::json!("done"));
     let moved = &envelope["data"]["status"];
     assert_eq!(moved["kind"], serde_json::json!("status"));
     assert_eq!(moved["body"]["status"], serde_json::json!("done"));
@@ -1276,7 +1271,7 @@ fn cancel_json_lands_under_its_own_cmd_name_with_the_reason() {
     );
     let envelope = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(envelope["cmd"], serde_json::json!("tower cancel"));
+    assert_eq!(envelope["cmd"], serde_json::json!("cancel"));
     let moved = &envelope["data"]["status"];
     assert_eq!(moved["body"]["status"], serde_json::json!("canceled"));
     assert_eq!(moved["body"]["reason"], serde_json::json!("not worth it"));
@@ -1364,7 +1359,7 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
     );
     let decomposed = envelope(&out);
     assert!(out.status.success(), "exit {:?}", out.status.code());
-    assert_eq!(decomposed["cmd"], serde_json::json!("tower decompose"));
+    assert_eq!(decomposed["cmd"], serde_json::json!("decompose"));
     let data = &decomposed["data"];
     assert_eq!(data["parent"], serde_json::json!("pi.1"));
 

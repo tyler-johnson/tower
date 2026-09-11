@@ -14,7 +14,8 @@ use atc_testsupport::Repo;
 fn atc(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
-        .env("FF_REPO", repo)
+        .current_dir(repo)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", root(repo).join("xdg"))
         .env("HOME", root(repo))
         // Windows' `HOME`: gix and git.exe read the profile from it, so
@@ -49,9 +50,6 @@ fn envelope(output: &Output) -> serde_json::Value {
 }
 
 /// Assert a refusal: the exit code, and the envelope's error id.
-/// The id is passed bare and asserted namespaced — `tower/<id>` is what
-/// the wire carries, and every call site goes on naming the id the
-/// registry keys on.
 fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
     assert_eq!(
         output.status.code(),
@@ -61,10 +59,7 @@ fn refusal(output: &Output, code: i32, id: &str) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr),
     );
     let envelope = envelope(output);
-    assert_eq!(
-        envelope["error"]["id"],
-        serde_json::json!(format!("tower/{id}"))
-    );
+    assert_eq!(envelope["error"]["id"], serde_json::json!(id));
     envelope
 }
 
@@ -368,7 +363,8 @@ fn update_check_syncs_cache() {
         let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
         command
             .args(args)
-            .env("FF_REPO", repo.path())
+            .current_dir(repo.path())
+            .env_remove("CLAUDE_CODE_SESSION_ID")
             .env("XDG_CONFIG_HOME", root(repo.path()).join("xdg"))
             .env("XDG_CACHE_HOME", cache.path())
             .env("HOME", root(repo.path()))

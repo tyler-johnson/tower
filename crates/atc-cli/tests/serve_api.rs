@@ -180,14 +180,14 @@ fn a_query_that_does_not_parse_is_400_and_the_query_envelope() {
         "{head}"
     );
     let envelope: serde_json::Value = serde_json::from_str(body.trim_end()).expect("an envelope");
-    assert_eq!(envelope["cmd"], json!("tower board"));
-    assert_eq!(envelope["error"]["id"], json!("tower/usage/unknown-field"));
+    assert_eq!(envelope["cmd"], json!("board"));
+    assert_eq!(envelope["error"]["id"], json!("usage/unknown-field"));
     assert_eq!(envelope["error"]["exits"], json!(["atc"]));
 
     let (status, _, body) = http(&server.addr, "/api/board?priority=before:3d");
     assert_eq!(status, 400, "{body}");
     let envelope: serde_json::Value = serde_json::from_str(body.trim_end()).expect("an envelope");
-    assert_eq!(envelope["error"]["id"], json!("tower/usage/bad-operator"));
+    assert_eq!(envelope["error"]["id"], json!("usage/bad-operator"));
 }
 
 #[test]

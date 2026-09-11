@@ -11,6 +11,7 @@ fn atc(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_atc"))
         .args(args)
         .current_dir(dir)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("ATC_FF", "/nonexistent")
         .env("XDG_CACHE_HOME", dir.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.
@@ -20,7 +21,6 @@ fn atc(dir: &Path, args: &[&str]) -> Output {
         // Windows' `HOME`: gix and git.exe read the profile from it, so
         // setting `HOME` alone leaves the runner's real one reachable.
         .env("USERPROFILE", dir)
-        .env_remove("FF_REPO")
         .output()
         .expect("spawn atc")
 }

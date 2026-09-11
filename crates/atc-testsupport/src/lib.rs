@@ -108,6 +108,7 @@ impl Repo {
             .env("GIT_CONFIG_SYSTEM", null_device())
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("FF_SESSION")
+            .env_remove("CLAUDE_CODE_SESSION_ID")
             .output()
             .unwrap_or_else(|err| panic!("`{program} {}`: {err}", args.join(" ")));
         assert!(

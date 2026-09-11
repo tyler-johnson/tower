@@ -7,11 +7,9 @@ use serde::Serialize;
 use crate::error::CliError;
 use crate::{explain, machine};
 
-/// One entry as the wire spells it: the id namespaced, everything else
-/// the entry's own. `Entry` itself stays bare — the registry keys on the
-/// bare id — and this is the shape that goes out, so `data.id` here and
-/// `error.id` on a refusal are the same string and an agent can join
-/// them.
+/// One entry as the wire spells it: the entry's own fields, the id
+/// owned, so `data.id` here and `error.id` on a refusal are the same
+/// string and an agent can join them.
 #[derive(Serialize)]
 struct Wire {
     id: String,
@@ -23,7 +21,7 @@ struct Wire {
 impl From<&'static explain::Entry> for Wire {
     fn from(entry: &'static explain::Entry) -> Wire {
         Wire {
-            id: machine::namespaced(entry.id),
+            id: entry.id.to_string(),
             summary: entry.summary,
             detail: entry.detail,
             exits: entry.exits,
@@ -63,10 +61,6 @@ pub fn run(json: bool, id: Option<&str>, list: bool) -> Result<(), CliError> {
         ));
     };
 
-    // Both spellings land on the same entry: the namespaced one a person
-    // pasted out of an envelope, and the bare one fufu hands over after
-    // splitting `tower/` off itself.
-    let id = explain::strip(id);
     let entry = explain::find(id).ok_or_else(|| explain::unknown_id(id))?;
     if json {
         println!("{}", machine::emit("explain", &Wire::from(entry)));
