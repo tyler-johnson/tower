@@ -214,17 +214,15 @@ fn the_claude_plugin_round_trips() {
     );
     assert!(!plugin.join(".mcp.json").exists(), "no server rides along");
 
-    // The four skills ride inside the plugin, under the layout a plugin's
+    // The skill rides inside the plugin, under the layout a plugin's
     // own skills take, front matter first and byte for byte.
-    for name in ["tower", "plan", "work", "review"] {
-        let on_disk = std::fs::read_to_string(plugin.join("skills").join(name).join("SKILL.md"))
-            .unwrap_or_else(|_| panic!("the {name} skill lands with the plugin"));
-        assert!(
-            on_disk.starts_with(&format!("---\nname: {name}\n")),
-            "{name}: front matter first"
-        );
-        assert_eq!(on_disk, compiled(name), "{name}: the compiled text");
-    }
+    let on_disk = std::fs::read_to_string(plugin.join("skills/tower/SKILL.md"))
+        .expect("the tower skill lands with the plugin");
+    assert!(
+        on_disk.starts_with("---\nname: tower\n"),
+        "front matter first"
+    );
+    assert_eq!(on_disk, compiled("tower"), "the compiled text");
 
     // Idempotent, and reported as already wired.
     let again = ok(&atc(home.path(), home.path(), &["hook", "claude"], None));
@@ -356,19 +354,13 @@ fn each_client_is_wired_in_its_own_schema() {
     assert_eq!(entry["hooks"][0]["type"], "command");
     assert!(entry.get("matcher").is_none(), "no matcher: {codex}");
     assert_eq!(codex["hooks"].as_object().unwrap().len(), 1, "{codex}");
-    for name in ["tower", "plan", "work", "review"] {
-        let skill = home
-            .path()
-            .join(".codex/skills")
-            .join(name)
-            .join("SKILL.md");
-        assert!(skill.exists(), "the {name} skill lands beside the wiring");
-        assert!(
-            std::fs::read_to_string(&skill)
-                .unwrap()
-                .starts_with(&format!("---\nname: {name}\n"))
-        );
-    }
+    let skill = home.path().join(".codex/skills/tower/SKILL.md");
+    assert!(skill.exists(), "the tower skill lands beside the wiring");
+    assert!(
+        std::fs::read_to_string(&skill)
+            .unwrap()
+            .starts_with("---\nname: tower\n")
+    );
 
     ok(&atc(home.path(), home.path(), &["hook", "gemini"], None));
     let gemini = json_at(&home.path().join(".gemini/settings.json"));
@@ -385,12 +377,10 @@ fn each_client_is_wired_in_its_own_schema() {
     assert!(entry.get("hooks").is_none(), "the flat shape: {cursor}");
     assert!(entry.get("matcher").is_none(), "no matcher: {cursor}");
 
-    // Removing the wiring removes the skills, because unhook takes back
+    // Removing the wiring removes the skill, because unhook takes back
     // exactly what hook added — both halves of it.
     ok(&atc(home.path(), home.path(), &["unhook", "codex"], None));
-    for name in ["tower", "plan", "work", "review"] {
-        assert!(!home.path().join(".codex/skills").join(name).exists());
-    }
+    assert!(!home.path().join(".codex/skills/tower").exists());
     let v = json_at(&home.path().join(".codex/hooks.json"));
     assert!(v.get("hooks").is_none(), "the entries went too: {v}");
 }
@@ -502,12 +492,45 @@ fn update_rewrites_only_what_is_wired() {
     // Wired, then drifted by hand: -u restores the bytes.
     let skill = home
         .path()
-        .join(".claude/skills/tower/skills/plan/SKILL.md");
+        .join(".claude/skills/tower/skills/tower/SKILL.md");
     let shipped = std::fs::read_to_string(&skill).unwrap();
     std::fs::write(&skill, "an older tower wrote this").unwrap();
     let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
     assert!(said.contains("rewired"), "{said:?}");
     assert_eq!(std::fs::read_to_string(&skill).unwrap(), shipped);
+
+    // A skill an older tower shipped and this one does not, recognized
+    // by the front matter it shipped with: doctor names the repair, and
+    // -u makes it by removing the directory.
+    let work = home.path().join(".claude/skills/tower/skills/work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(
+        work.join("SKILL.md"),
+        "---\nname: work\ndescription: claim, do, hold or commit, repeat — the loop that pairs with `atc next`\n---\n# work\n",
+    )
+    .unwrap();
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let out = atc(home.path(), repo.path(), &["doctor", "--json"], None);
+    let rows = envelope(&out)["data"]["rows"].clone();
+    let row = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["check"] == "hook/claude")
+        .cloned()
+        .unwrap_or_else(|| panic!("a hook/claude row: {rows}"));
+    assert_eq!(row["level"], "warn", "{row}");
+    assert!(
+        row["message"].as_str().unwrap().contains("atc hook -u"),
+        "{row}"
+    );
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("rewired"), "{said:?}");
+    assert!(!work.exists(), "the retired skill goes");
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("already wired in"), "{said:?}");
+    assert!(!said.contains("rewired"), "{said:?}");
 
     // -u names nothing: the flag is the whole instruction.
     let out = atc(home.path(), home.path(), &["hook", "-u", "claude"], None);
@@ -583,7 +606,7 @@ fn doctor_has_a_row_per_client() {
 
     // A skill an older tower wrote: the one finding, and the repair named.
     std::fs::write(
-        home.join(".claude/skills/tower/skills/work/SKILL.md"),
+        home.join(".claude/skills/tower/skills/tower/SKILL.md"),
         "an older tower wrote this",
     )
     .unwrap();

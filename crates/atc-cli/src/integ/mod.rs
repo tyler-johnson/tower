@@ -363,7 +363,7 @@ mod tests {
         }
     }
 
-    /// The drift the worked examples carry, kept out of every skill: no
+    /// The drift the worked examples carried, kept out of the manual: no
     /// `requeue`, `promote`, `sync`, or `log` verb exists, and `-p` is
     /// priority rather than a procedure.
     #[test]

@@ -1,12 +1,11 @@
 //! The skills the binary ships, for the clients that read them.
 //!
 //! The notice is budgeted, because it is context every session pays for
-//! whether or not it is needed. These are the other half of that bargain
-//! — the manual and the three worked examples, on a shelf, costing
-//! nothing until a client decides the situation calls for one. One text
-//! each, verbatim, for every client that reads skills: they agree on the
-//! file's name and on its front matter, so there is nothing per-vendor
-//! to adapt.
+//! whether or not it is needed. This is the other half of that bargain
+//! — the manual, on a shelf, costing nothing until a client decides the
+//! situation calls for it. One text, verbatim, for every client that
+//! reads skills: they agree on the file's name and on its front matter,
+//! so there is nothing per-vendor to adapt.
 //!
 //! Delivery is the same story `claude.rs` tells: a directory per skill
 //! that tower owns outright, written whole and removed whole, with no
@@ -14,10 +13,15 @@
 //! already owns; Codex takes directories beside the settings file it
 //! does not.
 //!
-//! They live as markdown next to the Rust, embedded whole. Each embedded
+//! It lives as markdown next to the Rust, embedded whole. The embedded
 //! constant is the staleness fingerprint — byte drift on disk reads as
-//! "an older tower wrote it" — so the files carry no version or hash of
-//! their own.
+//! "an older tower wrote it" — so the file carries no version or hash of
+//! its own.
+//!
+//! A skill an older tower shipped and this one does not is recognized by
+//! the front matter it shipped with and removed on the next write, so
+//! `hook -u` is the repair for a retired skill the way it is for a
+//! drifted one.
 
 use std::path::{Path, PathBuf};
 
@@ -34,26 +38,31 @@ pub struct Skill {
 /// The `tower` skill: the advanced manual, on fufu's model.
 pub const SKILL: &str = include_str!("skill.md");
 
-/// Every skill an install writes, in the order the reports name them.
-/// The manual first, then the three worked examples the loop is flown
-/// with — `/tower:plan`, `/tower:work`, `/tower:review` in Claude Code.
-pub const SKILLS: [Skill; 4] = [
-    Skill {
-        name: "tower",
-        text: SKILL,
-    },
-    Skill {
-        name: "plan",
-        text: include_str!("plan.md"),
-    },
-    Skill {
-        name: "work",
-        text: include_str!("work.md"),
-    },
-    Skill {
-        name: "review",
-        text: include_str!("review.md"),
-    },
+/// The manual — `/tower:tower` in Claude Code, `$tower` in Codex.
+pub const SKILLS: [Skill; 1] = [Skill {
+    name: "tower",
+    text: SKILL,
+}];
+
+/// Skills an older tower shipped and this one does not: the three
+/// worked examples, written by the hook from ba1203e until they went
+/// back to docs/skills/. Each is recognized by the front matter it
+/// shipped with, name and description byte for byte, so a skill of
+/// the user's own under the same name — possible beside Codex's
+/// settings — is never touched.
+const RETIRED: [(&str, &str); 3] = [
+    (
+        "plan",
+        "decompose a goal into linked flights — solo mode's entry point",
+    ),
+    (
+        "review",
+        "first-pass a branch — fix the mechanical half, hold the rest",
+    ),
+    (
+        "work",
+        "claim, do, hold or commit, repeat — the loop that pairs with `atc next`",
+    ),
 ];
 
 /// The one file in a skill's directory. The clients' convention, not
@@ -73,8 +82,28 @@ pub fn names() -> String {
         .join(", ")
 }
 
-/// `root/<name>/SKILL.md` for each of the four.
+/// The retired directories under `root` an older tower wrote.
+fn stale(root: &Path) -> Vec<PathBuf> {
+    RETIRED
+        .iter()
+        .map(|(name, description)| {
+            let dir = root.join(name);
+            let head = format!("---\nname: {name}\ndescription: {description}\n");
+            (dir, head)
+        })
+        .filter(|(dir, head)| {
+            std::fs::read_to_string(dir.join(FILE)).is_ok_and(|text| text.starts_with(head))
+        })
+        .map(|(dir, _)| dir)
+        .collect()
+}
+
+/// `root/<name>/SKILL.md` for each shipped skill, after any retired one
+/// goes.
 pub fn write_all(root: &Path) -> Result<(), CliError> {
+    for dir in stale(root) {
+        std::fs::remove_dir_all(&dir).map_err(|err| super::failed(&dir, err))?;
+    }
     for skill in &SKILLS {
         let dir = root.join(skill.name);
         std::fs::create_dir_all(&dir).map_err(|err| super::failed(&dir, err))?;
@@ -84,13 +113,13 @@ pub fn write_all(root: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-/// Every skill's directory, removed. Answers whether there was anything
-/// to remove, so a caller can report honestly instead of claiming a
-/// change it did not make.
+/// Every skill's directory, removed, retired ones included. Answers
+/// whether there was anything to remove, so a caller can report honestly
+/// instead of claiming a change it did not make.
 pub fn remove_all(root: &Path) -> Result<bool, CliError> {
     let mut removed = false;
-    for skill in &SKILLS {
-        let dir = root.join(skill.name);
+    let shipped = SKILLS.iter().map(|skill| root.join(skill.name));
+    for dir in shipped.chain(stale(root)) {
         if !dir.exists() {
             continue;
         }
@@ -102,12 +131,12 @@ pub fn remove_all(root: &Path) -> Result<bool, CliError> {
 
 /// What is on disk under `root`, held against what this binary ships.
 ///
-/// All four byte-equal is `Wired`. Any of them missing or drifted while
-/// at least one is there is `Partial` rather than missing: what is on
-/// disk works, it simply describes a tower that has moved, and that is
-/// a repair `atc hook -u` makes and never an outage. None at all is
-/// `NotWired`.
+/// Byte-equal is `Wired`. Drifted is `Partial` rather than missing: what
+/// is on disk works, it simply describes a tower that has moved, and
+/// that is a repair `atc hook -u` makes and never an outage. A retired
+/// skill on disk is `Partial` too. Nothing at all is `NotWired`.
 pub fn wiring(root: &Path) -> Wiring {
+    let stale = stale(root);
     let mut present = 0usize;
     let mut current = 0usize;
     for skill in &SKILLS {
@@ -120,9 +149,9 @@ pub fn wiring(root: &Path) -> Wiring {
             Err(_) => {}
         }
     }
-    if present == 0 {
+    if present == 0 && stale.is_empty() {
         Wiring::NotWired
-    } else if current == SKILLS.len() {
+    } else if current == SKILLS.len() && stale.is_empty() {
         Wiring::Wired {
             mechanism: Mechanism::Plugin,
             at: root.to_path_buf(),
@@ -147,28 +176,70 @@ mod tests {
 
         write_all(&root).unwrap();
         assert!(matches!(wiring(&root), Wiring::Wired { .. }));
-        for skill in &SKILLS {
-            assert_eq!(
-                std::fs::read_to_string(path(&root, skill)).unwrap(),
-                skill.text,
-                "{} lands byte for byte",
-                skill.name
-            );
-        }
+        assert_eq!(
+            std::fs::read_to_string(path(&root, &SKILLS[0])).unwrap(),
+            SKILLS[0].text,
+            "the manual lands byte for byte"
+        );
 
-        std::fs::write(path(&root, &SKILLS[1]), "an older tower wrote this").unwrap();
+        std::fs::write(path(&root, &SKILLS[0]), "an older tower wrote this").unwrap();
         assert!(
             matches!(wiring(&root), Wiring::Partial { .. }),
             "text that is not what this binary ships is a repair, not a hole"
-        );
-        std::fs::remove_dir_all(root.join(SKILLS[2].name)).unwrap();
-        assert!(
-            matches!(wiring(&root), Wiring::Partial { .. }),
-            "one of four missing is a repair too"
         );
 
         assert!(remove_all(&root).unwrap());
         assert!(!remove_all(&root).unwrap(), "nothing left to take");
         assert_eq!(wiring(&root), Wiring::NotWired);
+    }
+
+    /// The front matter is the fingerprint: a retired skill an older
+    /// tower wrote is taken on the next write, and a file of the user's
+    /// own under the same name is neither counted nor touched.
+    #[test]
+    fn a_retired_skill_is_a_repair_and_a_users_own_is_not() {
+        let home = tempfile::TempDir::new().unwrap();
+        let root = home.path().join("skills");
+        write_all(&root).unwrap();
+
+        let work = root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(
+            work.join(FILE),
+            "---\nname: work\ndescription: claim, do, hold or commit, repeat — the loop that pairs with `atc next`\n---\n# work\n",
+        )
+        .unwrap();
+        assert!(
+            matches!(wiring(&root), Wiring::Partial { .. }),
+            "a retired skill on disk is a repair"
+        );
+
+        let plan = root.join("plan");
+        std::fs::create_dir_all(&plan).unwrap();
+        let mine = "---\nname: plan\ndescription: mine\n---\n";
+        std::fs::write(plan.join(FILE), mine).unwrap();
+        assert!(
+            matches!(wiring(&root), Wiring::Partial { .. }),
+            "still the retired work"
+        );
+
+        write_all(&root).unwrap();
+        assert!(!work.exists(), "the retired skill goes");
+        assert_eq!(
+            std::fs::read_to_string(plan.join(FILE)).unwrap(),
+            mine,
+            "the user's own stands"
+        );
+        assert!(
+            matches!(wiring(&root), Wiring::Wired { .. }),
+            "the user's own is invisible to the count"
+        );
+
+        assert!(remove_all(&root).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(plan.join(FILE)).unwrap(),
+            mine,
+            "uninstall leaves the user's own too"
+        );
     }
 }

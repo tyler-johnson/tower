@@ -6,7 +6,7 @@
 //! `~/.config/tower/skills` would pass or fail by whose machine it is.
 //!
 //! The engine ships empty, so every listing here is over files the test
-//! wrote itself — the shape the worked examples in `crates/atc-cli/src/integ/`
+//! wrote itself — the shape the worked examples in `docs/skills/`
 //! carry, never the compiled copies themselves.
 
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use std::process::{Command, Output};
 use atc_testsupport::{Repo, scrub};
 
 /// A skill file with the front matter a harness redirect depends on,
-/// the shape of the shipped `work` skill. Written by the fixture, so the
+/// the shape of the `work` example. Written by the fixture, so the
 /// byte-for-byte comparison has a source to hold the output against.
 const WORK_MD: &str = "\
 ---

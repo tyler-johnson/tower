@@ -29,9 +29,9 @@ For the team, from the root of a clone of this repository:
 mkdir -p .tower/procedures .tower/skills
 cp docs/procedures/ticket.toml .tower/procedures/     # one flight, yours
 cp docs/procedures/review.toml .tower/procedures/     # pass and smoke, then your verdict
-cp crates/atc-cli/src/integ/plan.md   .tower/skills/         # decompose a goal into linked flights
-cp crates/atc-cli/src/integ/review.md .tower/skills/         # first-pass a branch
-cp crates/atc-cli/src/integ/work.md   .tower/skills/         # claim, do, hold or commit, repeat
+cp docs/skills/plan.md .tower/skills/                 # decompose a goal into linked flights
+cp docs/skills/review.md .tower/skills/               # first-pass a branch
+cp docs/skills/work.md .tower/skills/                 # claim, do, hold or commit, repeat
 ```
 
 For yourself, `~/.config/tower/procedures/` and `~/.config/tower/skills/` take the same files.
@@ -40,7 +40,7 @@ The name a procedure is filed under is the `name =` line inside the file, not th
 
 ## Reaching an agent
 
-The manual is fufu's to install: `ff extension add tower` declares tower, and `ff hook` asks the binary for the `tower` skill and installs it beside fufu's own in every client it wires. Nothing here is the manual, and the manual never appears on the shelf.
+The manual is the binary's to install: `atc hook` writes the `tower` skill where each client reads skills — inside the Claude Code plugin it owns, beside Codex's settings — and `atc unhook` takes it back. Nothing here is the manual, and the manual never appears on the shelf.
 
 A shelf skill reaches an agent by name. An agent-assigned flight names the skill it is flown with, `atc next` hands that name out on the picked row, and the agent prints it with `atc skills <name>` and follows it for that flight. tower writes no other program's config, so there is no redirect to set up: the flight carries the name, and the pick delivers it.
 

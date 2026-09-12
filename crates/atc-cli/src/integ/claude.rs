@@ -8,12 +8,12 @@
 //! in a directory that is entirely tower's. `--settings` is the escape
 //! hatch back to settings entries if the plugin path ever misbehaves.
 //!
-//! The plugin carries the shipped skills too, under `skills/<name>/`,
-//! which is the layout a plugin's own skills take and what makes them
-//! `/tower:<name>` in a session. That is why the skills cost this adapter
-//! nothing structural: four more files inside a directory that is written
-//! whole and removed whole either way. `--settings` gets no skills,
-//! because the skills ride the plugin.
+//! The plugin carries the shipped skill too, under `skills/<name>/`,
+//! which is the layout a plugin's own skills take and what makes it
+//! `/tower:<name>` in a session. That is why the skill costs this adapter
+//! nothing structural: the manual inside a directory that is written
+//! whole and removed whole either way. `--settings` gets no skill,
+//! because the skill rides the plugin.
 //!
 //! The migration from settings entries to the plugin is add-then-remove:
 //! install the plugin, verify it, then strip the settings entries. The
@@ -183,7 +183,7 @@ fn plugin_wiring() -> Wiring {
     }
 }
 
-/// Writes the plugin whole: manifest, hooks, and the four skills. Answers
+/// Writes the plugin whole: manifest, hooks, and the skill. Answers
 /// whether any byte moved, so a second install and a refresh over a
 /// current machine can say so instead of claiming a write.
 fn write_plugin() -> Result<bool, CliError> {

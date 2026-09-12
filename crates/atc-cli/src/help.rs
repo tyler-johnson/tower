@@ -699,12 +699,12 @@ yourself included. --settings is
 Claude Code's escape hatch: entries in ~/.claude/settings.json
 instead of the plugin, and no skills.
 
-Claude Code and Codex also take tower's four skills — the manual,
-`tower`, and the three worked examples, `plan`, `work`, and `review`
-— typed /tower:<name> in Claude Code and $<name> in Codex. Cursor
-and Gemini read no skills directory and get the notice alone. Codex
-trusts a hook by its hash, so after wiring it review the hook with
-/hooks there, or it is skipped.";
+Claude Code and Codex also take the manual, `tower` — typed
+/tower:tower in Claude Code and $tower in Codex; a skill an older
+tower shipped and this one does not is removed on the next write.
+Cursor and Gemini read no skills directory and get the notice alone.
+Codex trusts a hook by its hash, so after wiring it review the hook
+with /hooks there, or it is skipped.";
 
 pub const HOOK_EXAMPLES: &str = "\
 Examples:
