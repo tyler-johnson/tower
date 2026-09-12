@@ -12,7 +12,7 @@
 //! `linked` edges, so a sub-flight is indistinguishable from a
 //! hand-declared dependency, and the filings and the edges land in one
 //! `append_with` — two appends would leave a window where the parent is
-//! live, unlinked, and pullable.
+//! live, unlinked, and Ready.
 
 use serde::Serialize;
 

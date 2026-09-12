@@ -50,8 +50,9 @@ use crate::log::{self, Event, EventId, Kind, Store, usable_callsign};
 /// callsign — one word, no spaces. Anything else refuses here, at the
 /// boundary where a person is typing; the wire stays a free string.
 /// A callsign needs nothing to be a lane: values are open everywhere in
-/// tower.
-pub(crate) fn lane_word(word: &str) -> Result<Option<String>, Error> {
+/// tower. Public because `next <lane>` and `next --assignee` read the
+/// same words from the CLI.
+pub fn lane_word(word: &str) -> Result<Option<String>, Error> {
     match word {
         "none" => Ok(None),
         "me" | "agent" => Ok(Some(word.to_string())),
@@ -67,7 +68,7 @@ pub(crate) fn lane_word(word: &str) -> Result<Option<String>, Error> {
 /// when there is one, and stays the literal `me` when there is not.
 /// Resolved at the append and never at parse, so a procedure rule
 /// saying `assignee = "me"` still matches a `--assignee me` filing.
-pub(crate) fn stored_lane(word: Option<String>, caller: Option<&str>) -> Option<String> {
+pub fn stored_lane(word: Option<String>, caller: Option<&str>) -> Option<String> {
     match (word.as_deref(), caller) {
         (Some("me"), Some(callsign)) => Some(callsign.to_string()),
         _ => word,

@@ -197,8 +197,19 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
         None if cli.version => cmd::version::run(cli.json)?,
         None | Some(Command::Board { .. }) => cmd::board::run(cli.json, closed(cli)?)?,
-        Some(Command::Next { count, peek }) => {
-            return cmd::next::run(cli.json, count.unwrap_or(1), *peek);
+        Some(Command::Next {
+            lane,
+            assignee,
+            count,
+            peek,
+        }) => {
+            return cmd::next::run(
+                cli.json,
+                lane.as_deref(),
+                assignee.as_deref(),
+                count.unwrap_or(1),
+                *peek,
+            );
         }
         Some(Command::Brief { flight }) => cmd::brief::run(cli.json, flight)?,
         Some(Command::File {

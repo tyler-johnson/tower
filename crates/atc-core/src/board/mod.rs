@@ -5,7 +5,7 @@
 //! else, and [`enrich`] groups each flight by the status its record
 //! derives. [`assemble`] is the wiring, and the one call a render needs;
 //! the clock arrives as an argument, because the fold reads none for
-//! itself. [`pick`] is `next`'s fold over the same flights.
+//! itself. [`pick`] is `next`'s lane walk over the same flights.
 //! [`brief`] is one flight's full record over the same fold, plus its
 //! standing — why it is where it is — and [`history`] is the one thing
 //! the brief cannot read off the fold — the moments themselves, filtered
@@ -41,7 +41,7 @@ pub use history::{Detail, Moment, history};
 pub use model::{
     Board, ClosedWindow, DEFAULT_CLOSED, FlightView, Rows, WaitingOnYou, enrich, parse_closed, rows,
 };
-pub use pick::{Outcome, Pick, Picks, pick};
+pub use pick::{Lane, Outcome, Pick, Picks, pick};
 pub use query::{
     DEFAULT_SHOW, FIELDS, Field, Filter, Folded, Group, Mode, Op, Order, Query, QueryError, Value,
     When,

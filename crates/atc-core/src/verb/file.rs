@@ -41,7 +41,7 @@
 //! flights to say one thing. **Two or more** file a parent plus one
 //! flight each, on the same `linked` edges `decompose` writes; `--status`
 //! lands on the parent. All of it in one `append_with`: two appends would
-//! leave a window where the parent is live, unlinked, and pullable.
+//! leave a window where the parent is live, unlinked, and Ready.
 //!
 //! Still no fufu spawn. The registry's repository layer resolves through
 //! `Store::main_worktree`, which reads the common dir and runs nothing.
@@ -311,7 +311,7 @@ fn lane(assignee: Option<String>) -> Result<Option<String>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board;
+    use crate::board::{self, Lane};
     use atc_testsupport::Repo;
 
     fn store() -> (Repo, Store) {
@@ -421,7 +421,10 @@ done     = "committed"
         assert_eq!(flight.labels, ["web"]);
         assert_eq!(flight.skill.as_deref(), Some("debug"));
         assert_eq!(flight.body, "the redirect loops");
-        assert!(flight.pullable(None), "agent-laned and Ready — pullable");
+        assert!(
+            flight.in_lane(&Lane::Agent, None),
+            "agent-laned and Ready — what `next agent` walks"
+        );
     }
 
     #[test]
@@ -443,8 +446,8 @@ done     = "committed"
         let fold = folded(&store);
         assert_eq!(fold.flights[0].status, "backlog", "the setting's word");
         assert_eq!(fold.flights[1].status, "in_progress", "--status wins");
-        assert!(
-            !fold.flights[0].pullable(None),
+        assert_ne!(
+            fold.flights[0].status, "ready",
             "Backlog — the lane alone clears nothing"
         );
     }
@@ -616,7 +619,7 @@ status   = "backlog"
         assert_eq!(pass.status, "ready", "no after — born Ready");
         assert_eq!(pass.assignee.as_deref(), Some("agent"));
         assert_eq!(pass.skill.as_deref(), Some("review"));
-        assert!(pass.pullable(None));
+        assert!(pass.in_lane(&Lane::Agent, None));
 
         let smoke = by_subject("· smoke");
         assert_eq!(smoke.status, "ready");

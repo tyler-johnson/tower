@@ -1,10 +1,11 @@
 //! `atc brief` against real repositories: the full record in one
 //! read, the standing, the JSON round-trip, and the refusals.
 //!
-//! The pool fixtures share `next.rs`'s grammar: the pool is Ready
-//! flights in the agent lane, so bare filings — born Ready but laned to
-//! no one — are never candidates, and the pullable ones file under the two-flight
-//! `pipeline` procedure whose `pass` is agent-assigned and born Ready.
+//! The fixtures share `next.rs`'s grammar: a bare filing is born Ready
+//! and laned to no one, and the agent-laned ones file under the
+//! two-flight `pipeline` procedure whose `pass` is agent-assigned and
+//! born Ready. The standing reads the status alone — Ready in any lane
+//! is `ready` — and the lane rides beside it.
 //! Each filing mints six event seqs and three flight numbers, so the
 //! agent flights are `pi.2` (#2) and `pi.8` (#5).
 
@@ -657,25 +658,32 @@ fn a_malformed_reference_refuses_bad_flight() {
 }
 
 #[test]
-fn a_bare_filing_briefs_as_yours() {
-    // Bare `file` lands Ready with no lane — the lane is what keeps it
-    // out of the pool, and the brief says so.
+fn a_ready_flight_briefs_ready_in_any_lane() {
+    // Bare `file` lands Ready with no lane; `--assignee` lanes it. The
+    // standing is `ready` either way — which walk hands it out is
+    // `next <lane>`'s question — and the lane rides on the field line.
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "needs a look"]));
+    stdout(&atc(repo.path(), &["file", "mine", "--assignee", "me"]));
 
-    let out = atc(repo.path(), &["brief", "1"]);
-    assert_eq!(out.status.code(), Some(0));
-    let text = stdout(&out);
-    assert!(text.contains("ready"), "{text}");
-    assert!(text.contains("yours — unassigned"), "{text}");
+    for (flight, lane) in [("1", "unassigned"), ("2", "assignee me")] {
+        let out = atc(repo.path(), &["brief", flight]);
+        assert_eq!(out.status.code(), Some(0));
+        let text = stdout(&out);
+        assert!(text.contains("ready"), "{text}");
+        assert!(text.contains(lane), "{text}");
+        assert!(!text.contains("yours"), "{text}");
+        let json = envelope(&atc(repo.path(), &["brief", flight, "--json"]));
+        assert_eq!(json["data"]["standing"], serde_json::json!("ready"));
+    }
 }
 
 #[test]
-fn a_me_laned_ready_flight_briefs_as_yours_with_its_lane() {
+fn a_backlog_flight_briefs_as_yours_with_its_lane() {
     let repo = repo();
     stdout(&atc(
         repo.path(),
-        &["file", "needs a look", "--assignee", "me"],
+        &["file", "parked", "--assignee", "me", "--status", "backlog"],
     ));
 
     let out = atc(repo.path(), &["brief", "1"]);

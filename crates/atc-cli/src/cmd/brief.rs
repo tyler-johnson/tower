@@ -20,8 +20,7 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     let id = super::resolve(&fold, flight)?;
 
     let now = board::now();
-    let brief =
-        board::brief(&fold, &events, &id, store.callsign()).expect("resolved to a filed flight");
+    let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
 
     if json {
         println!("{}", machine::emit("brief", &brief));

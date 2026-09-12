@@ -9,14 +9,16 @@
 //! reading it is never a lifecycle move.
 //!
 //! Waiting is a status the fold derives, not a standing of its own: a
-//! flight with a live dependency is not pullable, so it stands as
-//! `yours` with the status line saying Waiting.
+//! flight with a live dependency is not Ready, so it stands as `yours`
+//! with the status line saying Waiting.
 //!
-//! Standing precedence is `enrich`'s partition, not pick's one boolean:
-//! closed, then the open question, then In Progress, then the lane and
-//! the edges — `!pullable()` is *yours* — and a pool candidate is
-//! *ready*. A brief that said "in progress" where the board shows
-//! *holding* would fail the one-glance test.
+//! Standing precedence is `enrich`'s partition: closed, then the open
+//! question, then In Progress, then the status — Ready in any lane is
+//! *ready*, and everything else, Backlog or Waiting on a live
+//! dependency, is *yours*. The lane is not read: which walk hands a
+//! Ready flight out is `next <lane>`'s question, and the brief's flat
+//! `assignee` says where it sits. A brief that said "in progress"
+//! where the board shows *holding* would fail the one-glance test.
 
 use serde::Serialize;
 
@@ -108,12 +110,12 @@ pub enum Standing {
     /// In Progress — someone already flies it; the status mark beside
     /// it says who.
     InProgress,
-    /// Not in the pool by the status and the lane alone: not Ready —
-    /// Backlog, or Waiting on a live dependency — or in neither the
-    /// agent lane nor the reader's own callsign's. Unknown never rounds
-    /// down.
+    /// Not Ready — Backlog, or Waiting on a live dependency — so no
+    /// walk reaches it until a gesture or a closing clears it. Unknown
+    /// never rounds down.
     Yours,
-    /// In the pool: `next` will hand it out in filed order.
+    /// Ready, in whatever lane: `next <lane>` hands it out in filed
+    /// order, and `assignee` says which lane that is.
     Ready,
 }
 
@@ -148,12 +150,11 @@ pub struct CommentView {
 /// source, since the fold keeps marks rather than gestures.
 ///
 /// Enrichment is `enrich`'s per-flight derivation, reused: the status
-/// mark and its reason, the progress mark, and the open question.
-/// `viewer` is the reader's callsign, which the standing reads: a
-/// flight laned to it is in the reader's pool.
-pub fn brief(fold: &Fold, events: &[Event], id: &EventId, viewer: Option<&str>) -> Option<Brief> {
+/// mark and its reason, the progress mark, and the open question. No
+/// viewer: the standing reads the same to everyone.
+pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
     let flight = fold.flights.iter().find(|flight| &flight.id == id)?;
-    let standing = standing(flight, viewer);
+    let standing = standing(flight);
 
     Some(Brief {
         id: flight.id.to_string(),
@@ -207,17 +208,17 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId, viewer: Option<&str>) 
     })
 }
 
-/// Where the flight stands, in enrich's precedence, over the same gate
-/// as pick's. A pool candidate is always ready — there is no gate for it
-/// to lose.
-fn standing(flight: &Flight, viewer: Option<&str>) -> Standing {
+/// Where the flight stands, in enrich's precedence. Ready is the
+/// derived word alone — a Ready flight is ready in any lane, and no
+/// viewer gates it.
+fn standing(flight: &Flight) -> Standing {
     if flight.closed() {
         Standing::Done
     } else if flight.question.is_some() {
         Standing::Question
     } else if flight.status == "in_progress" {
         Standing::InProgress
-    } else if flight.pullable(viewer) {
+    } else if flight.status == "ready" {
         Standing::Ready
     } else {
         Standing::Yours
@@ -252,8 +253,8 @@ mod tests {
     use super::*;
     use crate::log::{Event, EventId, Kind};
 
-    /// A filing with the given status and lane stored — the pool gate's
-    /// two fields, everything else defaulted.
+    /// A filing with the given status and lane stored — the standing's
+    /// field and the lane beside it, everything else defaulted.
     fn stored(id: &str, time: i64, status: &str, assignee: Option<&str>) -> Event {
         let id: EventId = id.parse().expect("id");
         Event {
@@ -420,7 +421,7 @@ mod tests {
     /// `brief` over one slice of events — the fold and the history from
     /// the same log, which is the only honest way to pair them.
     fn brief_of(events: &[Event], id: &EventId) -> Option<Brief> {
-        brief(&fold(events), events, id, None)
+        brief(&fold(events), events, id)
     }
 
     #[test]
@@ -556,15 +557,15 @@ mod tests {
     }
 
     #[test]
-    fn a_flight_laned_to_the_viewer_briefs_ready_and_yours_to_anyone_else() {
-        let events = [stored("pi.1", 10, "ready", Some("qwen-review"))];
-        let folded = fold(&events);
-        let own = brief(&folded, &events, &id("pi.1"), Some("qwen-review")).expect("filed");
-        assert!(matches!(own.standing, Standing::Ready));
-        let other = brief(&folded, &events, &id("pi.1"), Some("claude")).expect("filed");
-        assert!(matches!(other.standing, Standing::Yours));
-        let nobody = brief(&folded, &events, &id("pi.1"), None).expect("filed");
-        assert!(matches!(nobody.standing, Standing::Yours));
+    fn a_ready_flight_briefs_ready_in_any_lane() {
+        // No viewer gate: which walk hands it out is `next <lane>`'s
+        // question, and the lane reads off the flat field.
+        for lane in [Some("qwen-review"), Some("me"), Some("agent"), None] {
+            let events = [stored("pi.1", 10, "ready", lane)];
+            let brief = brief_of(&events, &id("pi.1")).expect("filed");
+            assert!(matches!(brief.standing, Standing::Ready), "{lane:?}");
+            assert_eq!(brief.assignee.as_deref(), lane);
+        }
     }
 
     #[test]
@@ -767,7 +768,7 @@ mod tests {
     #[test]
     fn a_me_laned_flight_is_yours_and_reads_waiting() {
         // Waiting is the status, yours is the standing: the flight is
-        // not pullable, and the lane reads off the flat field.
+        // not Ready, and the lane reads off the flat field.
         let brief = brief_of(
             &[
                 stored("pi.1", 10, "ready", Some("me")),
@@ -813,7 +814,7 @@ mod tests {
             linked("pi.3", 30, "pi.1", "pi.2"),
         ];
 
-        // Derived Waiting: not a pool candidate.
+        // Derived Waiting: no walk reaches it.
         let dependent = brief_of(&events, &id("pi.1")).expect("filed");
         assert_eq!(dependent.status, "waiting");
         assert!(matches!(dependent.standing, Standing::Yours));

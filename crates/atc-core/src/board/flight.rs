@@ -24,6 +24,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::pick::Lane;
 use super::view::View;
 use crate::log::{Event, EventId, Kind, RETIRED_KINDS};
 
@@ -114,14 +115,18 @@ impl Flight {
         self.status == "done" || self.status == "canceled"
     }
 
-    /// Whether the pool admits this flight for `caller`: Ready, and in
-    /// the agent lane or the caller's own callsign's queue. Exact string
-    /// compares on the stored fields — unknown never rounds down. One
-    /// method because `pick` and `brief` must agree on it, and two
-    /// copies of a gate is where drift starts.
-    pub fn pullable(&self, caller: Option<&str>) -> bool {
-        self.status == "ready"
-            && (self.assignee.as_deref() == Some("agent") || self.laned_to(caller))
+    /// Whether the flight is in `lane` for `caller`: the stored assignee
+    /// read against one of `next`'s four lane shapes. Exact string
+    /// compares — unknown never rounds down. Status is not read here:
+    /// the lane is where a flight sits, and `pick` gates Ready on its
+    /// own.
+    pub fn in_lane(&self, lane: &Lane, caller: Option<&str>) -> bool {
+        match lane {
+            Lane::Me => self.mine(caller),
+            Lane::Agent => self.assignee.as_deref() == Some("agent"),
+            Lane::None => self.assignee.is_none(),
+            Lane::Callsign(callsign) => self.assignee.as_deref() == Some(callsign.as_str()),
+        }
     }
 
     /// Whether the flight is the viewer's own: laned `me`, or laned to
@@ -794,7 +799,7 @@ mod tests {
         )
     }
 
-    /// A filing born pullable — Ready, agent lane, the pool's norm.
+    /// A filing born Ready in the agent lane — the shared pool's norm.
     fn filed_agent(id: &str, time: i64, subject: &str) -> Event {
         event(
             id,
@@ -1082,7 +1087,7 @@ mod tests {
         assert!(flight.labels.is_empty());
         assert_eq!(flight.skill.as_deref(), Some("review"));
         assert_eq!(flight.done_kind, "asserted");
-        assert!(flight.pullable(None));
+        assert!(flight.in_lane(&Lane::Agent, None));
         assert!(!flight.closed());
     }
 
@@ -1305,7 +1310,7 @@ mod tests {
         let flight = &parked.flights[0];
         assert_eq!(flight.status, "parked");
         assert_eq!(flight.stand.foreign.as_deref(), Some("parked"));
-        assert!(!flight.pullable(None), "unknown is not ready");
+        assert_ne!(flight.status, "ready", "unknown is not ready");
         assert!(!flight.closed(), "unknown is not closed either");
 
         // The next known word clears it.
@@ -1315,7 +1320,7 @@ mod tests {
             status("pi.3", 30, "pi.1", "ready"),
         ]);
         assert!(cleared.flights[0].stand.foreign.is_none());
-        assert!(cleared.flights[0].pullable(None));
+        assert_eq!(cleared.flights[0].status, "ready");
     }
 
     #[test]
@@ -1325,7 +1330,10 @@ mod tests {
             assigned("pi.2", 20, "pi.1", Some("me")),
         ]);
         assert_eq!(laned.flights[0].assignee.as_deref(), Some("me"));
-        assert!(!laned.flights[0].pullable(None), "the lane left the pool");
+        assert!(
+            !laned.flights[0].in_lane(&Lane::Agent, None),
+            "the lane left the pool"
+        );
 
         let cleared = fold(&[
             filed_agent("pi.1", 10, "s"),
@@ -1430,10 +1438,9 @@ mod tests {
         ]);
         let flight = &fold.flights[0];
         assert!(!flight.stand.started, "holding is stopping");
-        assert_eq!(flight.status, "ready");
-        assert!(
-            flight.pullable(None),
-            "back in the pool for whoever pulls next"
+        assert_eq!(
+            flight.status, "ready",
+            "back in the walk for whoever pulls next"
         );
     }
 
@@ -1455,7 +1462,6 @@ mod tests {
         let mark = flight.status_mark.as_ref().expect("moved");
         assert_eq!((mark.by.as_str(), mark.at), ("mover@b.c", 30));
         assert!(flight.status_dep.is_none());
-        assert!(!flight.pullable(None));
     }
 
     #[test]
@@ -1943,12 +1949,11 @@ mod tests {
     #[test]
     fn a_pull_and_a_release_round_trip_through_status_moves() {
         // What `next` writes and what a hand move undoes: in_progress
-        // takes the flight out of the pool, ready puts it back.
+        // takes the flight out of the walk, ready puts it back.
         let pulled = fold(&[
             filed_agent("pi.1", 10, "s"),
             status("pi.2", 20, "pi.1", "in_progress"),
         ]);
-        assert!(!pulled.flights[0].pullable(None));
         assert_eq!(pulled.flights[0].status, "in_progress");
 
         let released = fold(&[
@@ -1956,11 +1961,11 @@ mod tests {
             status("pi.2", 20, "pi.1", "in_progress"),
             status("pi.3", 30, "pi.1", "ready"),
         ]);
-        assert!(released.flights[0].pullable(None));
+        assert_eq!(released.flights[0].status, "ready");
     }
 
     #[test]
-    fn pullable_and_mine_read_the_lane_against_the_caller() {
+    fn in_lane_and_mine_read_the_lane_against_the_caller() {
         let fold = fold(&[
             filed_agent("pi.1", 10, "pool"),
             assigned("pi.2", 20, "pi.1", Some("qwen-review")),
@@ -1975,15 +1980,27 @@ mod tests {
         let me = &fold.flights[2];
         let nobody = &fold.flights[3];
 
-        assert!(own.pullable(Some("qwen-review")), "its own queue");
-        assert!(!own.pullable(Some("claude")), "another callsign's queue");
-        assert!(!own.pullable(None), "no callsign, no own queue");
-        assert!(pool.pullable(Some("qwen-review")) && pool.pullable(None));
-        assert!(!me.pullable(Some("qwen-review")));
+        let qwen = Lane::Callsign("qwen-review".to_string());
+        assert!(own.in_lane(&Lane::Me, Some("qwen-review")), "its own queue");
         assert!(
-            !nobody.pullable(None),
+            !own.in_lane(&Lane::Me, Some("claude")),
+            "another callsign's queue"
+        );
+        assert!(!own.in_lane(&Lane::Me, None), "no callsign, no own queue");
+        assert!(own.in_lane(&qwen, None), "a callsign lane named outright");
+        assert!(!own.in_lane(&Lane::Agent, Some("qwen-review")));
+        assert!(
+            pool.in_lane(&Lane::Agent, Some("qwen-review")) && pool.in_lane(&Lane::Agent, None)
+        );
+        assert!(!pool.in_lane(&Lane::Me, Some("qwen-review")) && !pool.in_lane(&qwen, None));
+        assert!(me.in_lane(&Lane::Me, Some("qwen-review")) && me.in_lane(&Lane::Me, None));
+        assert!(!me.in_lane(&qwen, None), "the literal is not a callsign");
+        assert!(
+            !nobody.in_lane(&Lane::Me, None),
             "an unassigned flight never matches a caller with no callsign"
         );
+        assert!(nobody.in_lane(&Lane::None, None) && nobody.in_lane(&Lane::None, Some("claude")));
+        assert!(!own.in_lane(&Lane::None, None));
 
         assert!(own.mine(Some("qwen-review")));
         assert!(!own.mine(Some("claude")) && !own.mine(None));

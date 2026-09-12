@@ -1130,14 +1130,14 @@ fn a_release_back_to_ready_rejoins_the_pool() {
         repo.path(),
         &["file", "the recovery", "--assignee", "agent"],
     ));
-    let envelope = envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
+    let envelope = envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     assert_eq!(
         envelope["data"]["picked"][0]["flight"],
         serde_json::json!("pi.1")
     );
 
     stdout(&atc(repo.path(), &["status", "1", "in_progress"]));
-    let peeked = self::envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
+    let peeked = self::envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     assert_eq!(
         peeked["data"]["picked"],
         serde_json::json!([]),
@@ -1145,7 +1145,7 @@ fn a_release_back_to_ready_rejoins_the_pool() {
     );
 
     stdout(&atc(repo.path(), &["status", "1", "ready"]));
-    let peeked = self::envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
+    let peeked = self::envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     assert_eq!(
         peeked["data"]["picked"][0]["flight"],
         serde_json::json!("pi.1"),

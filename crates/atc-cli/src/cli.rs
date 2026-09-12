@@ -108,10 +108,18 @@ pub enum Command {
         #[command(flatten)]
         args: BoardArgs,
     },
-    /// Claim the next ready flight, or the next `k` in filed order.
+    /// Claim the next ready flight from a lane, or the next `k` in filed order.
     // agent notice quotes this: `atc next`
     #[command(long_about = help::NEXT, after_long_help = help::NEXT_EXAMPLES)]
     Next {
+        /// The lane to walk — me, agent, none, or a callsign; your own
+        /// queue when unsaid. The unassigned lane walks after it.
+        #[arg(value_name = "lane")]
+        lane: Option<String>,
+        /// Re-lane each pick as it is claimed — me, agent, none, or a
+        /// callsign.
+        #[arg(long = "assignee", value_name = "lane")]
+        assignee: Option<String>,
         /// How many flights to hand out; one when unsaid.
         #[arg(short = 'n', value_name = "k")]
         count: Option<usize>,

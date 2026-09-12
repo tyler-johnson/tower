@@ -295,8 +295,7 @@ async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<
         let events = store.read_all()?;
         let fold = board::fold(&events);
         let id = board::resolve(&fold, &flight)?;
-        let brief = board::brief(&fold, &events, &id, store.callsign())
-            .expect("resolved to a filed flight");
+        let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
         Ok(machine::emit("brief", &brief))
     })
     .await

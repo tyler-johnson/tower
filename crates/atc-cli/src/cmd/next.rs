@@ -1,29 +1,35 @@
-//! `atc next [-n <k>] [--peek]` — pull the next Ready flight from
-//! the pool, or the next `k` in filed order. The pull is the Ready
-//! check and the In Progress move in one command: the pool is every
-//! Ready flight in the agent lane plus every one laned to your own
-//! callsign, and unless `--peek` the picked set becomes one In Progress
+//! `atc next [<lane>] [--assignee <lane>] [-n <k>] [--peek]` — pull the
+//! next Ready flight from a lane, or the next `k` in filed order. The
+//! walk is the named lane in filed order, then the unassigned lane in
+//! filed order: `me` — your own queue, the literal `me` lane and your
+//! callsign's — when unsaid, `agent` for the shared pool alone, `none`
+//! for the unassigned lane by itself, or a callsign for one pilot's
+//! queue. The pull is the Ready check and the In Progress move in one
+//! command: unless `--peek` the picked set becomes one In Progress
 //! `status` event per flight in a single append, the store's callsign
-//! stamp the pilot. The verb writes to tower's log
-//! and nothing to the repository: no branch, no worktree, no op row.
+//! stamp the pilot, and `--assignee` re-lanes each pick in that same
+//! append with `file`'s lane words. The verb writes to tower's log and
+//! nothing to the repository: no branch, no worktree, no op row.
 //!
 //! The verb's success code is 0 on a pick and 1 on an empty one, fufu's
 //! "no." An empty pick rides the success path with a full data envelope,
 //! and `outcome` on it says which empty pick it was — `drained`, a board
-//! with nothing left, or `yours`, Ready work the lane kept out of the
-//! pool that needs you. The code never says 3: 3 belongs to `held/*`,
-//! which an empty pool is not. `while atc next` terminates on the
-//! code alone; a harness that needs to know why reads the field, not the
-//! status. The pipeline is the board's — store, fold — with `pick` in
-//! place of `enrich`. `--peek` is the same computation
-//! with the append left out, and reports the pick alone.
+//! with nothing left, or `elsewhere`, Ready work in a lane the walk
+//! never entered. The code never says 3: 3 belongs to `held/*`, which
+//! an empty walk is not. `while atc next` terminates on the code alone;
+//! a harness that needs to know why reads the field, not the status.
+//! The pipeline is the board's — store, fold — with `pick` in place of
+//! `enrich`. `--peek` is the same computation with the append left out,
+//! and reports the pick alone. A bad lane word on either side refuses
+//! before the read, the way `assign` refuses it.
 
 use serde::Serialize;
 
 use crate::error::CliError;
 use crate::{machine, render};
-use atc_core::board::{self, Fold, Outcome};
-use atc_core::log::Kind;
+use atc_core::board::{self, Fold, Lane, Outcome};
+use atc_core::log::{EventId, Kind};
+use atc_core::verb;
 
 /// One shape either way: `pulled` is `false` under `--peek`, so the
 /// envelope never lies about whether the write happened.
@@ -32,11 +38,17 @@ struct Data<'a> {
     /// Which of the three things happened; the exit code is its
     /// rendering.
     outcome: Outcome,
+    /// The lane the walk named — `me` when unsaid.
+    lane: String,
+    /// The lane each pick was moved to, as the log stores it — absent
+    /// when `--assignee` was not given, `null` when it cleared the lane.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignee: Option<Option<String>>,
     picked: &'a [Row],
     pulled: bool,
-    /// Ready, kept out of the pool by the lane alone — the count behind
-    /// the `yours` outcome.
-    yours: usize,
+    /// Ready, in a lane the walk never entered — the count behind the
+    /// `elsewhere` outcome.
+    elsewhere: usize,
 }
 
 /// One pulled flight.
@@ -52,7 +64,13 @@ struct Row {
     skill: Option<String>,
 }
 
-pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
+pub fn run(
+    json: bool,
+    lane: Option<&str>,
+    assignee: Option<&str>,
+    count: usize,
+    peek: bool,
+) -> Result<i32, CliError> {
     if count == 0 {
         return Err(CliError::coded(
             "usage/bad-count",
@@ -61,25 +79,40 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
         ));
     }
 
+    // Both lane words before the read, so a typo refuses before the
+    // fold. The walk's lane defaults to `me`; the re-lane resolves the
+    // way `file` stores it, so `--assignee me` writes the callsign.
+    let lane = match lane {
+        Some(word) => Lane::from_word(verb::lane_word(word)?),
+        None => Lane::Me,
+    };
+    let assignee = assignee.map(verb::lane_word).transpose()?;
+
     let store = super::store()?;
+    let assignee = assignee.map(|word| verb::stored_lane(word, store.callsign()));
     let events = store.read_all()?;
     let fold = board::fold(&events);
-    let picks = board::pick(&fold, count, store.callsign());
+    let picks = board::pick(&fold, count, &lane, store.callsign());
     let outcome = picks.outcome();
 
     let pulled = !peek && !picks.picked.is_empty();
     if pulled {
-        store.append(
-            picks
-                .picked
-                .iter()
-                .map(|pick| Kind::Status {
-                    flight: pick.flight.parse().expect("the fold's ids parse"),
-                    status: "in_progress".to_string(),
-                    reason: None,
-                })
-                .collect(),
-        )?;
+        let mut batch = Vec::with_capacity(picks.picked.len() * 2);
+        for pick in &picks.picked {
+            let flight: EventId = pick.flight.parse().expect("the fold's ids parse");
+            batch.push(Kind::Status {
+                flight: flight.clone(),
+                status: "in_progress".to_string(),
+                reason: None,
+            });
+            if let Some(assignee) = &assignee {
+                batch.push(Kind::Assigned {
+                    flight,
+                    assignee: assignee.clone(),
+                });
+            }
+        }
+        store.append(batch)?;
     }
 
     let rows: Vec<Row> = picks
@@ -104,9 +137,11 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
                 "next",
                 &Data {
                     outcome,
+                    lane: lane.to_string(),
+                    assignee: assignee.clone(),
                     picked: &rows,
                     pulled,
-                    yours: picks.yours,
+                    elsewhere: picks.elsewhere,
                 }
             )
         );
@@ -122,16 +157,23 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
             if let Some(skill) = &row.skill {
                 line.push_str(&render::paint_dim(&format!(" · skill {skill}"), colored));
             }
+            if let Some(assignee) = &assignee {
+                let lane = assignee.as_deref().unwrap_or("none");
+                line.push_str(&render::paint_dim(&format!(" · assigned {lane}"), colored));
+            }
             println!("{line}");
         }
         if picks.picked.is_empty() {
-            if picks.yours > 0 {
-                let (count, noun, verb) = if picks.yours == 1 {
-                    ("one".to_string(), "flight", "needs")
+            if picks.elsewhere > 0 {
+                let noun = if picks.elsewhere == 1 {
+                    "flight in another lane"
                 } else {
-                    (super::count(picks.yours), "flights", "need")
+                    "flights in other lanes"
                 };
-                println!("nothing ready — {count} {noun} {verb} you");
+                println!(
+                    "nothing ready here — {} {noun}",
+                    super::count(picks.elsewhere)
+                );
             } else {
                 println!("nothing ready");
             }
@@ -140,7 +182,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     }
     Ok(match outcome {
         Outcome::Work => 0,
-        Outcome::Drained | Outcome::Yours => 1,
+        Outcome::Drained | Outcome::Elsewhere => 1,
     })
 }
 

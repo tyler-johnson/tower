@@ -1,15 +1,18 @@
-//! `atc next` against real repositories: the filed-order walk, the
-//! peek, the lane gate, the outcomes — work, drained, yours — and the
-//! exit, 0 on a pick and 1 otherwise.
+//! `atc next` against real repositories: the lane walk, the `none`
+//! overflow, the peek, the re-lane, the outcomes — work, drained,
+//! elsewhere — and the exit, 0 on a pick and 1 otherwise.
 //!
-//! The pool is Ready flights in the agent lane, so bare filings — born
-//! Ready but laned to no one — are never handed out, and every pullable fixture files under
-//! a two-flight repo-layer procedure whose `pass` is agent-assigned and
-//! born Ready; the flight `next` hands out is that one, and the parent
-//! and `verdict` fold Waiting by their edges. The fold derives the
-//! release, so a Waiting flight whose dependencies close reads Ready on
-//! the following invocation — the `yours` outcome when the released
-//! flight is off the agent lane, which in this shape it always is.
+//! The walk is the named lane then the unassigned lane, and `me` when
+//! unsaid — the harness scrubs the callsign, so bare `next` here walks
+//! the literal `me` lane and then `none`. Bare filings are born Ready
+//! and laned to no one, so they are the overflow of every walk. The
+//! agent fixtures file under a two-flight repo-layer procedure whose
+//! `pass` is agent-assigned and born Ready; `next agent` hands that one
+//! out, and the parent and `verdict` fold Waiting by their edges. The
+//! fold derives the release, so a Waiting flight whose dependencies
+//! close reads Ready on the following invocation — `verdict` in the
+//! `me` lane, `elsewhere` to the agent walk, and the parent unassigned,
+//! the overflow of any walk.
 //!
 //! A pull writes to tower's log and nothing to the repository: no
 //! branch, no worktree, no op row. The picked row is the flight, its
@@ -79,7 +82,7 @@ fn repo() -> Repo {
     repo
 }
 
-/// The minimal pullable shape principle 12 admits: an agent-assigned
+/// The minimal agent-walk shape principle 12 admits: an agent-assigned
 /// flight with a me-assigned end. Filing under it mints a parent and two
 /// flights — three flights and three edges, so each filing consumes six
 /// event seqs and three flight numbers, and only `pass` is born Ready.
@@ -98,12 +101,30 @@ fn file_pipeline(repo: &Repo, subject: &str) {
     stdout(&atc(repo.path(), &["file", "pipeline", subject]));
 }
 
+/// The picked ids off an envelope, in walk order.
+fn picked(envelope: &serde_json::Value) -> Vec<&str> {
+    envelope["data"]["picked"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["flight"].as_str().expect("flight"))
+        .collect()
+}
+
+/// How many commits every tower chain holds — one per append.
+fn commits(repo: &Repo) -> usize {
+    repo.git(&["rev-list", "--count", "--glob=refs/tower/log/*"])
+        .trim()
+        .parse()
+        .expect("a count")
+}
+
 #[test]
 fn next_pulls_the_agent_flight_and_sets_in_progress() {
     let repo = repo();
     file_pipeline(&repo, "the one flight");
 
-    let out = atc(repo.path(), &["next"]);
+    let out = atc(repo.path(), &["next", "agent"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
     assert!(
@@ -135,33 +156,50 @@ fn next_pulls_the_agent_flight_and_sets_in_progress() {
         "{brief}"
     );
 
-    // The pool is empty and the parent and `verdict` are born Waiting —
-    // no Ready work off the lane, so the outcome is drained, not yours.
-    let out = atc(repo.path(), &["next"]);
+    // The lane is empty and the parent and `verdict` are born Waiting —
+    // no Ready work anywhere, so the outcome is drained, not elsewhere.
+    let out = atc(repo.path(), &["next", "agent"]);
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("nothing ready\n"), "{text}");
 }
 
 #[test]
-fn a_ready_flight_off_the_agent_lane_is_the_yours_outcome_at_exit_1() {
+fn a_ready_flight_in_another_lane_is_the_elsewhere_outcome_at_exit_1() {
     let repo = repo();
-    // Born Ready, but never assigned to the lane.
-    stdout(&atc(repo.path(), &["file", "needs a look"]));
+    // Born Ready in the agent lane; the bare walk is `me` then `none`,
+    // and both are empty.
+    stdout(&atc(
+        repo.path(),
+        &["file", "needs a look", "--assignee", "agent"],
+    ));
 
     let out = atc(repo.path(), &["next", "--json"]);
     assert_eq!(out.status.code(), Some(1));
     let envelope = envelope(&out);
-    assert_eq!(envelope["data"]["outcome"], serde_json::json!("yours"));
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("elsewhere"));
+    assert_eq!(envelope["data"]["lane"], serde_json::json!("me"));
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
-    assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
 
     let out = atc(repo.path(), &["next"]);
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("nothing ready — one flight needs you"),
+        text.contains("nothing ready here — one flight in another lane"),
+        "{text}"
+    );
+
+    // The plural, with a second one alongside.
+    stdout(&atc(
+        repo.path(),
+        &["file", "needs another", "--assignee", "agent"],
+    ));
+    let out = atc(repo.path(), &["next"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("nothing ready here — two flights in other lanes"),
         "{text}"
     );
 }
@@ -177,27 +215,27 @@ fn a_backlog_filing_is_never_pulled_and_the_board_drains_to_1() {
     // Backlog but a person's gesture.
     stdout(&atc(repo.path(), &["assign", "1", "agent"]));
 
-    let out = atc(repo.path(), &["next"]);
+    let out = atc(repo.path(), &["next", "agent"]);
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("nothing ready\n"), "{text}");
     assert!(
-        !text.contains("need you"),
-        "Backlog is not yours-Ready: {text}"
+        !text.contains("another lane"),
+        "Backlog is not elsewhere: {text}"
     );
 
     // The person's gesture is what clears it.
     stdout(&atc(repo.path(), &["status", "1", "ready"]));
-    let text = stdout(&atc(repo.path(), &["next"]));
+    let text = stdout(&atc(repo.path(), &["next", "agent"]));
     assert!(text.contains("in progress #1: unclassified work"), "{text}");
 }
 
 #[test]
-fn the_parent_is_never_pulled_and_the_fold_releases_a_satisfied_waiter() {
+fn the_fold_releases_a_satisfied_waiter_into_its_lane() {
     let repo = repo();
     file_pipeline(&repo, "a broad task");
 
-    let text = stdout(&atc(repo.path(), &["next"]));
+    let text = stdout(&atc(repo.path(), &["next", "agent"]));
     assert!(
         text.contains("in progress #2: a broad task · pass"),
         "{text}"
@@ -205,31 +243,33 @@ fn the_parent_is_never_pulled_and_the_fold_releases_a_satisfied_waiter() {
     stdout(&atc(repo.path(), &["done", "2"]));
 
     // `verdict` waited on `pass`; this invocation's fold derives it
-    // Ready — off the agent lane, so exit 1 with the yours outcome.
-    let out = atc(repo.path(), &["next"]);
+    // Ready — in the `me` lane, so the agent walk is elsewhere at exit
+    // 1, and the bare walk finds it.
+    let out = atc(repo.path(), &["next", "agent"]);
     assert_eq!(out.status.code(), Some(1));
-    let envelope = self::envelope(&atc(repo.path(), &["next", "--json"]));
-    assert_eq!(envelope["data"]["outcome"], serde_json::json!("yours"));
-    assert_eq!(envelope["data"]["yours"], serde_json::json!(1));
+    let envelope = self::envelope(&atc(repo.path(), &["next", "agent", "--json"]));
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("elsewhere"));
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
+    let mine = self::envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
+    assert_eq!(picked(&mine), ["pi.3"], "the `me` lane is the bare walk");
     stdout(&atc(repo.path(), &["done", "3"]));
 
     // Every child closed releases the parent the same way — Ready, not
-    // finished: whether the broad task is over stays a judgment.
-    let out = atc(repo.path(), &["next"]);
-    assert_eq!(
-        out.status.code(),
-        Some(1),
-        "the parent is yours, never pulled"
-    );
+    // finished: whether the broad task is over stays a judgment. It is
+    // laned to no one, so it is the overflow of every walk.
+    let envelope = self::envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
+    assert_eq!(picked(&envelope), ["pi.1"], "the unassigned overflow");
+    let envelope = self::envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
+    assert_eq!(picked(&envelope), ["pi.1"]);
 
     // The two empty picks share the code; the word is what diverges.
     stdout(&atc(repo.path(), &["done", "1"]));
-    let out = atc(repo.path(), &["next"]);
+    let out = atc(repo.path(), &["next", "agent"]);
     assert_eq!(out.status.code(), Some(1), "drained at last");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("nothing ready\n"), "{text}");
-    assert!(!text.contains("need you"), "{text}");
-    let envelope = self::envelope(&atc(repo.path(), &["next", "--json"]));
+    assert!(!text.contains("another lane"), "{text}");
+    let envelope = self::envelope(&atc(repo.path(), &["next", "agent", "--json"]));
     assert_eq!(envelope["data"]["outcome"], serde_json::json!("drained"));
 }
 
@@ -238,7 +278,7 @@ fn peek_reads_without_pulling() {
     let repo = repo();
     file_pipeline(&repo, "the one flight");
 
-    let out = atc(repo.path(), &["next", "--peek"]);
+    let out = atc(repo.path(), &["next", "agent", "--peek"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
     assert!(text.contains("ready #2: the one flight · pass"), "{text}");
@@ -251,7 +291,7 @@ fn peek_reads_without_pulling() {
         "the peek wrote nothing: {board}"
     );
 
-    let out = atc(repo.path(), &["next", "--peek", "--json"]);
+    let out = atc(repo.path(), &["next", "agent", "--peek", "--json"]);
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
     assert_eq!(
@@ -265,7 +305,7 @@ fn peek_reads_without_pulling() {
     assert_eq!(keys(row), ["flight", "number", "subject"]);
 }
 
-/// The keys on one picked row, in emitted order.
+/// The keys on one JSON object, in emitted order.
 fn keys(row: &serde_json::Value) -> Vec<&str> {
     row.as_object()
         .expect("a row is an object")
@@ -279,7 +319,7 @@ fn a_pull_writes_nothing_to_the_repository() {
     let repo = repo();
     file_pipeline(&repo, "the one flight");
 
-    let envelope = envelope(&atc(repo.path(), &["next", "--json"]));
+    let envelope = envelope(&atc(repo.path(), &["next", "agent", "--json"]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(true));
     let row = &envelope["data"]["picked"][0];
     assert_eq!(row["flight"], serde_json::json!("pi.2"));
@@ -301,7 +341,7 @@ fn a_pull_writes_nothing_to_the_repository() {
 }
 
 #[test]
-fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
+fn an_unclosed_dependency_keeps_the_dependent_out_of_the_walk() {
     let repo = repo();
     file_pipeline(&repo, "the dependent");
     file_pipeline(&repo, "the dependency");
@@ -310,7 +350,7 @@ fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
 
     // The dependent is Waiting, not a candidate, and the dependency is
     // what the walk hands out.
-    let out = atc(repo.path(), &["next"]);
+    let out = atc(repo.path(), &["next", "agent"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
     assert!(
@@ -340,22 +380,23 @@ fn a_count_picks_in_filed_order_and_the_envelope_has_no_passed_key() {
 
     // The agent flights are #2, #5 and #8; two of three, in filed order,
     // and nothing about a tree decides it.
-    let out = atc(repo.path(), &["next", "-n", "2", "--peek", "--json"]);
+    let out = atc(
+        repo.path(),
+        &["next", "agent", "-n", "2", "--peek", "--json"],
+    );
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
     assert_eq!(envelope["data"]["outcome"], serde_json::json!("work"));
+    assert_eq!(envelope["data"]["lane"], serde_json::json!("agent"));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
-    let picked = envelope["data"]["picked"].as_array().expect("picked");
-    assert_eq!(picked.len(), 2);
-    assert_eq!(picked[0]["flight"], serde_json::json!("pi.2"));
-    assert_eq!(picked[1]["flight"], serde_json::json!("pi.8"));
-    let data = envelope["data"].as_object().expect("data");
-    assert!(!data.contains_key("passed"), "{envelope}");
-    for key in ["outcome", "picked", "pulled", "yours"] {
-        assert!(data.contains_key(key), "{key} missing: {envelope}");
-    }
+    assert_eq!(picked(&envelope), ["pi.2", "pi.8"]);
+    assert_eq!(
+        keys(&envelope["data"]),
+        ["outcome", "lane", "picked", "pulled", "elsewhere"],
+        "no `passed`, and no `assignee` when the flag was not given: {envelope}"
+    );
 
-    let out = atc(repo.path(), &["next", "-n", "2"]);
+    let out = atc(repo.path(), &["next", "agent", "-n", "2"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
     assert!(text.contains("in progress #2: first work · pass"), "{text}");
@@ -388,9 +429,10 @@ fn an_empty_pick_under_json_is_a_data_envelope_not_an_error() {
     assert_eq!(envelope["atc"], serde_json::json!(1));
     assert_eq!(envelope["cmd"], serde_json::json!("next"));
     assert_eq!(envelope["data"]["outcome"], serde_json::json!("drained"));
+    assert_eq!(envelope["data"]["lane"], serde_json::json!("me"));
     assert_eq!(envelope["data"]["picked"], serde_json::json!([]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
-    assert_eq!(envelope["data"]["yours"], serde_json::json!(0));
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(0));
     assert!(
         envelope.get("error").is_none(),
         "data and error, never both"
@@ -406,14 +448,14 @@ fn next_never_exits_three() {
     file_pipeline(&repo, "the one flight");
 
     let mut seen = Vec::new();
-    for expected in ["work", "yours", "drained"] {
+    for expected in ["work", "elsewhere", "drained"] {
         if expected == "drained" {
             // `verdict` was released Ready by the pull's `done`; close
-            // it and the parent so nothing Ready is left off the lane.
+            // it and the parent so nothing Ready is left in any lane.
             stdout(&atc(repo.path(), &["done", "3"]));
             stdout(&atc(repo.path(), &["done", "1"]));
         }
-        let out = atc(repo.path(), &["next", "--json"]);
+        let out = atc(repo.path(), &["next", "agent", "--json"]);
         let code = out.status.code().expect("a code");
         assert!(code == 0 || code == 1, "{expected}: exit {code}, never 3");
         let envelope = envelope(&out);
@@ -425,7 +467,7 @@ fn next_never_exits_three() {
             stdout(&atc(repo.path(), &["done", "2"]));
         }
     }
-    assert_eq!(seen, [("work", 0), ("yours", 1), ("drained", 1)]);
+    assert_eq!(seen, [("work", 0), ("elsewhere", 1), ("drained", 1)]);
 }
 
 #[test]
@@ -442,14 +484,14 @@ fn a_picked_flight_hands_out_its_skill() {
     );
     stdout(&atc(repo.path(), &["file", "skilled", "look this over"]));
 
-    let envelope = envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
+    let envelope = envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     assert_eq!(
         envelope["data"]["picked"][0]["skill"],
         serde_json::json!("review")
     );
 
     // The human render says it on the picked line, where the loop reads.
-    let text = stdout(&atc(repo.path(), &["next"]));
+    let text = stdout(&atc(repo.path(), &["next", "agent"]));
     assert!(
         text.contains("in progress #2: look this over · pass · skill review"),
         "{text}"
@@ -461,7 +503,7 @@ fn a_flight_naming_no_skill_omits_the_field() {
     let repo = repo();
     file_pipeline(&repo, "plain work");
 
-    let envelope = envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
+    let envelope = envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     let row = &envelope["data"]["picked"][0];
     assert_eq!(row["flight"], serde_json::json!("pi.2"));
     assert!(
@@ -469,8 +511,214 @@ fn a_flight_naming_no_skill_omits_the_field() {
         "absent, not null, when the flight names none: {row}"
     );
 
-    let text = stdout(&atc(repo.path(), &["next"]));
+    let text = stdout(&atc(repo.path(), &["next", "agent"]));
     assert!(!text.contains("skill"), "{text}");
+}
+
+#[test]
+fn the_default_pull_is_me_then_none() {
+    // Bare `next` walks the `me` lane first — ahead of an earlier bare
+    // filing — then the unassigned lane, and never the agent lane. No
+    // callsign under the harness, so `me` is the literal lane.
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "nobody's"]));
+    stdout(&atc(repo.path(), &["file", "mine", "--assignee", "me"]));
+    stdout(&atc(
+        repo.path(),
+        &["file", "pooled", "--assignee", "agent"],
+    ));
+
+    let envelope = envelope(&atc(repo.path(), &["next", "-n", "3", "--json"]));
+    assert_eq!(envelope["data"]["lane"], serde_json::json!("me"));
+    assert_eq!(picked(&envelope), ["pi.2", "pi.1"]);
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
+
+    let board = self::envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["ready"][0]["id"], serde_json::json!("pi.3"));
+}
+
+#[test]
+fn a_callsign_pulls_its_own_queue_the_literal_me_and_then_none() {
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "nobody's"]));
+    stdout(&atc(
+        repo.path(),
+        &["file", "qwen's", "--assignee", "qwen-review"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &["file", "the literal", "--assignee", "me"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &["file", "claude's", "--assignee", "claude"],
+    ));
+
+    // Filed order within the lane, then the overflow; claude's queue is
+    // elsewhere.
+    let envelope = envelope(&atc_as(
+        repo.path(),
+        &["next", "-n", "4", "--json"],
+        "qwen-review",
+    ));
+    assert_eq!(envelope["data"]["lane"], serde_json::json!("me"));
+    assert_eq!(picked(&envelope), ["pi.2", "pi.3", "pi.1"]);
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
+}
+
+#[test]
+fn agent_pulls_the_literal_lane_and_then_none() {
+    // The lane is the argument: the caller's own queue is not in the
+    // agent walk, whatever the callsign.
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "nobody's"]));
+    stdout(&atc(
+        repo.path(),
+        &["file", "claude's", "--assignee", "claude"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &["file", "pooled", "--assignee", "agent"],
+    ));
+
+    let envelope = envelope(&atc_as(
+        repo.path(),
+        &["next", "agent", "-n", "3", "--json"],
+        "claude",
+    ));
+    assert_eq!(envelope["data"]["lane"], serde_json::json!("agent"));
+    assert_eq!(picked(&envelope), ["pi.3", "pi.1"]);
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
+}
+
+#[test]
+fn none_named_outright_walks_the_unassigned() {
+    let repo = repo();
+    stdout(&atc(
+        repo.path(),
+        &["file", "pooled", "--assignee", "agent"],
+    ));
+    stdout(&atc(repo.path(), &["file", "nobody's first"]));
+    stdout(&atc(repo.path(), &["file", "nobody's second"]));
+
+    let envelope = envelope(&atc(repo.path(), &["next", "none", "-n", "3", "--json"]));
+    assert_eq!(envelope["data"]["lane"], serde_json::json!("none"));
+    assert_eq!(picked(&envelope), ["pi.2", "pi.3"], "once, not twice");
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
+}
+
+#[test]
+fn assignee_relanes_each_pick_in_the_same_append() {
+    let repo = repo();
+    stdout(&atc(
+        repo.path(),
+        &["file", "the review", "--assignee", "agent"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &["file", "the other", "--assignee", "agent"],
+    ));
+    let before = commits(&repo);
+
+    // `me` stores the callsign, the way `file` stores it, and the
+    // envelope carries the stored word.
+    let out = atc_as(
+        repo.path(),
+        &["next", "agent", "--assignee", "me", "--json"],
+        "claude",
+    );
+    assert_eq!(out.status.code(), Some(0));
+    let envelope = envelope(&out);
+    assert_eq!(envelope["data"]["assignee"], serde_json::json!("claude"));
+    assert_eq!(envelope["data"]["pulled"], serde_json::json!(true));
+    assert_eq!(picked(&envelope), ["pi.1"]);
+    assert_eq!(
+        commits(&repo),
+        before + 1,
+        "the pick and the re-lane are one append"
+    );
+
+    let board = self::envelope(&atc(repo.path(), &["--json"]));
+    let flown = &board["data"]["in_progress"][0];
+    assert_eq!(flown["id"], serde_json::json!("pi.1"));
+    assert_eq!(flown["assignee"], serde_json::json!("claude"));
+    assert_eq!(flown["status_callsign"], serde_json::json!("claude"));
+
+    // The human line says where the pick went, and `none` clears the
+    // lane and says so.
+    let text = stdout(&atc_as(
+        repo.path(),
+        &["next", "agent", "--assignee", "none"],
+        "claude",
+    ));
+    assert!(
+        text.contains("in progress #2: the other · assigned none"),
+        "{text}"
+    );
+    let board = self::envelope(&atc(repo.path(), &["--json"]));
+    let cleared = board["data"]["in_progress"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["id"] == serde_json::json!("pi.2"))
+        .expect("pulled")
+        .clone();
+    assert!(cleared["assignee"].is_null(), "{cleared}");
+    let envelope = self::envelope(&atc(repo.path(), &["next", "--json"]));
+    assert_eq!(
+        envelope["data"]["outcome"],
+        serde_json::json!("drained"),
+        "nothing Ready anywhere once both are pulled"
+    );
+}
+
+#[test]
+fn assignee_under_peek_writes_nothing() {
+    let repo = repo();
+    stdout(&atc(
+        repo.path(),
+        &["file", "the review", "--assignee", "agent"],
+    ));
+    let before = commits(&repo);
+
+    let envelope = envelope(&atc_as(
+        repo.path(),
+        &["next", "agent", "--assignee", "me", "--peek", "--json"],
+        "claude",
+    ));
+    assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
+    assert_eq!(picked(&envelope), ["pi.1"]);
+    assert_eq!(commits(&repo), before, "a peek appends nothing");
+
+    let board = self::envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["ready"][0]["id"], serde_json::json!("pi.1"));
+    assert_eq!(
+        board["data"]["ready"][0]["assignee"],
+        serde_json::json!("agent"),
+        "the lane stands"
+    );
+}
+
+#[test]
+fn a_bad_lane_on_either_side_is_bad_assignee() {
+    let repo = repo();
+    for args in [
+        ["next", "two words", "--json"],
+        ["next", "--assignee", "two words"],
+    ] {
+        let mut args = args.to_vec();
+        if !args.contains(&"--json") {
+            args.push("--json");
+        }
+        let out = atc(repo.path(), &args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        let envelope = envelope(&out);
+        assert_eq!(
+            envelope["error"]["id"],
+            serde_json::json!("usage/bad-assignee"),
+            "{args:?}"
+        );
+    }
 }
 
 #[test]
@@ -485,7 +733,7 @@ fn a_callsigns_own_queue_is_pulled_by_that_callsign_alone() {
     let out = atc_as(repo.path(), &["next"], "claude");
     assert_eq!(out.status.code(), Some(1), "another callsign's queue");
     let json = envelope(&atc_as(repo.path(), &["next", "--json"], "claude"));
-    assert_eq!(json["data"]["outcome"], serde_json::json!("yours"));
+    assert_eq!(json["data"]["outcome"], serde_json::json!("elsewhere"));
 
     let out = atc_as(repo.path(), &["next"], "qwen-review");
     assert_eq!(out.status.code(), Some(0));
@@ -502,7 +750,7 @@ fn a_callsigns_own_queue_is_pulled_by_that_callsign_alone() {
 }
 
 #[test]
-fn a_callsign_pulls_its_own_queue_and_the_pool_in_filed_order() {
+fn a_callsign_pulls_its_own_queue_and_never_the_pool() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "own first"]));
     stdout(&atc(repo.path(), &["assign", "1", "claude"]));
@@ -510,16 +758,13 @@ fn a_callsign_pulls_its_own_queue_and_the_pool_in_filed_order() {
     stdout(&atc(repo.path(), &["file", "own last"]));
     stdout(&atc(repo.path(), &["assign", "5", "claude"]));
 
+    // The agent lane's `pass` is elsewhere to a bare pull, and the
+    // pipeline's parent is Waiting, so nothing overflows.
     let json = envelope(&atc_as(
         repo.path(),
         &["next", "-n", "3", "--json"],
         "claude",
     ));
-    let picked: Vec<&str> = json["data"]["picked"]
-        .as_array()
-        .expect("rows")
-        .iter()
-        .map(|row| row["flight"].as_str().expect("flight"))
-        .collect();
-    assert_eq!(picked, ["pi.1", "pi.4", "pi.9"], "filed order across both");
+    assert_eq!(picked(&json), ["pi.1", "pi.9"], "own queue, filed order");
+    assert_eq!(json["data"]["elsewhere"], serde_json::json!(1));
 }

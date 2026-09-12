@@ -1,39 +1,84 @@
 //! The pick: `next`'s walk over the same fold as the board.
 //!
 //! Pure like `flight.rs` — no `crate::ff` spawns, no `std::process`; the
-//! walk runs over a [`Fold`], so the pool is unit-testable with
+//! walk runs over a [`Fold`], so the lane walk is unit-testable with
 //! hand-built rows.
 //!
-//! The pool is every Ready flight in the agent lane, plus every Ready
-//! flight laned to the caller's own callsign: the derived status and
-//! the stored assignee, read off the fold — never the registry
-//! (principle 11). The gate is `Flight::pullable`, the one the brief
-//! reads too: exact string compares, so an unknown status or lane never
-//! rounds down into the pool, and a caller with no callsign pulls the
-//! agent lane alone. Ready is derived, so a pool candidate has
-//! no live dependency by construction — a dependent sits in Waiting
-//! until its last dependency closes, done or canceled, and never
-//! reaches the walk. An open question takes a flight out on top of it.
-//! Ready flights *not* in the pool are counted in `yours`, the count
-//! behind the `yours` outcome; the flights themselves are silent here
-//! because the board is their surface, not this one's.
+//! The walk is one lane, then the overflow. The named [`Lane`] — the
+//! caller's own queue by default, the literal `agent` lane, the
+//! unassigned lane, or one pilot's callsign — walks first in filed order,
+//! and the unassigned lane walks after it in filed order: everyone falls
+//! through to `none` once their own lane is drained, and naming `none`
+//! walks it once. Membership is the derived status and the stored
+//! assignee, read off the fold — never the registry (principle 11) —
+//! through `Flight::in_lane`: exact string compares, so an unknown
+//! status or lane never rounds into a walk. Ready is derived, so a
+//! candidate has no live dependency by construction — a dependent sits
+//! in Waiting until its last dependency closes, done or canceled, and
+//! never reaches the walk. An open question takes a flight out on top
+//! of it. Ready flights outside the walk — other lanes — are counted in
+//! `elsewhere`, the count behind the `elsewhere` outcome; the flights
+//! themselves are silent here because the board is their surface, not
+//! this one's.
 //!
-//! Candidates walk in filed order and the first `want` of them are the
-//! pick. Nothing deconflicts here: which branches can fly together is
-//! not tower's question.
+//! The first `want` of the walk are the pick. Nothing deconflicts here:
+//! which branches can fly together is not tower's question.
+
+use std::fmt;
 
 use serde::Serialize;
 
 use super::flight::Fold;
 
+/// The lane a walk names: the same four shapes `assign` and `file`
+/// take, read against the caller at the gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lane {
+    /// The caller's own queue: the literal `me` lane and the caller's
+    /// callsign. A caller with no callsign walks the literal alone.
+    Me,
+    /// The literal `agent` lane alone — the shared pool.
+    Agent,
+    /// The unassigned lane — everyone's overflow, or the walk itself
+    /// when named outright.
+    None,
+    /// One pilot's own queue.
+    Callsign(String),
+}
+
+impl Lane {
+    /// The lane `verb::lane_word` validated: `None` is the absent lane
+    /// `none` spelled out, and the words map to their variants.
+    pub fn from_word(word: Option<String>) -> Lane {
+        match word.as_deref() {
+            None => Lane::None,
+            Some("me") => Lane::Me,
+            Some("agent") => Lane::Agent,
+            Some(callsign) => Lane::Callsign(callsign.to_string()),
+        }
+    }
+}
+
+/// The word back, for the envelope: `none` for the unassigned lane.
+impl fmt::Display for Lane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Lane::Me => f.write_str("me"),
+            Lane::Agent => f.write_str("agent"),
+            Lane::None => f.write_str("none"),
+            Lane::Callsign(callsign) => f.write_str(callsign),
+        }
+    }
+}
+
 /// What the walk produced: the picked set, and the count of Ready work
-/// the lane kept out of the pool.
+/// in lanes the walk never entered.
 #[derive(Debug, Serialize)]
 pub struct Picks {
     pub picked: Vec<Pick>,
-    /// Ready and unquestioned — excluded from the pool by the lane
-    /// alone. Work that exists and needs you.
-    pub yours: usize,
+    /// Ready and unquestioned — outside the walk by the lane alone.
+    /// Work that exists, in another lane.
+    pub elsewhere: usize,
 }
 
 /// Which of `next`'s three things happened. The word rides the envelope
@@ -46,22 +91,23 @@ pub struct Picks {
 pub enum Outcome {
     /// Something was picked.
     Work,
-    /// Nothing picked and nothing Ready off the lane either: the board
-    /// has nothing left.
+    /// Nothing picked and nothing Ready in any other lane either: the
+    /// board has nothing left.
     Drained,
-    /// Nothing picked, but Ready work exists that the lane alone kept
-    /// out of the pool. It needs you.
-    Yours,
+    /// Nothing picked, but Ready work exists in a lane the walk never
+    /// entered.
+    Elsewhere,
 }
 
 impl Picks {
     /// The outcome the walk arrived at: a pick is `Work` whatever
-    /// `yours` says, and an empty pick is `Yours` or `Drained` by it.
+    /// `elsewhere` says, and an empty pick is `Elsewhere` or `Drained`
+    /// by it.
     pub fn outcome(&self) -> Outcome {
         if !self.picked.is_empty() {
             Outcome::Work
-        } else if self.yours > 0 {
-            Outcome::Yours
+        } else if self.elsewhere > 0 {
+            Outcome::Elsewhere
         } else {
             Outcome::Drained
         }
@@ -78,37 +124,39 @@ pub struct Pick {
     pub subject: String,
 }
 
-/// Walk the candidates in filed order and pick the first `want` of them.
-/// `caller` is the puller's callsign: its own queue and the pool walk
-/// together, because the walk is filed order and the gate is one
-/// predicate.
-pub fn pick(fold: &Fold, want: usize, caller: Option<&str>) -> Picks {
-    // Per live flight: whether it is in the pool — Ready, agent lane or
-    // the caller's own, no open question.
-    let mut picked: Vec<Pick> = Vec::new();
-    let mut yours = 0;
-    for flight in &fold.flights {
-        if flight.closed() {
-            continue;
-        }
-        let id = flight.id.to_string();
-        let unheld = flight.question.is_none();
-        if unheld && flight.pullable(caller) {
-            if picked.len() < want {
-                picked.push(Pick {
-                    flight: id,
-                    number: flight.number,
-                    subject: flight.subject.clone(),
-                });
-            }
-        } else if unheld && flight.status == "ready" {
-            yours += 1;
+/// Walk `lane` in filed order, then the unassigned lane in filed order,
+/// and pick the first `want` of them. `caller` is the puller's
+/// callsign, which only `Lane::Me` reads.
+pub fn pick(fold: &Fold, want: usize, lane: &Lane, caller: Option<&str>) -> Picks {
+    // A candidate: live, unheld, Ready. The lane decides which pass it
+    // joins, and a candidate in neither is elsewhere.
+    let candidates = fold
+        .flights
+        .iter()
+        .filter(|flight| !flight.closed() && flight.question.is_none() && flight.status == "ready");
+    let mut own: Vec<Pick> = Vec::new();
+    let mut overflow: Vec<Pick> = Vec::new();
+    let mut elsewhere = 0;
+    for flight in candidates {
+        let pick = || Pick {
+            flight: flight.id.to_string(),
+            number: flight.number,
+            subject: flight.subject.clone(),
+        };
+        if flight.in_lane(lane, caller) {
+            own.push(pick());
+        } else if *lane != Lane::None && flight.in_lane(&Lane::None, caller) {
+            overflow.push(pick());
+        } else {
+            elsewhere += 1;
         }
     }
+    let mut picked = own;
+    picked.extend(overflow);
+    picked.truncate(want);
 
-    Picks { picked, yours }
+    Picks { picked, elsewhere }
 }
-
 #[cfg(test)]
 mod tests {
     use super::super::flight::fold;
@@ -209,8 +257,13 @@ mod tests {
         moved(id, time, flight, "done")
     }
 
+    /// The picked ids, in walk order.
+    fn ids(picks: &Picks) -> Vec<&str> {
+        picks.picked.iter().map(|p| p.flight.as_str()).collect()
+    }
+
     #[test]
-    fn an_unclosed_dependency_keeps_the_dependent_out_of_the_pool() {
+    fn an_unclosed_dependency_keeps_the_dependent_out_of_the_walk() {
         // The fold derives the dependent Waiting, so it is never a
         // candidate.
         let picks = pick(
@@ -220,12 +273,13 @@ mod tests {
                 linked("pi.3", 30, "pi.1", "pi.2"),
             ]),
             2,
+            &Lane::Agent,
             None,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.2");
         assert_eq!(picks.picked[0].number, 2);
-        assert_eq!(picks.yours, 0, "waiting is not yours either");
+        assert_eq!(picks.elsewhere, 0, "waiting is not elsewhere either");
     }
 
     #[test]
@@ -238,6 +292,7 @@ mod tests {
                 done("pi.4", 40, "pi.2"),
             ]),
             1,
+            &Lane::Agent,
             None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -255,6 +310,7 @@ mod tests {
                 moved("pi.4", 40, "pi.2", "canceled"),
             ]),
             1,
+            &Lane::Agent,
             None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -270,6 +326,7 @@ mod tests {
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             2,
+            &Lane::Agent,
             None,
         );
         assert!(picks.picked.is_empty());
@@ -280,11 +337,11 @@ mod tests {
         let picks = pick(
             &fold(&[filed("pi.2", 20), filed("pi.1", 10), filed("pi.3", 30)]),
             3,
+            &Lane::Agent,
             None,
         );
-        let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
         assert_eq!(
-            ids,
+            ids(&picks),
             ["pi.2", "pi.1", "pi.3"],
             "fold order, which is filed order"
         );
@@ -295,6 +352,7 @@ mod tests {
         let picks = pick(
             &fold(&[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)]),
             1,
+            &Lane::Agent,
             None,
         );
         assert_eq!(picks.picked.len(), 1);
@@ -302,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn only_ready_agent_flights_enter_the_pool_and_ready_rest_are_yours() {
+    fn only_ready_flights_in_the_walk_are_picked_and_ready_rest_are_elsewhere() {
         let picks = pick(
             &fold(&[
                 stored("pi.1", 10, "ready", None),
@@ -314,83 +372,102 @@ mod tests {
                 linked("pi.7", 70, "pi.6", "pi.5"),
             ]),
             6,
+            &Lane::Agent,
             None,
         );
-        assert_eq!(picks.picked.len(), 1);
-        assert_eq!(picks.picked[0].flight, "pi.4");
         assert_eq!(
-            picks.yours, 3,
-            "Ready off the agent lane counts; Backlog and Waiting do not"
+            ids(&picks),
+            ["pi.4", "pi.1"],
+            "the agent lane, then the unassigned overflow"
+        );
+        assert_eq!(
+            picks.elsewhere, 2,
+            "Ready in other lanes counts; Backlog and Waiting do not"
         );
     }
 
     #[test]
-    fn the_outcome_is_work_then_yours_then_drained() {
+    fn the_outcome_is_work_then_elsewhere_then_drained() {
         let work = pick(
             &fold(&[
                 stored("pi.1", 10, "ready", Some("me")),
                 stored("pi.2", 20, "ready", Some("agent")),
             ]),
             1,
+            &Lane::Agent,
             None,
         );
         assert_eq!(work.picked.len(), 1);
-        assert_eq!(work.yours, 1);
+        assert_eq!(work.elsewhere, 1);
         assert_eq!(
             work.outcome(),
             Outcome::Work,
-            "a pick is work whatever `yours` counts"
+            "a pick is work whatever `elsewhere` counts"
         );
 
-        let yours = pick(&fold(&[stored("pi.1", 10, "ready", Some("me"))]), 1, None);
-        assert!(yours.picked.is_empty());
-        assert_eq!(yours.yours, 1);
-        assert_eq!(yours.outcome(), Outcome::Yours);
+        let elsewhere = pick(
+            &fold(&[stored("pi.1", 10, "ready", Some("me"))]),
+            1,
+            &Lane::Agent,
+            None,
+        );
+        assert!(elsewhere.picked.is_empty());
+        assert_eq!(elsewhere.elsewhere, 1);
+        assert_eq!(elsewhere.outcome(), Outcome::Elsewhere);
 
         let drained = pick(
             &fold(&[stored("pi.1", 10, "backlog", Some("agent"))]),
             1,
+            &Lane::Agent,
             None,
         );
         assert!(drained.picked.is_empty());
-        assert_eq!(drained.yours, 0);
+        assert_eq!(drained.elsewhere, 0);
         assert_eq!(drained.outcome(), Outcome::Drained);
 
         assert_eq!(
-            serde_json::to_string(&Outcome::Yours).expect("serializes"),
-            "\"yours\"",
+            serde_json::to_string(&Outcome::Elsewhere).expect("serializes"),
+            "\"elsewhere\"",
             "the wire word is lowercase"
         );
     }
 
     #[test]
-    fn an_unknown_status_or_lane_never_rounds_into_the_pool() {
+    fn an_unknown_status_or_lane_never_rounds_into_the_walk() {
         let picks = pick(
             &fold(&[
                 stored("pi.1", 10, "parked", Some("agent")),
                 stored("pi.2", 20, "ready", Some("pair")),
             ]),
             2,
+            &Lane::Agent,
             None,
         );
         assert!(picks.picked.is_empty());
-        assert_eq!(picks.yours, 1, "the unknown lane's Ready flight is yours");
+        assert_eq!(
+            picks.elsewhere, 1,
+            "the unknown lane's Ready flight is elsewhere"
+        );
     }
 
     #[test]
-    fn questioned_and_pulled_flights_are_not_yours() {
+    fn questioned_and_pulled_flights_are_not_elsewhere() {
         let picks = pick(
             &fold(&[
                 stored("pi.1", 10, "ready", Some("me")),
-                stored("pi.2", 20, "ready", None),
+                stored("pi.2", 20, "ready", Some("pair")),
                 moved("pi.3", 30, "pi.1", "in_progress"),
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             2,
+            &Lane::Agent,
             None,
         );
         assert!(picks.picked.is_empty());
-        assert_eq!(picks.yours, 0, "a pull or a question already has an owner");
+        assert_eq!(
+            picks.elsewhere, 0,
+            "a pull or a question already has an owner"
+        );
     }
 
     #[test]
@@ -405,15 +482,15 @@ mod tests {
                 assigned("pi.4", 40, "pi.3", Some("me")),
             ]),
             2,
+            &Lane::Agent,
             None,
         );
-        let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
-        assert_eq!(ids, ["pi.1"]);
-        assert_eq!(picks.yours, 1);
+        assert_eq!(ids(&picks), ["pi.1"]);
+        assert_eq!(picks.elsewhere, 1);
     }
 
     #[test]
-    fn a_release_back_to_ready_rejoins_the_pool() {
+    fn a_release_back_to_ready_rejoins_the_walk() {
         let picks = pick(
             &fold(&[
                 filed("pi.1", 10),
@@ -421,6 +498,7 @@ mod tests {
                 moved("pi.3", 30, "pi.1", "ready"),
             ]),
             1,
+            &Lane::Agent,
             None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -428,34 +506,129 @@ mod tests {
 
     #[test]
     fn an_empty_fold_picks_nothing() {
-        let picks = pick(&fold(&[]), 1, None);
+        let picks = pick(&fold(&[]), 1, &Lane::Me, None);
         assert!(picks.picked.is_empty());
+        assert_eq!(picks.outcome(), Outcome::Drained);
     }
 
     #[test]
-    fn a_callers_own_queue_walks_with_the_pool_in_filed_order() {
+    fn the_named_lane_walks_first_and_none_is_the_overflow() {
+        // Lane first in filed order, then the unassigned in filed order
+        // — never interleaved, whatever the filing times say.
+        let events = [
+            stored("pi.1", 10, "ready", None),
+            stored("pi.2", 20, "ready", Some("qwen-review")),
+            stored("pi.3", 30, "ready", None),
+            stored("pi.4", 40, "ready", Some("qwen-review")),
+            stored("pi.5", 50, "ready", Some("claude")),
+        ];
+        let qwen = pick(
+            &fold(&events),
+            5,
+            &Lane::Callsign("qwen-review".to_string()),
+            None,
+        );
+        assert_eq!(ids(&qwen), ["pi.2", "pi.4", "pi.1", "pi.3"]);
+        assert_eq!(qwen.elsewhere, 1, "claude's queue is elsewhere to qwen");
+
+        // `want` counts across the walk: the lane fills first.
+        let two = pick(
+            &fold(&events),
+            3,
+            &Lane::Callsign("qwen-review".to_string()),
+            None,
+        );
+        assert_eq!(ids(&two), ["pi.2", "pi.4", "pi.1"]);
+    }
+
+    #[test]
+    fn me_is_the_literal_and_the_callsign() {
         // The brief's verify: `assign 5 qwen-review`, then the pull under
-        // that callsign picks it and a pull under another does not. Own
-        // queue and pool interleave by filed order, not queue first.
+        // that callsign picks it and a pull under another does not.
         let events = [
             stored("pi.1", 10, "ready", Some("qwen-review")),
-            filed("pi.2", 20),
+            stored("pi.2", 20, "ready", Some("me")),
             stored("pi.3", 30, "ready", Some("claude")),
-            stored("pi.4", 40, "ready", Some("qwen-review")),
+            stored("pi.4", 40, "ready", Some("agent")),
+            stored("pi.5", 50, "ready", None),
         ];
-        let qwen = pick(&fold(&events), 4, Some("qwen-review"));
-        let ids: Vec<&str> = qwen.picked.iter().map(|p| p.flight.as_str()).collect();
-        assert_eq!(ids, ["pi.1", "pi.2", "pi.4"]);
-        assert_eq!(qwen.yours, 1, "claude's queue is yours to qwen");
+        let qwen = pick(&fold(&events), 5, &Lane::Me, Some("qwen-review"));
+        assert_eq!(
+            ids(&qwen),
+            ["pi.1", "pi.2", "pi.5"],
+            "own queue and the literal, then the overflow; never agent"
+        );
+        assert_eq!(qwen.elsewhere, 2, "claude's queue and the agent lane");
 
-        let claude = pick(&fold(&events), 4, Some("claude"));
-        let ids: Vec<&str> = claude.picked.iter().map(|p| p.flight.as_str()).collect();
-        assert_eq!(ids, ["pi.2", "pi.3"]);
-        assert_eq!(claude.yours, 2);
+        let claude = pick(&fold(&events), 5, &Lane::Me, Some("claude"));
+        assert_eq!(ids(&claude), ["pi.2", "pi.3", "pi.5"]);
+        assert_eq!(claude.elsewhere, 2);
 
-        let nobody = pick(&fold(&events), 4, None);
-        let ids: Vec<&str> = nobody.picked.iter().map(|p| p.flight.as_str()).collect();
-        assert_eq!(ids, ["pi.2"], "no callsign pulls the agent lane alone");
-        assert_eq!(nobody.yours, 3);
+        let nobody = pick(&fold(&events), 5, &Lane::Me, None);
+        assert_eq!(
+            ids(&nobody),
+            ["pi.2", "pi.5"],
+            "no callsign walks the literal `me` lane alone"
+        );
+        assert_eq!(nobody.elsewhere, 3);
+    }
+
+    #[test]
+    fn agent_is_the_literal_lane_alone() {
+        // The caller's own queue is not in the agent walk: the lane is
+        // the argument, and the callsign does not widen it.
+        let events = [
+            stored("pi.1", 10, "ready", Some("claude")),
+            stored("pi.2", 20, "ready", Some("me")),
+            stored("pi.3", 30, "ready", Some("agent")),
+            stored("pi.4", 40, "ready", None),
+        ];
+        let picks = pick(&fold(&events), 4, &Lane::Agent, Some("claude"));
+        assert_eq!(ids(&picks), ["pi.3", "pi.4"]);
+        assert_eq!(picks.elsewhere, 2);
+    }
+
+    #[test]
+    fn none_named_outright_walks_the_unassigned_once() {
+        let events = [
+            stored("pi.1", 10, "ready", Some("agent")),
+            stored("pi.2", 20, "ready", None),
+            stored("pi.3", 30, "ready", Some("me")),
+            stored("pi.4", 40, "ready", None),
+        ];
+        let picks = pick(&fold(&events), 4, &Lane::None, Some("claude"));
+        assert_eq!(ids(&picks), ["pi.2", "pi.4"], "once, not twice");
+        assert_eq!(picks.elsewhere, 2);
+    }
+
+    #[test]
+    fn a_lane_walked_empty_with_work_elsewhere_is_elsewhere() {
+        let events = [
+            stored("pi.1", 10, "ready", Some("agent")),
+            stored("pi.2", 20, "backlog", None),
+        ];
+        let picks = pick(&fold(&events), 1, &Lane::Me, Some("claude"));
+        assert!(picks.picked.is_empty());
+        assert_eq!(picks.elsewhere, 1);
+        assert_eq!(picks.outcome(), Outcome::Elsewhere);
+    }
+
+    #[test]
+    fn the_lane_word_round_trips() {
+        assert_eq!(Lane::from_word(None), Lane::None);
+        assert_eq!(Lane::from_word(Some("me".to_string())), Lane::Me);
+        assert_eq!(Lane::from_word(Some("agent".to_string())), Lane::Agent);
+        assert_eq!(
+            Lane::from_word(Some("qwen-review".to_string())),
+            Lane::Callsign("qwen-review".to_string())
+        );
+        for word in ["me", "agent", "none", "qwen-review"] {
+            let lane = Lane::from_word(if word == "none" {
+                None
+            } else {
+                Some(word.to_string())
+            });
+            assert_eq!(lane.to_string(), word);
+        }
     }
 }

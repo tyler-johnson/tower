@@ -63,31 +63,40 @@ Examples:
 `atc help <command>` (or `atc <command> --help`) has the details.";
 
 pub const NEXT: &str = "\
-Pull the next Ready flight from the pool, or with -n <k> the next k.
-The pool is every Ready flight in the agent lane plus every Ready
-flight assigned to your own callsign, and the pick is filed order
-across both. The pull is the Ready check and the move in one command:
+Pull the next Ready flight from a lane, or with -n <k> the next k.
+The lane is the argument: me, agent, none, or a callsign, and your
+own queue — me — when unsaid. me is the literal me lane and your
+callsign's; agent is the shared pool alone; none is the unassigned
+lane; a callsign is that pilot's queue. The walk is the named lane in
+filed order, then the unassigned lane in filed order — everyone falls
+through to none once their own lane is drained, and naming none walks
+it once. The pull is the Ready check and the move in one command:
 each picked flight is set In Progress with your callsign as the pilot
-— the byline, and the session underneath it. --peek is the same
-computation with nothing written, and the envelope says which
-happened either way. Your callsign is ATC_CALLSIGN when set, else
-the client you are running under, else the login name at a terminal,
-else none — and with none the pool is the agent lane alone.
+— the byline, and the session underneath it — and --assignee <lane>
+re-lanes each pick in the same append, with file's words: me stores
+your callsign. --peek is the same computation with nothing written,
+and the envelope says which happened either way. Your callsign is
+ATC_CALLSIGN when set, else the client you are running under, else
+the login name at a terminal, else none — and with none, me is the
+literal lane alone.
 
 An empty pick exits 1 with a full data envelope, and `outcome` on it
-says which of `drained` and `yours` it was: `drained` is a board with
-nothing left, and `yours` is Ready work kept out of the pool by the
-lane alone — it needs you. A --json reader branches on the word; a
-shell loop stops on the code.
+says which of `drained` and `elsewhere` it was: `drained` is a board
+with nothing left, and `elsewhere` is Ready work in a lane the walk
+never entered — the count rides beside it. A --json reader branches
+on the word; a shell loop stops on the code.
 
-A flight with a live dependency is Waiting, not in the pool, and never
-reaches the walk.";
+A flight with a live dependency is Waiting, in no walk, and never
+reaches the pick.";
 
 pub const NEXT_EXAMPLES: &str = "\
 Examples:
-  atc next                  pull the next Ready flight
+  atc next                  pull the next Ready flight from your own queue
+  atc next agent            the shared pool, then the unassigned lane
   atc next -n 4             the next four, in filed order
   atc next --peek           the same computation, nothing written
+  atc next none --assignee me        claim an unassigned flight as yours
+  atc next agent --assignee me -n 3  three from the pool, each moved to you
   atc status 17 in_progress          take one by hand instead";
 
 pub const BRIEF: &str = "\
@@ -309,11 +318,12 @@ Examples:
 pub const ASSIGN: &str = "\
 Set a flight's lane, in one of four shapes: me, agent, none to clear
 it, or a callsign. The lane is the routing decision — whose queue
-this is in. agent is the open pool, which any `atc next` draws from;
-a callsign is one pilot's own queue, which only that pilot's `atc
-next` draws from beside the pool; me stores your own callsign when
-you have one, and the literal word when you do not, and either way
-the flight is yours on the board. A callsign is one word, no spaces,
+this is in. agent is the shared pool, which `atc next agent` draws
+from; a callsign is one pilot's own queue, which that pilot's bare
+`atc next` draws from; none is the unassigned lane, everyone's
+overflow; me stores your own callsign when you have one, and the
+literal word when you do not, and either way the flight is yours on
+the board. A callsign is one word, no spaces,
 and needs nothing to be a lane. Which pilot flies a flight is the
 callsign on the event: every event carries the callsign of whoever
 wrote it, with the session and the author underneath, so the history
@@ -328,11 +338,11 @@ move is on the record with your name on it.";
 
 pub const ASSIGN_EXAMPLES: &str = "\
 Examples:
-  atc assign 17 agent       into the open pool
+  atc assign 17 agent       into the shared pool
   atc assign 17 me          back to yours, under your callsign
   atc assign 17 qwen-review  one pilot's own queue
   atc assign 17 none        no lane at all
-  atc next --peek           what the pool would hand out";
+  atc next --peek           what your queue would hand out";
 
 pub const STATUS: &str = "\
 Move a flight: backlog, ready, in_progress, done, or canceled. One

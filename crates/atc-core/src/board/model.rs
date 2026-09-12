@@ -107,9 +107,9 @@ pub struct WaitingOnYou {
     /// ask first, so the longest-blocked agent takes the top row.
     pub questions: Vec<FlightView>,
     /// Ready in the `me` lane or the viewer's own callsign's — the todo
-    /// list. Narrower than `Picks::yours`, which counts every Ready
-    /// flight outside the pool: an unassigned flight is nobody's claim,
-    /// and it still stands in the `ready` group.
+    /// list. Narrower than `next`'s walk, which falls through to the
+    /// unassigned lane: an unassigned flight is nobody's claim, and it
+    /// still stands in the `ready` group.
     pub yours: Vec<FlightView>,
 }
 
