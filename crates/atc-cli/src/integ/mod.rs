@@ -2,9 +2,9 @@
 //! machine, and how those clients then hear about the board.
 //!
 //! The slugs are what `atc hook` and `atc unhook` take — the clients,
-//! `claude`, `codex`, `cursor`, `gemini`, and the shells, `bash`, `zsh`,
-//! `fish`, `powershell`. They are flat and permanent, because they end
-//! up written inside config files tower does not own. The two verbs are
+//! `claude`, `codex`, `qwen`, and the shells, `bash`, `zsh`, `fish`,
+//! `powershell`. They are flat and permanent, because they end up
+//! written inside config files tower does not own. The two verbs are
 //! for humans: an unknown slug is a real error, a failure is loud, and
 //! `--json` emits a report envelope.
 //!
@@ -19,7 +19,10 @@
 //! class, and `atc hook` writes the same table. A slug is what you hook
 //! and a source is what fires the trigger; for a client the two are one
 //! word, and the four shells share the one source `shell`, since their
-//! rc lines differ in syntax and call the same command.
+//! rc lines differ in syntax and call the same command. A source once
+//! written is answered forever: `retired.rs` keeps `cursor` and
+//! `gemini`, the spellings of two adapters that went, and they are
+//! sources and never slugs.
 //!
 //! The skills the binary ships ride the same install for the clients
 //! that read one. Each embedded constant is the staleness fingerprint —
@@ -35,8 +38,9 @@ use crate::error::CliError;
 pub mod briefing;
 pub mod claude;
 pub mod codex;
-pub mod cursor;
-pub mod gemini;
+pub mod plugin;
+pub mod qwen;
+pub mod retired;
 pub mod settings;
 pub mod shell;
 pub mod skill;
@@ -273,7 +277,7 @@ pub trait Integration: Sync {
     }
 
     /// The notice, wrapped however this client accepts injected context.
-    /// Claude Code and Codex read plain stdout; Gemini and Cursor need a
+    /// Claude Code and Codex read plain stdout; Qwen and Cursor need a
     /// JSON field, and plain text there is discarded silently, which is
     /// the worst of the available failures.
     fn envelope(&self, text: &str) -> String;
@@ -283,8 +287,7 @@ pub trait Integration: Sync {
 
 static CLAUDE: claude::Claude = claude::Claude;
 static CODEX: codex::Codex = codex::Codex;
-static CURSOR: cursor::Cursor = cursor::Cursor;
-static GEMINI: gemini::Gemini = gemini::Gemini;
+static QWEN: qwen::Qwen = qwen::Qwen;
 static BASH: shell::Shell = shell::Shell { slug: "bash" };
 static ZSH: shell::Shell = shell::Shell { slug: "zsh" };
 static FISH: shell::Shell = shell::Shell { slug: "fish" };
@@ -292,17 +295,8 @@ static POWERSHELL: shell::Shell = shell::Shell { slug: "powershell" };
 
 /// Every slug, in the order `atc hook -l` and `atc hook --all` walk
 /// them: the clients, then the shells.
-pub fn all() -> [&'static dyn Integration; 8] {
-    [
-        &CLAUDE,
-        &CODEX,
-        &CURSOR,
-        &GEMINI,
-        &BASH,
-        &ZSH,
-        &FISH,
-        &POWERSHELL,
-    ]
+pub fn all() -> [&'static dyn Integration; 7] {
+    [&CLAUDE, &CODEX, &QWEN, &BASH, &ZSH, &FISH, &POWERSHELL]
 }
 
 pub fn by_slug(slug: &str) -> Option<&'static dyn Integration> {
@@ -311,9 +305,13 @@ pub fn by_slug(slug: &str) -> Option<&'static dyn Integration> {
 
 /// The integration a trigger source names: the first whose `source`
 /// matches, which for the shells is bash, and every shell's lines are
-/// one table.
+/// one table; else a retired source, since a spelling once written
+/// into a config file is answered forever.
 pub fn by_source(source: &str) -> Option<&'static dyn Integration> {
-    all().into_iter().find(|i| i.source() == source)
+    all()
+        .into_iter()
+        .find(|i| i.source() == source)
+        .or_else(|| retired::by_source(source))
 }
 
 /// Every slug's name, for the error a wrong one earns.
@@ -412,7 +410,9 @@ mod tests {
     #[test]
     fn the_class_is_the_table_and_no_name_is_a_boundary() {
         use settings::Class;
-        for integration in all() {
+        let live = all().into_iter();
+        let gone = retired::all().into_iter().map(|r| r as &dyn Integration);
+        for integration in live.chain(gone) {
             let slug = integration.slug();
             let shell = integration.source() == "shell";
             let bare = if shell {
@@ -459,17 +459,31 @@ mod tests {
         }
     }
 
-    /// The callsign a client's mark resolves to is the slug `atc hook`
-    /// wires it under, so the two lists cannot drift: a client tower
-    /// detects is one tower can hook, by the same name.
+    /// The callsign a client's mark resolves to is the word `atc hook`
+    /// wires it under — a slug, or a retired source, since a client
+    /// whose adapter went keeps its word on the events it wrote — so the
+    /// two lists cannot drift: a client tower detects is one tower
+    /// hooks, or hooked, by the same name.
     #[test]
     fn every_client_marker_names_a_hook_slug() {
         for (variable, callsign) in atc_core::log::CLIENT_MARKERS {
             assert!(
-                by_slug(callsign).is_some(),
-                "{variable} names `{callsign}`, which is not a hook slug"
+                by_slug(callsign).is_some() || retired::by_source(callsign).is_some(),
+                "{variable} names `{callsign}`, which is neither a hook slug nor a retired source"
             );
         }
+    }
+
+    /// A retired source answers the trigger and never the hook: the
+    /// spelling is stored somewhere tower may never rewrite.
+    #[test]
+    fn a_retired_source_is_a_source_and_not_a_slug() {
+        for retired in retired::all() {
+            let name = retired.slug();
+            assert!(by_source(name).is_some(), "{name} answers the trigger");
+            assert!(by_slug(name).is_none(), "{name} is not a slug");
+        }
+        assert_eq!(all().len(), 7);
     }
 
     fn front_matter<'a>(name: &str, text: &'a str) -> Vec<&'a str> {

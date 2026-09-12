@@ -1,6 +1,7 @@
 //! `atc hook` and `atc unhook` against a scratch home: the report, the
-//! Claude plugin directory, the settings merge for the three clients
-//! that take one, the shells' marked rc lines, the refresh, and
+//! Claude plugin directory, the Codex plugin and its marketplace entry
+//! with the migration off the settings file an older tower wrote, Qwen's
+//! settings merge, the shells' marked rc lines, the refresh, and
 //! doctor's row per client.
 //!
 //! Every path here is env-redirected — HOME, USERPROFILE, the XDG roots,
@@ -46,8 +47,9 @@ fn atc_env(
         .env("XDG_CACHE_HOME", home.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.
         .env("LOCALAPPDATA", home.join("cache"))
-        // Nothing here spawns fufu.
+        // Nothing here spawns fufu, and nothing spawns Codex.
         .env("ATC_FF", "/nonexistent")
+        .env("ATC_CODEX", "/nonexistent")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -95,11 +97,10 @@ fn home() -> tempfile::TempDir {
 
 /// Every slug, in the order the listing walks them: the clients, then
 /// the shells.
-const SLUGS: [&str; 8] = [
+const SLUGS: [&str; 7] = [
     "claude",
     "codex",
-    "cursor",
-    "gemini",
+    "qwen",
     "bash",
     "zsh",
     "fish",
@@ -111,8 +112,8 @@ const SLUGS: [&str; 8] = [
 const MARKER: &str = "# tower — added by `atc hook`";
 const FUFU: &str = "# fufu — added by `ff hook`";
 
-/// Claude's table, in the order it is written; Codex names the same
-/// five.
+/// Claude's table, in the order it is written; Codex and Qwen name the
+/// same five.
 const CLAUDE_EVENTS: [&str; 5] = [
     "SessionStart",
     "UserPromptSubmit",
@@ -161,7 +162,7 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
     // with the OS.
     let lines: Vec<&str> = listing.lines().collect();
     assert_eq!(lines.len(), SLUGS.len(), "{listing:?}");
-    let present = [true, true, false, false, false, false, false, cfg!(windows)];
+    let present = [true, true, false, false, false, false, cfg!(windows)];
     for (line, present) in lines.iter().zip(present) {
         assert!(line.ends_with("not wired"), "{line:?}");
         assert_eq!(line.contains("not on this machine"), !present, "{line:?}");
@@ -176,6 +177,9 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
     assert_eq!(rows[0]["slug"], "claude");
     assert_eq!(rows[0]["wiring"]["state"], "not-wired");
     assert_eq!(rows[0]["presence"]["state"], "present");
+    assert_eq!(rows[1]["slug"], "codex");
+    assert_eq!(rows[1]["presence"]["state"], "present");
+    assert_eq!(rows[2]["slug"], "qwen");
     assert_eq!(rows[2]["presence"]["state"], "absent");
     assert_eq!(value["data"]["changed"], serde_json::json!([]));
 }
@@ -194,6 +198,7 @@ fn bare_hook_acts_on_nothing_when_it_cannot_ask() {
         .env("XDG_CACHE_HOME", home.path().join("cache"))
         .env("LOCALAPPDATA", home.path().join("cache"))
         .env("ATC_FF", "/nonexistent")
+        .env("ATC_CODEX", "/nonexistent")
         .env("ATC_NONINTERACTIVE", "1")
         .stdin(Stdio::null())
         .output()
@@ -404,81 +409,327 @@ fn unhook_claude_removes_both_mechanisms() {
     assert!(v.get("hooks").is_none(), "both mechanisms cleared: {v}");
 }
 
-// ---- the settings clients --------------------------------------------------
+// ---- the codex plugin ------------------------------------------------------
 
-/// One config file per vendor, each in the shape that vendor documents.
+/// The plugin Codex reads through the personal marketplace: the legacy
+/// manifest with a hashed version, the five events under one absolute
+/// command, the manual, and the marketplace entry beside it; idempotent,
+/// refreshed by `-u`, stale when an event is missing, and removed whole.
 #[test]
-fn each_client_is_wired_in_its_own_schema() {
+fn the_codex_plugin_round_trips() {
     let home = home();
+    let plugin = home.path().join(".agents/plugins/tower");
+    let marketplace = home.path().join(".agents/plugins/marketplace.json");
 
-    ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
-    let codex = json_at(&home.path().join(".codex/hooks.json"));
+    let said = ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
+    assert!(said.contains("plugin written to"), "{said:?}");
+    assert!(said.contains("marketplace entry written to"), "{said:?}");
+    assert!(
+        said.contains("Codex is not on PATH — run: codex plugin add tower@tower"),
+        "{said:?}"
+    );
+    assert!(said.contains("Codex trusts a hook by its hash"), "{said:?}");
+
+    // The legacy manifest, and no root one: Codex loads a plugin's hooks
+    // from the legacy manifest alone, and a root `$schema` manifest
+    // beside it would win and drop them.
+    let manifest = json_at(&plugin.join(".codex-plugin/plugin.json"));
+    assert!(!plugin.join("plugin.json").exists(), "no root manifest");
+    assert!(manifest.get("$schema").is_none(), "{manifest}");
+    assert_eq!(manifest["name"], "tower");
+    let version = manifest["version"].as_str().unwrap();
+    let (_, suffix) = version.split_once("+atc.").expect("a hash suffix");
+    assert_eq!(suffix.len(), 8, "{version}");
+    assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "{version}");
+
+    let hooks_path = plugin.join("hooks/hooks.json");
+    let hooks = json_at(&hooks_path);
     assert_eq!(
-        codex["hooks"]
+        hooks["hooks"]
             .as_object()
             .unwrap()
             .keys()
             .collect::<Vec<_>>(),
         CLAUDE_EVENTS.to_vec(),
-        "Codex names Claude's five: {codex}"
+        "the five events, in order: {hooks}"
     );
     for event in CLAUDE_EVENTS {
-        let entry = &codex["hooks"][event][0];
-        assert_eq!(entry["hooks"][0]["command"], "atc trigger codex", "{event}");
+        let entry = &hooks["hooks"][event][0];
+        assert!(
+            entry.get("matcher").is_none(),
+            "{event}: no matcher: {entry}"
+        );
+        let command = entry["hooks"][0]["command"].as_str().unwrap();
+        assert!(command.ends_with("trigger codex"), "{event}: {command:?}");
+        assert!(
+            command.len() > "atc trigger codex".len(),
+            "absolute path baked in: {command:?}"
+        );
+    }
+    assert!(!plugin.join("mcp.json").exists(), "no server rides along");
+    let on_disk = std::fs::read_to_string(plugin.join("skills/tower/SKILL.md"))
+        .expect("the tower skill lands with the plugin");
+    assert_eq!(on_disk, compiled("tower"), "the compiled text");
+
+    let market = json_at(&marketplace);
+    assert_eq!(market["name"], "tower");
+    let plugins = market["plugins"].as_array().unwrap();
+    assert_eq!(plugins.len(), 1);
+    assert_eq!(plugins[0]["name"], "tower");
+    assert_eq!(plugins[0]["source"]["source"], "local");
+    assert_eq!(plugins[0]["source"]["path"], "./.agents/plugins/tower");
+    assert_eq!(plugins[0]["policy"]["installation"], "INSTALLED_BY_DEFAULT");
+    assert_eq!(plugins[0]["policy"]["authentication"], "ON_INSTALL");
+
+    // Idempotent, and reported as already wired.
+    let again = ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
+    assert!(again.contains("already wired in"), "{again:?}");
+    assert!(!again.contains("marketplace entry written"), "{again:?}");
+    let again = ok(&atc(
+        home.path(),
+        home.path(),
+        &["--json", "hook", "codex"],
+        None,
+    ));
+    let value: serde_json::Value = serde_json::from_str(&again).unwrap();
+    assert_eq!(value["data"]["changed"], serde_json::json!([]));
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("codex")).unwrap();
+    assert!(row.contains("wired (plugin)"), "{row:?}");
+    assert!(row.contains(", skill"), "{row:?}");
+    assert!(!row.contains("stale"), "{row:?}");
+    assert!(
+        listing.contains("Codex trusts a hook by its hash"),
+        "the trust step is on the row: {listing:?}"
+    );
+
+    // -u over a current plugin moves nothing.
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("already wired in"), "{said:?}");
+    assert!(!said.contains("rewired"), "{said:?}");
+
+    // An extra event missing reads as stale, and -u restores the bytes.
+    let current = std::fs::read_to_string(&hooks_path).unwrap();
+    let mut fewer: serde_json::Value = serde_json::from_str(&current).unwrap();
+    fewer["hooks"].as_object_mut().unwrap().remove("SessionEnd");
+    std::fs::write(&hooks_path, serde_json::to_string_pretty(&fewer).unwrap()).unwrap();
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("codex")).unwrap();
+    assert!(row.contains("wired (plugin)"), "{row:?}");
+    assert!(row.contains("stale — atc hook -u rewrites it"), "{row:?}");
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("rewired"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&hooks_path).unwrap(), current);
+
+    let said = ok(&atc(home.path(), home.path(), &["unhook", "codex"], None));
+    assert!(said.contains("removed the tower entry from"), "{said:?}");
+    assert!(said.contains("codex plugin remove tower@tower"), "{said:?}");
+    assert!(!plugin.exists(), "the directory tower owns goes whole");
+    let market = json_at(&marketplace);
+    assert_eq!(market["name"], "tower", "the file keeps its name");
+    assert_eq!(market["plugins"], serde_json::json!([]));
+    let said = ok(&atc(home.path(), home.path(), &["unhook", "codex"], None));
+    assert!(said.contains("no tower plugin installed"), "{said:?}");
+}
+
+/// The marketplace is a file tower does not own: a foreign plugin, the
+/// file's own name, and its key order all survive hook and unhook, with
+/// tower's entry appended then removed.
+#[test]
+fn a_foreign_marketplace_survives() {
+    let home = home();
+    let marketplace = home.path().join(".agents/plugins/marketplace.json");
+    std::fs::create_dir_all(marketplace.parent().unwrap()).unwrap();
+    let seed = serde_json::json!({
+        "plugins": [{
+            "name": "theirs",
+            "source": { "source": "local", "path": "./.agents/plugins/theirs" },
+            "policy": { "installation": "AVAILABLE" }
+        }],
+        "name": "mine",
+        "metadata": { "description": "my plugins" }
+    });
+    std::fs::write(&marketplace, serde_json::to_string_pretty(&seed).unwrap()).unwrap();
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
+    assert!(said.contains("codex plugin add tower@mine"), "{said:?}");
+    let v = json_at(&marketplace);
+    assert_eq!(v["name"], "mine");
+    assert_eq!(v["metadata"]["description"], "my plugins");
+    let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+    assert_eq!(keys, vec!["plugins", "name", "metadata"], "{v}");
+    let plugins = v["plugins"].as_array().unwrap();
+    assert_eq!(plugins.len(), 2);
+    assert_eq!(
+        plugins[0], seed["plugins"][0],
+        "the foreign entry, value for value"
+    );
+    assert_eq!(plugins[1]["name"], "tower");
+
+    ok(&atc(home.path(), home.path(), &["unhook", "codex"], None));
+    let v = json_at(&marketplace);
+    assert_eq!(v["name"], "mine");
+    let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+    assert_eq!(keys, vec!["plugins", "name", "metadata"], "{v}");
+    assert_eq!(v["plugins"], seed["plugins"]);
+}
+
+/// A marketplace that will not parse is refused, the plugin already
+/// written — since the plugin delivers and the file is not tower's to
+/// guess at.
+#[test]
+fn a_malformed_marketplace_is_refused_untouched() {
+    let home = home();
+    let marketplace = home.path().join(".agents/plugins/marketplace.json");
+    std::fs::create_dir_all(marketplace.parent().unwrap()).unwrap();
+    std::fs::write(&marketplace, "{ not json").unwrap();
+    let out = atc(home.path(), home.path(), &["--json", "hook", "codex"], None);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(envelope(&out)["error"]["id"], "hook/malformed");
+    assert_eq!(std::fs::read_to_string(&marketplace).unwrap(), "{ not json");
+}
+
+/// Add-then-remove: once the plugin has verified, what an older tower
+/// wrote into Codex's settings file goes — tower's entries and nothing
+/// beside them, in either spelling — and the skill directory beside
+/// it; a file of the user's own under `~/.codex/skills` stays.
+#[test]
+fn the_migration_strips_the_old_codex_wiring() {
+    let home = home();
+    let codex = home.path().join(".codex/hooks.json");
+    std::fs::create_dir_all(codex.parent().unwrap()).unwrap();
+    let mut events = serde_json::Map::new();
+    for (n, event) in CLAUDE_EVENTS.iter().enumerate() {
+        let ours = if n == 0 {
+            "atc briefing codex"
+        } else {
+            "atc trigger codex"
+        };
+        events.insert(
+            (*event).into(),
+            serde_json::json!([
+                { "hooks": [{ "type": "command", "command": "ff trigger codex" }] },
+                { "hooks": [{ "type": "command", "command": ours }] }
+            ]),
+        );
+    }
+    std::fs::write(
+        &codex,
+        serde_json::to_string_pretty(&serde_json::json!({ "hooks": events })).unwrap(),
+    )
+    .unwrap();
+    let old_skill = home.path().join(".codex/skills/tower/SKILL.md");
+    std::fs::create_dir_all(old_skill.parent().unwrap()).unwrap();
+    std::fs::write(&old_skill, "---\nname: tower\ndescription: old\n---\n").unwrap();
+    let theirs = home.path().join(".codex/skills/theirs/SKILL.md");
+    std::fs::create_dir_all(theirs.parent().unwrap()).unwrap();
+    std::fs::write(&theirs, "---\nname: theirs\n---\n").unwrap();
+
+    // Before the plugin, the settings entries are not wiring the plugin
+    // adapter reports — they deliver, and `atc hook codex` is the move.
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("codex")).unwrap();
+    assert!(row.ends_with("not wired"), "{row:?}");
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
+    assert!(said.contains("moved off ~/.codex/hooks.json"), "{said:?}");
+    assert!(said.contains("removed ~/.codex/skills/tower"), "{said:?}");
+
+    let v = json_at(&codex);
+    for event in CLAUDE_EVENTS {
+        let entries = v["hooks"][event].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{event}: only fufu's stays: {v}");
+        assert_eq!(entries[0]["hooks"][0]["command"], "ff trigger codex");
+    }
+    assert!(!old_skill.exists(), "the old skill directory goes");
+    assert!(theirs.exists(), "a skill of the user's own stays");
+
+    // The second run has nothing left to strip and says so by silence.
+    let again = ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
+    assert!(!again.contains("moved off"), "{again:?}");
+    assert!(!again.contains("removed ~/.codex"), "{again:?}");
+}
+
+/// The two adapters that went are ordinary unknown names to the hook,
+/// and their files are left as found — there is nothing to migrate to.
+#[test]
+fn cursor_and_gemini_are_unknown_slugs_and_their_files_are_left() {
+    let home = home();
+    let cursor = home.path().join(".cursor/hooks.json");
+    std::fs::create_dir_all(cursor.parent().unwrap()).unwrap();
+    let cursor_seed =
+        r#"{"version":1,"hooks":{"sessionStart":[{"command":"atc trigger cursor"}]}}"#;
+    std::fs::write(&cursor, cursor_seed).unwrap();
+    let gemini = home.path().join(".gemini/settings.json");
+    std::fs::create_dir_all(gemini.parent().unwrap()).unwrap();
+    let gemini_seed = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"atc briefing gemini"}]}]}}"#;
+    std::fs::write(&gemini, gemini_seed).unwrap();
+
+    for verb in ["hook", "unhook"] {
+        for old in ["cursor", "gemini"] {
+            let out = atc(home.path(), home.path(), &["--json", verb, old], None);
+            assert_eq!(out.status.code(), Some(2), "{verb} {old}");
+            let value = envelope(&out);
+            assert_eq!(value["error"]["id"], "usage/unknown-slug");
+            let message = value["error"]["message"].as_str().unwrap();
+            assert!(message.contains("unknown client or shell"), "{message}");
+            assert!(message.contains("codex"), "names the known: {message}");
+        }
+    }
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    ok(&atc(home.path(), home.path(), &["hook", "--all"], None));
+    assert_eq!(std::fs::read_to_string(&cursor).unwrap(), cursor_seed);
+    assert_eq!(std::fs::read_to_string(&gemini).unwrap(), gemini_seed);
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    assert!(!listing.contains("cursor"), "{listing:?}");
+    assert!(!listing.contains("gemini"), "{listing:?}");
+}
+
+// ---- qwen ------------------------------------------------------------------
+
+/// Qwen Code takes the family's five events in its own settings file,
+/// no matcher, no skills directory.
+#[test]
+fn qwen_is_wired_in_its_settings_file() {
+    let home = home();
+    ok(&atc(home.path(), home.path(), &["hook", "qwen"], None));
+    let qwen = json_at(&home.path().join(".qwen/settings.json"));
+    assert_eq!(
+        qwen["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        CLAUDE_EVENTS.to_vec(),
+        "Qwen names the family's five: {qwen}"
+    );
+    for event in CLAUDE_EVENTS {
+        let entry = &qwen["hooks"][event][0];
+        assert_eq!(entry["hooks"][0]["command"], "atc trigger qwen", "{event}");
         assert_eq!(entry["hooks"][0]["type"], "command");
         assert!(
             entry.get("matcher").is_none(),
-            "{event}: no matcher: {codex}"
+            "{event}: no matcher: {qwen}"
         );
     }
-    let skill = home.path().join(".codex/skills/tower/SKILL.md");
-    assert!(skill.exists(), "the tower skill lands beside the wiring");
-    assert!(
-        std::fs::read_to_string(&skill)
-            .unwrap()
-            .starts_with("---\nname: tower\n")
-    );
+    assert!(!home.path().join(".qwen/skills").exists());
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("qwen")).unwrap();
+    assert!(row.contains("wired (settings)"), "{row:?}");
+    assert!(!row.contains(", skill"), "{row:?}");
 
-    ok(&atc(home.path(), home.path(), &["hook", "gemini"], None));
-    let gemini = json_at(&home.path().join(".gemini/settings.json"));
-    let entry = &gemini["hooks"]["SessionStart"][0];
-    assert_eq!(entry["hooks"][0]["command"], "atc trigger gemini");
-    assert!(entry.get("matcher").is_none(), "no matcher: {gemini}");
-    assert_eq!(
-        gemini["hooks"].as_object().unwrap().len(),
-        1,
-        "the boundary alone: {gemini}"
-    );
-    assert!(!home.path().join(".gemini/skills").exists());
-
-    ok(&atc(home.path(), home.path(), &["hook", "cursor"], None));
-    let cursor = json_at(&home.path().join(".cursor/hooks.json"));
-    assert_eq!(cursor["version"], 1);
-    let entry = &cursor["hooks"]["sessionStart"][0];
-    assert_eq!(entry["command"], "atc trigger cursor");
-    assert!(entry.get("hooks").is_none(), "the flat shape: {cursor}");
-    assert!(entry.get("matcher").is_none(), "no matcher: {cursor}");
-    assert_eq!(
-        cursor["hooks"].as_object().unwrap().len(),
-        1,
-        "the boundary alone: {cursor}"
-    );
-
-    // Removing the wiring removes the skill, because unhook takes back
-    // exactly what hook added — both halves of it.
-    ok(&atc(home.path(), home.path(), &["unhook", "codex"], None));
-    assert!(!home.path().join(".codex/skills/tower").exists());
-    let v = json_at(&home.path().join(".codex/hooks.json"));
-    assert!(v.get("hooks").is_none(), "the entries went too: {v}");
+    ok(&atc(home.path(), home.path(), &["unhook", "qwen"], None));
+    let v = json_at(&home.path().join(".qwen/settings.json"));
+    assert!(v.get("hooks").is_none(), "the entries went: {v}");
 }
 
 #[test]
 fn install_preserves_foreign_content() {
     let home = home();
-    let settings = home.path().join(".codex/hooks.json");
+    let settings = home.path().join(".qwen/settings.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     let foreign = serde_json::json!({
-        "model": "opus",
+        "model": "qwen3",
         "hooks": {
             "SessionStart": [
                 { "hooks": [{ "type": "command", "command": "my-banner" }] }
@@ -491,9 +742,9 @@ fn install_preserves_foreign_content() {
     });
     std::fs::write(&settings, serde_json::to_string_pretty(&foreign).unwrap()).unwrap();
 
-    ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
+    ok(&atc(home.path(), home.path(), &["hook", "qwen"], None));
     let v = json_at(&settings);
-    assert_eq!(v["model"], "opus", "foreign top-level fields preserved");
+    assert_eq!(v["model"], "qwen3", "foreign top-level fields preserved");
     assert_eq!(v["env"]["FOO"], "bar");
     assert_eq!(
         v["hooks"]["SessionStart"][0]["hooks"][0]["command"], "my-banner",
@@ -504,11 +755,11 @@ fn install_preserves_foreign_content() {
         "the foreign Stop entry stays first"
     );
     assert_eq!(
-        v["hooks"]["Stop"][1]["hooks"][0]["command"], "atc trigger codex",
+        v["hooks"]["Stop"][1]["hooks"][0]["command"], "atc trigger qwen",
         "ours appended under the event the foreign one already held"
     );
     assert_eq!(
-        v["hooks"]["SessionStart"][1]["hooks"][0]["command"], "atc trigger codex",
+        v["hooks"]["SessionStart"][1]["hooks"][0]["command"], "atc trigger qwen",
         "our entry appended after foreign ones"
     );
     // The user's key order survives the round trip.
@@ -516,7 +767,7 @@ fn install_preserves_foreign_content() {
     assert_eq!(keys, vec!["model", "hooks", "env"], "{v}");
 
     // Uninstall removes only ours.
-    ok(&atc(home.path(), home.path(), &["unhook", "codex"], None));
+    ok(&atc(home.path(), home.path(), &["unhook", "qwen"], None));
     let v = json_at(&settings);
     assert_eq!(v["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
     assert_eq!(
@@ -529,13 +780,13 @@ fn install_preserves_foreign_content() {
         "notify-send done"
     );
     assert!(v["hooks"].get("SessionEnd").is_none(), "{v}");
-    assert_eq!(v["model"], "opus");
+    assert_eq!(v["model"], "qwen3");
 }
 
 #[test]
 fn install_refuses_malformed_files_untouched() {
     let home = home();
-    let settings = home.path().join(".codex/hooks.json");
+    let settings = home.path().join(".qwen/settings.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
 
     for bad in [
@@ -545,17 +796,13 @@ fn install_refuses_malformed_files_untouched() {
         r#"{ "hooks": { "SessionStart": "not an array" } }"#,
     ] {
         std::fs::write(&settings, bad).unwrap();
-        let out = atc(home.path(), home.path(), &["--json", "hook", "codex"], None);
+        let out = atc(home.path(), home.path(), &["--json", "hook", "qwen"], None);
         assert_eq!(out.status.code(), Some(1), "must refuse: {bad}");
         assert_eq!(envelope(&out)["error"]["id"], "hook/malformed");
         assert_eq!(
             std::fs::read_to_string(&settings).unwrap(),
             bad,
             "file untouched on refusal"
-        );
-        assert!(
-            !home.path().join(".codex/skills").exists(),
-            "the refusal stops the install before the skills: {bad}"
         );
     }
 }
@@ -786,10 +1033,10 @@ fn the_bash_lines_round_trip_byte_for_byte() {
     assert!(row.contains(&rc.display().to_string()), "{row:?}");
     let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
     let rows = envelope(&out)["data"]["integrations"].clone();
-    assert_eq!(rows[4]["slug"], "bash");
-    assert_eq!(rows[4]["wiring"]["state"], "wired");
-    assert_eq!(rows[4]["wiring"]["mechanism"], "rc");
-    assert_eq!(rows[4]["presence"]["state"], "present");
+    assert_eq!(rows[3]["slug"], "bash");
+    assert_eq!(rows[3]["wiring"]["state"], "wired");
+    assert_eq!(rows[3]["wiring"]["mechanism"], "rc");
+    assert_eq!(rows[3]["presence"]["state"], "present");
 
     let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
     assert!(said.contains("already wired in"), "{said:?}");
@@ -848,8 +1095,8 @@ fn a_hand_written_trigger_line_is_reported_and_left_alone() {
     assert!(row.contains("written by hand — left alone"), "{row:?}");
     let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
     let rows = envelope(&out)["data"]["integrations"].clone();
-    assert_eq!(rows[4]["wiring"]["state"], "hand-written");
-    assert_eq!(rows[4]["wiring"]["at"], rc.display().to_string());
+    assert_eq!(rows[3]["wiring"]["state"], "hand-written");
+    assert_eq!(rows[3]["wiring"]["at"], rc.display().to_string());
 
     let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
     assert!(said.contains("nothing is wired"), "{said:?}");
@@ -1089,4 +1336,46 @@ fn doctor_has_a_row_per_client() {
     let out = atc(home, repo.path(), &["doctor"], None);
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out).contains("WARN  claude:"), "{}", text(&out));
+}
+
+/// Doctor reads the Codex plugin the way it reads Claude's: an ok row
+/// under the plugin's word, naming the directory.
+#[test]
+fn doctor_reads_the_codex_plugin() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let home = repo.path().parent().unwrap();
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    let row = |home: &Path| -> serde_json::Value {
+        let out = atc(home, repo.path(), &["doctor", "--json"], None);
+        envelope(&out)["data"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["check"] == "hook/codex")
+            .cloned()
+            .unwrap_or_else(|| panic!("a hook/codex row"))
+    };
+    let found = row(home);
+    assert_eq!(found["level"], "info", "{found}");
+    assert!(
+        found["message"]
+            .as_str()
+            .unwrap()
+            .contains("atc hook codex"),
+        "{found}"
+    );
+    ok(&atc(home, home, &["hook", "codex"], None));
+    let found = row(home);
+    assert_eq!(found["level"], "ok", "{found}");
+    assert_eq!(
+        found["message"],
+        format!(
+            "codex: plugin wired in {}",
+            home.join(".agents/plugins/tower").display()
+        ),
+        "{found}"
+    );
+    let human = ok(&atc(home, repo.path(), &["doctor"], None));
+    assert!(human.contains("ok    codex: plugin wired in"), "{human:?}");
 }

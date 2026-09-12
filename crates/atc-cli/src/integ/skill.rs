@@ -10,8 +10,8 @@
 //! Delivery is the same story `claude.rs` tells: a directory per skill
 //! that tower owns outright, written whole and removed whole, with no
 //! foreign content to preserve. Claude takes them inside the plugin it
-//! already owns; Codex takes directories beside the settings file it
-//! does not.
+//! already owns; Codex inside the plugin tower writes for it, under
+//! `skills/` the same way.
 //!
 //! It lives as markdown next to the Rust, embedded whole. The embedded
 //! constant is the staleness fingerprint — byte drift on disk reads as
@@ -48,8 +48,8 @@ pub const SKILLS: [Skill; 1] = [Skill {
 /// worked examples, written by the hook from ba1203e until they went
 /// back to docs/skills/. Each is recognized by the front matter it
 /// shipped with, name and description byte for byte, so a skill of
-/// the user's own under the same name — possible beside Codex's
-/// settings — is never touched.
+/// the user's own under the same name — possible under `~/.codex/skills`,
+/// where an older tower wrote — is never touched.
 const RETIRED: [(&str, &str); 3] = [
     (
         "plan",

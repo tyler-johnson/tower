@@ -42,9 +42,24 @@ fn trigger(
     session: Option<&str>,
     stdin: Option<&str>,
 ) -> Output {
+    trigger_env(cwd, home, source, session, stdin, &[])
+}
+
+/// The same, with more variables set — a client's marker.
+fn trigger_env(
+    cwd: &Path,
+    home: &Path,
+    source: &str,
+    session: Option<&str>,
+    stdin: Option<&str>,
+    env: &[(&str, &str)],
+) -> Output {
     let mut command = command(cwd, home, &["trigger", source]);
     if let Some(session) = session {
         command.env("CLAUDE_CODE_SESSION_ID", session);
+    }
+    for (name, value) in env {
+        command.env(name, value);
     }
     let mut child = command
         .stdin(match stdin {
@@ -236,7 +251,8 @@ fn no_event_name_is_a_boundary() {
 }
 
 /// Every client's boundary goes out in its own envelope, and the notice
-/// is the same text inside each.
+/// is the same text inside each, and the retired sources answer as they
+/// always did.
 #[test]
 fn the_boundary_is_wrapped_the_way_each_client_reads_it() {
     let repo = repo();
@@ -248,9 +264,9 @@ fn the_boundary_is_wrapped_the_way_each_client_reads_it() {
     );
     let elsewhere = tempfile::TempDir::new().unwrap();
 
-    let plain = |source: &str, event: &str| -> String {
+    let under = |source: &str, event: &str, env: &[(&str, &str)]| -> String {
         let text = payload(repo.path(), Some(event), None);
-        let out = trigger(elsewhere.path(), home, source, Some("s3"), Some(&text));
+        let out = trigger_env(elsewhere.path(), home, source, Some("s3"), Some(&text), env);
         assert!(
             out.stderr.is_empty(),
             "{}",
@@ -258,25 +274,53 @@ fn the_boundary_is_wrapped_the_way_each_client_reads_it() {
         );
         stdout(&out)
     };
-    for source in ["claude", "codex"] {
-        let text = plain(source, "SessionStart");
-        assert!(text.starts_with("tower (`atc`) keeps"), "{source}: {text}");
+    let plain = |source: &str, event: &str| under(source, event, &[]);
+    let is_plain = |text: &str, what: &str| {
+        assert!(text.starts_with("tower (`atc`) keeps"), "{what}: {text}");
         assert!(
             text.trim_end().ends_with("1 flight ready. Run `atc`."),
-            "{source}: {text}"
+            "{what}: {text}"
         );
-    }
-    let gemini: serde_json::Value = serde_json::from_str(&plain("gemini", "SessionStart")).unwrap();
-    let carried = gemini["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap();
-    assert!(carried.starts_with("tower (`atc`) keeps"), "{carried}");
-    let cursor: serde_json::Value = serde_json::from_str(&plain("cursor", "sessionStart")).unwrap();
-    let carried = cursor["additional_context"].as_str().unwrap();
-    assert!(carried.starts_with("tower (`atc`) keeps"), "{carried}");
+    };
+    let carried = |text: &str, path: &[&str]| -> String {
+        let mut value: serde_json::Value = serde_json::from_str(text).unwrap();
+        for key in path {
+            value = value[*key].take();
+        }
+        value
+            .as_str()
+            .unwrap_or_else(|| panic!("{path:?} in {text}"))
+            .to_string()
+    };
 
-    // Each client's table is its own: Claude's activity name means
-    // nothing to the two that wire the boundary alone.
+    for source in ["claude", "codex"] {
+        is_plain(&plain(source, "SessionStart"), source);
+    }
+    // A Codex hook process carries no marker; the shell tool's marker
+    // changes nothing about the envelope either way.
+    is_plain(
+        &under("codex", "SessionStart", &[("CODEX_SANDBOX", "1")]),
+        "codex under its marker",
+    );
+
+    // The retired sources, each in the envelope it was written with.
+    let text = carried(
+        &plain("gemini", "SessionStart"),
+        &["hookSpecificOutput", "additionalContext"],
+    );
+    is_plain(&text, "gemini");
+    let text = carried(&plain("cursor", "sessionStart"), &["additional_context"]);
+    is_plain(&text, "cursor");
+    // Qwen, in the field it inherited.
+    let text = carried(
+        &plain("qwen", "SessionStart"),
+        &["hookSpecificOutput", "additionalContext"],
+    );
+    is_plain(&text, "qwen");
+
+    // Each source's table is its own: Claude's activity name means
+    // nothing to the two retired ones that wired the boundary alone,
+    // and renews the lease silently on Codex.
     for source in ["gemini", "cursor"] {
         let text = payload(repo.path(), Some("PreToolUse"), None);
         silent(
@@ -284,6 +328,14 @@ fn the_boundary_is_wrapped_the_way_each_client_reads_it() {
             source,
         );
     }
+    let lease = lease(home, "s3");
+    let before = age(&lease);
+    let text = payload(repo.path(), Some("PreToolUse"), None);
+    silent(
+        &trigger(elsewhere.path(), home, "codex", Some("s3"), Some(&text)),
+        "codex activity",
+    );
+    assert!(mtime(&lease) > before, "activity renews the lease");
 }
 
 /// `--json` on the source form is the machine envelope, the way the
@@ -618,7 +670,7 @@ fn a_source_it_does_not_know_and_a_place_with_no_board_are_silent() {
         Some(String::new()),
         None,
     ] {
-        for source in ["claude", "codex", "cursor", "gemini"] {
+        for source in ["claude", "codex", "qwen", "cursor", "gemini"] {
             silent(
                 &trigger(home, home, source, Some("s9"), stdin.as_deref()),
                 &format!("{source}: {stdin:?}"),

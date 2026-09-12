@@ -40,7 +40,7 @@ The name a procedure is filed under is the `name =` line inside the file, not th
 
 ## Reaching an agent
 
-The manual is the binary's to install: `atc hook` writes the `tower` skill where each client reads skills — inside the Claude Code plugin it owns, beside Codex's settings — and `atc unhook` takes it back. Nothing here is the manual, and the manual never appears on the shelf.
+The manual is the binary's to install: `atc hook` writes the `tower` skill where each client reads skills, and `atc unhook` takes it back. tower wires Claude Code through its own plugin, Codex through a plugin at `~/.agents/plugins/tower` reached by the personal marketplace beside it, and Qwen Code through its settings file; the notice lands where the client runs hooks, and the manual lands with it. Nothing here is the manual, and the manual never appears on the shelf.
 
 A shelf skill reaches an agent by name. An agent-assigned flight names the skill it is flown with, `atc next` hands that name out on the picked row, and the agent prints it with `atc skills <name>` and follows it for that flight. tower writes no other program's config, so there is no redirect to set up: the flight carries the name, and the pick delivers it.
 

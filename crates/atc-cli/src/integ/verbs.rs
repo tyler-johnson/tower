@@ -66,7 +66,7 @@ fn refresh(json: bool) -> Result<(), CliError> {
     let statuses = super::statuses();
     let targets: Vec<&'static dyn Integration> = statuses
         .iter()
-        .filter(|status| matches!(status.wiring, Wiring::Wired { .. } | Wiring::Partial { .. }))
+        .filter(|status| status.wiring.is_wired())
         .filter_map(|status| super::by_slug(status.slug))
         .collect();
     if targets.is_empty() {

@@ -430,8 +430,9 @@ pub struct SessionVar {
 /// The session table, walked in order, first set and usable wins.
 /// `ATC_SESSION` is the launcher's own tag, set per worker by a
 /// person's orchestrator, and beats the client's; the clients' own
-/// follow — Claude Code's on every process it spawns, Codex's, and the
-/// one tower's OpenCode plugin sets; `ATC_SHELL_SESSION` is a
+/// follow — Claude Code's on every process it spawns, Codex's, Qwen
+/// Code's on hooks and shell tools alike, and the one tower's OpenCode
+/// plugin sets; `ATC_SHELL_SESSION` is a
 /// terminal's, minted by its rc lines, and last on purpose: a
 /// terminal's variables are inherited by every agent launched from it,
 /// and the agent's own row must win. A pid is read from the row that
@@ -454,6 +455,11 @@ pub const SESSION_VARS: &[SessionVar] = &[
         var: "CODEX_SESSION_ID",
         pid_var: None,
         source: "codex",
+    },
+    SessionVar {
+        var: "QWEN_CODE_SESSION_ID",
+        pid_var: None,
+        source: "qwen",
     },
     SessionVar {
         var: "OPENCODE_SESSION_ID",
@@ -688,16 +694,17 @@ pub const CALLSIGN_VAR: &str = "ATC_CALLSIGN";
 /// The marks the agent clients leave on the shell they run commands in,
 /// and the callsign each names: a variable that is set and non-empty
 /// names its client, first match in table order. Claude Code sets
-/// `CLAUDECODE`, Gemini CLI `GEMINI_CLI`, Cursor's IDE agent
+/// `CLAUDECODE`, Qwen Code `QWEN_CODE`, Cursor's IDE agent
 /// `CURSOR_AGENT`, and Codex's shell tool `CODEX_SANDBOX_NETWORK_DISABLED`
 /// and `CODEX_SANDBOX` under its sandbox. Best-effort on purpose: a
 /// client that leaves no mark, or Codex with sandboxing off, resolves
 /// like a bare shell, and the launcher's [`CALLSIGN_VAR`] is the way to
-/// name it. The callsigns are the `atc hook` slugs, so the client a
-/// hook wires is the one its events name.
+/// name it. The callsigns are the words the clients are wired under —
+/// an `atc hook` slug, or the source a retired adapter wrote — so the
+/// client a hook wires is the one its events name.
 pub const CLIENT_MARKERS: &[(&str, &str)] = &[
     ("CLAUDECODE", "claude"),
-    ("GEMINI_CLI", "gemini"),
+    ("QWEN_CODE", "qwen"),
     ("CURSOR_AGENT", "cursor"),
     ("CODEX_SANDBOX_NETWORK_DISABLED", "codex"),
     ("CODEX_SANDBOX", "codex"),
@@ -1188,10 +1195,10 @@ mod tests {
             case(
                 Some("   "),
                 None,
-                Some("gemini"),
+                Some("qwen"),
                 false,
                 None,
-                Some(("gemini", "client")),
+                Some(("qwen", "client")),
             ),
             case(
                 Some("me"),

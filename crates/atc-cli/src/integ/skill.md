@@ -7,7 +7,7 @@ description: Advanced use of tower (atc), the board over fufu. Use when driving 
 
 `atc` is the board over fufu. Work is filed as flights, every verb appends one event to a log kept as ordinary git refs in the repository, and every render folds that log fresh. Nothing is entered twice, and nothing tower stores needs tower to read back: the refs are plain git objects beside history.
 
-tower is called and never calls. It runs no dispatch and no loop; the harness a session runs in is the scheduler, and tower is the queue and the record. The once-per-session briefing already gave the agent bare `atc` and the loop's four gestures. This is the rest.
+tower is called and never calls. It runs no dispatch and no loop; the harness a session runs in is the scheduler, and tower is the queue and the record. The once-per-session briefing already gave the agent bare `atc` and the loop's four gestures. This is the rest. Both reach a client through `atc hook`: Claude Code through its own plugin, Codex through a plugin at `~/.agents/plugins/tower` reached by the personal marketplace beside it, Qwen Code through its settings file.
 
 ## The model
 

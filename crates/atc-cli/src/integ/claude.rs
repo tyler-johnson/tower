@@ -23,7 +23,8 @@
 use std::path::PathBuf;
 
 use super::{
-    Change, InstallOptions, Integration, Mechanism, Presence, Status, Wiring, settings, skill,
+    Change, InstallOptions, Integration, Mechanism, Presence, Status, Wiring, plugin, settings,
+    skill,
 };
 use crate::error::CliError;
 use settings::{Class, Event, Need};
@@ -134,62 +135,18 @@ fn is_legacy(command: &str) -> bool {
 
 // ---- the plugin ------------------------------------------------------------
 
+/// The manifest and the hooks file. The reading of the hooks file is
+/// `plugin.rs`, shared with Codex's plugin; the manifest and the
+/// `.claude-plugin/` layout are this client's own.
 fn plugin_body() -> (String, String) {
-    let command = super::exe_command(TAIL);
     let manifest = serde_json::json!({
         "name": "tower",
         "version": env!("CARGO_PKG_VERSION"),
         "description": "tower (atc) keeps this repository's board: flights for people and agents",
         "homepage": env!("CARGO_PKG_REPOSITORY"),
     });
-    let mut events = serde_json::Map::new();
-    for event in EVENTS {
-        let mut entry = serde_json::Map::new();
-        if let Some(matcher) = event.matcher {
-            entry.insert("matcher".into(), matcher.into());
-        }
-        entry.insert(
-            "hooks".into(),
-            serde_json::json!([{ "type": "command", "command": command }]),
-        );
-        events.insert(
-            event.name.to_string(),
-            serde_json::Value::Array(vec![serde_json::Value::Object(entry)]),
-        );
-    }
-    let hooks = serde_json::json!({ "hooks": serde_json::Value::Object(events) });
-    (pretty(&manifest), pretty(&hooks))
-}
-
-fn pretty(value: &serde_json::Value) -> String {
-    let mut body = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
-    body.push('\n');
-    body
-}
-
-/// Every command the plugin's hooks.json runs under one event.
-fn plugin_commands<'a>(value: &'a serde_json::Value, event: &str) -> Vec<&'a str> {
-    value["hooks"][event]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| entry["hooks"].as_array())
-        .flatten()
-        .filter_map(|c| c["command"].as_str())
-        .collect()
-}
-
-/// Which of `EVENTS` this hooks.json does not carry, in `EVENTS` order.
-fn plugin_missing(value: &serde_json::Value) -> Vec<(&'static str, Need)> {
-    EVENTS
-        .iter()
-        .filter(|event| {
-            !plugin_commands(value, event.name)
-                .iter()
-                .any(|c| is_ours(c))
-        })
-        .map(|event| (event.name, event.need))
-        .collect()
+    let hooks = plugin::hooks_body(&EVENTS, &super::exe_command(TAIL));
+    (plugin::pretty(&manifest), hooks)
 }
 
 /// Whether the plugin on disk is one an older tower wrote: a command in
@@ -200,57 +157,15 @@ fn plugin_stale() -> bool {
     let Ok(path) = hooks_path() else {
         return false;
     };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return false;
-    };
-    let legacy = EVENTS.iter().any(|event| {
-        plugin_commands(&value, event.name)
-            .iter()
-            .any(|c| is_legacy(c))
-    });
-    if legacy {
-        return true;
-    }
-    let missing = plugin_missing(&value);
-    missing.len() < EVENTS.len() && missing.iter().any(|(_, need)| *need == Need::Extra)
+    plugin::stale(&path, &EVENTS, is_ours, is_legacy)
 }
 
 /// Whether the plugin on disk is wired, read the way the client reads it.
 fn plugin_wiring() -> Wiring {
-    let Ok(path) = hooks_path() else {
+    let (Ok(path), Ok(dir)) = (hooks_path(), plugin_dir()) else {
         return Wiring::NotWired;
     };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Wiring::NotWired;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Wiring::Unavailable(format!("{}: not valid JSON", path.display()));
-    };
-    let missing = plugin_missing(&value);
-    let plugin = plugin_dir().unwrap_or_default();
-    if missing.len() == EVENTS.len() {
-        return Wiring::NotWired;
-    }
-    // Only a required event's absence is partial delivery; an extra one
-    // missing would be an older install, which `stale` reports instead.
-    let required: Vec<&str> = missing
-        .iter()
-        .filter(|(_, need)| *need == Need::Required)
-        .map(|(event, _)| *event)
-        .collect();
-    if required.is_empty() {
-        return Wiring::Wired {
-            mechanism: Mechanism::Plugin,
-            at: plugin,
-        };
-    }
-    Wiring::Partial {
-        missing: required.join(", "),
-        at: plugin,
-    }
+    plugin::wiring(&path, &dir, &EVENTS, is_ours)
 }
 
 /// Writes the plugin whole: manifest, hooks, and the skill. Answers
@@ -258,19 +173,8 @@ fn plugin_wiring() -> Wiring {
 /// current machine can say so instead of claiming a write.
 fn write_plugin() -> Result<bool, CliError> {
     let (manifest, hooks) = plugin_body();
-    let manifest_path = manifest_path()?;
-    let hooks_path = hooks_path()?;
-    let mut changed = false;
-    for (path, body) in [(&manifest_path, &manifest), (&hooks_path, &hooks)] {
-        if std::fs::read_to_string(path).ok().as_ref() == Some(body) {
-            continue;
-        }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| super::failed(parent, err))?;
-        }
-        std::fs::write(path, body).map_err(|err| super::failed(path, err))?;
-        changed = true;
-    }
+    let mut changed = plugin::write_if_changed(&manifest_path()?, &manifest)?;
+    changed |= plugin::write_if_changed(&hooks_path()?, &hooks)?;
     let root = skills_root()?;
     if !matches!(skill::wiring(&root), Wiring::Wired { .. }) {
         skill::write_all(&root)?;
@@ -463,7 +367,7 @@ mod tests {
                 event.name
             );
         }
-        assert!(plugin_missing(&value).is_empty());
+        assert!(plugin::missing(&value, &EVENTS, is_ours).is_empty());
     }
 
     /// The retired spelling still reads as ours — an older plugin keeps

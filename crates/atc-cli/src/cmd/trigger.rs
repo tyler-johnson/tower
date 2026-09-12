@@ -26,7 +26,9 @@
 //! has no boundary: a prompt has no context to inject a notice into.
 //!
 //! `atc briefing [client]` stays as an alias that prints the notice and
-//! touches no lease, for the configs that still spell it.
+//! touches no lease, for the configs that still spell it; a source an
+//! adapter that went once wrote — `cursor`, `gemini` — answers both
+//! verbs forever, from `retired.rs`.
 
 use crate::error::CliError;
 use crate::integ::settings::Class;
@@ -83,12 +85,15 @@ pub fn run(json: bool, source: Option<&str>, end: bool) -> Result<(), CliError> 
 
 /// `atc briefing [client]`: the notice alone, as it always printed. The
 /// client form refuses a name it does not know, because a person typing
-/// this by hand deserves the answer.
+/// this by hand deserves the answer; a retired one — `cursor`, `gemini`
+/// — is a stored spelling and prints what it printed.
 pub fn run_briefing(json: bool, client: Option<&str>) -> Result<(), CliError> {
     let Some(slug) = client else {
         return bare(json, "briefing");
     };
-    let integration = integ::by_slug(slug).ok_or_else(|| integ::verbs::unknown_slug(slug))?;
+    let integration = integ::by_slug(slug)
+        .or_else(|| integ::retired::by_source(slug))
+        .ok_or_else(|| integ::verbs::unknown_slug(slug))?;
     let payload = briefing::read_payload();
     notice(json, integration, &payload)
 }

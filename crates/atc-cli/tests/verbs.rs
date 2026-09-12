@@ -1161,10 +1161,10 @@ fn a_client_mark_is_the_callsign_and_the_variable_beats_it() {
 
     stdout(&marked(
         &["status", "1", "in_progress"],
-        &[("GEMINI_CLI", "1")],
+        &[("QWEN_CODE", "1")],
     ));
     let board = envelope(&atc(repo.path(), &["--json"]));
-    assert_eq!(callsign(&board), serde_json::json!("gemini"));
+    assert_eq!(callsign(&board), serde_json::json!("qwen"));
 }
 
 #[test]

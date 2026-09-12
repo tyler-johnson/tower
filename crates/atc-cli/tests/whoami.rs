@@ -197,6 +197,27 @@ fn an_agent_under_a_terminal_is_its_own_session() {
     assert_eq!(data["session_source"], "launcher");
 }
 
+/// Qwen Code's session variable is a row of its own, under its marker:
+/// source `qwen`, no pid, and the client's word as the callsign.
+#[test]
+fn a_qwen_session_is_its_own_row() {
+    let repo = repo();
+    let path = repo.path();
+    let out = atc(
+        path,
+        &[("QWEN_CODE_SESSION_ID", "q1"), ("QWEN_CODE", "1")],
+        &["whoami", "--json"],
+    );
+    let data = envelope(&out)["data"].clone();
+    assert_eq!(data["session"], "q1", "{data}");
+    assert_eq!(data["session_source"], "qwen");
+    assert_eq!(data["client"], "qwen");
+    assert_eq!(data["callsign"], "qwen");
+    assert_eq!(data["callsign_source"], "client");
+    assert_eq!(data["pid"], serde_json::Value::Null, "{data}");
+    assert!(root(path).join(".local/state/atc/leases/q1").is_file());
+}
+
 /// Bare `atc callsign` prints what `atc whoami` prints, under its own
 /// envelope `cmd`.
 #[test]

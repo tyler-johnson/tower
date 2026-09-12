@@ -2,9 +2,9 @@
 //! boundary, and the guards that keep it true.
 //!
 //! One text feeds every client. What differs per vendor is only how it is
-//! delivered — plain stdout for Claude and Codex, a JSON field for Gemini
-//! and Cursor — which is why the envelope is the adapter's job and this is
-//! not. What differs per repository is one line at the end: how much is
+//! delivered — plain stdout for Claude and Codex, a JSON field for Qwen
+//! — which is why the envelope is the adapter's job and this is not.
+//! What differs per repository is one line at the end: how much is
 //! ready, or that nothing is filed here yet.
 //!
 //! The guards at the bottom cover the shipped skills too. Both are prose

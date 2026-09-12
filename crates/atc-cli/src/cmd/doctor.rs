@@ -202,7 +202,7 @@ fn installed_note(skills: &skill::Registry) -> String {
 /// The agent clients and the shells, one row each, under `hook/<slug>`.
 ///
 /// A client that is not on this machine and not wired earns no row at
-/// all: absence is the ordinary case, and a row saying so eight times
+/// all: absence is the ordinary case, and a row saying so seven times
 /// over is noise. Present and not wired is information — wiring is
 /// optional, and the row names the verb; so is a shell whose rc file
 /// calls the trigger by hand, which delivers and is not tower's to

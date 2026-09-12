@@ -426,7 +426,7 @@ fn the_four_refusals() {
         "atc: `me` is not a callsign — one word, no spaces, at most 64 bytes, and not me, agent, or none\n  try:\n    atc callsign\n"
     );
 
-    for word in ["claude", "codex", "cursor", "gemini"] {
+    for word in ["claude", "codex", "cursor", "qwen"] {
         let out = atc(path, Some("s1"), None, &["callsign", word, "--json"]);
         let v = refusal(&out, 1, "callsign/client-word");
         assert!(

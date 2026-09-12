@@ -352,7 +352,7 @@ shows the pilot.
 
 Your callsign is ATC_CALLSIGN when set, else the word you gave
 `atc callsign` this session, else the client you are running under —
-claude, codex, cursor, gemini — else the login name at a terminal,
+claude, codex, cursor, qwen — else the login name at a terminal,
 else none.
 
 A closed flight refuses; everything else re-lanes freely, and the
@@ -371,7 +371,8 @@ Name this session's pilot. The word is held on the session's lease —
 one file per session under the machine's state directory, keyed by
 the first session variable set: ATC_SESSION, the launcher's own, then
 the client's — CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID,
-OPENCODE_SESSION_ID — then ATC_SHELL_SESSION, a terminal's. Every atc
+QWEN_CODE_SESSION_ID, OPENCODE_SESSION_ID — then ATC_SHELL_SESSION, a
+terminal's. Every atc
 call and every trigger event under the session renews the lease, and
 the trigger's end event releases it. A process with none of the
 variables has no session and this verb refuses: ATC_CALLSIGN in the
@@ -399,7 +400,7 @@ whose word was its client's or its login name moves nothing on its
 first callsign.
 
 Refused: a word usable_callsign rejects — me, agent, none, spaces,
-past 64 bytes; a client's word — claude, codex, cursor, gemini — which
+past 64 bytes; a client's word — claude, codex, cursor, qwen — which
 is the name of every unnamed session of that client; ATC_CALLSIGN
 set, because the launcher's word wins and a lease under it would
 never be read. There is no unset: the trigger's end event, the pid,
@@ -425,14 +426,15 @@ Examples:
 pub const WHOAMI: &str = "\
 Who you are, on every axis tower stamps: the writer chain this
 machine appends to, the author from git, the client detected from
-the mark it leaves — CLAUDECODE, GEMINI_CLI, CURSOR_AGENT,
+the mark it leaves — CLAUDECODE, QWEN_CODE, CURSOR_AGENT,
 CODEX_SANDBOX — the session and where it came from, the callsign and
 where it came from, the lease, and the pid when the session's row
 hands one down.
 
 The session is the first session variable set: ATC_SESSION, a
 launcher's, reported as `launcher`; CLAUDE_CODE_SESSION_ID,
-CODEX_SESSION_ID, OPENCODE_SESSION_ID, the clients' own, reported by
+CODEX_SESSION_ID, QWEN_CODE_SESSION_ID, OPENCODE_SESSION_ID, the
+clients' own, reported by
 the client's name; ATC_SHELL_SESSION, a terminal's, minted by the rc
 lines `atc hook bash` (or zsh, fish, powershell) writes, reported as
 `shell`; else the login name at a terminal, reported as `login`,
@@ -823,7 +825,9 @@ Any failure — no repository, a store that will not open, a source or
 an event it does not know — exits 0 with nothing said, because a
 hook's stderr is noise in someone else's terminal. `briefing` is the
 spelling this verb replaced, kept for the configs that still carry
-it: it prints the notice and touches no lease.
+it: it prints the notice and touches no lease. The sources of the
+two adapters that went — cursor, gemini — answer forever too, each
+as it did.
 
 --json carries the text as `data.text`, with `ready`, `filed`, `on`
 — the flights In Progress under your callsign — and `callsign`
@@ -844,7 +848,9 @@ wired to every event: bare, for the repository you are in; named for
 a client, wrapped the way that client reads it, silent on any
 failure, and refusing a client it does not know. It touches no lease
 and reads no event, so it is the spelling a stored config may still
-carry and not one to write anew — `atc hook -u` rewrites it.";
+carry and not one to write anew — `atc hook -u` rewrites it. The
+retired client names — cursor, gemini — are answered here as they
+were, since a config file may still spell them.";
 
 pub const HOOK: &str = "\
 Wire tower into the agent clients and the shells on this machine, so
@@ -864,12 +870,22 @@ wired and adds nothing: the install is re-run for every slug already
 wired, on whatever mechanism it is on, so an upgraded binary
 refreshes the machine. The names are flat:
 
-  claude  codex  cursor  gemini
+  claude  codex  qwen
   bash  zsh  fish  powershell
 
-What gets written is not a choice you make. Claude Code takes a
-plugin directory tower owns outright, ~/.claude/skills/tower; the
-other three clients take entries merged into their own hooks file,
+What gets written is not a choice you make. Claude Code and Codex
+each take a plugin directory tower owns outright, written whole and
+removed whole: Claude Code's at ~/.claude/skills/tower, which it
+loads on its own; Codex's at ~/.agents/plugins/tower, which Codex
+reads through the personal marketplace beside it,
+~/.agents/plugins/marketplace.json — one entry merged there, the
+rest of that file left as found — and installs by
+`codex plugin add tower@tower`, which `atc hook codex` runs when
+codex is on PATH and names when it is not. Codex loads a plugin's
+hooks from its legacy manifest alone, so that is the one the plugin
+carries. `atc hook codex` also moves a machine off the entries an
+older tower wrote in ~/.codex/hooks.json, once the plugin has
+verified. Qwen Code takes entries merged into ~/.qwen/settings.json,
 and whatever else that file holds is left as it was — an entry you
 wrote yourself included. --settings is Claude Code's escape hatch:
 entries in ~/.claude/settings.json instead of the plugin, and no
@@ -890,12 +906,12 @@ ATC_SHELL_SESSION. A line you wrote yourself that calls the trigger
 is reported and left alone; fufu's lines in the same file are fufu's
 and untouched.
 
-Claude Code and Codex also take the manual, `tower` — typed
-/tower:tower in Claude Code and $tower in Codex; a skill an older
-tower shipped and this one does not is removed on the next write.
-Cursor and Gemini read no skills directory and get the notice alone.
-Codex trusts a hook by its hash, so after wiring it review the hook
-with /hooks there, or it is skipped.";
+Both plugins carry the manual, `tower` — typed /tower:tower in Claude
+Code and $tower in Codex; a skill an older tower shipped and this
+one does not is removed on the next write. Qwen reads no skills
+directory and gets the notice alone. Codex trusts a plugin's hook by
+its hash, so after wiring it review the hook with /hooks there, or
+it is skipped.";
 
 pub const HOOK_EXAMPLES: &str = "\
 Examples:
@@ -910,11 +926,12 @@ Examples:
 
 pub const UNHOOK: &str = "\
 Remove exactly what hook added: Claude Code's plugin directory, and
-the settings entries an older install left; the other clients'
-entries and skill directories; a shell's marked rc lines. Anything
-else in a file is left as it was — an entry or a line you wrote
-yourself included, and fufu's lines beside tower's. Name clients or
-shells, or --all for everything detected on this machine.";
+the settings entries an older install left; Codex's plugin directory
+and its entry in the personal marketplace; Qwen's entries; a shell's
+marked rc lines. Anything else in a file is left as it was
+— an entry or a line you wrote yourself included, and fufu's lines
+beside tower's. Name clients or shells, or --all for everything
+detected on this machine.";
 
 pub const UNHOOK_EXAMPLES: &str = "\
 Examples:

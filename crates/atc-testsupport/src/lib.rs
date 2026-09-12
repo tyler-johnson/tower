@@ -29,6 +29,7 @@ pub const AGENT_ENV: &[&str] = &[
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_PID",
     "CODEX_SESSION_ID",
+    "QWEN_CODE_SESSION_ID",
     "OPENCODE_SESSION_ID",
     "ATC_SHELL_SESSION",
     "ATC_SHELL_PID",
@@ -37,7 +38,7 @@ pub const AGENT_ENV: &[&str] = &[
     "CODEX_SANDBOX_NETWORK_DISABLED",
     "CODEX_SANDBOX",
     "CURSOR_AGENT",
-    "GEMINI_CLI",
+    "QWEN_CODE",
 ];
 
 /// Remove every [`AGENT_ENV`] variable from a spawn, so the events a

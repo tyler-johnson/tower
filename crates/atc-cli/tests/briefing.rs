@@ -230,6 +230,11 @@ fn a_client_source_is_wrapped_the_way_each_client_reads_it() {
             "{client}: {text}"
         );
     }
+    let qwen: serde_json::Value = serde_json::from_str(&plain("qwen")).unwrap();
+    let carried = qwen["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(carried.starts_with("tower (`atc`) keeps"), "{carried}");
     let gemini: serde_json::Value = serde_json::from_str(&plain("gemini")).unwrap();
     let carried = gemini["hookSpecificOutput"]["additionalContext"]
         .as_str()
@@ -275,7 +280,8 @@ fn a_client_source_is_wrapped_the_way_each_client_reads_it() {
 fn a_client_source_outside_a_repository_says_nothing() {
     let elsewhere = tempfile::TempDir::new().unwrap();
     let silent = |stdin: Option<&str>| {
-        for client in ["claude", "codex", "cursor", "gemini"] {
+        // The live clients and the retired spellings alike.
+        for client in ["claude", "codex", "qwen", "cursor", "gemini"] {
             let out = hook(elsewhere.path(), elsewhere.path(), client, stdin);
             assert_eq!(out.status.code(), Some(0), "{client}: {stdin:?}");
             assert!(

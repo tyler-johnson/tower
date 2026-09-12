@@ -34,12 +34,14 @@ pub static ENTRIES: &[Entry] = &[
         id: "usage/unknown-slug",
         summary: "that is not a client atc hook knows",
         detail: "`atc hook` and `atc unhook` take flat, permanent names — claude, codex, \
-                 cursor, gemini — because they end up written inside config files tower does \
-                 not own and cannot rename afterward. These two verbs are for people, so an \
-                 unknown name is a real error here. `atc trigger <source>`, the command the \
-                 wiring runs, is silent on a name it does not know — fufu's shape, since a \
-                 hook's stderr is someone else's terminal. `atc hook -l` lists every client \
-                 with what is on this machine and what is already wired.",
+                 qwen, and the shells — because they end up written inside config files tower \
+                 does not own and cannot rename afterward. These two verbs are for people, so \
+                 an unknown name is a real error here; cursor and gemini were names once, and \
+                 their adapters went, so the hook refuses them while `atc trigger <source>` \
+                 and `atc briefing <client>` answer the stored spellings forever. The trigger, \
+                 the command the wiring runs, is silent on any name it does not know — fufu's \
+                 shape, since a hook's stderr is someone else's terminal. `atc hook -l` lists \
+                 every client with what is on this machine and what is already wired.",
         exits: &["atc hook -l", "atc hook claude", "atc hook --all"],
     },
     Entry {
@@ -228,7 +230,8 @@ pub static ENTRIES: &[Entry] = &[
         summary: "there is no session to name",
         detail: "The word is held on the session's lease, keyed by the first session variable \
                  set — ATC_SESSION, CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID, \
-                 OPENCODE_SESSION_ID, ATC_SHELL_SESSION — and none of them is. A process with \
+                 QWEN_CODE_SESSION_ID, OPENCODE_SESSION_ID, ATC_SHELL_SESSION — and none of \
+                 them is. A process with \
                  no session has nothing to hold a word on, and the launcher's variable is the \
                  way: ATC_CALLSIGN in the environment names every event the process appends, \
                  no lease needed. A launcher that runs a pool sets ATC_SESSION per worker and \
@@ -247,7 +250,7 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "callsign/client-word",
         summary: "that is a client's word, not a pilot's",
-        detail: "claude, codex, cursor, gemini, opencode — the words the client markers name — \
+        detail: "claude, codex, cursor, qwen, opencode — the words the client markers name — \
                  are the callsign of every unnamed session of that client, and the lane any \
                  such session's bare `atc next` draws from. `atc assign <flight> claude` is a \
                  real gesture and stays one; holding the word on one session's lease would \

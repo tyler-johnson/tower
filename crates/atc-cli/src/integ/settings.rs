@@ -7,10 +7,14 @@
 //! whose shape is not what the schema says, is refused with the file
 //! untouched rather than rewritten into something the client cannot read.
 //!
-//! Two shapes cover the four clients. `Shape::Nested` is the one Claude
-//! Code, Codex, and Gemini CLI share — an event maps to entries, and an
-//! entry holds a matcher and a list of commands. `Shape::Flat` is Cursor's
-//! — an entry *is* a command.
+//! Two shapes. `Shape::Nested` is the one Claude Code's `--settings`
+//! hatch and Qwen Code take — an event maps to entries, and an entry
+//! holds a matcher and a list of commands — and the shape an older
+//! tower wrote into Codex's settings file, which the plugin's migration
+//! strips. `Shape::Flat` was Cursor's — an entry *is* a command — and
+//! stays for the day a client spells it again. The Codex plugin's
+//! marketplace entry rides `load` and `write` here too: a file tower
+//! does not own, merged the same way.
 //!
 //! What gets written under each event is one command, `atc trigger
 //! <slug>`, and the event's [`Class`] is what the trigger does when the
@@ -69,7 +73,8 @@ pub struct Event {
 pub enum Shape {
     /// `{"matcher": …, "hooks": [{"type": "command", "command": …}]}`
     Nested,
-    /// `{"matcher": …, "command": …}`
+    /// `{"matcher": …, "command": …}` — no live client spells it today.
+    #[allow(dead_code)]
     Flat,
 }
 
