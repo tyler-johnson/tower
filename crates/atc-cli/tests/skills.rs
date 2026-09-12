@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 /// A skill file with the front matter a harness redirect depends on,
 /// the shape of the shipped `work` skill. Written by the fixture, so the
@@ -40,11 +40,11 @@ Turn a goal into flights tower stores.
 ";
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn atc")

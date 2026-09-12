@@ -26,7 +26,7 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 mod support;
 use support::{Server, command, free_port, free_ports, http, refusal};
@@ -180,7 +180,9 @@ fn outside_a_repository_it_refuses_before_it_binds() {
     // Both flags on purpose: they skip the config lane, so the refusal
     // comes from the server validating the repository at startup rather
     // than from a config read on the way to it.
-    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let out = command
         .args([
             "serve",
             "--json",
@@ -190,8 +192,6 @@ fn outside_a_repository_it_refuses_before_it_binds() {
             &port.to_string(),
         ])
         .current_dir(dir.path())
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .env("XDG_CONFIG_HOME", dir.path().join("xdg"))

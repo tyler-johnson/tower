@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use atc_testsupport::{FakeFf, Repo};
+use atc_testsupport::{FakeFf, Repo, scrub};
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
     atc_via(repo, args, None)
@@ -19,8 +19,6 @@ fn atc_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
     command
         .args(args)
         .current_dir(repo)
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         // The hook rows read the agent clients under HOME, and the
         // runner's real `~/.claude` would add one: the fixture root is
         // the home, with no client in it.
@@ -29,6 +27,7 @@ fn atc_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
         // setting `HOME` alone leaves the runner's real one reachable.
         .env("USERPROFILE", root)
         .env("XDG_CONFIG_HOME", xdg(repo));
+    scrub(&mut command);
     if let Some(program) = program {
         command.env("ATC_FF", program);
     }

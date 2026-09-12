@@ -228,34 +228,12 @@ pub struct Comment {
     pub text: String,
 }
 
-/// One registered callsign, as the roster holds it after every
-/// registration and retirement.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pilot {
-    pub callsign: String,
-    /// `person` or `agent` — a free string here, closed at the verb.
-    pub kind: String,
-    pub description: String,
-    /// The latest standing registration's time and author.
-    pub registered_at: i64,
-    pub by: String,
-    /// The newest event anywhere in the log stamped with this callsign,
-    /// registered or not: an agent has a callsign only when its harness
-    /// exports one, so this is what says the harness is wired.
-    pub last_seen: Option<i64>,
-}
-
 /// What the fold produced: every flight, and every event it could not
 /// route, split by whether anything can be done about it.
 #[derive(Debug)]
 pub struct Fold {
     /// Filed order.
     pub flights: Vec<Flight>,
-    /// The registered callsigns in registration order, retired ones
-    /// gone. Last wins in log order: a second `registered` replaces the
-    /// kind and the description, an `unregistered` drops the pilot, and
-    /// a later `registered` brings it back at the end.
-    pub roster: Vec<Pilot>,
     /// The saved views in minting order, deleted ones gone. Every
     /// author's, personal included: [`views`](super::views) is the
     /// viewer's cut.
@@ -293,15 +271,8 @@ pub fn fold(events: &[Event]) -> Fold {
     let mut deleted: HashSet<usize> = HashSet::new();
     let mut unrouted: Vec<Event> = Vec::new();
     let mut retired: Vec<Event> = Vec::new();
-    let mut roster: Vec<Pilot> = Vec::new();
-    // The newest time per callsign over every event, roster or not.
-    let mut last_seen: HashMap<&str, i64> = HashMap::new();
 
     for event in events {
-        if let Some(callsign) = event.callsign.as_deref() {
-            let seen = last_seen.entry(callsign).or_insert(event.time);
-            *seen = (*seen).max(event.time);
-        }
         match &event.kind {
             Kind::Filed {
                 procedure,
@@ -587,35 +558,6 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 None => unrouted.push(event.clone()),
             },
-            // The roster: no id lookup, so nothing here is ever unrouted.
-            // Last wins in log order — a re-registration rewrites the
-            // entry in place, and a registration after a retirement
-            // appends a fresh one.
-            Kind::Registered {
-                callsign,
-                kind,
-                description,
-            } => match roster.iter_mut().find(|pilot| &pilot.callsign == callsign) {
-                Some(pilot) => {
-                    pilot.kind = kind.clone();
-                    pilot.description = description.clone();
-                    pilot.registered_at = event.time;
-                    pilot.by = event.author.clone();
-                }
-                None => roster.push(Pilot {
-                    callsign: callsign.clone(),
-                    kind: kind.clone(),
-                    description: description.clone(),
-                    registered_at: event.time,
-                    by: event.author.clone(),
-                    last_seen: None,
-                }),
-            },
-            // A retirement of nobody is a no-op, like an unlink of no
-            // edge.
-            Kind::Unregistered { callsign } => {
-                roster.retain(|pilot| &pilot.callsign != callsign);
-            }
             Kind::Unknown { kind, .. } if RETIRED_KINDS.contains(&kind.as_str()) => {
                 retired.push(event.clone())
             }
@@ -722,13 +664,9 @@ pub fn fold(events: &[Event]) -> Fold {
         .filter(|(at, _)| !deleted.contains(at))
         .map(|(_, view)| view)
         .collect();
-    for pilot in &mut roster {
-        pilot.last_seen = last_seen.get(pilot.callsign.as_str()).copied();
-    }
 
     Fold {
         flights,
-        roster,
         views,
         unrouted,
         retired,
@@ -999,28 +937,6 @@ mod tests {
     fn flown(mut event: Event, callsign: &str) -> Event {
         event.callsign = Some(callsign.to_string());
         event
-    }
-
-    fn registered(id: &str, time: i64, callsign: &str, kind: &str, description: &str) -> Event {
-        event(
-            id,
-            time,
-            Kind::Registered {
-                callsign: callsign.to_string(),
-                kind: kind.to_string(),
-                description: description.to_string(),
-            },
-        )
-    }
-
-    fn unregistered(id: &str, time: i64, callsign: &str) -> Event {
-        event(
-            id,
-            time,
-            Kind::Unregistered {
-                callsign: callsign.to_string(),
-            },
-        )
     }
 
     fn edited(
@@ -2041,67 +1957,6 @@ mod tests {
             status("pi.3", 30, "pi.1", "ready"),
         ]);
         assert!(released.flights[0].pullable(None));
-    }
-
-    #[test]
-    fn the_roster_folds_last_wins_and_a_retirement_is_undone_by_a_registration() {
-        let fold = fold(&[
-            registered("pi.1", 10, "claude", "agent", "Claude Code"),
-            by(registered("qi.1", 20, "tyler", "person", ""), "t@b.c"),
-            registered("pi.2", 30, "claude", "agent", "every Claude Code session"),
-            unregistered("pi.3", 40, "tyler"),
-            unregistered("pi.4", 45, "nobody"),
-            registered("pi.5", 50, "tyler", "person", "back"),
-        ]);
-        let names: Vec<&str> = fold
-            .roster
-            .iter()
-            .map(|pilot| pilot.callsign.as_str())
-            .collect();
-        assert_eq!(
-            names,
-            ["claude", "tyler"],
-            "a rewrite stays in place; a return lands at the end"
-        );
-        let claude = &fold.roster[0];
-        assert_eq!(claude.kind, "agent");
-        assert_eq!(claude.description, "every Claude Code session");
-        assert_eq!(claude.registered_at, 30, "the latest standing registration");
-        let tyler = &fold.roster[1];
-        assert_eq!(tyler.description, "back");
-        assert_eq!(tyler.registered_at, 50);
-        assert_eq!(tyler.by, "a@b.c", "the return's author, not the first's");
-        assert!(
-            fold.unrouted.is_empty(),
-            "a retirement of nobody is a no-op, never unrouted"
-        );
-
-        let retired = super::fold(&[
-            registered("pi.1", 10, "claude", "agent", ""),
-            unregistered("pi.2", 20, "claude"),
-        ]);
-        assert!(retired.roster.is_empty());
-    }
-
-    #[test]
-    fn last_seen_is_the_newest_event_stamped_with_the_callsign() {
-        // Over every event, roster or not: a registration carries no
-        // callsign of its own unless the registrar was flying one, and
-        // an unregistered callsign is still seen — it just has no row.
-        let fold = fold(&[
-            registered("pi.1", 10, "claude", "agent", ""),
-            registered("pi.2", 11, "idle", "agent", ""),
-            flown(filed("pi.3", 20, "s"), "claude"),
-            flown(status("pi.4", 40, "pi.3", "in_progress"), "claude"),
-            flown(commented("pi.5", 30, "pi.3"), "claude"),
-            flown(commented("pi.6", 35, "pi.3"), "qwen-review"),
-        ]);
-        assert_eq!(
-            fold.roster[0].last_seen,
-            Some(40),
-            "the newest, not the last"
-        );
-        assert_eq!(fold.roster[1].last_seen, None, "registered, never flown");
     }
 
     #[test]

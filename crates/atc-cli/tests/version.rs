@@ -8,12 +8,14 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use atc_testsupport::scrub;
+
 fn atc(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(dir)
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .env("ATC_FF", "/nonexistent")
         .env("XDG_CACHE_HOME", dir.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.

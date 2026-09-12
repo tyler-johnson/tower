@@ -10,19 +10,20 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
+
+use atc_testsupport::scrub;
 use std::time::{Duration, Instant};
 
 /// The binary, addressed at a fixture: the current directory is the
 /// repository, `HOME` and `XDG_CONFIG_HOME` point into the fixture so
 /// neither the developer's git config nor their environment can reach a
-/// spawn, the session variable is scrubbed so their own Claude Code
-/// session cannot tag a fixture event, and the serve lanes' variables
-/// are cleared for the same reason.
+/// spawn, the agent variables are scrubbed so their own Claude Code
+/// session cannot tag or stamp a fixture event, and the serve lanes'
+/// variables are cleared for the same reason.
 pub fn command(repo: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     command
         .current_dir(repo)
-        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("XDG_CONFIG_HOME", root(repo).join("xdg"))
         .env("HOME", root(repo))
         // Windows' `HOME`: gix and git.exe read the profile from it, so
@@ -31,6 +32,7 @@ pub fn command(repo: &Path) -> Command {
         .env_remove("GIT_CONFIG_GLOBAL")
         .env_remove("ATC_HOST")
         .env_remove("ATC_PORT");
+    scrub(&mut command);
     command
 }
 

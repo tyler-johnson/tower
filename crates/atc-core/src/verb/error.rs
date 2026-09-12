@@ -63,20 +63,6 @@ pub enum Error {
     /// A word that is neither a lane word nor a usable callsign.
     #[error("`{word}` is not a lane — me, agent, none, or a callsign: one word, no spaces")]
     BadAssignee { word: String },
-    /// `register` with a word that is not a usable callsign.
-    #[error(
-        "`{word}` is not a callsign — one word, no spaces, at most 64 bytes, and not me, agent, or none"
-    )]
-    BadCallsign { word: String },
-    /// `register --kind` with a word that is neither `person` nor `agent`.
-    #[error("`{word}` is not a pilot kind — person or agent")]
-    BadKind { word: String },
-    /// `register <callsign>` with neither `--kind` nor `--retire`.
-    #[error("registering a callsign needs --kind person or agent")]
-    NeedsKind,
-    /// `register --retire` naming a callsign the roster does not carry.
-    #[error("`{callsign}` is not on the roster")]
-    CallsignNotFound { callsign: String },
     /// `--status` with a word a flight cannot be filed with: not a
     /// status at all, one the fold derives, or one that is closed.
     #[error("`{word}` cannot be filed — backlog, ready, or in_progress")]
@@ -155,10 +141,6 @@ impl Error {
             Error::StatusWaiting { .. } => "usage/status-waiting",
             Error::StatusHold { .. } => "usage/status-held",
             Error::BadAssignee { .. } => "usage/bad-assignee",
-            Error::BadCallsign { .. } => "usage/bad-callsign",
-            Error::BadKind { .. } => "usage/bad-kind",
-            Error::NeedsKind => "usage/needs-kind",
-            Error::CallsignNotFound { .. } => "callsign/not-found",
             Error::FileStatus { .. } => "usage/file-status",
             Error::FlightDone { .. }
             | Error::AlreadyDone { .. }
@@ -212,13 +194,7 @@ impl Error {
             | Error::ViewNotFound { .. }
             | Error::NeedsViewEdit
             | Error::EditTargetNotFound { .. } => &["atc"],
-            Error::BadStatus { .. }
-            | Error::BadAssignee { .. }
-            | Error::BadCallsign { .. }
-            | Error::BadKind { .. }
-            | Error::FileStatus { .. } => &[],
-            Error::NeedsKind => &["atc register <callsign> --kind <kind>"],
-            Error::CallsignNotFound { .. } => &["atc register"],
+            Error::BadStatus { .. } | Error::BadAssignee { .. } | Error::FileStatus { .. } => &[],
         };
         exits.iter().map(|exit| (*exit).to_string()).collect()
     }

@@ -12,24 +12,26 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use atc_core::log::{Kind, Store};
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    // A developer's own Claude Code session must not tag or stamp the
+    // fixture's events: the bylines below assert the bare email.
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        // A developer's own Claude Code session must not tag the fixture's
-        // events: the bylines below assert the bare email.
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .output()
         .expect("spawn atc")
 }
 
 /// The spawn under a session tag, the way Claude Code hands one down.
 fn atc_tagged(repo: &Path, args: &[&str], tag: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
@@ -373,7 +375,9 @@ fn the_byline_is_the_callsign_and_the_session_follows_under_it() {
     let repo = repo();
     let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
     stdout(&atc(repo.path(), &["file", "flown"]));
-    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let out = command
         .args(["status", "1", "in_progress"])
         .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
@@ -382,11 +386,12 @@ fn the_byline_is_the_callsign_and_the_session_follows_under_it() {
         .output()
         .expect("spawn atc");
     stdout(&out);
-    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let out = command
         .args(["comment", "1", "-m", "a note"])
         .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
-        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("ATC_CALLSIGN", "tyler")
         .output()
         .expect("spawn atc");

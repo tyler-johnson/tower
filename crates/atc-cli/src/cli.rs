@@ -255,28 +255,6 @@ pub enum Command {
         #[arg(value_name = "lane")]
         lane: String,
     },
-    /// The roster: who flies here. Bare lists it; a callsign with
-    /// --kind registers one; -d retires one.
-    #[command(long_about = help::REGISTER, after_long_help = help::REGISTER_EXAMPLES)]
-    Register {
-        /// The callsign to register or retire; the roster when unsaid.
-        #[arg(value_name = "callsign")]
-        callsign: Option<String>,
-        /// What the pilot is: person or agent.
-        #[arg(long, value_name = "kind")]
-        kind: Option<String>,
-        /// A description, on the roster line.
-        #[arg(short = 'm', value_name = "msg")]
-        message: Option<String>,
-        /// Take the callsign off the roster.
-        #[arg(
-            short = 'd',
-            long = "retire",
-            requires = "callsign",
-            conflicts_with_all = ["kind", "message"]
-        )]
-        retire: bool,
-    },
     /// Move a flight to a status.
     #[command(long_about = help::STATUS, after_long_help = help::STATUS_EXAMPLES)]
     Status {
@@ -495,7 +473,6 @@ impl Command {
             | Command::Unlink { .. }
             | Command::Decompose { .. }
             | Command::Assign { .. }
-            | Command::Register { .. }
             | Command::Status { .. }
             | Command::Cancel { .. }
             | Command::Hold { .. }

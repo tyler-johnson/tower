@@ -172,7 +172,6 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Procedures { .. }) => "procedures",
         Some(Command::Skills { .. }) => "skills",
         Some(Command::Assign { .. }) => "assign",
-        Some(Command::Register { .. }) => "register",
         Some(Command::Status { .. }) => "status",
         Some(Command::Cancel { .. }) => "cancel",
         Some(Command::Hold { .. }) => "hold",
@@ -251,18 +250,6 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Procedures { name }) => cmd::procedures::run(cli.json, name.as_deref())?,
         Some(Command::Skills { name }) => cmd::skills::run(cli.json, name.as_deref())?,
         Some(Command::Assign { flight, lane }) => cmd::assign::run(cli.json, flight, lane)?,
-        Some(Command::Register {
-            callsign,
-            kind,
-            message,
-            retire,
-        }) => cmd::register::run(
-            cli.json,
-            callsign.as_deref(),
-            kind.as_deref(),
-            message.clone(),
-            *retire,
-        )?,
         Some(Command::Status { flight, status }) => cmd::status::run(cli.json, flight, status)?,
         Some(Command::Cancel { flight, message }) => {
             cmd::cancel::run(cli.json, flight, message.clone())?

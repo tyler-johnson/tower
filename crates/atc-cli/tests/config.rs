@@ -9,14 +9,14 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .env("XDG_CONFIG_HOME", root(repo).join("xdg"))
         .env("HOME", root(repo))
         // Windows' `HOME`: gix and git.exe read the profile from it, so
@@ -365,12 +365,11 @@ fn update_check_syncs_cache() {
         command
             .args(args)
             .current_dir(repo.path())
-            .env_remove("CLAUDE_CODE_SESSION_ID")
-            .env_remove("ATC_CALLSIGN")
             .env("XDG_CONFIG_HOME", root(repo.path()).join("xdg"))
             .env("XDG_CACHE_HOME", cache.path())
             .env("HOME", root(repo.path()))
             .env_remove("GIT_CONFIG_GLOBAL");
+        scrub(&mut command);
         command.output().expect("spawn atc")
     };
 

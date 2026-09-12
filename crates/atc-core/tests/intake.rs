@@ -120,7 +120,12 @@ fn a_routed_filing_lands_in_one_commit_as_one_filed_plus_one_routed() {
     let flight = &fold.flights[0];
     assert_eq!(flight.status, "ready", "the collapse is born Ready");
     assert_eq!(flight.procedure.as_deref(), Some("chores"));
-    assert_eq!(flight.assignee.as_deref(), Some("me"));
+    // `me` stores the caller's callsign when there is one — and there is
+    // one when the suite itself runs under a client that marks its shell.
+    assert_eq!(
+        flight.assignee.as_deref(),
+        Some(store.callsign().unwrap_or("me"))
+    );
     assert_eq!(flight.skill.as_deref(), Some("tidy"));
     assert!(fold.unrouted.is_empty());
 }

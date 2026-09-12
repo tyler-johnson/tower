@@ -201,19 +201,6 @@ pub enum Kind {
         /// Retired with #124; read for old events, never written.
         branch: Option<String>,
     },
-    /// Puts a callsign on the roster, or rewrites its entry: `kind` is
-    /// `person` or `agent` — closed in the verb, a free string here on
-    /// the crew precedent — and `description` is always written. Last
-    /// wins in log order, and a later registration after an
-    /// `unregistered` brings the pilot back.
-    Registered {
-        callsign: String,
-        kind: String,
-        description: String,
-    },
-    /// Takes a callsign off the roster. Events stamped with it stay as
-    /// they are: the roster is a list, never a permission.
-    Unregistered { callsign: String },
     /// A kind from a newer tower, preserved verbatim so the fold can carry
     /// it even though this binary cannot read it. Old logs land here too:
     /// the retired `claimed`/`taken`/`requeued`/`done` kinds deserialize
@@ -244,8 +231,6 @@ impl Kind {
             Kind::Held { .. } => "held",
             Kind::Answered { .. } => "answered",
             Kind::Routed { .. } => "routed",
-            Kind::Registered { .. } => "registered",
-            Kind::Unregistered { .. } => "unregistered",
             Kind::Unknown { kind, .. } => kind,
         }
     }
@@ -262,9 +247,10 @@ pub struct Event {
     /// down, the login name when a person typed the verb at a terminal,
     /// else none. The author stays the email; this says which session.
     pub session: Option<String>,
-    /// The pilot that appended it: the callsign the harness exported, or
-    /// the login name at a terminal, else none. The fourth stamp beside
-    /// writer, author, and session — the one that names who is flying.
+    /// The pilot that appended it: `ATC_CALLSIGN` when the launcher set
+    /// one, else the client detected from its own mark, else the login
+    /// name at a terminal, else none. The fourth stamp beside writer,
+    /// author, and session — the one that names who is flying.
     pub callsign: Option<String>,
     pub kind: Kind,
 }
@@ -440,21 +426,6 @@ struct RoutedBody {
     branch: Option<String>,
 }
 
-/// `description` is always written, empty included, so a registration
-/// says outright what it carries.
-#[derive(Serialize, Deserialize)]
-struct RegisteredBody {
-    callsign: String,
-    kind: String,
-    #[serde(default)]
-    description: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct UnregisteredBody {
-    callsign: String,
-}
-
 impl Serialize for Event {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let body = match &self.kind {
@@ -573,18 +544,6 @@ impl Serialize for Event {
                 bay: bay.clone(),
                 done: done.clone(),
                 branch: branch.clone(),
-            }),
-            Kind::Registered {
-                callsign,
-                kind,
-                description,
-            } => serde_json::value::to_raw_value(&RegisteredBody {
-                callsign: callsign.clone(),
-                kind: kind.clone(),
-                description: description.clone(),
-            }),
-            Kind::Unregistered { callsign } => serde_json::value::to_raw_value(&UnregisteredBody {
-                callsign: callsign.clone(),
             }),
             Kind::Unknown { body, .. } => Ok(body.clone()),
         }
@@ -745,21 +704,6 @@ impl<'de> Deserialize<'de> for Event {
                 done,
                 branch,
             }
-        } else if kind == "registered" {
-            let RegisteredBody {
-                callsign,
-                kind,
-                description,
-            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Registered {
-                callsign,
-                kind,
-                description,
-            }
-        } else if kind == "unregistered" {
-            let UnregisteredBody { callsign } =
-                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Unregistered { callsign }
         } else {
             Kind::Unknown { kind, body }
         };
@@ -906,82 +850,6 @@ mod tests {
         let event: Event = serde_json::from_str(old).expect("parse");
         assert!(event.callsign.is_none());
         assert_eq!(event.session.as_deref(), Some("tyler"));
-    }
-
-    #[test]
-    fn the_roster_kinds_round_trip_and_write_the_description_always() {
-        let registered = Event {
-            id: "pi.1".parse().expect("id"),
-            author: "a@b.c".to_string(),
-            writer: "pi".to_string(),
-            time: 7,
-            session: None,
-            callsign: None,
-            kind: Kind::Registered {
-                callsign: "claude".to_string(),
-                kind: "agent".to_string(),
-                description: String::new(),
-            },
-        };
-        assert_eq!(
-            serde_json::to_string(&registered).expect("serialize"),
-            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"registered","body":{"callsign":"claude","kind":"agent","description":""}}"#
-        );
-        let back: Event = serde_json::from_str(
-            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"registered","body":{"callsign":"claude","kind":"agent","description":"Claude Code sessions"}}"#,
-        )
-        .expect("parse");
-        let Kind::Registered {
-            callsign,
-            kind,
-            description,
-        } = back.kind
-        else {
-            panic!("a registration parses as one");
-        };
-        assert_eq!(callsign, "claude");
-        assert_eq!(kind, "agent");
-        assert_eq!(description, "Claude Code sessions");
-
-        let retired = Event {
-            id: "pi.2".parse().expect("id"),
-            author: "a@b.c".to_string(),
-            writer: "pi".to_string(),
-            time: 8,
-            session: None,
-            callsign: None,
-            kind: Kind::Unregistered {
-                callsign: "qwen-review".to_string(),
-            },
-        };
-        let json = serde_json::to_string(&retired).expect("serialize");
-        assert!(json.contains(r#""kind":"unregistered""#), "{json}");
-        assert!(
-            json.contains(r#""body":{"callsign":"qwen-review"}"#),
-            "{json}"
-        );
-        let back: Event = serde_json::from_str(&json).expect("parse");
-        let Kind::Unregistered { callsign } = back.kind else {
-            panic!("a retirement parses as one");
-        };
-        assert_eq!(callsign, "qwen-review");
-
-        // The kind is a free string on the wire: a newer tower's pilot
-        // kind parses and folds, the crew precedent.
-        let foreign = r#"{"id":"pi.3","author":"a@b.c","writer":"pi","time":9,"kind":"registered","body":{"callsign":"bot","kind":"service"}}"#;
-        let event: Event = serde_json::from_str(foreign).expect("parse");
-        let Kind::Registered {
-            kind, description, ..
-        } = event.kind
-        else {
-            panic!("a registration parses as one");
-        };
-        assert_eq!(kind, "service");
-        assert_eq!(description, "", "an absent description defaults empty");
-        // A registration naming nobody is malformed, not a kind from
-        // the future.
-        let broken = r#"{"id":"pi.3","author":"a@b.c","writer":"pi","time":9,"kind":"registered","body":{"kind":"agent"}}"#;
-        assert!(serde_json::from_str::<Event>(broken).is_err());
     }
 
     #[test]

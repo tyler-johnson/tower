@@ -15,6 +15,30 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Every variable the store reads to stamp a session or a callsign: the
+/// session tag, the launcher's callsign override, and the marks the
+/// agent clients leave on their shells. A cargo run inside a Claude
+/// Code session inherits `CLAUDECODE=1`, so a harness that did not
+/// scrub these would stamp `claude` on every fixture's events. Core's
+/// tests assert this list covers everything the store reads.
+pub const AGENT_ENV: &[&str] = &[
+    "CLAUDE_CODE_SESSION_ID",
+    "ATC_CALLSIGN",
+    "CLAUDECODE",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+    "CODEX_SANDBOX",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+];
+
+/// Remove every [`AGENT_ENV`] variable from a spawn, so the events a
+/// harness writes are stamped by what the test sets and nothing else.
+pub fn scrub(command: &mut Command) {
+    for name in AGENT_ENV {
+        command.env_remove(name);
+    }
+}
+
 /// A real repository with real fufu history on it.
 ///
 /// Requires `ff` on PATH. That is deliberate rather than unfortunate: fufu

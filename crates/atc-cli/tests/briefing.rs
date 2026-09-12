@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 /// The fixture's own config root and HOME, beside the repository inside
 /// the tempdir: nothing here reads the developer's real files.
@@ -23,9 +23,8 @@ fn command(cwd: &Path, home: &Path, args: &[&str]) -> Command {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("XDG_CONFIG_HOME", home.join("xdg"))
-        .env("ATC_FF", "/nonexistent")
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN");
+        .env("ATC_FF", "/nonexistent");
+    scrub(&mut command);
     command
 }
 

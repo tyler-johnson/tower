@@ -113,34 +113,6 @@ impl Assignee {
     }
 }
 
-/// What a registered callsign is: a person at a terminal, or an agent
-/// under a harness. Closed at the verb, a free string in the log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PilotKind {
-    Person,
-    Agent,
-}
-
-impl PilotKind {
-    /// The wire name.
-    pub fn name(&self) -> &'static str {
-        match self {
-            PilotKind::Person => "person",
-            PilotKind::Agent => "agent",
-        }
-    }
-
-    /// The wire name back to the value; `None` for anything else.
-    pub fn parse(text: &str) -> Option<PilotKind> {
-        Some(match text {
-            "person" => PilotKind::Person,
-            "agent" => PilotKind::Agent,
-            _ => return None,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,15 +155,5 @@ mod tests {
             Assignee::parse("none").is_none(),
             "none is absence, not a lane"
         );
-    }
-
-    #[test]
-    fn the_pilot_kinds_round_trip_and_the_rest_refuse() {
-        assert_eq!(PilotKind::parse("person"), Some(PilotKind::Person));
-        assert_eq!(PilotKind::parse("agent"), Some(PilotKind::Agent));
-        assert_eq!(PilotKind::Person.name(), "person");
-        assert_eq!(PilotKind::Agent.name(), "agent");
-        assert!(PilotKind::parse("bot").is_none());
-        assert!(PilotKind::parse("Person").is_none(), "wire form only");
     }
 }

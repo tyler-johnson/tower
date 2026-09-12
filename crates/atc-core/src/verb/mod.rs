@@ -26,7 +26,6 @@ mod error;
 mod file;
 mod hold;
 mod link;
-mod register;
 mod status;
 pub mod view;
 
@@ -40,7 +39,6 @@ pub use error::Error;
 pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
 pub use link::{Link, Linked, Unlink, Unlinked, link, unlink};
-pub use register::{Register, Registered, Retire, Retired, register, retire};
 pub use status::{Move, Moved, cancel, done, status};
 pub use view::{Delete, Deleted, Save, Saved, Views};
 
@@ -51,9 +49,8 @@ use crate::log::{self, Event, EventId, Kind, Store, usable_callsign};
 /// and `agent` pass, and any other word passes when it is a usable
 /// callsign — one word, no spaces. Anything else refuses here, at the
 /// boundary where a person is typing; the wire stays a free string.
-/// Assigning to a callsign needs no registration: values are open
-/// everywhere in tower, and an unregistered callsign on an event still
-/// folds.
+/// A callsign needs nothing to be a lane: values are open everywhere in
+/// tower.
 pub(crate) fn lane_word(word: &str) -> Result<Option<String>, Error> {
     match word {
         "none" => Ok(None),

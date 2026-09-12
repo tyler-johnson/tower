@@ -223,13 +223,9 @@ fn named(kind: &Kind) -> Vec<&EventId> {
             view: Some(view), ..
         }
         | Kind::ViewDeleted { view } => vec![view],
-        // A roster event names a callsign, never a flight, and the fold
-        // routes every one of them.
-        Kind::Filed { .. }
-        | Kind::ViewSaved { view: None, .. }
-        | Kind::Registered { .. }
-        | Kind::Unregistered { .. }
-        | Kind::Unknown { .. } => Vec::new(),
+        Kind::Filed { .. } | Kind::ViewSaved { view: None, .. } | Kind::Unknown { .. } => {
+            Vec::new()
+        }
     }
 }
 

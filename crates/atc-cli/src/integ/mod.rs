@@ -320,6 +320,19 @@ mod tests {
         }
     }
 
+    /// The callsign a client's mark resolves to is the slug `atc hook`
+    /// wires it under, so the two lists cannot drift: a client tower
+    /// detects is one tower can hook, by the same name.
+    #[test]
+    fn every_client_marker_names_a_hook_slug() {
+        for (variable, callsign) in atc_core::log::CLIENT_MARKERS {
+            assert!(
+                by_slug(callsign).is_some(),
+                "{variable} names `{callsign}`, which is not a hook slug"
+            );
+        }
+    }
+
     fn front_matter<'a>(name: &str, text: &'a str) -> Vec<&'a str> {
         let mut lines = text.lines();
         assert_eq!(lines.next(), Some("---"), "{name}: front matter first");

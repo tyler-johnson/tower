@@ -8,17 +8,17 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    // A developer's own Claude Code session must not tag or stamp the
+    // fixture's events: the bylines below assert the bare email.
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        // A developer's own Claude Code session must not tag the fixture's
-        // events: the bylines below assert the bare email.
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .output()
         .expect("spawn atc")
 }
@@ -727,11 +727,11 @@ fn a_comment_shows_in_the_rendered_note_line() {
 fn a_missing_identity_is_a_coded_envelope() {
     let repo = repo();
     repo.git(&["config", "--unset", "user.email"]);
-    let output = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let output = command
         .args(["file", "a subject", "--json"])
         .current_dir(repo.path())
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         // The machine's own git config must not answer for the fixture.
         .env("GIT_CONFIG_GLOBAL", atc_testsupport::null_device())
         .env("GIT_CONFIG_SYSTEM", atc_testsupport::null_device())
@@ -820,7 +820,9 @@ fn the_pilot_line_names_the_session_over_the_email() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "take a pull"]));
     let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
-    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let out = command
         .args(["status", "1", "in_progress"])
         .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
@@ -1027,11 +1029,12 @@ fn assign_to_a_callsign_stores_it_verbatim_with_no_registration() {
 fn me_stores_the_callers_callsign_and_stays_yours() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "laned work"]));
-    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let out = command
         .args(["assign", "1", "me", "--json"])
         .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
-        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("ATC_CALLSIGN", "claude")
         .output()
         .expect("spawn atc");
@@ -1043,11 +1046,12 @@ fn me_stores_the_callers_callsign_and_stays_yours() {
 
     // Yours to the same callsign, not to a caller with none — and `me`
     // written by a caller with none is yours to everyone.
-    let board = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let board = command
         .args(["--json"])
         .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
-        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("ATC_CALLSIGN", "claude")
         .output()
         .expect("spawn atc");
@@ -1074,6 +1078,49 @@ fn me_stores_the_callers_callsign_and_stays_yours() {
         board["data"]["waiting_on_you"]["yours"][0]["id"],
         serde_json::json!("pi.3")
     );
+}
+
+#[test]
+fn a_client_mark_is_the_callsign_and_the_variable_beats_it() {
+    // The client's own mark on its shell names the pilot with nothing
+    // configured; the launcher's variable is the override on top of it.
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "marked work"]));
+    let marked = |args: &[&str], env: &[(&str, &str)]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+        scrub(&mut command);
+        command
+            .args(args)
+            .current_dir(repo.path())
+            .env("XDG_CONFIG_HOME", xdg(repo.path()));
+        for (name, value) in env {
+            command.env(name, value);
+        }
+        command.output().expect("spawn atc")
+    };
+    let callsign =
+        |board: &serde_json::Value| board["data"]["in_progress"][0]["status_callsign"].clone();
+
+    stdout(&marked(
+        &["status", "1", "in_progress"],
+        &[("CLAUDECODE", "1")],
+    ));
+    let board = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(callsign(&board), serde_json::json!("claude"));
+
+    stdout(&marked(
+        &["status", "1", "in_progress"],
+        &[("CLAUDECODE", "1"), ("ATC_CALLSIGN", "qwen-review")],
+    ));
+    let board = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(callsign(&board), serde_json::json!("qwen-review"));
+
+    stdout(&marked(
+        &["status", "1", "in_progress"],
+        &[("GEMINI_CLI", "1")],
+    ));
+    let board = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(callsign(&board), serde_json::json!("gemini"));
 }
 
 #[test]

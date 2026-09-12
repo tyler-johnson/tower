@@ -10,13 +10,15 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 /// The spawn: `home` is the scratch HOME, `cwd` where the verb runs,
 /// `stdin` what it is fed (piped and closed either way, so nothing here
 /// is a terminal and nothing may prompt).
 fn atc(home: &Path, cwd: &Path, args: &[&str], stdin: Option<&str>) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    let mut child = command
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
@@ -29,8 +31,6 @@ fn atc(home: &Path, cwd: &Path, args: &[&str], stdin: Option<&str>) -> Output {
         .env("LOCALAPPDATA", home.join("cache"))
         // Nothing here spawns fufu.
         .env("ATC_FF", "/nonexistent")
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

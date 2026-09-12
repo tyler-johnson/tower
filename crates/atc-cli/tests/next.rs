@@ -19,17 +19,17 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    // A developer's own Claude Code session must not tag or stamp the
+    // fixture's events: the bylines below assert the bare email.
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        // A developer's own Claude Code session must not tag the fixture's
-        // events: the bylines below assert the bare email.
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .output()
         .expect("spawn atc")
 }
@@ -61,11 +61,12 @@ fn envelope(output: &Output) -> serde_json::Value {
 
 /// The spawn under a callsign, the way a harness exports one.
 fn atc_as(repo: &Path, args: &[&str], callsign: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
-        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("ATC_CALLSIGN", callsign)
         .output()
         .expect("spawn atc")

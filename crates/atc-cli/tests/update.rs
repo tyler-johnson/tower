@@ -5,15 +5,15 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
     let root = repo.parent().expect("the fixture nests the repository");
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .env("XDG_CONFIG_HOME", root.join("xdg"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.

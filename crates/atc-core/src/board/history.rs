@@ -131,11 +131,8 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
             Kind::Linked { from, to } | Kind::Unlinked { from, to } => {
                 from == flight || to == flight
             }
-            // A view names no flight, and neither does the roster.
-            Kind::ViewSaved { .. }
-            | Kind::ViewDeleted { .. }
-            | Kind::Registered { .. }
-            | Kind::Unregistered { .. } => false,
+            // A view names no flight.
+            Kind::ViewSaved { .. } | Kind::ViewDeleted { .. } => false,
             Kind::Unknown { body, .. } => {
                 serde_json::from_str::<Names>(body.get()).is_ok_and(|names| {
                     [names.flight, names.target, names.from, names.to]
@@ -226,8 +223,6 @@ fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
         | Kind::Commented { .. }
         | Kind::ViewSaved { .. }
         | Kind::ViewDeleted { .. }
-        | Kind::Registered { .. }
-        | Kind::Unregistered { .. }
         | Kind::Unknown { .. } => None,
     }
 }

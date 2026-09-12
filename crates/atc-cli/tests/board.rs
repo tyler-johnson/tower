@@ -5,14 +5,14 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use atc_core::log::{Kind, Store};
-use atc_testsupport::Repo;
+use atc_testsupport::{Repo, scrub};
 
 fn atc(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
         .args(args)
         .current_dir(repo)
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("ATC_CALLSIGN")
         .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn atc")
@@ -361,11 +361,12 @@ fn a_ready_flight_laned_to_the_viewers_callsign_is_yours() {
     stdout(&atc(repo.path(), &["file", "someone's flight"]));
 
     let as_qwen = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_atc"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+        scrub(&mut command);
+        command
             .args(args)
             .current_dir(repo.path())
             .env("XDG_CONFIG_HOME", xdg(repo.path()))
-            .env_remove("CLAUDE_CODE_SESSION_ID")
             .env("ATC_CALLSIGN", "qwen-review")
             .output()
             .expect("spawn atc")

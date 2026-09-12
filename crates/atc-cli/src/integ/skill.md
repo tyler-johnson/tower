@@ -66,7 +66,7 @@ The pick is the claim and nothing else: each picked flight is set In Progress wi
 
 ## Lanes
 
-`atc assign <flight> me`, `agent`, `none`, or a callsign; `none` is absence, and an unassigned Ready flight stands in the `ready` group as nobody's claim. The lane is the whole routing decision: `agent` is the open pool, a callsign is one pilot's own queue, and `me` stores your callsign — so nothing unshaped is handed out, and `assign` is the gate. Which pilot flew a flight is the callsign on the event: your callsign is `ATC_CALLSIGN` when the harness exports it, else the login name at a terminal, else none, and every event carries it beside the session and the author, so the brief's history shows the pilot. `atc register` is the roster — kind, description, last seen — and a callsign needs no registration to be a lane.
+`atc assign <flight> me`, `agent`, `none`, or a callsign; `none` is absence, and an unassigned Ready flight stands in the `ready` group as nobody's claim. The lane is the whole routing decision: `agent` is the open pool, a callsign is one pilot's own queue, and `me` stores your callsign — so nothing unshaped is handed out, and `assign` is the gate. Which pilot flew a flight is the callsign on the event: your callsign is detected from the client you run under, or `ATC_CALLSIGN` when the launcher sets one, else the login name at a terminal, else none, and every event carries it beside the session and the author, so the brief's history shows the pilot. A callsign needs nothing to be a lane.
 
 ## Machine surface
 
