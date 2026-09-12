@@ -9,7 +9,7 @@ You are the crew of a loop over `atc next`. The harness you run in is the schedu
 
 The loop step is `atc next me agent --json` — your own queue, where a held flight answered back to Ready lands now that a pull is yours, then the shared pool, then the unassigned lane. Exit 0 is a pick: `picked[0]` carries `flight`, `subject`, and — when the flight's part names one — `skill`. Exit 1 is an empty pick, and `data.outcome` says which: `drained` is a board with nothing left, and `elsewhere` is work that exists in another lane — someone's own queue. Both stop the loop and are reported by their word. Those are the only exits. Never sleep and retry, never add a timeout, never invent a sentinel.
 
-Fan-out: when the harness can run parallel subagents, `atc next me agent -n 3` claims the next three in filed order. Hand each picked row to one worker in its own worktree, and rejoin the loop when all of them have ended their flight with a verb. Solo remains the default; fan out only when the board shows independent ready flights and the harness genuinely runs workers concurrently.
+Fan-out: when the harness can run parallel subagents, `atc next me agent -n 3` claims the next three by priority, then filed order. Hand each picked row to one worker in its own worktree, and rejoin the loop when all of them have ended their flight with a verb. Solo remains the default; fan out only when the board shows independent ready flights and the harness genuinely runs workers concurrently.
 
 `next` hands out no tree, so choose a worktree of your own before touching anything, and never one another flight is using.
 

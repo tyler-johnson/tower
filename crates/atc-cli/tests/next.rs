@@ -373,6 +373,29 @@ fn an_unclosed_dependency_keeps_the_dependent_out_of_the_walk() {
 }
 
 #[test]
+fn a_lane_walks_by_priority_then_filed_order() {
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "low work", "-p", "low"]));
+    stdout(&atc(repo.path(), &["file", "urgent work", "-p", "urgent"]));
+    stdout(&atc(repo.path(), &["file", "plain work"]));
+
+    // Three bare filings in the unassigned lane, #1 low, #2 urgent, #3
+    // none: the urgent one leads, and the rest keep filed order.
+    let out = atc(
+        repo.path(),
+        &["next", "none", "-n", "3", "--peek", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(0));
+    let envelope = envelope(&out);
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("work"));
+    assert_eq!(
+        picked(&envelope),
+        ["pi.2", "pi.1", "pi.3"],
+        "priority first, then filed order: {envelope}"
+    );
+}
+
+#[test]
 fn a_count_picks_in_filed_order_and_the_envelope_has_no_passed_key() {
     let repo = repo();
     file_pipeline(&repo, "first work");

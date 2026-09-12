@@ -6,14 +6,18 @@
 //!
 //! The walk is a list of lanes. Each named [`Lane`] — the caller's own
 //! queue, the literal `agent` lane, the unassigned lane, or one pilot's
-//! callsign — walks in the order given, each in filed order, and the
-//! unassigned lane walks last unless it was named, in which case it
+//! callsign — walks in the order given, each by priority and then
+//! filed order, and the unassigned lane walks last unless it was
+//! named, in which case it
 //! walks where it was named: everyone falls through to `none` once
 //! their own lanes are drained, and `none` walks once wherever it
 //! lands. [`walk`] builds that list from the words; an empty list is
 //! `me` alone. A flight in two named lanes — the literal `me` and the
 //! caller's callsign, say — is picked once, in the first lane that
-//! admits it. Membership is the derived status and the stored
+//! admits it. Within a lane the order is the board's — `rank`'s
+//! ladder, then filed order — so an urgent flight filed late leads its
+//! lane, and never an earlier lane: lanes fill in the order named
+//! whatever the priorities say. Membership is the derived status and the stored
 //! assignee, read off the fold — never the registry (principle 11) —
 //! through `Flight::in_lane`: exact string compares, so an unknown
 //! status or lane never rounds into a walk. Ready is derived, so a
@@ -33,6 +37,7 @@ use std::fmt;
 use serde::Serialize;
 
 use super::flight::Fold;
+use super::model::rank;
 
 /// The lane a walk names: the same four shapes `assign` and `file`
 /// take, read against the caller at the gate.
@@ -151,8 +156,8 @@ pub fn walk(named: &[Lane]) -> Vec<Lane> {
     lanes
 }
 
-/// Walk `lanes` in order, each in filed order, and pick the first `want`
-/// of them. The list is walked exactly as given — [`walk`] is where the
+/// Walk `lanes` in order, each by priority and then filed order, and
+/// pick the first `want` of them. The list is walked exactly as given — [`walk`] is where the
 /// overflow is appended. `caller` is the puller's callsign, which only
 /// `Lane::Me` reads.
 pub fn pick(fold: &Fold, want: usize, lanes: &[Lane], caller: Option<&str>) -> Picks {
@@ -162,20 +167,31 @@ pub fn pick(fold: &Fold, want: usize, lanes: &[Lane], caller: Option<&str>) -> P
         .flights
         .iter()
         .filter(|flight| !flight.closed() && flight.question.is_none() && flight.status == "ready");
-    let mut buckets: Vec<Vec<Pick>> = lanes.iter().map(|_| Vec::new()).collect();
+    let mut buckets: Vec<Vec<(u8, Pick)>> = lanes.iter().map(|_| Vec::new()).collect();
     let mut elsewhere = 0;
     for flight in candidates {
         match lanes.iter().position(|lane| flight.in_lane(lane, caller)) {
-            Some(index) => buckets[index].push(Pick {
-                flight: flight.id.to_string(),
-                number: flight.number,
-                subject: flight.subject.clone(),
-                assignee: flight.assignee.clone(),
-            }),
+            Some(index) => buckets[index].push((
+                rank(&flight.priority),
+                Pick {
+                    flight: flight.id.to_string(),
+                    number: flight.number,
+                    subject: flight.subject.clone(),
+                    assignee: flight.assignee.clone(),
+                },
+            )),
             None => elsewhere += 1,
         }
     }
-    let mut picked: Vec<Pick> = buckets.into_iter().flatten().collect();
+    // Each bucket by the board's ladder. The sort is stable and the fold
+    // handed the flights over in filed order, so equal ranks keep it.
+    let mut picked: Vec<Pick> = buckets
+        .into_iter()
+        .flat_map(|mut bucket| {
+            bucket.sort_by_key(|(rank, _)| *rank);
+            bucket.into_iter().map(|(_, pick)| pick)
+        })
+        .collect();
     picked.truncate(want);
 
     Picks { picked, elsewhere }
@@ -190,6 +206,18 @@ mod tests {
     /// A filing with the given status and lane stored — the shape the
     /// pool gate is about.
     fn stored(id: &str, time: i64, status: &str, assignee: Option<&str>) -> Event {
+        prioritized(id, time, status, "none", assignee)
+    }
+
+    /// A Ready filing with the given priority word stored — the shape the
+    /// in-lane order is about.
+    fn prioritized(
+        id: &str,
+        time: i64,
+        status: &str,
+        priority: &str,
+        assignee: Option<&str>,
+    ) -> Event {
         let id: EventId = id.parse().expect("id");
         Event {
             writer: id.writer.clone(),
@@ -204,7 +232,7 @@ mod tests {
                 body: String::new(),
                 status: status.to_string(),
                 assignee: assignee.map(str::to_string),
-                priority: "none".to_string(),
+                priority: priority.to_string(),
                 labels: Vec::new(),
                 skill: None,
                 bay: None,
@@ -533,6 +561,82 @@ mod tests {
         let picks = pick(&fold(&[]), 1, &walk(&[]), None);
         assert!(picks.picked.is_empty());
         assert_eq!(picks.outcome(), Outcome::Drained);
+    }
+
+    #[test]
+    fn a_later_urgent_flight_leads_its_lane() {
+        let picks = pick(
+            &fold(&[
+                prioritized("pi.1", 10, "ready", "none", Some("agent")),
+                prioritized("pi.2", 20, "ready", "low", Some("agent")),
+                prioritized("pi.3", 30, "ready", "urgent", Some("agent")),
+                prioritized("pi.4", 40, "ready", "high", Some("agent")),
+            ]),
+            4,
+            &[Lane::Agent, Lane::None],
+            None,
+        );
+        assert_eq!(
+            ids(&picks),
+            ["pi.3", "pi.4", "pi.2", "pi.1"],
+            "the board's ladder, whatever the filing times say"
+        );
+    }
+
+    #[test]
+    fn equal_priority_keeps_filed_order_and_an_unknown_word_sorts_last() {
+        let picks = pick(
+            &fold(&[
+                prioritized("pi.1", 10, "ready", "whenever", Some("agent")),
+                prioritized("pi.2", 20, "ready", "high", Some("agent")),
+                prioritized("pi.3", 30, "ready", "none", Some("agent")),
+                prioritized("pi.4", 40, "ready", "high", Some("agent")),
+                prioritized("pi.5", 50, "ready", "none", Some("agent")),
+            ]),
+            5,
+            &[Lane::Agent, Lane::None],
+            None,
+        );
+        assert_eq!(
+            ids(&picks),
+            ["pi.2", "pi.4", "pi.3", "pi.5", "pi.1"],
+            "stable within a rank, and a word the ladder lacks sorts after `none`"
+        );
+    }
+
+    #[test]
+    fn priority_never_crosses_a_lane() {
+        // The first named lane fills first: its low flight beats the
+        // urgent one in the lane behind it.
+        let events = [
+            prioritized("pi.1", 10, "ready", "low", Some("agent")),
+            prioritized("pi.2", 20, "ready", "urgent", None),
+        ];
+        let picks = pick(&fold(&events), 2, &walk(&[Lane::Agent]), None);
+        assert_eq!(ids(&picks), ["pi.1", "pi.2"]);
+
+        let reversed = pick(&fold(&events), 2, &walk(&[Lane::None, Lane::Agent]), None);
+        assert_eq!(ids(&reversed), ["pi.2", "pi.1"]);
+    }
+
+    #[test]
+    fn want_truncates_after_the_sort() {
+        let picks = pick(
+            &fold(&[
+                prioritized("pi.1", 10, "ready", "none", Some("agent")),
+                prioritized("pi.2", 20, "ready", "urgent", Some("agent")),
+                prioritized("pi.3", 30, "ready", "high", None),
+            ]),
+            1,
+            &[Lane::Agent, Lane::None],
+            None,
+        );
+        assert_eq!(
+            ids(&picks),
+            ["pi.2"],
+            "the highest priority of the first non-empty lane"
+        );
+        assert_eq!(picks.elsewhere, 0, "truncated is not elsewhere");
     }
 
     #[test]

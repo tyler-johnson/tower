@@ -68,12 +68,13 @@ next k. The lanes are the arguments, walked in the order given: me,
 agent, none, or a callsign, and your own queue — me — when unsaid. me
 is the literal me lane and your callsign's; agent is the shared pool
 alone; none is the unassigned lane; a callsign is that pilot's queue.
-Each lane walks in filed order, and the unassigned lane walks last
-unless you named it, in which case it walks where you named it — so
-everyone falls through to none once their own lanes are drained, and
-none walks once. A lane named twice walks once. The pull is the Ready
-check and the move in one command: each picked flight is set In
-Progress with your callsign as the pilot — the byline, and the
+Each lane walks by priority, then filed order — an urgent flight
+filed late leads its lane, never an earlier one — and the unassigned
+lane walks last unless you named it, in which case it walks where you
+named it — so everyone falls through to none once their own lanes are
+drained, and none walks once. A lane named twice walks once. The pull
+is the Ready check and the move in one command: each picked flight is
+set In Progress with your callsign as the pilot — the byline, and the
 session underneath it — and lands in your own queue, the pull being
 yours by default. --assignee <lane> says where it lands instead, with
 file's words: agent keeps a pick in the pool, none clears its lane, a
@@ -99,7 +100,7 @@ Examples:
   atc next                  pull the next Ready flight from your own queue
   atc next agent            the shared pool, then the unassigned lane
   atc next me agent         your queue, then the pool, then the overflow
-  atc next -n 4             the next four, in filed order
+  atc next -n 4             the next four, by priority then filed order
   atc next --peek           the same computation, nothing written
   atc next agent --assignee agent    pull and leave it in the pool
   atc next agent -n 3       three from the pool, each moved to you
