@@ -278,6 +278,16 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Who you are: writer, author, client, session, callsign, lease.
+    #[command(long_about = help::WHOAMI, after_long_help = help::WHOAMI_EXAMPLES)]
+    Whoami,
+    /// Every session on this machine with a lease; --mint prints a fresh id.
+    #[command(long_about = help::SESSION, after_long_help = help::SESSION_EXAMPLES)]
+    Session {
+        /// Print a fresh session id and touch nothing.
+        #[arg(long)]
+        mint: bool,
+    },
     /// Move a flight to a status.
     #[command(long_about = help::STATUS, after_long_help = help::STATUS_EXAMPLES)]
     Status {
@@ -393,13 +403,14 @@ pub enum Command {
         #[arg(long, value_name = "n")]
         port: Option<String>,
     },
-    /// Wire tower into the agent clients on this machine.
+    /// Wire tower into the agent clients and the shells on this machine.
     #[command(long_about = help::HOOK, after_long_help = help::HOOK_EXAMPLES)]
     Hook {
-        /// The clients to wire: claude, codex, cursor, gemini.
+        /// The clients to wire — claude, codex, cursor, gemini — or the
+        /// shells: bash, zsh, fish, powershell.
         #[arg(value_name = "client")]
         slugs: Vec<String>,
-        /// Every client detected on this machine, without asking.
+        /// Every client and shell detected on this machine, without asking.
         #[arg(long)]
         all: bool,
         /// Report what is detected and what is wired, and stop.
@@ -419,10 +430,11 @@ pub enum Command {
     /// Remove exactly what hook added.
     #[command(long_about = help::UNHOOK, after_long_help = help::UNHOOK_EXAMPLES)]
     Unhook {
-        /// The clients to unwire: claude, codex, cursor, gemini.
+        /// The clients to unwire — claude, codex, cursor, gemini — or the
+        /// shells: bash, zsh, fish, powershell.
         #[arg(value_name = "client")]
         slugs: Vec<String>,
-        /// Every client detected on this machine.
+        /// Every client and shell detected on this machine.
         #[arg(long)]
         all: bool,
     },
@@ -430,12 +442,15 @@ pub enum Command {
     /// boundary, a lease heartbeat on activity, a release at the end.
     #[command(long_about = help::TRIGGER, after_long_help = help::TRIGGER_EXAMPLES)]
     Trigger {
-        /// The client whose hook is running this — claude, codex,
-        /// cursor, or gemini — which names the event table and the
-        /// envelope, and makes every failure silent. Bare, the notice
-        /// prints as it is.
+        /// The source whose hook is running this — claude, codex,
+        /// cursor, gemini, or shell — which names the event table and
+        /// the envelope, and makes every failure silent. Bare, the
+        /// notice prints as it is.
         #[arg(value_name = "source")]
         source: Option<String>,
+        /// The shell's exit: release the lease. Shell source only.
+        #[arg(long)]
+        end: bool,
     },
     /// The notice alone — the spelling `trigger` replaced.
     ///
@@ -485,8 +500,9 @@ impl Command {
             },
             // A hook spawns it with nobody in front of it, under a short
             // box, on every tool call: no child to fork, and no one to
-            // read a notice.
-            Command::Trigger { .. } | Command::Briefing { .. } => Lanes {
+            // read a notice. The session list runs at every shell start
+            // and `--mint` inside a prompt's `$(…)`, the same box.
+            Command::Trigger { .. } | Command::Briefing { .. } | Command::Session { .. } => Lanes {
                 update: false,
                 notice: false,
             },
@@ -512,6 +528,7 @@ impl Command {
             | Command::Decompose { .. }
             | Command::Assign { .. }
             | Command::Callsign { .. }
+            | Command::Whoami
             | Command::Status { .. }
             | Command::Cancel { .. }
             | Command::Hold { .. }

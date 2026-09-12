@@ -1,10 +1,13 @@
 //! `atc hook` and `atc unhook` against a scratch home: the report, the
 //! Claude plugin directory, the settings merge for the three clients
-//! that take one, the refresh, and doctor's row per client.
+//! that take one, the shells' marked rc lines, the refresh, and
+//! doctor's row per client.
 //!
 //! Every path here is env-redirected — HOME, USERPROFILE, the XDG roots,
-//! LOCALAPPDATA — so the suite never touches a real config file. Client
-//! presence is faked by creating the client's config directory.
+//! ZDOTDIR, LOCALAPPDATA — so the suite never touches a real config
+//! file. Client presence is faked by creating the client's config
+//! directory, a shell's by creating its rc file; `SHELL` is scrubbed, so
+//! the developer's login shell is not present in a fixture.
 
 use std::io::Write;
 use std::path::Path;
@@ -16,8 +19,22 @@ use atc_testsupport::{Repo, scrub};
 /// `stdin` what it is fed (piped and closed either way, so nothing here
 /// is a terminal and nothing may prompt).
 fn atc(home: &Path, cwd: &Path, args: &[&str], stdin: Option<&str>) -> Output {
+    atc_env(home, cwd, args, stdin, &[])
+}
+
+/// The same spawn with more variables set — `ZDOTDIR`, a shell's own.
+fn atc_env(
+    home: &Path,
+    cwd: &Path,
+    args: &[&str],
+    stdin: Option<&str>,
+    env: &[(&str, &str)],
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     scrub(&mut command);
+    for (name, value) in env {
+        command.env(name, value);
+    }
     let mut child = command
         .args(args)
         .current_dir(cwd)
@@ -76,6 +93,24 @@ fn home() -> tempfile::TempDir {
     tempfile::TempDir::new().unwrap()
 }
 
+/// Every slug, in the order the listing walks them: the clients, then
+/// the shells.
+const SLUGS: [&str; 8] = [
+    "claude",
+    "codex",
+    "cursor",
+    "gemini",
+    "bash",
+    "zsh",
+    "fish",
+    "powershell",
+];
+
+/// The marker every rc line tower writes carries, and fufu's, which sits
+/// in the same file and is not tower's to touch.
+const MARKER: &str = "# tower — added by `atc hook`";
+const FUFU: &str = "# fufu — added by `ff hook`";
+
 /// Claude's table, in the order it is written; Codex names the same
 /// five.
 const CLAUDE_EVENTS: [&str; 5] = [
@@ -117,14 +152,17 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
     std::fs::create_dir_all(home.path().join(".codex")).unwrap();
 
     let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
-    for slug in ["claude", "codex", "cursor", "gemini"] {
+    for slug in SLUGS {
         assert!(listing.contains(slug), "every slug has a row: {listing:?}");
     }
     // Every row says not wired; the client column is what separates a
-    // client that is here from one that is not.
+    // client that is here from one that is not. A shell is here when its
+    // rc file is — none is — except PowerShell on Windows, which ships
+    // with the OS.
     let lines: Vec<&str> = listing.lines().collect();
-    assert_eq!(lines.len(), 4, "{listing:?}");
-    for (line, present) in lines.iter().zip([true, true, false, false]) {
+    assert_eq!(lines.len(), SLUGS.len(), "{listing:?}");
+    let present = [true, true, false, false, false, false, false, cfg!(windows)];
+    for (line, present) in lines.iter().zip(present) {
         assert!(line.ends_with("not wired"), "{line:?}");
         assert_eq!(line.contains("not on this machine"), !present, "{line:?}");
     }
@@ -134,7 +172,7 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
     let value = envelope(&out);
     assert_eq!(value["cmd"], "hook");
     let rows = value["data"]["integrations"].as_array().unwrap();
-    assert_eq!(rows.len(), 4, "one row per slug: {rows:?}");
+    assert_eq!(rows.len(), SLUGS.len(), "one row per slug: {rows:?}");
     assert_eq!(rows[0]["slug"], "claude");
     assert_eq!(rows[0]["wiring"]["state"], "not-wired");
     assert_eq!(rows[0]["presence"]["state"], "present");
@@ -172,21 +210,25 @@ fn bare_hook_acts_on_nothing_when_it_cannot_ask() {
     );
 }
 
+/// A shell nobody supports is a usage error, and so is `shell` itself:
+/// it is the trigger's source, not a slug, and nothing ever wrote it.
 #[test]
 fn unknown_slugs_are_hard_errors() {
     let home = home();
     for verb in ["hook", "unhook"] {
-        let out = atc(home.path(), home.path(), &["--json", verb, "tcsh"], None);
-        assert_eq!(out.status.code(), Some(2), "{verb}: a usage error");
-        let value = envelope(&out);
-        assert_eq!(value["cmd"], verb);
-        assert_eq!(value["error"]["id"], "usage/unknown-slug");
-        let message = value["error"]["message"].as_str().unwrap();
-        assert!(message.contains("tcsh"), "{message}");
-        assert!(
-            message.contains("claude"),
-            "names the known ones: {message}"
-        );
+        for bad in ["tcsh", "shell"] {
+            let out = atc(home.path(), home.path(), &["--json", verb, bad], None);
+            assert_eq!(out.status.code(), Some(2), "{verb} {bad}: a usage error");
+            let value = envelope(&out);
+            assert_eq!(value["cmd"], verb);
+            assert_eq!(value["error"]["id"], "usage/unknown-slug");
+            let message = value["error"]["message"].as_str().unwrap();
+            assert!(message.contains(bad), "{message}");
+            assert!(
+                message.contains("claude") && message.contains("bash"),
+                "names the known ones: {message}"
+            );
+        }
     }
 }
 
@@ -690,6 +732,276 @@ fn an_old_settings_entry_reads_as_stale_and_update_rewrites_it() {
     );
     let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
     assert!(!listing.contains("stale"), "{listing:?}");
+}
+
+// ---- the shells ------------------------------------------------------------
+
+/// The marked lines tower writes for a shell: every line carries the
+/// marker, and the text is what the suite compares byte for byte.
+fn marked(home: &Path, slug: &str, rc: &Path) -> String {
+    let scratch = home.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let scratch_rc = match rc.strip_prefix(home) {
+        Ok(rel) => scratch.join(rel),
+        Err(_) => panic!("{} is under the fixture", rc.display()),
+    };
+    ok(&atc(&scratch, &scratch, &["hook", slug], None));
+    let text = std::fs::read_to_string(&scratch_rc).unwrap();
+    std::fs::remove_dir_all(&scratch).unwrap();
+    for line in text.lines() {
+        assert!(
+            line.ends_with(MARKER),
+            "{slug}: every line is marked: {line}"
+        );
+    }
+    text
+}
+
+/// `atc hook bash` appends the marked lines after what is there, byte
+/// for byte; a second run is byte-identical; `-u` leaves a current file
+/// unchanged; `unhook` restores the seed exactly.
+#[test]
+fn the_bash_lines_round_trip_byte_for_byte() {
+    let home = home();
+    let rc = home.path().join(".bashrc");
+    let seed = "# mine\nexport EDITOR=vim\n";
+    std::fs::write(&rc, seed).unwrap();
+    let lines = marked(home.path(), "bash", &rc);
+    assert!(lines.contains("atc session --mint"), "{lines}");
+    assert!(lines.contains("atc trigger shell --end"), "{lines}");
+    assert!(lines.contains("PROMPT_COMMAND"), "{lines}");
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "bash"], None));
+    assert!(said.contains("wired into"), "{said:?}");
+    assert!(said.contains("restart the shell"), "{said:?}");
+    let wired = format!("{seed}{lines}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), wired);
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "bash"], None));
+    assert!(said.contains("already wired in"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), wired);
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("bash")).unwrap();
+    assert!(row.contains("wired (rc)"), "{row:?}");
+    assert!(row.contains(&rc.display().to_string()), "{row:?}");
+    let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert_eq!(rows[4]["slug"], "bash");
+    assert_eq!(rows[4]["wiring"]["state"], "wired");
+    assert_eq!(rows[4]["wiring"]["mechanism"], "rc");
+    assert_eq!(rows[4]["presence"]["state"], "present");
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("already wired in"), "{said:?}");
+    assert!(!said.contains("rewired"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), wired);
+
+    // An older tower's marked line is rewritten in place by -u.
+    std::fs::write(
+        &rc,
+        format!("{seed}PROMPT_COMMAND=\"atc trigger shell\"  {MARKER}\n"),
+    )
+    .unwrap();
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("rewired"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), wired);
+
+    let said = ok(&atc(home.path(), home.path(), &["unhook", "bash"], None));
+    assert!(said.contains("removed the session lines"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), seed);
+    let said = ok(&atc(home.path(), home.path(), &["unhook", "bash"], None));
+    assert!(said.contains("nothing wired in"), "{said:?}");
+
+    // A file with no trailing newline gets one before the lines; a
+    // missing file is created.
+    std::fs::write(&rc, "# no newline").unwrap();
+    ok(&atc(home.path(), home.path(), &["hook", "bash"], None));
+    assert_eq!(
+        std::fs::read_to_string(&rc).unwrap(),
+        format!("# no newline\n{lines}")
+    );
+    std::fs::remove_file(&rc).unwrap();
+    let said = ok(&atc(home.path(), home.path(), &["unhook", "bash"], None));
+    assert!(said.contains("not found"), "{said:?}");
+    ok(&atc(home.path(), home.path(), &["hook", "bash"], None));
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), lines);
+}
+
+/// A line a person wrote that calls the trigger is reported and left:
+/// `hook` adds nothing beside it, `-u` does not count it, and `unhook`
+/// restores the seed exactly.
+#[test]
+fn a_hand_written_trigger_line_is_reported_and_left_alone() {
+    let home = home();
+    let rc = home.path().join(".bashrc");
+    let seed = "# mine\nPROMPT_COMMAND=\"atc trigger shell;$PROMPT_COMMAND\"\n";
+    std::fs::write(&rc, seed).unwrap();
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "bash"], None));
+    assert!(
+        said.contains("already calls atc trigger shell by hand — leaving it alone"),
+        "{said:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), seed);
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("bash")).unwrap();
+    assert!(row.contains("written by hand — left alone"), "{row:?}");
+    let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert_eq!(rows[4]["wiring"]["state"], "hand-written");
+    assert_eq!(rows[4]["wiring"]["at"], rc.display().to_string());
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("nothing is wired"), "{said:?}");
+    let said = ok(&atc(home.path(), home.path(), &["unhook", "bash"], None));
+    assert!(said.contains("nothing wired in"), "{said:?}");
+    assert!(said.contains("written by hand"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), seed);
+}
+
+/// fufu's lines in the same rc file are fufu's: `hook` and `unhook`
+/// leave them byte for byte, and neither reads them as tower's.
+#[test]
+fn fufus_lines_in_the_same_file_are_untouched() {
+    let home = home();
+    let rc = home.path().join(".bashrc");
+    let seed = format!(
+        "# mine\nalias git='ff git'  {FUFU}\n[[ $PROMPT_COMMAND == *\"ff trigger shell\"* ]] || PROMPT_COMMAND=\"ff trigger shell;$PROMPT_COMMAND\"  {FUFU}\n"
+    );
+    std::fs::write(&rc, &seed).unwrap();
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("bash")).unwrap();
+    assert!(row.ends_with("not wired"), "{row:?}");
+
+    let lines = marked(home.path(), "bash", &rc);
+    ok(&atc(home.path(), home.path(), &["hook", "bash"], None));
+    assert_eq!(
+        std::fs::read_to_string(&rc).unwrap(),
+        format!("{seed}{lines}")
+    );
+    ok(&atc(home.path(), home.path(), &["unhook", "bash"], None));
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), seed);
+}
+
+/// Each shell's rc file is where that shell reads it: zsh under
+/// `ZDOTDIR`, fish and PowerShell under `XDG_CONFIG_HOME`.
+#[test]
+fn each_shell_writes_where_the_shell_reads() {
+    let home = home();
+    let zdot = home.path().join("zdot");
+    std::fs::create_dir_all(&zdot).unwrap();
+    let zshrc = zdot.join(".zshrc");
+    let zdotdir = zdot.display().to_string();
+    ok(&atc_env(
+        home.path(),
+        home.path(),
+        &["hook", "zsh"],
+        None,
+        &[("ZDOTDIR", zdotdir.as_str())],
+    ));
+    let text = std::fs::read_to_string(&zshrc).unwrap();
+    assert!(
+        text.contains("precmd_functions+=(_tower_ambient)"),
+        "{text}"
+    );
+    assert!(text.contains("zshexit_functions+=(_tower_exit)"), "{text}");
+    assert!(!home.path().join(".zshrc").exists(), "ZDOTDIR wins");
+    ok(&atc(home.path(), home.path(), &["hook", "zsh"], None));
+    assert!(home.path().join(".zshrc").is_file(), "HOME without ZDOTDIR");
+
+    ok(&atc(home.path(), home.path(), &["hook", "fish"], None));
+    let fish = home.path().join("xdg/fish/config.fish");
+    let text = std::fs::read_to_string(&fish).unwrap();
+    assert!(text.contains("--on-event fish_prompt"), "{text}");
+    assert!(text.contains("--on-event fish_exit"), "{text}");
+    assert!(text.contains("$fish_pid"), "{text}");
+
+    if !cfg!(windows) {
+        ok(&atc(
+            home.path(),
+            home.path(),
+            &["hook", "powershell"],
+            None,
+        ));
+        let profile = home
+            .path()
+            .join("xdg/powershell/Microsoft.PowerShell_profile.ps1");
+        let text = std::fs::read_to_string(&profile).unwrap();
+        assert!(text.contains("function global:prompt"), "{text}");
+        assert!(text.contains("PowerShell.Exiting"), "{text}");
+        assert!(text.contains("$PID"), "{text}");
+    }
+
+    // Every wired shell is present, and unhook takes each back to empty.
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    for slug in ["zsh", "fish"] {
+        let row = listing.lines().find(|l| l.starts_with(slug)).unwrap();
+        assert!(row.contains("wired (rc)"), "{row:?}");
+    }
+    ok(&atc(home.path(), home.path(), &["unhook", "fish"], None));
+    assert_eq!(std::fs::read_to_string(&fish).unwrap(), "");
+}
+
+/// A CRLF profile keeps its endings through the append and the removal.
+#[test]
+fn a_crlf_rc_file_keeps_its_line_endings() {
+    let home = home();
+    let rc = home.path().join(".bashrc");
+    let seed = "# mine\r\nexport EDITOR=vim\r\n";
+    std::fs::write(&rc, seed).unwrap();
+    ok(&atc(home.path(), home.path(), &["hook", "bash"], None));
+    let text = std::fs::read_to_string(&rc).unwrap();
+    assert!(text.starts_with(seed), "{text:?}");
+    assert!(
+        text.lines().all(|_| true) && !text.replace("\r\n", "").contains('\n'),
+        "every line ends in CRLF: {text:?}"
+    );
+    assert!(text.ends_with(&format!("{MARKER}\r\n")), "{text:?}");
+    ok(&atc(home.path(), home.path(), &["unhook", "bash"], None));
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), seed);
+}
+
+/// Doctor: a wired shell is ok under its mechanism's word, and a
+/// hand-written line is information naming the file.
+#[test]
+fn doctor_reads_the_shells() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let home = repo.path().parent().unwrap();
+    let rc = home.join(".bashrc");
+    let row = |home: &Path| -> serde_json::Value {
+        let out = atc(home, repo.path(), &["doctor", "--json"], None);
+        envelope(&out)["data"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["check"] == "hook/bash")
+            .cloned()
+            .unwrap_or_else(|| panic!("a hook/bash row"))
+    };
+    std::fs::write(&rc, "# mine\n").unwrap();
+    ok(&atc(home, home, &["hook", "bash"], None));
+    let found = row(home);
+    assert_eq!(found["level"], "ok", "{found}");
+    assert_eq!(
+        found["message"],
+        format!("bash: rc wired in {}", rc.display()),
+        "{found}"
+    );
+    let human = ok(&atc(home, repo.path(), &["doctor"], None));
+    assert!(human.contains("ok    bash: rc wired in"), "{human:?}");
+
+    std::fs::write(&rc, "atc trigger shell\n").unwrap();
+    let found = row(home);
+    assert_eq!(found["level"], "info", "{found}");
+    assert_eq!(
+        found["message"],
+        format!(
+            "bash: atc trigger shell is wired by hand in {}",
+            rc.display()
+        ),
+        "{found}"
+    );
 }
 
 // ---- doctor ----------------------------------------------------------------

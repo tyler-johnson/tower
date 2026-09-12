@@ -30,6 +30,7 @@ Every read folds the log fresh and never blocks on the network.
 - `atc procedures` and `atc skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `atc explain <id>` — the prose behind a refusal; `atc explain --list` is the whole catalog. A pure lookup, no repository needed.
 - `atc config` — every setting with its value and default; `atc version`; `atc doctor`, which exits 1 on findings so a script can gate on it; `atc trigger`, the notice a wired client shows a new session.
+- `atc whoami` — who you are: the session and where it came from, the callsign and its source, the lease, the pid, the writer and the author; bare `atc callsign` prints the same. `atc session` — every session on this machine with a lease, yours marked. A terminal wired by `atc hook bash` (or zsh, fish, powershell) is a session of its own, minted once per interactive shell into `ATC_SHELL_SESSION`; an agent launched from it is still its own session, because the client's variable ranks ahead of the terminal's. A launcher that wants a worker tracked sets `ATC_SESSION`, never `ATC_SHELL_SESSION`; `atc session --mint` prints an id for it.
 
 ## Filing and shaping
 

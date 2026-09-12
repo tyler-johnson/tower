@@ -44,12 +44,15 @@ pub const AGENT_ENV: &[&str] = &[
 /// harness writes are stamped by what the test sets and nothing else.
 /// `XDG_STATE_HOME` goes too, so a fixture's leases land under the
 /// `HOME` the harness points into the fixture and never under the
-/// developer's state directory.
+/// developer's state directory; and `SHELL`, so a shell is present in
+/// a fixture only when its rc file is there, whatever the developer's
+/// login shell is.
 pub fn scrub(command: &mut Command) {
     for name in AGENT_ENV {
         command.env_remove(name);
     }
     command.env_remove("XDG_STATE_HOME");
+    command.env_remove("SHELL");
 }
 
 /// A real repository with real fufu history on it.

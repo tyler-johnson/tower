@@ -32,3 +32,10 @@ tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# The Documents known folder, for PowerShell's profile: `$PROFILE` follows
+# a OneDrive redirect, and only the shell API says where it went.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }

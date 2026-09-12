@@ -19,6 +19,12 @@
 //! store: a `touch` or an unlink, a few milliseconds, since it runs on
 //! every tool call.
 //!
+//! The `shell` source is the four shells' rc lines: no payload — a
+//! shell has none to hand down, and reading a piped interactive bash's
+//! stdin would eat the rest of its script — so bare is activity, the
+//! prompt's heartbeat, and `--end` is the end, the release at exit. It
+//! has no boundary: a prompt has no context to inject a notice into.
+//!
 //! `atc briefing [client]` stays as an alias that prints the notice and
 //! touches no lease, for the configs that still spell it.
 
@@ -28,18 +34,29 @@ use crate::integ::{self, briefing};
 use crate::machine;
 use atc_core::lease;
 
-pub fn run(json: bool, source: Option<&str>) -> Result<(), CliError> {
-    let Some(slug) = source else {
+pub fn run(json: bool, source: Option<&str>, end: bool) -> Result<(), CliError> {
+    let Some(source) = source else {
         return bare(json, "trigger");
     };
     // Machine surface: a name tower did not write is nothing to say,
     // not a refusal — the hook's stderr is someone else's terminal.
-    let Some(integration) = integ::by_slug(slug) else {
+    let Some(integration) = integ::by_source(source) else {
         return Ok(());
     };
-    let payload = briefing::read_payload();
+    let payload = if integration.carries_payload() {
+        briefing::read_payload()
+    } else {
+        briefing::Payload::default()
+    };
     let session = lease::session_key(&payload.session_id);
-    match integration.class_of(Some(payload.hook_event_name.as_str())) {
+    // `--end` names the event where the source has no payload to; a
+    // client source given it classes to nothing and stays silent.
+    let name = if end {
+        "end"
+    } else {
+        payload.hook_event_name.as_str()
+    };
+    match integration.class_of(Some(name)) {
         Some(Class::Boundary) => {
             if let Some(session) = &session {
                 // A lease that would not write is not the notice's

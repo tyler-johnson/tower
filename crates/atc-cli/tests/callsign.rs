@@ -301,8 +301,9 @@ fn the_same_word_is_a_renewal() {
 
 // ---- the bare read ---------------------------------------------------------
 
-/// Bare `atc callsign` is the identity read: the word with source
-/// `session`, the session and its variable, the lease fresh, the pid.
+/// Bare `atc callsign` is the identity read, what `atc whoami` prints:
+/// the word with source `session`, the session and its variable, the
+/// lease fresh, the pid, the writer and the author.
 #[test]
 fn bare_callsign_reports_the_identity() {
     let repo = repo();
@@ -328,6 +329,7 @@ fn bare_callsign_reports_the_identity() {
         ),
         None => assert!(lease_line.ends_with(", no pid"), "{lease_line}"),
     }
+    assert_eq!(lines.next(), Some("writer pi · author tests@tower.invalid"));
     assert_eq!(lines.next(), None);
 
     let out = atc(path, Some("s1"), pid, &["callsign", "--json"]);
@@ -356,6 +358,10 @@ fn bare_callsign_reports_the_identity() {
         text.starts_with("callsign claude — client (ATC_SESSION s2)\n"),
         "{text}"
     );
+    assert!(
+        text.ends_with("writer pi · author tests@tower.invalid · client claude\n"),
+        "{text}"
+    );
     let out = atc_with(
         path,
         Some("s2"),
@@ -368,7 +374,10 @@ fn bare_callsign_reports_the_identity() {
     assert_eq!(data["callsign_source"], "env");
     assert_eq!(data["session_source"], "launcher");
     let text = stdout(&atc(path, None, None, &["callsign"]));
-    assert_eq!(text, "callsign none · no session\n");
+    assert_eq!(
+        text,
+        "callsign none · no session\nwriter pi · author tests@tower.invalid\n"
+    );
     let data = envelope(&atc(path, None, None, &["callsign", "--json"]))["data"].clone();
     assert_eq!(data["callsign"], serde_json::Value::Null);
     assert_eq!(data["session"], serde_json::Value::Null);

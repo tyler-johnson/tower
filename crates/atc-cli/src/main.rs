@@ -173,6 +173,8 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Skills { .. }) => "skills",
         Some(Command::Assign { .. }) => "assign",
         Some(Command::Callsign { .. }) => "callsign",
+        Some(Command::Whoami) => "whoami",
+        Some(Command::Session { .. }) => "session",
         Some(Command::Status { .. }) => "status",
         Some(Command::Cancel { .. }) => "cancel",
         Some(Command::Hold { .. }) => "hold",
@@ -268,6 +270,8 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Callsign { name, force }) => {
             cmd::callsign::run(cli.json, name.as_deref(), *force)?
         }
+        Some(Command::Whoami) => cmd::whoami::run(cli.json)?,
+        Some(Command::Session { mint }) => cmd::session::run(cli.json, *mint)?,
         Some(Command::Status { flight, status }) => cmd::status::run(cli.json, flight, status)?,
         Some(Command::Cancel { flight, message }) => {
             cmd::cancel::run(cli.json, flight, message.clone())?
@@ -301,7 +305,9 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             update,
         }) => integ::hook(cli.json, slugs.clone(), *all, *list, *settings, *update)?,
         Some(Command::Unhook { slugs, all }) => integ::unhook(cli.json, slugs.clone(), *all)?,
-        Some(Command::Trigger { source }) => cmd::trigger::run(cli.json, source.as_deref())?,
+        Some(Command::Trigger { source, end }) => {
+            cmd::trigger::run(cli.json, source.as_deref(), *end)?
+        }
         Some(Command::Briefing { client }) => {
             cmd::trigger::run_briefing(cli.json, client.as_deref())?
         }

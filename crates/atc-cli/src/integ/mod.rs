@@ -1,13 +1,14 @@
 //! Integrations: how tower gets wired into the agent clients on this
 //! machine, and how those clients then hear about the board.
 //!
-//! The slugs are what `atc hook` and `atc unhook` take — `claude`,
-//! `codex`, `cursor`, `gemini`. They are flat and permanent, because they
-//! end up written inside config files tower does not own. The two verbs
-//! are for humans: an unknown slug is a real error, a failure is loud,
-//! and `--json` emits a report envelope.
+//! The slugs are what `atc hook` and `atc unhook` take — the clients,
+//! `claude`, `codex`, `cursor`, `gemini`, and the shells, `bash`, `zsh`,
+//! `fish`, `powershell`. They are flat and permanent, because they end
+//! up written inside config files tower does not own. The two verbs are
+//! for humans: an unknown slug is a real error, a failure is loud, and
+//! `--json` emits a report envelope.
 //!
-//! What every client runs is `atc trigger <slug>`, on every event the
+//! What every client runs is `atc trigger <source>`, on every event the
 //! client offers: at a context boundary it prints tower's notice,
 //! wrapped the way that client reads it, and renews the session's lease;
 //! on activity it renews the lease and says nothing; at the session's
@@ -15,7 +16,10 @@
 //! contract — it always exits 0 and says nothing on a failure — and
 //! `briefing.rs` holds the notice and the guards that keep it true.
 //! Each adapter's event table says which of the client's names is which
-//! class, and `atc hook` writes the same table.
+//! class, and `atc hook` writes the same table. A slug is what you hook
+//! and a source is what fires the trigger; for a client the two are one
+//! word, and the four shells share the one source `shell`, since their
+//! rc lines differ in syntax and call the same command.
 //!
 //! The skills the binary ships ride the same install for the clients
 //! that read one. Each embedded constant is the staleness fingerprint —
@@ -34,6 +38,7 @@ pub mod codex;
 pub mod cursor;
 pub mod gemini;
 pub mod settings;
+pub mod shell;
 pub mod skill;
 pub mod verbs;
 
@@ -65,6 +70,9 @@ pub enum Mechanism {
     Plugin,
     /// Entries merged into a settings file that belongs to the user.
     Settings,
+    /// Marked lines appended to a shell's rc file, which belongs to the
+    /// user: install appends exactly them, uninstall removes exactly them.
+    Rc,
 }
 
 impl Mechanism {
@@ -72,6 +80,7 @@ impl Mechanism {
         match self {
             Mechanism::Plugin => "plugin",
             Mechanism::Settings => "settings",
+            Mechanism::Rc => "rc",
         }
     }
 }
@@ -90,14 +99,22 @@ pub enum Wiring {
         missing: String,
         at: PathBuf,
     },
+    /// A line a person wrote themselves that calls the trigger — a
+    /// shell's rc file with `atc trigger shell` in it under no marker.
+    /// Reported and never touched: it is theirs, and `unhook` would
+    /// otherwise remove what it did not add.
+    HandWritten {
+        at: PathBuf,
+    },
     /// The wiring cannot be read at all: no HOME, or a file that is not
     /// valid JSON. Carries the complaint.
     Unavailable(String),
 }
 
 impl Wiring {
-    /// Whether the client actually runs the hook. `Partial` counts: what
-    /// is there still fires.
+    /// Whether tower wrote the hook. `Partial` counts: what is there
+    /// still fires. A hand-written line fires too, but it is not tower's
+    /// to rewrite, so `-u` must not count it.
     pub fn is_wired(&self) -> bool {
         matches!(self, Wiring::Wired { .. } | Wiring::Partial { .. })
     }
@@ -107,6 +124,7 @@ impl Wiring {
             Wiring::NotWired => "not wired".into(),
             Wiring::Wired { mechanism, .. } => format!("wired ({})", mechanism.word()),
             Wiring::Partial { missing, .. } => format!("partial — {missing} missing"),
+            Wiring::HandWritten { .. } => "written by hand — left alone".into(),
             Wiring::Unavailable(complaint) => complaint.clone(),
         }
     }
@@ -114,7 +132,9 @@ impl Wiring {
     /// Where the wiring lives, when that is known.
     pub fn at(&self) -> Option<&Path> {
         match self {
-            Wiring::Wired { at, .. } | Wiring::Partial { at, .. } => Some(at),
+            Wiring::Wired { at, .. } | Wiring::Partial { at, .. } | Wiring::HandWritten { at } => {
+                Some(at)
+            }
             _ => None,
         }
     }
@@ -194,6 +214,21 @@ impl Change {
 pub trait Integration: Sync {
     fn slug(&self) -> &'static str;
 
+    /// The trigger source this slug's wiring calls — `atc trigger
+    /// <source>`. The slug itself for a client; the four shells share
+    /// `shell`.
+    fn source(&self) -> &'static str {
+        self.slug()
+    }
+
+    /// Whether the trigger reads a payload off stdin. A client hands one
+    /// down on every event; a shell has none, and an interactive bash
+    /// fed by a pipe hands its stdin to `PROMPT_COMMAND`, so a trigger
+    /// that read it would eat the rest of the script.
+    fn carries_payload(&self) -> bool {
+        true
+    }
+
     /// The events tower wires on this client, in the client's own
     /// vocabulary: what `atc hook` writes, and what the trigger
     /// dispatches on.
@@ -250,14 +285,35 @@ static CLAUDE: claude::Claude = claude::Claude;
 static CODEX: codex::Codex = codex::Codex;
 static CURSOR: cursor::Cursor = cursor::Cursor;
 static GEMINI: gemini::Gemini = gemini::Gemini;
+static BASH: shell::Shell = shell::Shell { slug: "bash" };
+static ZSH: shell::Shell = shell::Shell { slug: "zsh" };
+static FISH: shell::Shell = shell::Shell { slug: "fish" };
+static POWERSHELL: shell::Shell = shell::Shell { slug: "powershell" };
 
-/// Every slug, in the order `atc hook -l` and `atc hook --all` walk them.
-pub fn all() -> [&'static dyn Integration; 4] {
-    [&CLAUDE, &CODEX, &CURSOR, &GEMINI]
+/// Every slug, in the order `atc hook -l` and `atc hook --all` walk
+/// them: the clients, then the shells.
+pub fn all() -> [&'static dyn Integration; 8] {
+    [
+        &CLAUDE,
+        &CODEX,
+        &CURSOR,
+        &GEMINI,
+        &BASH,
+        &ZSH,
+        &FISH,
+        &POWERSHELL,
+    ]
 }
 
 pub fn by_slug(slug: &str) -> Option<&'static dyn Integration> {
     all().into_iter().find(|i| i.slug() == slug)
+}
+
+/// The integration a trigger source names: the first whose `source`
+/// matches, which for the shells is bash, and every shell's lines are
+/// one table.
+pub fn by_source(source: &str) -> Option<&'static dyn Integration> {
+    all().into_iter().find(|i| i.source() == source)
 }
 
 /// Every slug's name, for the error a wrong one earns.
@@ -346,22 +402,28 @@ mod tests {
         }
     }
 
-    /// The dispatch every adapter shares: no name is a boundary, a name
-    /// in the table is its class, and anything else is nothing — never a
-    /// guess, because a guess prints the notice into a tool call.
+    /// The dispatch every adapter shares, split by source. For a client,
+    /// no name is a boundary, a name in the table is its class, and
+    /// anything else is nothing — never a guess, because a guess prints
+    /// the notice into a tool call. For a shell, no name is activity —
+    /// there is no payload to name one — `end` is the end, and there is
+    /// no boundary at all, since a prompt has no context to inject a
+    /// notice into.
     #[test]
     fn the_class_is_the_table_and_no_name_is_a_boundary() {
         use settings::Class;
         for integration in all() {
             let slug = integration.slug();
-            assert_eq!(
-                integration.class_of(None),
-                Some(Class::Boundary),
-                "{slug}: no name"
-            );
+            let shell = integration.source() == "shell";
+            let bare = if shell {
+                Class::Activity
+            } else {
+                Class::Boundary
+            };
+            assert_eq!(integration.class_of(None), Some(bare), "{slug}: no name");
             assert_eq!(
                 integration.class_of(Some("")),
-                Some(Class::Boundary),
+                Some(bare),
                 "{slug}: empty name"
             );
             assert_eq!(integration.class_of(Some("Nonsense")), None, "{slug}");
@@ -370,7 +432,22 @@ mod tests {
                 .iter()
                 .filter(|event| event.class == Class::Boundary)
                 .count();
-            assert_eq!(boundaries, 1, "{slug}: one boundary event");
+            assert_eq!(
+                boundaries,
+                if shell { 0 } else { 1 },
+                "{slug}: boundary events"
+            );
+            assert_eq!(integration.carries_payload(), !shell, "{slug}: payload");
+            if shell {
+                assert_eq!(
+                    integration.class_of(Some("end")),
+                    Some(Class::End),
+                    "{slug}"
+                );
+                assert_eq!(by_source("shell").map(|i| i.slug()), Some("bash"));
+            } else {
+                assert_eq!(integration.source(), slug, "a client is its own source");
+            }
             for event in integration.events() {
                 assert_eq!(
                     integration.class_of(Some(event.name)),

@@ -1,7 +1,7 @@
 //! `atc trigger` against real repositories: the notice at a boundary in
 //! each client's envelope, the lease renewed on a boundary and on
-//! activity and released at the end, silence on everything else, and
-//! the bare form a person runs.
+//! activity and released at the end, silence on everything else, the
+//! shell source that reads no payload, and the bare form a person runs.
 //!
 //! Every spawn gets a scratch HOME, so the lease lands under the
 //! fixture's `.local/state` and never under the developer's.
@@ -431,6 +431,127 @@ fn the_launcher_row_beats_the_client_row_and_the_pid_is_the_rows_own() {
     assert!(mtime(&lease(home, "c1")) > before);
     if cfg!(target_os = "linux") {
         assert_eq!(body("c1")["pid"], std::process::id());
+    }
+}
+
+// ---- the shell source ------------------------------------------------------
+
+/// `atc trigger shell` under the terminal's variables creates the lease
+/// with the shell's pid and says nothing; a second call moves the mtime;
+/// `--end` removes it; with no session variable nothing is touched.
+#[test]
+fn the_shell_source_is_the_terminals_heartbeat_and_release() {
+    let repo = repo();
+    let home = root(repo.path());
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let own = std::process::id().to_string();
+    let shell = |args: &[&str], vars: &[(&str, &str)], stdin: Option<&str>| -> Output {
+        let mut argv = vec!["trigger", "shell"];
+        argv.extend_from_slice(args);
+        let mut command = command(elsewhere.path(), home, &argv);
+        for (name, value) in vars {
+            command.env(name, value);
+        }
+        command
+            .stdin(match stdin {
+                Some(_) => Stdio::piped(),
+                None => Stdio::null(),
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        if let Some(text) = stdin {
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(text.as_bytes())
+                .unwrap();
+        }
+        child.wait_with_output().unwrap()
+    };
+    let terminal: [(&str, &str); 2] = [("ATC_SHELL_SESSION", "t1"), ("ATC_SHELL_PID", &own)];
+    let lease = lease(home, "t1");
+
+    silent(&shell(&[], &terminal, None), "the prompt");
+    assert!(lease.is_file(), "the prompt creates the lease");
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&lease).unwrap()).unwrap();
+    assert_eq!(stored["session"], "t1");
+    assert_eq!(stored["client"], serde_json::Value::Null);
+    if cfg!(target_os = "linux") {
+        assert_eq!(
+            stored["pid"],
+            std::process::id(),
+            "the shell's pid: {stored}"
+        );
+    }
+
+    let before = age(&lease);
+    silent(&shell(&[], &terminal, None), "the next prompt");
+    assert!(mtime(&lease) > before, "a prompt renews the lease");
+
+    silent(&shell(&["--end"], &terminal, None), "the exit");
+    assert!(!lease.exists(), "the exit releases the lease");
+    silent(&shell(&["--end"], &terminal, None), "the exit again");
+
+    // No session variable: nothing to lease, nothing said.
+    silent(&shell(&[], &[], None), "no session");
+    silent(&shell(&["--end"], &[], None), "no session, the end");
+    assert!(
+        !home.join(".local/state/atc/leases").exists()
+            || std::fs::read_dir(home.join(".local/state/atc/leases"))
+                .unwrap()
+                .next()
+                .is_none(),
+        "nothing was leased"
+    );
+
+    // The shell source reads no stdin: a payload naming a session keys
+    // nothing, and the script it would have eaten is left alone.
+    let piped = payload(repo.path(), Some("SessionStart"), Some("p1"));
+    silent(&shell(&[], &[], Some(&piped)), "a payload on stdin");
+    assert!(
+        !crate::lease(home, "p1").exists(),
+        "the shell source reads no payload"
+    );
+
+    // `--end` on a client source is nothing: no class, no lease touched.
+    let mut command = command(elsewhere.path(), home, &["trigger", "claude", "--end"]);
+    command.env("CLAUDE_CODE_SESSION_ID", "c9");
+    command.stdin(Stdio::null());
+    silent(&command.output().unwrap(), "a client given --end");
+    assert!(!crate::lease(home, "c9").exists());
+}
+
+/// An agent under a wired terminal is its own session: with Claude's
+/// variable and the terminal's both set, `atc trigger shell` renews
+/// Claude's lease — the row walk is the store's, and the terminal's
+/// row is last.
+#[test]
+fn under_an_agent_the_shell_source_renews_the_agents_lease() {
+    let repo = repo();
+    let home = root(repo.path());
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let own = std::process::id().to_string();
+    let mut command = command(elsewhere.path(), home, &["trigger", "shell"]);
+    command
+        .env("CLAUDE_CODE_SESSION_ID", "c1")
+        .env("CLAUDE_PID", &own)
+        .env("ATC_SHELL_SESSION", "t1")
+        .env("ATC_SHELL_PID", "1")
+        .stdin(Stdio::null());
+    silent(&command.output().unwrap(), "the prompt under an agent");
+    assert!(lease(home, "c1").is_file(), "Claude's lease");
+    assert!(!lease(home, "t1").exists(), "not the terminal's");
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(lease(home, "c1")).unwrap()).unwrap();
+    if cfg!(target_os = "linux") {
+        assert_eq!(
+            stored["pid"],
+            std::process::id(),
+            "CLAUDE_PID, never the shell's"
+        );
     }
 }
 

@@ -199,15 +199,17 @@ fn installed_note(skills: &skill::Registry) -> String {
     }
 }
 
-/// The agent clients, one row each, under `hook/<slug>`.
+/// The agent clients and the shells, one row each, under `hook/<slug>`.
 ///
 /// A client that is not on this machine and not wired earns no row at
-/// all: absence is the ordinary case, and a row saying so four times
+/// all: absence is the ordinary case, and a row saying so eight times
 /// over is noise. Present and not wired is information — wiring is
-/// optional, and the row names the verb. Wired is ok, unless the skills
-/// on disk are an older tower's or the entries carry a retired spelling:
-/// the notice still lands, so it is never an outage, but `atc hook -u`
-/// is the repair nothing else runs, so doctor counts it.
+/// optional, and the row names the verb; so is a shell whose rc file
+/// calls the trigger by hand, which delivers and is not tower's to
+/// touch. Wired is ok, unless the skills on disk are an older tower's
+/// or the entries carry a retired spelling: the notice still lands, so
+/// it is never an outage, but `atc hook -u` is the repair nothing else
+/// runs, so doctor counts it.
 fn hook_rows() -> Vec<DoctorRow> {
     use crate::integ::{Presence, Wiring};
     let mut rows = Vec::new();
@@ -250,6 +252,13 @@ fn hook_rows() -> Vec<DoctorRow> {
                 Level::Warn,
                 format!(
                     "{slug}: partial — {missing} missing from {} — `atc hook {slug}`",
+                    at.display()
+                ),
+            ),
+            Wiring::HandWritten { at } => row(
+                Level::Info,
+                format!(
+                    "{slug}: atc trigger shell is wired by hand in {}",
                     at.display()
                 ),
             ),

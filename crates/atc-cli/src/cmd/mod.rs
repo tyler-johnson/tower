@@ -27,12 +27,14 @@ pub mod link;
 pub mod next;
 pub mod procedures;
 pub mod serve;
+pub mod session;
 pub mod skills;
 pub mod status;
 pub mod trigger;
 pub mod unlink;
 pub mod update;
 pub mod version;
+pub mod whoami;
 
 use std::path::PathBuf;
 

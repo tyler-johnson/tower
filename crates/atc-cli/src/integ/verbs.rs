@@ -2,7 +2,8 @@
 //!
 //! Both are for humans: an unknown slug is a real error, every failure is
 //! loud, and `--json` emits a report envelope. The machine half — what a
-//! wired client actually runs — is `atc trigger <slug>`, in `cmd/trigger.rs`.
+//! wired client or shell actually runs — is `atc trigger <source>`, in
+//! `cmd/trigger.rs`.
 
 use super::{Change, InstallOptions, Integration, Status, Wiring};
 use crate::error::CliError;
@@ -157,7 +158,10 @@ fn bad_flags(verb: Verb, slugs: &[String]) -> CliError {
 pub fn unknown_slug(slug: &str) -> CliError {
     CliError::coded(
         "usage/unknown-slug",
-        format!("unknown client {slug:?} (known: {})", super::slugs()),
+        format!(
+            "unknown client or shell {slug:?} (known: {})",
+            super::slugs()
+        ),
         vec!["atc hook -l".into()],
     )
 }

@@ -405,11 +405,10 @@ set, because the launcher's word wins and a lease under it would
 never be read. There is no unset: the trigger's end event, the pid,
 and the window are the unset.
 
-Bare, it prints who you are: the callsign and its source — env,
-session, client, login — the session and its variable, the lease
-fresh or stale and by how much, the pid. --json carries writer,
-author, client, session, session_source, callsign, callsign_source,
-lease, and pid.
+Bare, it prints what `atc whoami` prints — who you are: the callsign
+and its source, the session and its variable, the lease, the pid, the
+writer and the author — so the verb an agent remembers gets the
+answer. --json carries the same fields under this verb's name.
 
 A session that goes idle past the window and finds its word taken on
 the next atc call drops to its client word and says so once, on
@@ -417,11 +416,79 @@ stderr; the verb it was running proceeds.";
 
 pub const CALLSIGN_EXAMPLES: &str = "\
 Examples:
-  atc callsign              who you are: callsign, source, session, lease
+  atc callsign              who you are — the same as atc whoami
   atc callsign agent-1      hold the word; re-lane what you laned as before
   atc callsign agent-1 --force    take it from a stale holder inside the window
   atc assign 17 me          into your queue, under the word
   atc config leaseWindow 30s      a shorter window for a client with no pid";
+
+pub const WHOAMI: &str = "\
+Who you are, on every axis tower stamps: the writer chain this
+machine appends to, the author from git, the client detected from
+the mark it leaves — CLAUDECODE, GEMINI_CLI, CURSOR_AGENT,
+CODEX_SANDBOX — the session and where it came from, the callsign and
+where it came from, the lease, and the pid when the session's row
+hands one down.
+
+The session is the first session variable set: ATC_SESSION, a
+launcher's, reported as `launcher`; CLAUDE_CODE_SESSION_ID,
+CODEX_SESSION_ID, OPENCODE_SESSION_ID, the clients' own, reported by
+the client's name; ATC_SHELL_SESSION, a terminal's, minted by the rc
+lines `atc hook bash` (or zsh, fish, powershell) writes, reported as
+`shell`; else the login name at a terminal, reported as `login`,
+which is a byline and not a session to lease. The pid is read from
+the row that named the session and never from an inherited one, so a
+Claude session under a wired terminal reports CLAUDE_PID and never
+the shell's.
+
+The callsign is ATC_CALLSIGN when set, `env`; else the word this
+session gave `atc callsign`, held on its lease, `session`; else the
+client's word, `client`; else the login name at a terminal, `login`;
+else none. The lease is fresh while its mtime is inside leaseWindow
+or its pid is alive; this read is itself a heartbeat, so the age
+shown is the one before it.
+
+--json carries writer, author, client, session, session_source,
+callsign, callsign_source, lease — fresh, age, pid_alive — and pid.
+Bare `atc callsign` prints the same text.";
+
+pub const WHOAMI_EXAMPLES: &str = "\
+Examples:
+  atc whoami                callsign, session, lease, writer, author
+  atc whoami --json         the same as fields
+  atc session               who else is on this machine
+  atc callsign qwen-review  name this session's pilot";
+
+pub const SESSION: &str = "\
+Every session on this machine with a lease: the session id, the
+client it runs under, the callsign it holds or none, the lease fresh
+or stale and by how much, the pid alive or dead when the lease holds
+one, and which row is this process's own. The \"who is flying here\"
+view, and what a pool manager reads. Sorted by session; a shell's
+id is a UUIDv7, so a terminal's sessions sort by birth.
+
+Leases are per machine — one file per session under the machine's
+state directory — so this opens no store and needs no repository;
+the window is leaseWindow from the repository you are in when there
+is one, two minutes otherwise. A read and not a sweep: a stale lease
+is listed as stale and left where it is, and nothing here renews
+one.
+
+--mint prints a fresh session id and touches nothing: a UUIDv7, the
+one the shells' rc lines export as ATC_SHELL_SESSION once per
+interactive shell. A launcher that wants a worker tracked sets
+ATC_SESSION to one instead, and never ATC_SHELL_SESSION, which is
+the terminal's own and ranks last.
+
+--json carries sessions, one object each: session, client, callsign,
+lease — fresh, age, pid_alive — pid, and this.";
+
+pub const SESSION_EXAMPLES: &str = "\
+Examples:
+  atc session               every session on this machine
+  atc session --json        the same as a list
+  atc session --mint        a fresh id, for ATC_SESSION or a script
+  atc whoami                which one you are";
 
 pub const STATUS: &str = "\
 Move a flight: backlog, ready, in_progress, done, or canceled. One
@@ -744,6 +811,14 @@ hands one down and the word `atc callsign` gave it; renewing it opens
 no store, so the activity path costs a few milliseconds on every tool
 call.
 
+The `shell` source is what the rc lines `atc hook bash` (or zsh,
+fish, powershell) write call: `atc trigger shell` before every
+prompt, which reads no stdin and renews the terminal's lease under
+ATC_SHELL_SESSION, and `atc trigger shell --end` when the shell
+exits, which releases it. Neither prints: a prompt has no context to
+inject a notice into. Under a terminal with no session variable both
+touch nothing.
+
 Any failure — no repository, a store that will not open, a source or
 an event it does not know — exits 0 with nothing said, because a
 hook's stderr is noise in someone else's terminal. `briefing` is the
@@ -759,6 +834,8 @@ pub const TRIGGER_EXAMPLES: &str = "\
 Examples:
   atc trigger               what an agent is told here
   atc trigger claude        the same, as Claude Code's hook runs it
+  atc trigger shell         the terminal's heartbeat, as the prompt runs it
+  atc trigger shell --end   the release, as the shell's exit runs it
   atc trigger --json        the text as a field, with the counts";
 
 pub const BRIEFING: &str = "\
@@ -770,31 +847,48 @@ and reads no event, so it is the spelling a stored config may still
 carry and not one to write anew — `atc hook -u` rewrites it.";
 
 pub const HOOK: &str = "\
-Wire tower into the agent clients on this machine, so every session an
-agent starts in a repository is told the board is here and how to
-pull from it. The hooks carry three things: the notice at every
+Wire tower into the agent clients and the shells on this machine, so
+every session an agent starts in a repository is told the board is
+here and how to pull from it, and every terminal is a session of its
+own. A client's hooks carry three things: the notice at every
 context boundary the client reports — session start, resume, clear,
 compact — a heartbeat on the session's lease at every prompt, tool
 call, and turn, and the lease's release at the session's end. The
 notice is silent outside a git repository, and the heartbeat opens no
 store, so a wired client costs nothing elsewhere.
 
-Bare `atc hook` reports what it found and then asks. Name clients to
-wire exactly those; --all takes everything detected without asking;
--l reports and stops either way. -u rewrites what is already wired
-and adds nothing: the install is re-run for every client already
+Bare `atc hook` reports what it found and then asks. Name clients or
+shells to wire exactly those; --all takes everything detected without
+asking; -l reports and stops either way. -u rewrites what is already
+wired and adds nothing: the install is re-run for every slug already
 wired, on whatever mechanism it is on, so an upgraded binary
-refreshes the machine. The clients are flat names:
+refreshes the machine. The names are flat:
 
   claude  codex  cursor  gemini
+  bash  zsh  fish  powershell
 
 What gets written is not a choice you make. Claude Code takes a
 plugin directory tower owns outright, ~/.claude/skills/tower; the
-other three take entries merged into their own hooks file, and
-whatever else that file holds is left as it was — an entry you wrote
-yourself included. --settings is
-Claude Code's escape hatch: entries in ~/.claude/settings.json
-instead of the plugin, and no skills.
+other three clients take entries merged into their own hooks file,
+and whatever else that file holds is left as it was — an entry you
+wrote yourself included. --settings is Claude Code's escape hatch:
+entries in ~/.claude/settings.json instead of the plugin, and no
+skills.
+
+A shell takes marked lines appended to its rc file — ~/.bashrc,
+$ZDOTDIR/.zshrc, fish's config.fish, PowerShell's profile — that
+mint a session id once per interactive shell and export it as
+ATC_SHELL_SESSION with the shell's pid as ATC_SHELL_PID, run
+`atc trigger shell` before every prompt as the lease's heartbeat,
+and release the lease when the shell exits. A person at a prompt
+then has what an agent has: `atc whoami` says which session, `atc
+callsign <name>` names its pilot, `atc next` claims under it. An
+agent launched from that terminal is still its own session — its
+client's variable ranks ahead of the terminal's — and a launcher
+that wants a worker tracked sets ATC_SESSION, never
+ATC_SHELL_SESSION. A line you wrote yourself that calls the trigger
+is reported and left alone; fufu's lines in the same file are fufu's
+and untouched.
 
 Claude Code and Codex also take the manual, `tower` — typed
 /tower:tower in Claude Code and $tower in Codex; a skill an older
@@ -807,6 +901,7 @@ pub const HOOK_EXAMPLES: &str = "\
 Examples:
   atc hook                  what is on this machine, then asks
   atc hook claude codex     wire exactly those
+  atc hook bash             a session per terminal, from this shell's rc
   atc hook --all            everything detected, no question
   atc hook -l               report and stop
   atc hook -u               rewrite what is wired, after an update
@@ -816,14 +911,16 @@ Examples:
 pub const UNHOOK: &str = "\
 Remove exactly what hook added: Claude Code's plugin directory, and
 the settings entries an older install left; the other clients'
-entries and skill directories. Anything else in a client's file is
-left as it was, an entry you wrote yourself included. Name clients,
-or --all for every client detected on this machine.";
+entries and skill directories; a shell's marked rc lines. Anything
+else in a file is left as it was — an entry or a line you wrote
+yourself included, and fufu's lines beside tower's. Name clients or
+shells, or --all for everything detected on this machine.";
 
 pub const UNHOOK_EXAMPLES: &str = "\
 Examples:
   atc unhook claude         take back exactly what hook added
-  atc unhook --all          every client detected
+  atc unhook bash           the rc lines, and nothing else in the file
+  atc unhook --all          everything detected
   atc hook -l               what is wired now";
 
 /// The extractors the prose guards share: every `atc …` a text spells,

@@ -27,7 +27,9 @@
 //! The session is keyed by the first [`crate::log::SESSION_VARS`] row
 //! set in the environment, else by the `session_id` a client's payload
 //! carries. The key becomes a file name, so it is held to one rule
-//! beyond the session's own: no separator and no `..`.
+//! beyond the session's own: no separator and no `..`. A terminal's
+//! session is one [`mint`] made — a UUIDv7, so it sorts by birth — and
+//! `atc session` lists every lease on the machine through [`all`].
 
 use std::ffi::OsString;
 use std::fs::OpenOptions;
@@ -345,6 +347,57 @@ pub fn release(session: &str) -> io::Result<()> {
     }
 }
 
+/// A fresh session id: a UUIDv7, so a session's id sorts by birth.
+///
+/// The 48 high bits are unix milliseconds; the 12 `rand_a` bits carry
+/// the sub-millisecond fraction (RFC 9562 §6.2, method 3), so two mints
+/// a moment apart still sort in order; the 62 `rand_b` bits come from a
+/// SHA-1 over the pid, the wall-clock nanos, and two `RandomState`
+/// hashes — the OS-seeded entropy std already pulls, through gix's
+/// hasher, so there is no RNG dependency. `atc session --mint` prints
+/// it and touches nothing.
+pub fn mint() -> String {
+    use std::hash::{BuildHasher, RandomState};
+
+    let since_epoch = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO);
+    let millis = since_epoch.as_millis() as u64 & 0xffff_ffff_ffff;
+    // The nanos inside this millisecond, scaled onto 12 bits.
+    let sub_ms = (u64::from(since_epoch.subsec_nanos()) % 1_000_000) * 4096 / 1_000_000;
+
+    let seed = format!(
+        "{}\0{}\0{}\0{}",
+        std::process::id(),
+        since_epoch.as_nanos(),
+        RandomState::new().hash_one(0u8),
+        RandomState::new().hash_one(1u8),
+    );
+    let digest = gix::objs::compute_hash(
+        gix::hash::Kind::Sha1,
+        gix::objs::Kind::Blob,
+        seed.as_bytes(),
+    )
+    .map(|id| id.as_bytes().to_vec())
+    .unwrap_or_else(|_| seed.into_bytes());
+    let mut rand_b = [0u8; 8];
+    for (slot, byte) in rand_b.iter_mut().zip(digest.iter().cycle()) {
+        *slot = *byte;
+    }
+    let rand_b = u64::from_be_bytes(rand_b) & 0x3fff_ffff_ffff_ffff;
+
+    let high = (millis << 16) | (0x7 << 12) | sub_ms;
+    let low = (0b10 << 62) | rand_b;
+    format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        high >> 32,
+        (high >> 16) & 0xffff,
+        high & 0xffff,
+        low >> 48,
+        low & 0xffff_ffff_ffff
+    )
+}
+
 /// Every lease on the machine: session, body, mtime. A missing
 /// directory is no leases.
 pub fn all() -> Vec<(String, Lease, SystemTime)> {
@@ -491,6 +544,46 @@ mod tests {
         assert!(partial.pid().is_none() && partial.callsign.is_none());
         let half: Lease = serde_json::from_str(r#"{"session":"s3","pid":5}"#).unwrap();
         assert!(half.pid().is_none(), "a pid without its start is no pid");
+    }
+
+    /// A mint is a UUIDv7: the shape, the version and variant bits, the
+    /// timestamp decoding to now, and two in a row sorting in order.
+    #[test]
+    fn a_mint_is_a_v7_uuid_that_sorts_by_birth() {
+        let before = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let first = mint();
+        let second = mint();
+        let after = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        for id in [&first, &second] {
+            assert_eq!(id.len(), 36, "{id}");
+            let groups: Vec<&str> = id.split('-').collect();
+            assert_eq!(
+                groups.iter().map(|g| g.len()).collect::<Vec<_>>(),
+                [8, 4, 4, 4, 12],
+                "{id}"
+            );
+            assert!(
+                id.chars()
+                    .all(|c| c == '-' || c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+                "lowercase hex: {id}"
+            );
+            assert!(groups[2].starts_with('7'), "version 7: {id}");
+            let variant = u8::from_str_radix(&groups[3][..1], 16).unwrap();
+            assert_eq!(variant & 0b1100, 0b1000, "variant 10: {id}");
+            let millis = u64::from_str_radix(&format!("{}{}", groups[0], groups[1]), 16).unwrap();
+            assert!(
+                (before..=after).contains(&millis),
+                "{id}: {millis} not in {before}..={after}"
+            );
+        }
+        assert!(first < second, "{first} then {second}");
+        assert_ne!(first, second);
     }
 
     /// A pid variable that is unset or not a number is no pid; this
