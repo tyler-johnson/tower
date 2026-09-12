@@ -1,15 +1,21 @@
-//! `atc next [<lane>] [--assignee <lane>] [-n <k>] [--peek]` — pull the
-//! next Ready flight from a lane, or the next `k` in filed order. The
-//! walk is the named lane in filed order, then the unassigned lane in
-//! filed order: `me` — your own queue, the literal `me` lane and your
-//! callsign's — when unsaid, `agent` for the shared pool alone, `none`
-//! for the unassigned lane by itself, or a callsign for one pilot's
-//! queue. The pull is the Ready check and the In Progress move in one
-//! command: unless `--peek` the picked set becomes one In Progress
-//! `status` event per flight in a single append, the store's callsign
-//! stamp the pilot, and `--assignee` re-lanes each pick in that same
-//! append with `file`'s lane words. The verb writes to tower's log and
-//! nothing to the repository: no branch, no worktree, no op row.
+//! `atc next [<lane>...] [--assignee <lane>] [-n <k>] [--peek]` — pull
+//! the next Ready flight from the lanes named, or the next `k` in filed
+//! order. The walk is the lanes in the order given, each in filed
+//! order, then the unassigned lane in filed order unless `none` was
+//! named, in which case it walks where it was named: `me` — your own
+//! queue, the literal `me` lane and your callsign's — when nothing is
+//! said, `agent` for the shared pool, `none` for the unassigned lane,
+//! or a callsign for one pilot's queue. A lane named twice walks once.
+//! The pull is the Ready check and the In Progress move in one command:
+//! unless `--peek` the picked set becomes one In Progress `status`
+//! event per flight in a single append, the store's callsign the
+//! pilot, and each pick lands in the lane `--assignee` names with
+//! `file`'s lane words — `me` when unsaid, so a pull is yours by
+//! default and `--assignee agent` is how a pick stays in the pool. The
+//! `assigned` event rides the same append and is written only when the
+//! lane changes: a flight pulled from its own queue writes one moment.
+//! The verb writes to tower's log and nothing to the repository: no
+//! branch, no worktree, no op row.
 //!
 //! The verb's success code is 0 on a pick and 1 on an empty one, fufu's
 //! "no." An empty pick rides the success path with a full data envelope,
@@ -20,7 +26,7 @@
 //! a harness that needs to know why reads the field, not the status.
 //! The pipeline is the board's — store, fold — with `pick` in place of
 //! `enrich`. `--peek` is the same computation with the append left out,
-//! and reports the pick alone. A bad lane word on either side refuses
+//! and reports the pick alone. A bad lane word in any position refuses
 //! before the read, the way `assign` refuses it.
 
 use serde::Serialize;
@@ -38,12 +44,12 @@ struct Data<'a> {
     /// Which of the three things happened; the exit code is its
     /// rendering.
     outcome: Outcome,
-    /// The lane the walk named — `me` when unsaid.
-    lane: String,
-    /// The lane each pick was moved to, as the log stores it — absent
-    /// when `--assignee` was not given, `null` when it cleared the lane.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    assignee: Option<Option<String>>,
+    /// The walk performed, in order — the overflow `none` included.
+    lanes: Vec<String>,
+    /// The lane each pick lands in, as the log stores it — `null` for
+    /// the unassigned lane. Said even under `--peek`, when nothing
+    /// moves.
+    assignee: Option<String>,
     picked: &'a [Row],
     pulled: bool,
     /// Ready, in a lane the walk never entered — the count behind the
@@ -62,11 +68,15 @@ struct Row {
     /// flight names none.
     #[serde(skip_serializing_if = "Option::is_none")]
     skill: Option<String>,
+    /// Whether the pick's lane changed — the render's cue, not the
+    /// wire's.
+    #[serde(skip)]
+    relaned: bool,
 }
 
 pub fn run(
     json: bool,
-    lane: Option<&str>,
+    lanes: &[String],
     assignee: Option<&str>,
     count: usize,
     peek: bool,
@@ -79,20 +89,21 @@ pub fn run(
         ));
     }
 
-    // Both lane words before the read, so a typo refuses before the
-    // fold. The walk's lane defaults to `me`; the re-lane resolves the
-    // way `file` stores it, so `--assignee me` writes the callsign.
-    let lane = match lane {
-        Some(word) => Lane::from_word(verb::lane_word(word)?),
-        None => Lane::Me,
-    };
-    let assignee = assignee.map(verb::lane_word).transpose()?;
+    // Every lane word before the read, so a typo refuses before the
+    // fold. The walk defaults to `me`; the re-lane defaults to `me` too,
+    // and resolves the way `file` stores it, so it writes the callsign.
+    let named = lanes
+        .iter()
+        .map(|word| verb::lane_word(word).map(Lane::from_word))
+        .collect::<Result<Vec<Lane>, _>>()?;
+    let lanes = board::walk(&named);
+    let assignee = verb::lane_word(assignee.unwrap_or("me"))?;
 
     let store = super::store()?;
-    let assignee = assignee.map(|word| verb::stored_lane(word, store.callsign()));
+    let assignee = verb::stored_lane(assignee, store.callsign());
     let events = store.read_all()?;
     let fold = board::fold(&events);
-    let picks = board::pick(&fold, count, &lane, store.callsign());
+    let picks = board::pick(&fold, count, &lanes, store.callsign());
     let outcome = picks.outcome();
 
     let pulled = !peek && !picks.picked.is_empty();
@@ -105,7 +116,8 @@ pub fn run(
                 status: "in_progress".to_string(),
                 reason: None,
             });
-            if let Some(assignee) = &assignee {
+            // A pull from the lane it lands in is one moment, not two.
+            if pick.assignee != assignee {
                 batch.push(Kind::Assigned {
                     flight,
                     assignee: assignee.clone(),
@@ -127,6 +139,7 @@ pub fn run(
                 .iter()
                 .find(|flight| flight.id.to_string() == pick.flight)
                 .and_then(|flight| flight.skill.clone()),
+            relaned: pick.assignee != assignee,
         })
         .collect();
 
@@ -137,7 +150,7 @@ pub fn run(
                 "next",
                 &Data {
                     outcome,
-                    lane: lane.to_string(),
+                    lanes: lanes.iter().map(Lane::to_string).collect(),
                     assignee: assignee.clone(),
                     picked: &rows,
                     pulled,
@@ -157,7 +170,7 @@ pub fn run(
             if let Some(skill) = &row.skill {
                 line.push_str(&render::paint_dim(&format!(" · skill {skill}"), colored));
             }
-            if let Some(assignee) = &assignee {
+            if row.relaned {
                 let lane = assignee.as_deref().unwrap_or("none");
                 line.push_str(&render::paint_dim(&format!(" · assigned {lane}"), colored));
             }

@@ -41,7 +41,7 @@ pub use history::{Detail, Moment, history};
 pub use model::{
     Board, ClosedWindow, DEFAULT_CLOSED, FlightView, Rows, WaitingOnYou, enrich, parse_closed, rows,
 };
-pub use pick::{Lane, Outcome, Pick, Picks, pick};
+pub use pick::{Lane, Outcome, Pick, Picks, pick, walk};
 pub use query::{
     DEFAULT_SHOW, FIELDS, Field, Filter, Folded, Group, Mode, Op, Order, Query, QueryError, Value,
     When,

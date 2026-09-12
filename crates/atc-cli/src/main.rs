@@ -198,14 +198,14 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         None if cli.version => cmd::version::run(cli.json)?,
         None | Some(Command::Board { .. }) => cmd::board::run(cli.json, closed(cli)?)?,
         Some(Command::Next {
-            lane,
+            lanes,
             assignee,
             count,
             peek,
         }) => {
             return cmd::next::run(
                 cli.json,
-                lane.as_deref(),
+                lanes,
                 assignee.as_deref(),
                 count.unwrap_or(1),
                 *peek,

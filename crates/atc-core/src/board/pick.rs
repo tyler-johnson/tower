@@ -4,12 +4,16 @@
 //! walk runs over a [`Fold`], so the lane walk is unit-testable with
 //! hand-built rows.
 //!
-//! The walk is one lane, then the overflow. The named [`Lane`] — the
-//! caller's own queue by default, the literal `agent` lane, the
-//! unassigned lane, or one pilot's callsign — walks first in filed order,
-//! and the unassigned lane walks after it in filed order: everyone falls
-//! through to `none` once their own lane is drained, and naming `none`
-//! walks it once. Membership is the derived status and the stored
+//! The walk is a list of lanes. Each named [`Lane`] — the caller's own
+//! queue, the literal `agent` lane, the unassigned lane, or one pilot's
+//! callsign — walks in the order given, each in filed order, and the
+//! unassigned lane walks last unless it was named, in which case it
+//! walks where it was named: everyone falls through to `none` once
+//! their own lanes are drained, and `none` walks once wherever it
+//! lands. [`walk`] builds that list from the words; an empty list is
+//! `me` alone. A flight in two named lanes — the literal `me` and the
+//! caller's callsign, say — is picked once, in the first lane that
+//! admits it. Membership is the derived status and the stored
 //! assignee, read off the fold — never the registry (principle 11) —
 //! through `Flight::in_lane`: exact string compares, so an unknown
 //! status or lane never rounds into a walk. Ready is derived, so a
@@ -122,41 +126,61 @@ pub struct Pick {
     /// half, beside the wire id.
     pub number: u64,
     pub subject: String,
+    /// The lane the flight was in when picked, as the log stores it —
+    /// `None` for the unassigned lane — so a caller deciding a re-lane
+    /// needs no second look at the fold.
+    pub assignee: Option<String>,
 }
 
-/// Walk `lane` in filed order, then the unassigned lane in filed order,
-/// and pick the first `want` of them. `caller` is the puller's
-/// callsign, which only `Lane::Me` reads.
-pub fn pick(fold: &Fold, want: usize, lane: &Lane, caller: Option<&str>) -> Picks {
-    // A candidate: live, unheld, Ready. The lane decides which pass it
-    // joins, and a candidate in neither is elsewhere.
+/// The walk for the lanes named: each once, in the order given, with
+/// the unassigned lane appended unless it was named. No lane named is
+/// the caller's own queue, then the overflow.
+pub fn walk(named: &[Lane]) -> Vec<Lane> {
+    let mut lanes: Vec<Lane> = Vec::with_capacity(named.len() + 1);
+    if named.is_empty() {
+        lanes.push(Lane::Me);
+    }
+    for lane in named {
+        if !lanes.contains(lane) {
+            lanes.push(lane.clone());
+        }
+    }
+    if !lanes.contains(&Lane::None) {
+        lanes.push(Lane::None);
+    }
+    lanes
+}
+
+/// Walk `lanes` in order, each in filed order, and pick the first `want`
+/// of them. The list is walked exactly as given — [`walk`] is where the
+/// overflow is appended. `caller` is the puller's callsign, which only
+/// `Lane::Me` reads.
+pub fn pick(fold: &Fold, want: usize, lanes: &[Lane], caller: Option<&str>) -> Picks {
+    // A candidate: live, unheld, Ready. The first lane admitting it
+    // decides which pass it joins, and a candidate in none is elsewhere.
     let candidates = fold
         .flights
         .iter()
         .filter(|flight| !flight.closed() && flight.question.is_none() && flight.status == "ready");
-    let mut own: Vec<Pick> = Vec::new();
-    let mut overflow: Vec<Pick> = Vec::new();
+    let mut buckets: Vec<Vec<Pick>> = lanes.iter().map(|_| Vec::new()).collect();
     let mut elsewhere = 0;
     for flight in candidates {
-        let pick = || Pick {
-            flight: flight.id.to_string(),
-            number: flight.number,
-            subject: flight.subject.clone(),
-        };
-        if flight.in_lane(lane, caller) {
-            own.push(pick());
-        } else if *lane != Lane::None && flight.in_lane(&Lane::None, caller) {
-            overflow.push(pick());
-        } else {
-            elsewhere += 1;
+        match lanes.iter().position(|lane| flight.in_lane(lane, caller)) {
+            Some(index) => buckets[index].push(Pick {
+                flight: flight.id.to_string(),
+                number: flight.number,
+                subject: flight.subject.clone(),
+                assignee: flight.assignee.clone(),
+            }),
+            None => elsewhere += 1,
         }
     }
-    let mut picked = own;
-    picked.extend(overflow);
+    let mut picked: Vec<Pick> = buckets.into_iter().flatten().collect();
     picked.truncate(want);
 
     Picks { picked, elsewhere }
 }
+
 #[cfg(test)]
 mod tests {
     use super::super::flight::fold;
@@ -273,7 +297,7 @@ mod tests {
                 linked("pi.3", 30, "pi.1", "pi.2"),
             ]),
             2,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(picks.picked.len(), 1);
@@ -292,7 +316,7 @@ mod tests {
                 done("pi.4", 40, "pi.2"),
             ]),
             1,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -310,7 +334,7 @@ mod tests {
                 moved("pi.4", 40, "pi.2", "canceled"),
             ]),
             1,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -326,7 +350,7 @@ mod tests {
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             2,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert!(picks.picked.is_empty());
@@ -337,7 +361,7 @@ mod tests {
         let picks = pick(
             &fold(&[filed("pi.2", 20), filed("pi.1", 10), filed("pi.3", 30)]),
             3,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(
@@ -352,7 +376,7 @@ mod tests {
         let picks = pick(
             &fold(&[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)]),
             1,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(picks.picked.len(), 1);
@@ -372,7 +396,7 @@ mod tests {
                 linked("pi.7", 70, "pi.6", "pi.5"),
             ]),
             6,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(
@@ -394,7 +418,7 @@ mod tests {
                 stored("pi.2", 20, "ready", Some("agent")),
             ]),
             1,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(work.picked.len(), 1);
@@ -408,7 +432,7 @@ mod tests {
         let elsewhere = pick(
             &fold(&[stored("pi.1", 10, "ready", Some("me"))]),
             1,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert!(elsewhere.picked.is_empty());
@@ -418,7 +442,7 @@ mod tests {
         let drained = pick(
             &fold(&[stored("pi.1", 10, "backlog", Some("agent"))]),
             1,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert!(drained.picked.is_empty());
@@ -440,7 +464,7 @@ mod tests {
                 stored("pi.2", 20, "ready", Some("pair")),
             ]),
             2,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert!(picks.picked.is_empty());
@@ -460,7 +484,7 @@ mod tests {
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             2,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert!(picks.picked.is_empty());
@@ -482,7 +506,7 @@ mod tests {
                 assigned("pi.4", 40, "pi.3", Some("me")),
             ]),
             2,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(ids(&picks), ["pi.1"]);
@@ -498,7 +522,7 @@ mod tests {
                 moved("pi.3", 30, "pi.1", "ready"),
             ]),
             1,
-            &Lane::Agent,
+            &[Lane::Agent, Lane::None],
             None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -506,39 +530,119 @@ mod tests {
 
     #[test]
     fn an_empty_fold_picks_nothing() {
-        let picks = pick(&fold(&[]), 1, &Lane::Me, None);
+        let picks = pick(&fold(&[]), 1, &walk(&[]), None);
         assert!(picks.picked.is_empty());
         assert_eq!(picks.outcome(), Outcome::Drained);
     }
 
     #[test]
-    fn the_named_lane_walks_first_and_none_is_the_overflow() {
-        // Lane first in filed order, then the unassigned in filed order
-        // — never interleaved, whatever the filing times say.
+    fn the_lanes_walk_in_order_and_none_is_the_overflow() {
+        // Each lane in filed order, lanes in the order given, then the
+        // unassigned in filed order — never interleaved, whatever the
+        // filing times say.
         let events = [
             stored("pi.1", 10, "ready", None),
             stored("pi.2", 20, "ready", Some("qwen-review")),
             stored("pi.3", 30, "ready", None),
             stored("pi.4", 40, "ready", Some("qwen-review")),
             stored("pi.5", 50, "ready", Some("claude")),
+            stored("pi.6", 60, "ready", Some("agent")),
         ];
-        let qwen = pick(
+        let qwen = Lane::Callsign("qwen-review".to_string());
+        let one = pick(&fold(&events), 6, &walk(std::slice::from_ref(&qwen)), None);
+        assert_eq!(ids(&one), ["pi.2", "pi.4", "pi.1", "pi.3"]);
+        assert_eq!(
+            one.elsewhere, 2,
+            "claude's queue and the pool are elsewhere"
+        );
+        assert_eq!(
+            one.picked[0].assignee.as_deref(),
+            Some("qwen-review"),
+            "the pick carries the lane it was found in"
+        );
+        assert_eq!(one.picked[2].assignee, None);
+
+        let two = pick(&fold(&events), 6, &walk(&[qwen.clone(), Lane::Agent]), None);
+        assert_eq!(ids(&two), ["pi.2", "pi.4", "pi.6", "pi.1", "pi.3"]);
+        assert_eq!(two.elsewhere, 1);
+
+        let reversed = pick(&fold(&events), 6, &walk(&[Lane::Agent, qwen.clone()]), None);
+        assert_eq!(ids(&reversed), ["pi.6", "pi.2", "pi.4", "pi.1", "pi.3"]);
+
+        // `want` counts across the walk: the first lane fills first.
+        let three = pick(&fold(&events), 3, &walk(&[qwen]), None);
+        assert_eq!(ids(&three), ["pi.2", "pi.4", "pi.1"]);
+    }
+
+    #[test]
+    fn walk_dedupes_and_appends_none_once() {
+        assert_eq!(walk(&[Lane::Agent]), [Lane::Agent, Lane::None]);
+        assert_eq!(
+            walk(&[Lane::Me, Lane::Me, Lane::Agent, Lane::Me]),
+            [Lane::Me, Lane::Agent, Lane::None],
+            "a lane named twice walks once, where first named"
+        );
+        assert_eq!(
+            walk(&[Lane::None, Lane::Agent, Lane::None]),
+            [Lane::None, Lane::Agent],
+            "`none` named walks where named and is not appended again"
+        );
+        assert_eq!(walk(&[Lane::None]), [Lane::None]);
+    }
+
+    #[test]
+    fn an_empty_walk_defaults_to_me() {
+        assert_eq!(walk(&[]), [Lane::Me, Lane::None]);
+    }
+
+    #[test]
+    fn none_named_in_the_middle_walks_there() {
+        let events = [
+            stored("pi.1", 10, "ready", None),
+            stored("pi.2", 20, "ready", Some("agent")),
+            stored("pi.3", 30, "ready", Some("claude")),
+            stored("pi.4", 40, "ready", None),
+        ];
+        let picks = pick(
+            &fold(&events),
+            4,
+            &walk(&[Lane::Agent, Lane::None, Lane::Me]),
+            Some("claude"),
+        );
+        assert_eq!(ids(&picks), ["pi.2", "pi.1", "pi.4", "pi.3"]);
+        assert_eq!(picks.elsewhere, 0);
+    }
+
+    #[test]
+    fn a_flight_in_two_named_lanes_is_picked_once_in_the_first() {
+        // `me` under the caller's callsign and the callsign named
+        // outright admit the same flight; it joins the first bucket only.
+        let events = [
+            stored("pi.1", 10, "ready", Some("qwen-review")),
+            stored("pi.2", 20, "ready", Some("me")),
+            stored("pi.3", 30, "ready", None),
+        ];
+        let qwen = Lane::Callsign("qwen-review".to_string());
+        let me_first = pick(
             &fold(&events),
             5,
-            &Lane::Callsign("qwen-review".to_string()),
-            None,
+            &walk(&[Lane::Me, qwen.clone()]),
+            Some("qwen-review"),
         );
-        assert_eq!(ids(&qwen), ["pi.2", "pi.4", "pi.1", "pi.3"]);
-        assert_eq!(qwen.elsewhere, 1, "claude's queue is elsewhere to qwen");
+        assert_eq!(ids(&me_first), ["pi.1", "pi.2", "pi.3"]);
+        assert_eq!(me_first.elsewhere, 0);
 
-        // `want` counts across the walk: the lane fills first.
-        let two = pick(
+        let callsign_first = pick(
             &fold(&events),
-            3,
-            &Lane::Callsign("qwen-review".to_string()),
-            None,
+            5,
+            &walk(&[qwen, Lane::Me]),
+            Some("qwen-review"),
         );
-        assert_eq!(ids(&two), ["pi.2", "pi.4", "pi.1"]);
+        assert_eq!(
+            ids(&callsign_first),
+            ["pi.1", "pi.2", "pi.3"],
+            "the callsign bucket takes pi.1, the `me` bucket pi.2, the overflow pi.3"
+        );
     }
 
     #[test]
@@ -552,7 +656,7 @@ mod tests {
             stored("pi.4", 40, "ready", Some("agent")),
             stored("pi.5", 50, "ready", None),
         ];
-        let qwen = pick(&fold(&events), 5, &Lane::Me, Some("qwen-review"));
+        let qwen = pick(&fold(&events), 5, &walk(&[Lane::Me]), Some("qwen-review"));
         assert_eq!(
             ids(&qwen),
             ["pi.1", "pi.2", "pi.5"],
@@ -560,11 +664,11 @@ mod tests {
         );
         assert_eq!(qwen.elsewhere, 2, "claude's queue and the agent lane");
 
-        let claude = pick(&fold(&events), 5, &Lane::Me, Some("claude"));
+        let claude = pick(&fold(&events), 5, &walk(&[Lane::Me]), Some("claude"));
         assert_eq!(ids(&claude), ["pi.2", "pi.3", "pi.5"]);
         assert_eq!(claude.elsewhere, 2);
 
-        let nobody = pick(&fold(&events), 5, &Lane::Me, None);
+        let nobody = pick(&fold(&events), 5, &walk(&[Lane::Me]), None);
         assert_eq!(
             ids(&nobody),
             ["pi.2", "pi.5"],
@@ -583,7 +687,7 @@ mod tests {
             stored("pi.3", 30, "ready", Some("agent")),
             stored("pi.4", 40, "ready", None),
         ];
-        let picks = pick(&fold(&events), 4, &Lane::Agent, Some("claude"));
+        let picks = pick(&fold(&events), 4, &walk(&[Lane::Agent]), Some("claude"));
         assert_eq!(ids(&picks), ["pi.3", "pi.4"]);
         assert_eq!(picks.elsewhere, 2);
     }
@@ -596,7 +700,7 @@ mod tests {
             stored("pi.3", 30, "ready", Some("me")),
             stored("pi.4", 40, "ready", None),
         ];
-        let picks = pick(&fold(&events), 4, &Lane::None, Some("claude"));
+        let picks = pick(&fold(&events), 4, &walk(&[Lane::None]), Some("claude"));
         assert_eq!(ids(&picks), ["pi.2", "pi.4"], "once, not twice");
         assert_eq!(picks.elsewhere, 2);
     }
@@ -607,7 +711,7 @@ mod tests {
             stored("pi.1", 10, "ready", Some("agent")),
             stored("pi.2", 20, "backlog", None),
         ];
-        let picks = pick(&fold(&events), 1, &Lane::Me, Some("claude"));
+        let picks = pick(&fold(&events), 1, &walk(&[Lane::Me]), Some("claude"));
         assert!(picks.picked.is_empty());
         assert_eq!(picks.elsewhere, 1);
         assert_eq!(picks.outcome(), Outcome::Elsewhere);

@@ -206,7 +206,7 @@ pub static ENTRIES: &[Entry] = &[
         summary: "that is not a lane",
         detail: "A lane is `me`, `agent`, `none` to clear it, or a callsign — one word, no \
                  spaces, at most 64 bytes — and the word given is none of those. The same words \
-                 are read by `assign`, `file --assignee`, `next <lane>`, and `next --assignee`. \
+                 are read by `assign`, `file --assignee`, `next <lane>...`, and `next --assignee`. \
                  `agent` is the shared pool, a callsign is one pilot's own queue, `none` is the \
                  unassigned lane, and `me` stores your own callsign. A callsign needs nothing to \
                  be a lane.",

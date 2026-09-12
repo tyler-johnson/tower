@@ -63,22 +63,27 @@ Examples:
 `atc help <command>` (or `atc <command> --help`) has the details.";
 
 pub const NEXT: &str = "\
-Pull the next Ready flight from a lane, or with -n <k> the next k.
-The lane is the argument: me, agent, none, or a callsign, and your
-own queue — me — when unsaid. me is the literal me lane and your
-callsign's; agent is the shared pool alone; none is the unassigned
-lane; a callsign is that pilot's queue. The walk is the named lane in
-filed order, then the unassigned lane in filed order — everyone falls
-through to none once their own lane is drained, and naming none walks
-it once. The pull is the Ready check and the move in one command:
-each picked flight is set In Progress with your callsign as the pilot
-— the byline, and the session underneath it — and --assignee <lane>
-re-lanes each pick in the same append, with file's words: me stores
-your callsign. --peek is the same computation with nothing written,
-and the envelope says which happened either way. Your callsign is
-ATC_CALLSIGN when set, else the client you are running under, else
-the login name at a terminal, else none — and with none, me is the
-literal lane alone.
+Pull the next Ready flight from the lanes named, or with -n <k> the
+next k. The lanes are the arguments, walked in the order given: me,
+agent, none, or a callsign, and your own queue — me — when unsaid. me
+is the literal me lane and your callsign's; agent is the shared pool
+alone; none is the unassigned lane; a callsign is that pilot's queue.
+Each lane walks in filed order, and the unassigned lane walks last
+unless you named it, in which case it walks where you named it — so
+everyone falls through to none once their own lanes are drained, and
+none walks once. A lane named twice walks once. The pull is the Ready
+check and the move in one command: each picked flight is set In
+Progress with your callsign as the pilot — the byline, and the
+session underneath it — and lands in your own queue, the pull being
+yours by default. --assignee <lane> says where it lands instead, with
+file's words: agent keeps a pick in the pool, none clears its lane, a
+callsign hands it to that pilot. The re-lane rides the same append,
+and only when the lane changes — a pull from your own queue is one
+moment on the record. --peek is the same computation with nothing
+written, and the envelope says which happened either way. Your
+callsign is ATC_CALLSIGN when set, else the client you are running
+under, else the login name at a terminal, else none — and with none,
+me is the literal lane alone.
 
 An empty pick exits 1 with a full data envelope, and `outcome` on it
 says which of `drained` and `elsewhere` it was: `drained` is a board
@@ -93,10 +98,11 @@ pub const NEXT_EXAMPLES: &str = "\
 Examples:
   atc next                  pull the next Ready flight from your own queue
   atc next agent            the shared pool, then the unassigned lane
+  atc next me agent         your queue, then the pool, then the overflow
   atc next -n 4             the next four, in filed order
   atc next --peek           the same computation, nothing written
-  atc next none --assignee me        claim an unassigned flight as yours
-  atc next agent --assignee me -n 3  three from the pool, each moved to you
+  atc next agent --assignee agent    pull and leave it in the pool
+  atc next agent -n 3       three from the pool, each moved to you
   atc status 17 in_progress          take one by hand instead";
 
 pub const BRIEF: &str = "\
@@ -320,8 +326,8 @@ Set a flight's lane, in one of four shapes: me, agent, none to clear
 it, or a callsign. The lane is the routing decision — whose queue
 this is in. agent is the shared pool, which `atc next agent` draws
 from; a callsign is one pilot's own queue, which that pilot's bare
-`atc next` draws from; none is the unassigned lane, everyone's
-overflow; me stores your own callsign when you have one, and the
+`atc next` draws from, and where a pull lands the flight; none is the
+unassigned lane, everyone's overflow; me stores your own callsign when you have one, and the
 literal word when you do not, and either way the flight is yours on
 the board. A callsign is one word, no spaces,
 and needs nothing to be a lane. Which pilot flies a flight is the
