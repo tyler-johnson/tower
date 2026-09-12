@@ -18,6 +18,7 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
         // A developer's own Claude Code session must not tag the fixture's
         // events: the bylines below assert the bare email.
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .output()
         .expect("spawn atc")
 }
@@ -222,12 +223,14 @@ fn a_bad_lane_at_filing_is_a_usage_refusal() {
     let repo = repo();
     let out = atc(
         repo.path(),
-        &["file", "laned work", "--assignee", "pair", "--json"],
+        &["file", "laned work", "--assignee", "two words", "--json"],
     );
     let envelope = refusal(&out, 2, "usage/bad-assignee");
     assert_eq!(
         envelope["error"]["message"],
-        serde_json::json!("`pair` is not a lane — me, agent, or none")
+        serde_json::json!(
+            "`two words` is not a lane — me, agent, none, or a callsign: one word, no spaces"
+        )
     );
 
     // Nothing was filed: the refusal lands before the append.
@@ -728,6 +731,7 @@ fn a_missing_identity_is_a_coded_envelope() {
         .args(["file", "a subject", "--json"])
         .current_dir(repo.path())
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         // The machine's own git config must not answer for the fixture.
         .env("GIT_CONFIG_GLOBAL", atc_testsupport::null_device())
         .env("GIT_CONFIG_SYSTEM", atc_testsupport::null_device())
@@ -985,13 +989,90 @@ fn assign_json_carries_the_appended_event() {
 
 #[test]
 fn a_word_outside_the_lanes_is_refused() {
+    // The lane grammar is open to any one-word callsign, so what refuses
+    // is a malformed word, not an unfamiliar one.
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "laned work"]));
-    let out = atc(repo.path(), &["assign", "1", "you", "--json"]);
+    let out = atc(repo.path(), &["assign", "1", "two words", "--json"]);
     let envelope = refusal(&out, 2, "usage/bad-assignee");
     assert_eq!(
         envelope["error"]["message"],
-        serde_json::json!("`you` is not a lane — me, agent, or none")
+        serde_json::json!(
+            "`two words` is not a lane — me, agent, none, or a callsign: one word, no spaces"
+        )
+    );
+}
+
+#[test]
+fn assign_to_a_callsign_stores_it_verbatim_with_no_registration() {
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "laned work"]));
+    let out = stdout(&atc(repo.path(), &["assign", "1", "qwen-review"]));
+    assert_eq!(out, "assigned #1 to qwen-review: laned work\nboard: atc\n");
+    let board = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        board["data"]["ready"][0]["assignee"],
+        serde_json::json!("qwen-review")
+    );
+    // Off the pool and not `me`: nobody's inbox, and no pull without
+    // the callsign.
+    assert_eq!(
+        board["data"]["waiting_on_you"]["yours"],
+        serde_json::json!([])
+    );
+    assert_eq!(board["data"]["ready"][0]["mine"], serde_json::json!(false));
+}
+
+#[test]
+fn me_stores_the_callers_callsign_and_stays_yours() {
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "laned work"]));
+    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+        .args(["assign", "1", "me", "--json"])
+        .current_dir(repo.path())
+        .env("XDG_CONFIG_HOME", xdg(repo.path()))
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env("ATC_CALLSIGN", "claude")
+        .output()
+        .expect("spawn atc");
+    let envelope = self::envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    let assigned = &envelope["data"]["assigned"];
+    assert_eq!(assigned["body"]["assignee"], serde_json::json!("claude"));
+    assert_eq!(assigned["callsign"], serde_json::json!("claude"));
+
+    // Yours to the same callsign, not to a caller with none — and `me`
+    // written by a caller with none is yours to everyone.
+    let board = Command::new(env!("CARGO_BIN_EXE_atc"))
+        .args(["--json"])
+        .current_dir(repo.path())
+        .env("XDG_CONFIG_HOME", xdg(repo.path()))
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env("ATC_CALLSIGN", "claude")
+        .output()
+        .expect("spawn atc");
+    let board = self::envelope(&board);
+    assert_eq!(
+        board["data"]["waiting_on_you"]["yours"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    let board = self::envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        board["data"]["waiting_on_you"]["yours"],
+        serde_json::json!([])
+    );
+
+    stdout(&atc(repo.path(), &["file", "bare me"]));
+    stdout(&atc(repo.path(), &["assign", "2", "me"]));
+    let board = self::envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        board["data"]["ready"][1]["assignee"],
+        serde_json::json!("me"),
+        "no callsign under the runner, so the literal is stored"
+    );
+    assert_eq!(
+        board["data"]["waiting_on_you"]["yours"][0]["id"],
+        serde_json::json!("pi.3")
     );
 }
 

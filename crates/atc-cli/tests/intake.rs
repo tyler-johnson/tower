@@ -13,6 +13,7 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(repo)
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn atc")

@@ -122,6 +122,8 @@ export interface FlightView {
   /// The filer's session, when the filing carried one: fufu's tag, or
   /// the login name at a terminal.
   filed_session: string | null;
+  /// The filer's callsign, when the filing carried one.
+  filed_callsign: string | null;
   filed_at: number;
   comments: number;
   depends_on: string[];
@@ -133,8 +135,14 @@ export interface FlightView {
   status_by: string | null;
   /// The mover's session, when that gesture carried one.
   status_session: string | null;
+  /// The mover's callsign, when that gesture carried one — the pilot.
+  status_callsign: string | null;
   status_at: number | null;
   assignee: string | null;
+  /// Whether the lane is the viewer's: `me`, or the viewer's own
+  /// callsign — derived server-side against the process's callsign, so
+  /// `for=me` reads one flag.
+  mine: boolean;
   priority: string;
   labels: string[];
   skill: string | null;
@@ -178,11 +186,13 @@ export function age(now: number, then: number): string {
   return `${Math.floor(delta / 604_800)}w ago`;
 }
 
-/// The byline: the session when the event carries one, else the author.
-/// A session shaped like a UUID renders as its first eight characters in
-/// brackets, the short form fufu's capture summaries use; anything else —
-/// a login name, a hand-typed tag — renders verbatim.
-export function byline(session: string | null, by: string): string {
+/// The byline: the callsign when the event carries one, else the session,
+/// else the author. A callsign renders verbatim — it is the chosen
+/// readable name. A session shaped like a UUID renders as its first eight
+/// characters in brackets, the short form fufu's capture summaries use;
+/// anything else — a login name, a hand-typed tag — renders verbatim.
+export function byline(callsign: string | null, session: string | null, by: string): string {
+  if (callsign !== null) return callsign;
   if (session === null) return by;
   return isUuid(session) ? `[${session.slice(0, 8)}]` : session;
 }
@@ -324,7 +334,7 @@ export function notePhrases(view: FlightView): NotePhrase[] {
   if (view.status === "in_progress") {
     dim(
       view.status_by !== null
-        ? `in progress — ${byline(view.status_session, view.status_by)}`
+        ? `in progress — ${byline(view.status_callsign, view.status_session, view.status_by)}`
         : "in progress",
     );
   }
@@ -356,6 +366,8 @@ export interface CommentView {
   author: string;
   /// The session behind the author, when the event carried one.
   session: string | null;
+  /// The pilot, when the event carried a callsign.
+  callsign: string | null;
   at: number;
   text: string;
 }
@@ -373,6 +385,9 @@ export interface Moment {
   /// The session behind the author, when the event carried one: fufu's
   /// tag, or the login name at a terminal.
   session: string | null;
+  /// The pilot, when the event carried a callsign — what the byline
+  /// prints first.
+  callsign: string | null;
   what: string;
   /// `status`: the word used, verbatim; `reason` a cancel's `-m`.
   status?: string;
@@ -446,12 +461,14 @@ export interface Brief {
   body: string;
   filed_by: string;
   filed_session: string | null;
+  filed_callsign: string | null;
   filed_at: number;
   /// The stored fields, read here because the brief is the read surface
   /// for one flight.
   status: string;
   status_by: string | null;
   status_session: string | null;
+  status_callsign: string | null;
   status_at: number | null;
   /// A cancel's `-m`, or the closing of a dependency that moved this
   /// flight — the words behind the move, which nothing else carries.
@@ -538,7 +555,7 @@ export function briefNote(brief: Brief, now: number): NotePhrase[] {
   const status = statusWord(brief.status);
   dim(
     brief.status_by !== null && brief.status_at !== null
-      ? `${status} — ${byline(brief.status_session, brief.status_by)} ${age(now, brief.status_at)}`
+      ? `${status} — ${byline(brief.status_callsign, brief.status_session, brief.status_by)} ${age(now, brief.status_at)}`
       : status,
   );
   if (brief.status_reason !== null) dim(brief.status_reason);
@@ -620,10 +637,12 @@ const KNOWN_BRIEF_KEYS = new Set([
   "body",
   "filed_by",
   "filed_session",
+  "filed_callsign",
   "filed_at",
   "status",
   "status_by",
   "status_session",
+  "status_callsign",
   "status_at",
   "status_reason",
   "assignee",

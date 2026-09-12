@@ -53,9 +53,36 @@ it is flown with. `atc brief <flight>` is everything on record about one. \
 Every verb's own `--help` is the authority on it.
 ";
 
-/// The one line that is this repository's: nothing filed, nothing ready,
-/// or how many are.
-pub fn status_line(ready: usize, filed: usize) -> String {
+/// The one line that is this repository's: the flights this callsign
+/// is already on — the resume line, ahead of everything, because a
+/// session that compacted mid-flight needs its flight back before it
+/// needs the count — else nothing filed, nothing ready, or how many
+/// are. `on` is the display names of the In Progress flights under the
+/// caller's callsign, filed order, so the quoted command resolves on a
+/// two-writer board too.
+pub fn status_line(ready: usize, filed: usize, on: &[String]) -> String {
+    match on {
+        [] => {}
+        [one] => {
+            return format!(
+                "You are on {one}. Run `atc brief {}`.",
+                one.trim_start_matches('#')
+            );
+        }
+        [one, two] => {
+            return format!(
+                "You are on {one} and {two}. Run `atc brief {}`.",
+                one.trim_start_matches('#')
+            );
+        }
+        [rest @ .., last] => {
+            return format!(
+                "You are on {}, and {last}. Run `atc brief {}`.",
+                rest.join(", "),
+                rest[0].trim_start_matches('#')
+            );
+        }
+    }
     if filed == 0 {
         return "Nothing filed here yet. Run `atc`.".to_string();
     }
@@ -67,22 +94,45 @@ pub fn status_line(ready: usize, filed: usize) -> String {
 }
 
 /// The whole briefing: the notice, then the status line.
-pub fn text(ready: usize, filed: usize) -> String {
-    format!("{NOTICE}\n{}", status_line(ready, filed))
+pub fn text(ready: usize, filed: usize, on: &[String]) -> String {
+    format!("{NOTICE}\n{}", status_line(ready, filed, on))
 }
 
-/// The two counts the status line is made of, folded from the store the
-/// directory belongs to.
+/// What the status line is made of, folded from the store the directory
+/// belongs to: the two counts, the caller's callsign, and the flights In
+/// Progress under it.
 pub struct Counts {
     pub ready: usize,
     pub filed: usize,
+    /// The process's callsign — `ATC_CALLSIGN`, or the login name at a
+    /// terminal — which is none under a hook unless the harness exports
+    /// it.
+    pub callsign: Option<String>,
+    /// The live In Progress flights whose mover carried the callsign, in
+    /// filed order, as display names.
+    pub on: Vec<String>,
 }
 
 /// The pipeline is the fold alone — no gather, no spawn beyond the store
-/// — because the question is the board's: how much is ready.
+/// — because the question is the board's: how much is ready, and what
+/// this callsign is already flying.
 pub fn counts(cwd: &Path) -> Result<Counts, CliError> {
     let store = Store::open(cwd)?;
     let fold = board::fold(&store.read_all()?);
+    let callsign = store.callsign().map(str::to_string);
+    let on = fold
+        .flights
+        .iter()
+        .filter(|flight| flight.status == "in_progress")
+        .filter(|flight| {
+            callsign.is_some()
+                && flight
+                    .status_mark
+                    .as_ref()
+                    .is_some_and(|mark| mark.callsign == callsign)
+        })
+        .map(|flight| board::display(&fold, &flight.id))
+        .collect();
     Ok(Counts {
         ready: fold
             .flights
@@ -90,6 +140,8 @@ pub fn counts(cwd: &Path) -> Result<Counts, CliError> {
             .filter(|flight| flight.status == "ready")
             .count(),
         filed: fold.flights.len(),
+        callsign,
+        on,
     })
 }
 
@@ -105,7 +157,9 @@ const MAX_PAYLOAD: u64 = 8 * 1024 * 1024;
 #[serde(default)]
 pub struct Payload {
     pub cwd: String,
-    /// Parsed and kept for the callsign line to come; nothing reads it yet.
+    /// Parsed and kept; nothing reads it. The callsign is the variable,
+    /// not the session — a session is one run, and the resume line is
+    /// about the pilot across runs.
     #[allow(dead_code)]
     pub session_id: String,
 }
@@ -167,12 +221,47 @@ mod tests {
     /// the text a wired session reads.
     fn briefing() -> String {
         format!(
-            "{NOTICE}\n{}\n{}\n{}\n{}",
-            status_line(0, 0),
-            status_line(0, 3),
-            status_line(1, 3),
-            status_line(2, 3)
+            "{NOTICE}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            status_line(0, 0, &[]),
+            status_line(0, 3, &[]),
+            status_line(1, 3, &[]),
+            status_line(2, 3, &[]),
+            status_line(2, 3, &["#52".to_string()]),
+            status_line(2, 3, &["#52".to_string(), "#53".to_string()]),
+            status_line(
+                2,
+                3,
+                &["pi#52".to_string(), "pi#53".to_string(), "qi#1".to_string()]
+            ),
         )
+    }
+
+    /// The resume line's three shapes, and the quoted command resolving
+    /// the way the name prints: `#52` is `atc brief 52`, and a two-writer
+    /// board's `pi#52` stays `atc brief pi#52`.
+    #[test]
+    fn the_resume_line_names_the_flights_and_the_brief_to_run() {
+        assert_eq!(
+            status_line(2, 3, &["#52".to_string()]),
+            "You are on #52. Run `atc brief 52`."
+        );
+        assert_eq!(
+            status_line(0, 3, &["#52".to_string(), "#53".to_string()]),
+            "You are on #52 and #53. Run `atc brief 52`."
+        );
+        assert_eq!(
+            status_line(
+                0,
+                0,
+                &["#52".to_string(), "#53".to_string(), "#54".to_string()]
+            ),
+            "You are on #52, #53, and #54. Run `atc brief 52`."
+        );
+        assert_eq!(
+            status_line(0, 3, &["pi#52".to_string()]),
+            "You are on pi#52. Run `atc brief pi#52`."
+        );
+        assert_eq!(status_line(0, 3, &[]), "Nothing ready. Run `atc`.");
     }
 
     /// The guard that rotted spellings need. Parsing alone is not enough:

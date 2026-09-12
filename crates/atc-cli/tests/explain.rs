@@ -16,6 +16,7 @@ fn atc(dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(dir)
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .env("ATC_FF", "/nonexistent")
         .env("XDG_CACHE_HOME", dir.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.
@@ -217,6 +218,7 @@ fn a_raise_with_no_exits_gains_the_registry_lookup() {
             .args(args)
             .current_dir(repo.path())
             .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("ATC_CALLSIGN")
             .env(
                 "XDG_CONFIG_HOME",
                 repo.path().parent().expect("nested").join("xdg"),

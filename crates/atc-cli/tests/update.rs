@@ -13,6 +13,7 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(repo)
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .env("XDG_CONFIG_HOME", root.join("xdg"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.

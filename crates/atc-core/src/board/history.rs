@@ -33,6 +33,9 @@ pub struct Moment {
     /// The session behind the author, when the event carried one:
     /// fufu's tag, or the login name at a terminal.
     pub session: Option<String>,
+    /// The pilot, when the event carried a callsign — what the byline
+    /// prints first.
+    pub callsign: Option<String>,
     /// The kind's own name; an unknown kind carries its own string
     /// through.
     pub what: String,
@@ -128,8 +131,11 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
             Kind::Linked { from, to } | Kind::Unlinked { from, to } => {
                 from == flight || to == flight
             }
-            // A view names no flight.
-            Kind::ViewSaved { .. } | Kind::ViewDeleted { .. } => false,
+            // A view names no flight, and neither does the roster.
+            Kind::ViewSaved { .. }
+            | Kind::ViewDeleted { .. }
+            | Kind::Registered { .. }
+            | Kind::Unregistered { .. } => false,
             Kind::Unknown { body, .. } => {
                 serde_json::from_str::<Names>(body.get()).is_ok_and(|names| {
                     [names.flight, names.target, names.from, names.to]
@@ -150,6 +156,7 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
                 at: event.time,
                 by: event.author.clone(),
                 session: event.session.clone(),
+                callsign: event.callsign.clone(),
                 what: event.kind.name().to_string(),
                 detail: detail(&event.kind, &comments),
             });
@@ -219,6 +226,8 @@ fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
         | Kind::Commented { .. }
         | Kind::ViewSaved { .. }
         | Kind::ViewDeleted { .. }
+        | Kind::Registered { .. }
+        | Kind::Unregistered { .. }
         | Kind::Unknown { .. } => None,
     }
 }
@@ -234,6 +243,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind,
         }
@@ -318,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn a_clearing_is_a_null_lane_and_a_filing_carries_the_five_keys_alone() {
+    fn a_clearing_is_a_null_lane_and_a_filing_carries_the_six_keys_alone() {
         let flight: EventId = "pi.1".parse().expect("id");
         let events = vec![
             filed("pi.1", 1),
@@ -334,7 +344,7 @@ mod tests {
         let rows = json(&history(&events, &flight));
         assert_eq!(
             rows[0],
-            serde_json::json!({"id": "pi.1", "at": 1, "by": "a@b.c", "session": null, "what": "filed"})
+            serde_json::json!({"id": "pi.1", "at": 1, "by": "a@b.c", "session": null, "callsign": null, "what": "filed"})
         );
         let lane = rows[1].as_object().expect("an object");
         assert!(lane.contains_key("assignee"), "{}", rows[1]);

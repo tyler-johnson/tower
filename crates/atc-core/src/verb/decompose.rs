@@ -20,7 +20,7 @@ use crate::board;
 use crate::log::{Event, EventId, Kind, Store};
 use crate::procedure;
 
-use super::{Error, Fields, Parent, appended_all, classify, ensure_active};
+use super::{Error, Fields, Parent, appended_all, classify, ensure_active, resolve_me};
 
 /// The envelope's `data`. Struct fields serialize in declaration order,
 /// and this order — `filed, linked, parent` — is the alphabetical one
@@ -68,13 +68,16 @@ pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decomp
         && let Some(definition) = installed.get(name)
     {
         let ids = store.append_with(|mint| {
-            classify(
-                definition,
-                &subject,
-                &Fields::default(),
-                Parent::Existing(parent.clone()),
-                "ready",
-                mint,
+            resolve_me(
+                classify(
+                    definition,
+                    &subject,
+                    &Fields::default(),
+                    Parent::Existing(parent.clone()),
+                    "ready",
+                    mint,
+                ),
+                store.callsign(),
             )
         })?;
         // `Parent::Existing` mints no parent event, so the filings are

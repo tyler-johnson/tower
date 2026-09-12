@@ -1,9 +1,10 @@
 //! `atc next [-n <k>] [--peek]` — pull the next Ready flight from
-//! the agent lane, or the next `k` in filed order. The pull is the Ready
+//! the pool, or the next `k` in filed order. The pull is the Ready
 //! check and the In Progress move in one command: the pool is every
-//! Ready flight assigned to the agent lane, and unless `--peek` the
-//! picked set becomes one In Progress `status` event per flight in a
-//! single append, the byline the pilot. The verb writes to tower's log
+//! Ready flight in the agent lane plus every one laned to your own
+//! callsign, and unless `--peek` the picked set becomes one In Progress
+//! `status` event per flight in a single append, the store's callsign
+//! stamp the pilot. The verb writes to tower's log
 //! and nothing to the repository: no branch, no worktree, no op row.
 //!
 //! The verb's success code is 0 on a pick and 1 on an empty one, fufu's
@@ -63,7 +64,7 @@ pub fn run(json: bool, count: usize, peek: bool) -> Result<i32, CliError> {
     let store = super::store()?;
     let events = store.read_all()?;
     let fold = board::fold(&events);
-    let picks = board::pick(&fold, count);
+    let picks = board::pick(&fold, count, store.callsign());
     let outcome = picks.outcome();
 
     let pulled = !peek && !picks.picked.is_empty();

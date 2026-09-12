@@ -12,7 +12,7 @@ use atc_testsupport::Repo;
 /// The suite's board: the real clock, because a wall clock is not a
 /// fixture and nothing here reads an age.
 fn assemble(events: &[atc_core::log::Event]) -> board::Board {
-    board::assemble(events, board::now(), board::ClosedWindow::default())
+    board::assemble(events, board::now(), board::ClosedWindow::default(), None)
 }
 
 fn filed(subject: &str) -> Kind {

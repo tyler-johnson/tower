@@ -4,16 +4,19 @@
 //! walk runs over a [`Fold`], so the pool is unit-testable with
 //! hand-built rows.
 //!
-//! The pool is every Ready flight in the agent lane: the derived status
-//! and the stored assignee, read off the fold — never the registry
+//! The pool is every Ready flight in the agent lane, plus every Ready
+//! flight laned to the caller's own callsign: the derived status and
+//! the stored assignee, read off the fold — never the registry
 //! (principle 11). The gate is `Flight::pullable`, the one the brief
 //! reads too: exact string compares, so an unknown status or lane never
-//! rounds down into the pool. Ready is derived, so a pool candidate has
+//! rounds down into the pool, and a caller with no callsign pulls the
+//! agent lane alone. Ready is derived, so a pool candidate has
 //! no live dependency by construction — a dependent sits in Waiting
 //! until its last dependency closes, done or canceled, and never
-//! reaches the walk. An open question takes a flight out on top of it. Ready flights *not* in the agent lane are counted in
-//! `yours`, the count behind the `yours` outcome; the flights themselves
-//! are silent here because the board is their surface, not this one's.
+//! reaches the walk. An open question takes a flight out on top of it.
+//! Ready flights *not* in the pool are counted in `yours`, the count
+//! behind the `yours` outcome; the flights themselves are silent here
+//! because the board is their surface, not this one's.
 //!
 //! Candidates walk in filed order and the first `want` of them are the
 //! pick. Nothing deconflicts here: which branches can fly together is
@@ -76,9 +79,12 @@ pub struct Pick {
 }
 
 /// Walk the candidates in filed order and pick the first `want` of them.
-pub fn pick(fold: &Fold, want: usize) -> Picks {
-    // Per live flight: whether it is in the pool — Ready, agent lane, no
-    // open question.
+/// `caller` is the puller's callsign: its own queue and the pool walk
+/// together, because the walk is filed order and the gate is one
+/// predicate.
+pub fn pick(fold: &Fold, want: usize, caller: Option<&str>) -> Picks {
+    // Per live flight: whether it is in the pool — Ready, agent lane or
+    // the caller's own, no open question.
     let mut picked: Vec<Pick> = Vec::new();
     let mut yours = 0;
     for flight in &fold.flights {
@@ -87,7 +93,7 @@ pub fn pick(fold: &Fold, want: usize) -> Picks {
         }
         let id = flight.id.to_string();
         let unheld = flight.question.is_none();
-        if unheld && flight.pullable() {
+        if unheld && flight.pullable(caller) {
             if picked.len() < want {
                 picked.push(Pick {
                     flight: id,
@@ -118,6 +124,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Filed {
                 procedure: Some("review".to_string()),
@@ -147,6 +154,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind,
         }
@@ -212,6 +220,7 @@ mod tests {
                 linked("pi.3", 30, "pi.1", "pi.2"),
             ]),
             2,
+            None,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.2");
@@ -229,6 +238,7 @@ mod tests {
                 done("pi.4", 40, "pi.2"),
             ]),
             1,
+            None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
     }
@@ -245,6 +255,7 @@ mod tests {
                 moved("pi.4", 40, "pi.2", "canceled"),
             ]),
             1,
+            None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
     }
@@ -259,6 +270,7 @@ mod tests {
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             2,
+            None,
         );
         assert!(picks.picked.is_empty());
     }
@@ -268,6 +280,7 @@ mod tests {
         let picks = pick(
             &fold(&[filed("pi.2", 20), filed("pi.1", 10), filed("pi.3", 30)]),
             3,
+            None,
         );
         let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
         assert_eq!(
@@ -282,6 +295,7 @@ mod tests {
         let picks = pick(
             &fold(&[filed("pi.1", 10), filed("pi.2", 20), filed("pi.3", 30)]),
             1,
+            None,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.1");
@@ -300,6 +314,7 @@ mod tests {
                 linked("pi.7", 70, "pi.6", "pi.5"),
             ]),
             6,
+            None,
         );
         assert_eq!(picks.picked.len(), 1);
         assert_eq!(picks.picked[0].flight, "pi.4");
@@ -317,6 +332,7 @@ mod tests {
                 stored("pi.2", 20, "ready", Some("agent")),
             ]),
             1,
+            None,
         );
         assert_eq!(work.picked.len(), 1);
         assert_eq!(work.yours, 1);
@@ -326,12 +342,16 @@ mod tests {
             "a pick is work whatever `yours` counts"
         );
 
-        let yours = pick(&fold(&[stored("pi.1", 10, "ready", Some("me"))]), 1);
+        let yours = pick(&fold(&[stored("pi.1", 10, "ready", Some("me"))]), 1, None);
         assert!(yours.picked.is_empty());
         assert_eq!(yours.yours, 1);
         assert_eq!(yours.outcome(), Outcome::Yours);
 
-        let drained = pick(&fold(&[stored("pi.1", 10, "backlog", Some("agent"))]), 1);
+        let drained = pick(
+            &fold(&[stored("pi.1", 10, "backlog", Some("agent"))]),
+            1,
+            None,
+        );
         assert!(drained.picked.is_empty());
         assert_eq!(drained.yours, 0);
         assert_eq!(drained.outcome(), Outcome::Drained);
@@ -351,6 +371,7 @@ mod tests {
                 stored("pi.2", 20, "ready", Some("pair")),
             ]),
             2,
+            None,
         );
         assert!(picks.picked.is_empty());
         assert_eq!(picks.yours, 1, "the unknown lane's Ready flight is yours");
@@ -366,6 +387,7 @@ mod tests {
                 held("pi.4", 40, "pi.2", "which?"),
             ]),
             2,
+            None,
         );
         assert!(picks.picked.is_empty());
         assert_eq!(picks.yours, 0, "a pull or a question already has an owner");
@@ -383,6 +405,7 @@ mod tests {
                 assigned("pi.4", 40, "pi.3", Some("me")),
             ]),
             2,
+            None,
         );
         let ids: Vec<&str> = picks.picked.iter().map(|p| p.flight.as_str()).collect();
         assert_eq!(ids, ["pi.1"]);
@@ -398,13 +421,41 @@ mod tests {
                 moved("pi.3", 30, "pi.1", "ready"),
             ]),
             1,
+            None,
         );
         assert_eq!(picks.picked[0].flight, "pi.1");
     }
 
     #[test]
     fn an_empty_fold_picks_nothing() {
-        let picks = pick(&fold(&[]), 1);
+        let picks = pick(&fold(&[]), 1, None);
         assert!(picks.picked.is_empty());
+    }
+
+    #[test]
+    fn a_callers_own_queue_walks_with_the_pool_in_filed_order() {
+        // The brief's verify: `assign 5 qwen-review`, then the pull under
+        // that callsign picks it and a pull under another does not. Own
+        // queue and pool interleave by filed order, not queue first.
+        let events = [
+            stored("pi.1", 10, "ready", Some("qwen-review")),
+            filed("pi.2", 20),
+            stored("pi.3", 30, "ready", Some("claude")),
+            stored("pi.4", 40, "ready", Some("qwen-review")),
+        ];
+        let qwen = pick(&fold(&events), 4, Some("qwen-review"));
+        let ids: Vec<&str> = qwen.picked.iter().map(|p| p.flight.as_str()).collect();
+        assert_eq!(ids, ["pi.1", "pi.2", "pi.4"]);
+        assert_eq!(qwen.yours, 1, "claude's queue is yours to qwen");
+
+        let claude = pick(&fold(&events), 4, Some("claude"));
+        let ids: Vec<&str> = claude.picked.iter().map(|p| p.flight.as_str()).collect();
+        assert_eq!(ids, ["pi.2", "pi.3"]);
+        assert_eq!(claude.yours, 2);
+
+        let nobody = pick(&fold(&events), 4, None);
+        let ids: Vec<&str> = nobody.picked.iter().map(|p| p.flight.as_str()).collect();
+        assert_eq!(ids, ["pi.2"], "no callsign pulls the agent lane alone");
+        assert_eq!(nobody.yours, 3);
     }
 }

@@ -187,11 +187,14 @@ fn reply(status: StatusCode, line: String) -> Reply {
 /// The board's envelope for one query, folded fresh. Shared verbatim
 /// between the `/api/board` handler and every feed subscriber, so a
 /// pushed frame and a pulled body under one query can only ever be the
-/// same bytes.
+/// same bytes. The viewer is the process: `view.rs` documents that there
+/// is no request-scoped viewer, so `mine` on the web is the server
+/// owner's callsign, whatever `ATC_CALLSIGN` or the launching login
+/// gave the process.
 pub(crate) fn board_envelope(repo: &Path, query: &Query) -> Result<String, ApiError> {
     let store = Store::open(repo)?;
     let events = store.read_all()?;
-    let folded = board::answer(&events, board::now(), query);
+    let folded = board::answer(&events, board::now(), query, store.callsign());
     Ok(machine::emit("board", &folded))
 }
 
@@ -292,7 +295,8 @@ async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<
         let events = store.read_all()?;
         let fold = board::fold(&events);
         let id = board::resolve(&fold, &flight)?;
-        let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
+        let brief = board::brief(&fold, &events, &id, store.callsign())
+            .expect("resolved to a filed flight");
         Ok(machine::emit("brief", &brief))
     })
     .await

@@ -1,17 +1,18 @@
 //! `assign <flight> <lane>` — whose queue this is in.
 //!
-//! Three words: `me`, `agent`, or `none` to clear the lane. The stored
-//! field is the whole gate — `next` draws only from the agent lane, so
-//! assigning is what opens or closes it. Anything else refuses at this
-//! boundary; the wire itself stays a free string.
+//! Four shapes: `me`, `agent`, `none` to clear the lane, or a callsign.
+//! The stored field is the whole gate — `next` draws from the agent lane
+//! and the caller's own callsign's queue, so assigning is what opens or
+//! closes it. `me` stores the caller's callsign when there is one. A
+//! malformed word refuses at this boundary; the wire itself stays a
+//! free string, and a callsign needs no registration.
 
 use serde::Serialize;
 
 use crate::board::{self, display};
 use crate::log::{Event, Kind, Store};
-use crate::model::Assignee;
 
-use super::{Error, appended, ensure_active};
+use super::{Error, appended, ensure_active, lane_word, stored_lane};
 
 /// The envelope's `data`: the assignment, as the log holds it.
 #[derive(Serialize)]
@@ -24,23 +25,13 @@ pub struct Assign {
     pub payload: Assigned,
     pub display: String,
     pub subject: String,
-    /// The lane as stored — `me`, `agent`, or `none` for the cleared
-    /// lane.
+    /// The lane as stored — `me`, `agent`, a callsign, or `none` for the
+    /// cleared lane.
     pub lane: String,
 }
 
 pub fn assign(store: &Store, flight: &str, lane: &str) -> Result<Assign, Error> {
-    let assignee = match lane {
-        "none" => None,
-        word => match Assignee::parse(word) {
-            Some(lane) => Some(lane.name().to_string()),
-            None => {
-                return Err(Error::BadAssignee {
-                    word: word.to_string(),
-                });
-            }
-        },
-    };
+    let assignee = stored_lane(lane_word(lane)?, store.callsign());
     board::parse_ref(flight)?;
     let fold = board::fold(&store.read_all()?);
     let flight = board::resolve(&fold, flight)?;

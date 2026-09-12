@@ -11,7 +11,8 @@
 //! fails loudly gets uninstalled.
 //!
 //! The pipeline is the fold alone — no gather, no spawn beyond the store
-//! — because the question is the board's: how much is ready.
+//! — because the question is the board's: how much is ready, and what
+//! this callsign is already on.
 
 use crate::error::CliError;
 use crate::integ::{self, briefing};
@@ -20,7 +21,7 @@ use crate::machine;
 pub fn run(json: bool, client: Option<&str>) -> Result<(), CliError> {
     let Some(slug) = client else {
         let counts = briefing::counts(&super::repo()?)?;
-        let text = briefing::text(counts.ready, counts.filed);
+        let text = briefing::text(counts.ready, counts.filed, &counts.on);
         if json {
             println!("{}", envelope(&text, &counts));
         } else {
@@ -38,7 +39,7 @@ pub fn run(json: bool, client: Option<&str>) -> Result<(), CliError> {
     let Ok(counts) = briefing::counts(&payload.cwd()) else {
         return Ok(());
     };
-    let text = briefing::text(counts.ready, counts.filed);
+    let text = briefing::text(counts.ready, counts.filed, &counts.on);
     if json {
         println!("{}", envelope(&text, &counts));
     } else {
@@ -54,6 +55,8 @@ fn envelope(text: &str, counts: &briefing::Counts) -> String {
             "text": text,
             "ready": counts.ready,
             "filed": counts.filed,
+            "on": counts.on,
+            "callsign": counts.callsign,
         }),
     )
 }

@@ -177,6 +177,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Filed {
                 procedure: None,

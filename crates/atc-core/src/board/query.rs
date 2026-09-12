@@ -1007,15 +1007,16 @@ fn one(filter: &Filter, held: Option<&str>) -> bool {
     }
 }
 
-/// Whether `for` holds. `me` is the rows only a person can handle: an
-/// open question in any lane, or the `me` lane at any status — what the
-/// CLI's inbox pins, as one predicate. No other word names anyone, so
+/// Whether `for` holds. `me` is the rows only the viewer can handle: an
+/// open question in any lane, or a row in the `me` lane or the viewer's
+/// own callsign's at any status — what the CLI's inbox pins, as one
+/// predicate over the row's `mine` flag. No other word names anyone, so
 /// it matches nothing, values being open as everywhere.
 fn for_holds(filter: &Filter, view: &FlightView) -> bool {
     let Value::Words(words) = &filter.value else {
         return false;
     };
-    let mine = view.question.is_some() || view.assignee.as_deref() == Some("me");
+    let mine = view.question.is_some() || view.mine;
     let hit = mine && words.iter().any(|word| word == "me");
     match filter.op {
         Op::Is => hit,
@@ -1241,6 +1242,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind,
         }
@@ -1287,7 +1289,7 @@ mod tests {
     }
 
     fn flights(events: &[Event]) -> Vec<FlightView> {
-        rows(fold(events)).flights
+        rows(fold(events), None).flights
     }
 
     fn ids(views: &[FlightView]) -> Vec<&str> {
@@ -1559,6 +1561,29 @@ mod tests {
     }
 
     #[test]
+    fn for_me_hits_the_viewers_own_callsign_through_the_rows_flag() {
+        // The rows carry `mine` against the viewer, so the predicate
+        // never sees the callsign: a row laned to it holds for `me`.
+        let events = [
+            filed("pi.1", 10, "ready", "none", Some("qwen-review"), &[]),
+            filed("pi.2", 20, "ready", "none", Some("me"), &[]),
+            filed("pi.3", 30, "ready", "none", Some("claude"), &[]),
+        ];
+        let kept = |viewer: Option<&str>| -> Vec<String> {
+            let views = rows(fold(&events), viewer).flights;
+            let folded = Query::parse("for=me").expect("parses").fold(views, NOW);
+            folded
+                .groups
+                .iter()
+                .flat_map(|group| group.rows.iter())
+                .map(|view| view.id.clone())
+                .collect()
+        };
+        assert_eq!(kept(Some("qwen-review")), ["pi.1", "pi.2"]);
+        assert_eq!(kept(None), ["pi.2"]);
+    }
+
+    #[test]
     fn closed_filters_as_the_pair() {
         // The alias no column deals any more still selects the pair, so
         // a saved view from before the split keeps its meaning.
@@ -1768,7 +1793,7 @@ mod tests {
                 },
             ),
         ];
-        let board = enrich(fold(&events), NOW, ClosedWindow::default());
+        let board = enrich(fold(&events), NOW, ClosedWindow::default(), None);
         let folded = Query::default().fold(flights(&events), NOW);
 
         // The board's one closed window, dealt by status: the render

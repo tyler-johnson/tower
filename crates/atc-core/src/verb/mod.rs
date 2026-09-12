@@ -26,6 +26,7 @@ mod error;
 mod file;
 mod hold;
 mod link;
+mod register;
 mod status;
 pub mod view;
 
@@ -39,11 +40,56 @@ pub use error::Error;
 pub use file::{File, Filed, file};
 pub use hold::{Held, Hold, hold};
 pub use link::{Link, Linked, Unlink, Unlinked, link, unlink};
+pub use register::{Register, Registered, Retire, Retired, register, retire};
 pub use status::{Move, Moved, cancel, done, status};
 pub use view::{Delete, Deleted, Save, Saved, Views};
 
 use crate::board::{Flight, Fold, display};
-use crate::log::{self, Event, EventId, Store};
+use crate::log::{self, Event, EventId, Kind, Store, usable_callsign};
+
+/// A lane word, validated: `none` is the absent lane spelled out, `me`
+/// and `agent` pass, and any other word passes when it is a usable
+/// callsign — one word, no spaces. Anything else refuses here, at the
+/// boundary where a person is typing; the wire stays a free string.
+/// Assigning to a callsign needs no registration: values are open
+/// everywhere in tower, and an unregistered callsign on an event still
+/// folds.
+pub(crate) fn lane_word(word: &str) -> Result<Option<String>, Error> {
+    match word {
+        "none" => Ok(None),
+        "me" | "agent" => Ok(Some(word.to_string())),
+        other => usable_callsign(other)
+            .map(Some)
+            .ok_or_else(|| Error::BadAssignee {
+                word: other.to_string(),
+            }),
+    }
+}
+
+/// The lane as the log stores it: `me` becomes the caller's callsign
+/// when there is one, and stays the literal `me` when there is not.
+/// Resolved at the append and never at parse, so a procedure rule
+/// saying `assignee = "me"` still matches a `--assignee me` filing.
+pub(crate) fn stored_lane(word: Option<String>, caller: Option<&str>) -> Option<String> {
+    match (word.as_deref(), caller) {
+        (Some("me"), Some(callsign)) => Some(callsign.to_string()),
+        _ => word,
+    }
+}
+
+/// [`stored_lane`] over a minted batch: every `Filed` in `kinds` with
+/// the literal `me` takes the caller's callsign. `classify` is pure and
+/// has no store, so the resolution happens here, after rule matching.
+pub(crate) fn resolve_me(mut kinds: Vec<Kind>, caller: Option<&str>) -> Vec<Kind> {
+    for kind in &mut kinds {
+        if let Kind::Filed { assignee, .. } = kind
+            && assignee.as_deref() == Some("me")
+        {
+            *assignee = stored_lane(assignee.take(), caller);
+        }
+    }
+    kinds
+}
 
 /// The event just appended, read back from this writer's chain so the
 /// JSON payload is what the log holds — store-assigned time included —
@@ -88,7 +134,6 @@ pub fn ensure_active<'a>(fold: &'a Fold, id: &EventId) -> Result<&'a Flight, Err
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log::Kind;
     use atc_testsupport::Repo;
 
     /// A store on a fresh fixture, the writer pinned so ids are stable.
@@ -183,9 +228,9 @@ mod tests {
             &[],
         );
         pinned(
-            &assign(&store, "1", "you").err().expect("not a lane"),
+            &assign(&store, "1", "two words").err().expect("not a lane"),
             "usage/bad-assignee",
-            "`you` is not a lane — me, agent, or none",
+            "`two words` is not a lane — me, agent, none, or a callsign: one word, no spaces",
             &[],
         );
         pinned(
@@ -193,7 +238,7 @@ mod tests {
                 &store,
                 "laned",
                 Fields {
-                    assignee: Some("pair".to_string()),
+                    assignee: Some("two words".to_string()),
                     ..Fields::default()
                 },
                 None,
@@ -201,9 +246,50 @@ mod tests {
             .err()
             .expect("not a lane"),
             "usage/bad-assignee",
-            "`pair` is not a lane — me, agent, or none",
+            "`two words` is not a lane — me, agent, none, or a callsign: one word, no spaces",
             &[],
         );
+    }
+
+    /// The lane grammar: the three words, a callsign, and the refusals
+    /// — a spaced word, a blank, and a word past the length.
+    #[test]
+    fn a_lane_word_is_a_lane_a_callsign_or_a_refusal() {
+        assert_eq!(lane_word("none").expect("none"), None);
+        assert_eq!(lane_word("me").expect("me").as_deref(), Some("me"));
+        assert_eq!(lane_word("agent").expect("agent").as_deref(), Some("agent"));
+        assert_eq!(
+            lane_word("qwen-review").expect("a callsign").as_deref(),
+            Some("qwen-review")
+        );
+        for bad in ["two words", "", "   ", "a\tb"] {
+            assert_eq!(
+                lane_word(bad).expect_err("refused").id(),
+                "usage/bad-assignee",
+                "{bad:?}"
+            );
+        }
+        let long = "x".repeat(65);
+        assert!(lane_word(&long).is_err());
+    }
+
+    /// `me` resolves at the append: the caller's callsign when there is
+    /// one, the literal otherwise; every other word is untouched.
+    #[test]
+    fn me_stores_the_callers_callsign_when_there_is_one() {
+        assert_eq!(
+            stored_lane(Some("me".to_string()), Some("tyler")).as_deref(),
+            Some("tyler")
+        );
+        assert_eq!(
+            stored_lane(Some("me".to_string()), None).as_deref(),
+            Some("me")
+        );
+        assert_eq!(
+            stored_lane(Some("agent".to_string()), Some("tyler")).as_deref(),
+            Some("agent")
+        );
+        assert_eq!(stored_lane(None, Some("tyler")), None);
     }
 
     #[test]

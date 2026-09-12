@@ -25,6 +25,7 @@ function flight(number: number, status: string, labels: string[] = []): FlightVi
     body: "",
     filed_by: "tyler",
     filed_session: null,
+    filed_callsign: null,
     filed_at: 0,
     comments: 0,
     depends_on: [],
@@ -32,8 +33,10 @@ function flight(number: number, status: string, labels: string[] = []): FlightVi
     status,
     status_by: null,
     status_session: null,
+    status_callsign: null,
     status_at: null,
     assignee: null,
+    mine: false,
     priority: "none",
     labels,
     skill: null,
@@ -75,17 +78,21 @@ function brief(number: number, depends_on: LinkView[], blocks: LinkView[] = []):
 
 describe("the byline", () => {
   it("shortens a UUID session to its first eight characters in brackets", () => {
-    expect(byline("95b36d9d-efdc-4564-9b06-91842f51ef6b", "a@b.c")).toBe("[95b36d9d]");
+    expect(byline(null, "95b36d9d-efdc-4564-9b06-91842f51ef6b", "a@b.c")).toBe("[95b36d9d]");
   });
   it("renders any other session verbatim", () => {
-    expect(byline("tyler", "a@b.c")).toBe("tyler");
-    expect(byline("hand-typed", "a@b.c")).toBe("hand-typed");
-    expect(byline("95b36d9d-efdc-4564-9b06-91842f51ef6", "a@b.c")).toBe(
+    expect(byline(null, "tyler", "a@b.c")).toBe("tyler");
+    expect(byline(null, "hand-typed", "a@b.c")).toBe("hand-typed");
+    expect(byline(null, "95b36d9d-efdc-4564-9b06-91842f51ef6", "a@b.c")).toBe(
       "95b36d9d-efdc-4564-9b06-91842f51ef6",
     );
   });
   it("falls back to the author with no session", () => {
-    expect(byline(null, "a@b.c")).toBe("a@b.c");
+    expect(byline(null, null, "a@b.c")).toBe("a@b.c");
+  });
+  it("the callsign wins over the session and the author", () => {
+    expect(byline("claude", "95b36d9d-efdc-4564-9b06-91842f51ef6b", "a@b.c")).toBe("claude");
+    expect(byline("claude", null, "a@b.c")).toBe("claude");
   });
 });
 

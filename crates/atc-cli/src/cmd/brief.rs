@@ -20,7 +20,8 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     let id = super::resolve(&fold, flight)?;
 
     let now = board::now();
-    let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
+    let brief =
+        board::brief(&fold, &events, &id, store.callsign()).expect("resolved to a filed flight");
 
     if json {
         println!("{}", machine::emit("brief", &brief));
@@ -120,6 +121,9 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     // it. The words a gesture only points at — the question, the
     // comment's text — are already printed above, and repeating them
     // here would make the section a second, staler copy of the page.
+    // When the byline is a callsign and the event carried a session
+    // too, the session follows on its own line: the pilot is the
+    // byline, and the run stays provenance underneath.
     if !brief.history.is_empty() {
         out.push('\n');
         out.push_str("history\n");
@@ -133,12 +137,28 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
                         moment.id,
                         moment.what,
                         words,
-                        render::byline(moment.session.as_deref(), &moment.by),
+                        render::byline(
+                            moment.callsign.as_deref(),
+                            moment.session.as_deref(),
+                            &moment.by
+                        ),
                         render::age(now, moment.at)
                     ),
                     colored
                 )
             ));
+            if let (Some(_), Some(session)) = (&moment.callsign, moment.session.as_deref()) {
+                out.push_str(&format!(
+                    "    {}\n",
+                    render::paint_dim(
+                        &format!(
+                            "session {}",
+                            render::byline(None, Some(session), &moment.by)
+                        ),
+                        colored
+                    )
+                ));
+            }
             for line in follow.into_iter().flat_map(str::lines) {
                 out.push_str(&format!("    {}\n", render::paint_dim(line, colored)));
             }
@@ -191,7 +211,11 @@ fn note(brief: &Brief, now: i64, colored: bool) -> String {
         &match (brief.status_by.as_deref(), brief.status_at) {
             (Some(by), Some(at)) => format!(
                 "{status} — {} {}",
-                render::byline(brief.status_session.as_deref(), by),
+                render::byline(
+                    brief.status_callsign.as_deref(),
+                    brief.status_session.as_deref(),
+                    by
+                ),
                 render::age(now, at)
             ),
             _ => status,

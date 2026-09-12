@@ -36,7 +36,7 @@ mod view;
 
 pub use brief::{Brief, CommentView, LinkView, Standing, brief};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
-pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
+pub use flight::{Comment, Flight, Fold, Mark, Pilot, Question, fold};
 pub use history::{Detail, Moment, history};
 pub use model::{
     Board, ClosedWindow, DEFAULT_CLOSED, FlightView, Rows, WaitingOnYou, enrich, parse_closed, rows,
@@ -53,12 +53,14 @@ use crate::log::Event;
 
 /// One board: fold the log, enrich.
 ///
-/// `now` and `closed` ride in from the caller — the board module reads
-/// no clock and no command line, so a board stays a pure function of
-/// what it was handed. [`now`] takes the first, and the second is
-/// [`DEFAULT_CLOSED`] wherever nobody asked for another window.
-pub fn assemble(events: &[Event], now: i64, closed: ClosedWindow) -> Board {
-    enrich(fold(events), now, closed)
+/// `now`, `closed`, and `viewer` ride in from the caller — the board
+/// module reads no clock, no command line, and no environment, so a
+/// board stays a pure function of what it was handed. [`now`] takes the
+/// first, the second is [`DEFAULT_CLOSED`] wherever nobody asked for
+/// another window, and the third is the reader's callsign, which only
+/// the `mine` flag reads.
+pub fn assemble(events: &[Event], now: i64, closed: ClosedWindow, viewer: Option<&str>) -> Board {
+    enrich(fold(events), now, closed, viewer)
 }
 
 /// One query's answer: fold the log, enrich every flight into a row, and
@@ -67,8 +69,8 @@ pub fn assemble(events: &[Event], now: i64, closed: ClosedWindow) -> Board {
 /// The same arguments as [`assemble`] with the query in place of the
 /// closed window, which the query carries itself. `now` reaches the
 /// query's fold, so a relative filter and a row's age read one clock.
-pub fn answer(events: &[Event], now: i64, query: &Query) -> Folded {
-    let rows = rows(fold(events));
+pub fn answer(events: &[Event], now: i64, query: &Query, viewer: Option<&str>) -> Folded {
+    let rows = rows(fold(events), viewer);
     query.fold(rows.flights, now)
 }
 

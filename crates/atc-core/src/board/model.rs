@@ -106,10 +106,10 @@ pub struct WaitingOnYou {
     /// Held with an open question — an agent is stopped on you. Oldest
     /// ask first, so the longest-blocked agent takes the top row.
     pub questions: Vec<FlightView>,
-    /// Ready in the `me` lane — the todo list. Narrower than
-    /// `Picks::yours`, which counts every Ready flight outside the agent
-    /// lane: an unassigned flight is nobody's claim, and it still stands
-    /// in the `ready` group.
+    /// Ready in the `me` lane or the viewer's own callsign's — the todo
+    /// list. Narrower than `Picks::yours`, which counts every Ready
+    /// flight outside the pool: an unassigned flight is nobody's claim,
+    /// and it still stands in the `ready` group.
     pub yours: Vec<FlightView>,
 }
 
@@ -131,6 +131,8 @@ pub struct FlightView {
     pub filed_by: String,
     /// The filer's session, when the filing carried one.
     pub filed_session: Option<String>,
+    /// The filer's callsign, when the filing carried one.
+    pub filed_callsign: Option<String>,
     /// Raw epoch; relative age is the render's concern.
     pub filed_at: i64,
     pub comments: usize,
@@ -146,12 +148,19 @@ pub struct FlightView {
     pub status_by: Option<String>,
     /// The mover's session, when that gesture carried one.
     pub status_session: Option<String>,
+    /// The mover's callsign, when that gesture carried one — the pilot,
+    /// what the In Progress note names first.
+    pub status_callsign: Option<String>,
     pub status_at: Option<i64>,
     /// Why the mark is someone else's gesture: "dependency <id> done"
     /// or "… canceled" when a dependency's closing made the flight
     /// Ready. `null` when the mark is the flight's own.
     pub status_reason: Option<String>,
     pub assignee: Option<String>,
+    /// Whether the lane is the viewer's: `me`, or the viewer's own
+    /// callsign. Derived against the viewer at fold time, so the web's
+    /// `for=me` and the CLI's inbox read one flag.
+    pub mine: bool,
     pub priority: String,
     pub labels: Vec<String>,
     pub skill: Option<String>,
@@ -185,7 +194,9 @@ pub struct Rows {
 ///
 /// Every flight is flattened the same way: the stored fields, the derived
 /// status and its mark, the progress mark, and the open question.
-pub fn rows(fold: Fold) -> Rows {
+/// `viewer` is the reader's callsign, the one thing a row carries that
+/// is relative to who is looking: `mine`.
+pub fn rows(fold: Fold, viewer: Option<&str>) -> Rows {
     // The progress marks and the since lines, taken before the flights
     // are consumed and carried as owned rows.
     let marks: HashMap<String, (usize, usize)> = fold
@@ -202,7 +213,7 @@ pub fn rows(fold: Fold) -> Rows {
     let mut flights = Vec::with_capacity(fold.flights.len());
     for flight in fold.flights {
         let id = flight.id.to_string();
-        let mut view = view(flight, reasons.remove(&id));
+        let mut view = view(flight, reasons.remove(&id), viewer);
         view.progress = marks.get(&id).copied();
         flights.push(view);
     }
@@ -223,16 +234,17 @@ pub fn rows(fold: Fold) -> Rows {
 /// lands in the group its `status` field names and a status string this
 /// binary has never heard of routes nowhere rather than being invented
 /// into a group. The inbox is a second view over the same rows: an open
-/// question puts a flight in `questions`, Ready in the `me` lane puts it
-/// in `yours`, and both keep their place in the status group below.
+/// question puts a flight in `questions`, Ready in the viewer's lane —
+/// `me`, or their callsign — puts it in `yours`, and both keep their
+/// place in the status group below.
 ///
 /// A sub-flight is a flight: it lands in its own status group beside
 /// every other row, and nothing about having a parent moves or hides it.
 /// What says a row is a family is the parent's progress mark, closed
 /// children over total, which every parent carries. The family itself is
 /// the projects view's shape, not this list's.
-pub fn enrich(fold: Fold, now: i64, closed: ClosedWindow) -> Board {
-    let rows = rows(fold);
+pub fn enrich(fold: Fold, now: i64, closed: ClosedWindow, viewer: Option<&str>) -> Board {
+    let rows = rows(fold, viewer);
 
     let mut inbox = WaitingOnYou {
         questions: Vec::new(),
@@ -245,12 +257,12 @@ pub fn enrich(fold: Fold, now: i64, closed: ClosedWindow) -> Board {
     let mut held = Vec::new();
     let mut group = Vec::new();
     for view in rows.flights {
-        // The inbox: an open question, or Ready in the `me` lane on a
-        // live row — a closed flight needs nobody, and the fold already
+        // The inbox: an open question, or Ready in the viewer's lane on
+        // a live row — a closed flight needs nobody, and the fold already
         // took a close's question off the record.
         let live = !closed_row(&view);
         let questioned = view.question.is_some();
-        let mine = live && view.status == "ready" && view.assignee.as_deref() == Some("me");
+        let mine = live && view.status == "ready" && view.mine;
         if questioned {
             inbox.questions.push(view.clone());
         } else if mine {
@@ -376,7 +388,8 @@ pub(super) fn rank(priority: &str) -> u8 {
     }
 }
 
-fn view(flight: Flight, status_reason: Option<String>) -> FlightView {
+fn view(flight: Flight, status_reason: Option<String>, viewer: Option<&str>) -> FlightView {
+    let mine = flight.mine(viewer);
     let (question, asked_at) = match flight.question {
         Some(question) => (Some(question.text), Some(question.at)),
         None => (None, None),
@@ -389,6 +402,7 @@ fn view(flight: Flight, status_reason: Option<String>) -> FlightView {
         body: flight.body,
         filed_by: flight.filed_by,
         filed_session: flight.filed_session,
+        filed_callsign: flight.filed_callsign,
         filed_at: flight.filed_at,
         comments: flight.comments.len(),
         depends_on: flight.depends_on.iter().map(ToString::to_string).collect(),
@@ -399,9 +413,14 @@ fn view(flight: Flight, status_reason: Option<String>) -> FlightView {
             .status_mark
             .as_ref()
             .and_then(|mark| mark.session.clone()),
+        status_callsign: flight
+            .status_mark
+            .as_ref()
+            .and_then(|mark| mark.callsign.clone()),
         status_at: flight.status_mark.as_ref().map(|mark| mark.at),
         status_reason,
         assignee: flight.assignee,
+        mine,
         priority: flight.priority,
         labels: flight.labels,
         skill: flight.skill,
@@ -445,6 +464,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind,
         }
@@ -533,13 +553,13 @@ mod tests {
 
     /// The common shape: the default closed window.
     fn board(events: &[Event]) -> Board {
-        enrich(fold(events), NOW, ClosedWindow::default())
+        enrich(fold(events), NOW, ClosedWindow::default(), None)
     }
 
     /// The same board with the closed window named, where a test is
     /// about the window itself.
     fn windowed(events: &[Event], closed: ClosedWindow) -> Board {
-        enrich(fold(events), NOW, closed)
+        enrich(fold(events), NOW, closed, None)
     }
 
     fn ids(views: &[FlightView]) -> Vec<&str> {
@@ -885,5 +905,50 @@ mod tests {
         assert!(view.labels.is_empty());
         assert!(view.skill.is_none());
         assert!(view.procedure.is_none());
+    }
+
+    #[test]
+    fn the_inbox_pins_the_viewers_own_callsign_beside_me() {
+        let events = [
+            filed_as("pi.1", 10, "ready", "none", Some("me")),
+            filed_as("pi.2", 20, "ready", "none", Some("qwen-review")),
+            filed_as("pi.3", 30, "ready", "none", Some("claude")),
+            filed_as("pi.4", 40, "ready", "none", Some("agent")),
+            filed_as("pi.5", 50, "backlog", "none", Some("qwen-review")),
+        ];
+        let qwen = enrich(
+            fold(&events),
+            NOW,
+            ClosedWindow::default(),
+            Some("qwen-review"),
+        );
+        assert_eq!(
+            ids(&qwen.waiting_on_you.yours),
+            ["pi.1", "pi.2"],
+            "`me` and the viewer's own, Ready only"
+        );
+        let mine: Vec<bool> = qwen.backlog.iter().map(|view| view.mine).collect();
+        assert_eq!(mine, [true], "the flag is the lane's, whatever the status");
+        let nobody = enrich(fold(&events), NOW, ClosedWindow::default(), None);
+        assert_eq!(ids(&nobody.waiting_on_you.yours), ["pi.1"]);
+        assert!(
+            !nobody
+                .ready
+                .iter()
+                .any(|view| view.id == "pi.2" && view.mine)
+        );
+    }
+
+    #[test]
+    fn the_row_carries_the_filers_and_the_movers_callsign() {
+        let mut filing = filed_as("pi.1", 10, "ready", "none", None);
+        filing.callsign = Some("tyler".to_string());
+        let mut pull = moved("pi.2", 20, "pi.1", "in_progress");
+        pull.callsign = Some("claude".to_string());
+        let board = board(&[filing, pull]);
+        let row = &board.in_progress[0];
+        assert_eq!(row.filed_callsign.as_deref(), Some("tyler"));
+        assert_eq!(row.status_callsign.as_deref(), Some("claude"));
+        assert_eq!(row.status_by.as_deref(), Some("a@b.c"));
     }
 }

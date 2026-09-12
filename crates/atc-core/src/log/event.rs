@@ -201,6 +201,19 @@ pub enum Kind {
         /// Retired with #124; read for old events, never written.
         branch: Option<String>,
     },
+    /// Puts a callsign on the roster, or rewrites its entry: `kind` is
+    /// `person` or `agent` — closed in the verb, a free string here on
+    /// the crew precedent — and `description` is always written. Last
+    /// wins in log order, and a later registration after an
+    /// `unregistered` brings the pilot back.
+    Registered {
+        callsign: String,
+        kind: String,
+        description: String,
+    },
+    /// Takes a callsign off the roster. Events stamped with it stay as
+    /// they are: the roster is a list, never a permission.
+    Unregistered { callsign: String },
     /// A kind from a newer tower, preserved verbatim so the fold can carry
     /// it even though this binary cannot read it. Old logs land here too:
     /// the retired `claimed`/`taken`/`requeued`/`done` kinds deserialize
@@ -231,6 +244,8 @@ impl Kind {
             Kind::Held { .. } => "held",
             Kind::Answered { .. } => "answered",
             Kind::Routed { .. } => "routed",
+            Kind::Registered { .. } => "registered",
+            Kind::Unregistered { .. } => "unregistered",
             Kind::Unknown { kind, .. } => kind,
         }
     }
@@ -247,6 +262,10 @@ pub struct Event {
     /// down, the login name when a person typed the verb at a terminal,
     /// else none. The author stays the email; this says which session.
     pub session: Option<String>,
+    /// The pilot that appended it: the callsign the harness exported, or
+    /// the login name at a terminal, else none. The fourth stamp beside
+    /// writer, author, and session — the one that names who is flying.
+    pub callsign: Option<String>,
     pub kind: Kind,
 }
 
@@ -263,6 +282,10 @@ struct Wire {
     /// line when there is none, so the format is otherwise unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session: Option<String>,
+    /// The same discipline as `session`: no key when there is none, so an
+    /// old chain reads as none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    callsign: Option<String>,
     kind: String,
     body: Box<RawValue>,
 }
@@ -417,6 +440,21 @@ struct RoutedBody {
     branch: Option<String>,
 }
 
+/// `description` is always written, empty included, so a registration
+/// says outright what it carries.
+#[derive(Serialize, Deserialize)]
+struct RegisteredBody {
+    callsign: String,
+    kind: String,
+    #[serde(default)]
+    description: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct UnregisteredBody {
+    callsign: String,
+}
+
 impl Serialize for Event {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let body = match &self.kind {
@@ -536,6 +574,18 @@ impl Serialize for Event {
                 done: done.clone(),
                 branch: branch.clone(),
             }),
+            Kind::Registered {
+                callsign,
+                kind,
+                description,
+            } => serde_json::value::to_raw_value(&RegisteredBody {
+                callsign: callsign.clone(),
+                kind: kind.clone(),
+                description: description.clone(),
+            }),
+            Kind::Unregistered { callsign } => serde_json::value::to_raw_value(&UnregisteredBody {
+                callsign: callsign.clone(),
+            }),
             Kind::Unknown { body, .. } => Ok(body.clone()),
         }
         .map_err(serde::ser::Error::custom)?;
@@ -545,6 +595,7 @@ impl Serialize for Event {
             writer: self.writer.clone(),
             time: self.time,
             session: self.session.clone(),
+            callsign: self.callsign.clone(),
             kind: self.kind.name().to_string(),
             body,
         }
@@ -560,6 +611,7 @@ impl<'de> Deserialize<'de> for Event {
             writer,
             time,
             session,
+            callsign,
             kind,
             body,
         } = Wire::deserialize(deserializer)?;
@@ -693,6 +745,21 @@ impl<'de> Deserialize<'de> for Event {
                 done,
                 branch,
             }
+        } else if kind == "registered" {
+            let RegisteredBody {
+                callsign,
+                kind,
+                description,
+            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Registered {
+                callsign,
+                kind,
+                description,
+            }
+        } else if kind == "unregistered" {
+            let UnregisteredBody { callsign } =
+                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Unregistered { callsign }
         } else {
             Kind::Unknown { kind, body }
         };
@@ -702,6 +769,7 @@ impl<'de> Deserialize<'de> for Event {
             writer,
             time,
             session,
+            callsign,
             kind,
         })
     }
@@ -768,6 +836,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: plain_filed("s", "b"),
         };
         assert_eq!(
@@ -787,6 +856,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: Some("95b36d9d-efdc-4564-9b06-91842f51ef6b".to_string()),
+            callsign: None,
             kind: plain_filed("s", "b"),
         };
         let json = serde_json::to_string(&event).expect("serialize");
@@ -804,6 +874,114 @@ mod tests {
         let old = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"filed","body":{"subject":"s","body":"b","status":"ready"}}"#;
         let event: Event = serde_json::from_str(old).expect("parse");
         assert!(event.session.is_none());
+    }
+
+    #[test]
+    fn a_callsign_rides_the_wire_only_when_there_is_one() {
+        // `Some` round-trips verbatim, and `None` leaves no key, so a
+        // chain written with none is byte-identical to one written
+        // before the field.
+        let mut event = Event {
+            id: "pi.1".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            session: None,
+            callsign: Some("claude".to_string()),
+            kind: plain_filed("s", "b"),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""callsign":"claude""#), "{json}");
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        assert_eq!(back.callsign, event.callsign);
+
+        event.callsign = None;
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(!json.contains("callsign"), "{json}");
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        assert!(back.callsign.is_none());
+
+        // A line from before the field: no key, and it reads as none.
+        let old = r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"session":"tyler","kind":"filed","body":{"subject":"s","body":"b","status":"ready"}}"#;
+        let event: Event = serde_json::from_str(old).expect("parse");
+        assert!(event.callsign.is_none());
+        assert_eq!(event.session.as_deref(), Some("tyler"));
+    }
+
+    #[test]
+    fn the_roster_kinds_round_trip_and_write_the_description_always() {
+        let registered = Event {
+            id: "pi.1".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 7,
+            session: None,
+            callsign: None,
+            kind: Kind::Registered {
+                callsign: "claude".to_string(),
+                kind: "agent".to_string(),
+                description: String::new(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&registered).expect("serialize"),
+            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"registered","body":{"callsign":"claude","kind":"agent","description":""}}"#
+        );
+        let back: Event = serde_json::from_str(
+            r#"{"id":"pi.1","author":"a@b.c","writer":"pi","time":7,"kind":"registered","body":{"callsign":"claude","kind":"agent","description":"Claude Code sessions"}}"#,
+        )
+        .expect("parse");
+        let Kind::Registered {
+            callsign,
+            kind,
+            description,
+        } = back.kind
+        else {
+            panic!("a registration parses as one");
+        };
+        assert_eq!(callsign, "claude");
+        assert_eq!(kind, "agent");
+        assert_eq!(description, "Claude Code sessions");
+
+        let retired = Event {
+            id: "pi.2".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 8,
+            session: None,
+            callsign: None,
+            kind: Kind::Unregistered {
+                callsign: "qwen-review".to_string(),
+            },
+        };
+        let json = serde_json::to_string(&retired).expect("serialize");
+        assert!(json.contains(r#""kind":"unregistered""#), "{json}");
+        assert!(
+            json.contains(r#""body":{"callsign":"qwen-review"}"#),
+            "{json}"
+        );
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        let Kind::Unregistered { callsign } = back.kind else {
+            panic!("a retirement parses as one");
+        };
+        assert_eq!(callsign, "qwen-review");
+
+        // The kind is a free string on the wire: a newer tower's pilot
+        // kind parses and folds, the crew precedent.
+        let foreign = r#"{"id":"pi.3","author":"a@b.c","writer":"pi","time":9,"kind":"registered","body":{"callsign":"bot","kind":"service"}}"#;
+        let event: Event = serde_json::from_str(foreign).expect("parse");
+        let Kind::Registered {
+            kind, description, ..
+        } = event.kind
+        else {
+            panic!("a registration parses as one");
+        };
+        assert_eq!(kind, "service");
+        assert_eq!(description, "", "an absent description defaults empty");
+        // A registration naming nobody is malformed, not a kind from
+        // the future.
+        let broken = r#"{"id":"pi.3","author":"a@b.c","writer":"pi","time":9,"kind":"registered","body":{"kind":"agent"}}"#;
+        assert!(serde_json::from_str::<Event>(broken).is_err());
     }
 
     #[test]
@@ -875,6 +1053,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: Kind::Routed {
                 flight: "pi.1".parse().expect("id"),
                 procedure: "review".to_string(),
@@ -966,6 +1145,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: Kind::Filed {
                 procedure: Some("review".to_string()),
                 subject: "the retry test · pass".to_string(),
@@ -1051,6 +1231,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: Kind::Status {
                 flight: "pi.1".parse().expect("id"),
                 status: "in_progress".to_string(),
@@ -1070,6 +1251,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 8,
             session: None,
+            callsign: None,
             kind: Kind::Status {
                 flight: "pi.1".parse().expect("id"),
                 status: "canceled".to_string(),
@@ -1093,6 +1275,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: Kind::Assigned {
                 flight: "pi.1".parse().expect("id"),
                 assignee: None,
@@ -1115,6 +1298,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 8,
             session: None,
+            callsign: None,
             kind: Kind::Assigned {
                 flight: "pi.1".parse().expect("id"),
                 assignee: Some("agent".to_string()),
@@ -1132,6 +1316,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: Kind::Edited {
                 target: "pi.1".parse().expect("id"),
                 subject: subject.map(str::to_string),
@@ -1185,6 +1370,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: Kind::Edited {
                 target: "pi.1".parse().expect("id"),
                 subject: None,
@@ -1273,6 +1459,7 @@ mod tests {
                 writer: "pi".to_string(),
                 time: 7,
                 session: None,
+                callsign: None,
                 kind,
             };
             let json = serde_json::to_string(&event).expect("serialize");
@@ -1322,6 +1509,7 @@ mod tests {
             writer: "pi".to_string(),
             time: 7,
             session: None,
+            callsign: None,
             kind: Kind::ViewSaved {
                 view: None,
                 name: "mine".to_string(),

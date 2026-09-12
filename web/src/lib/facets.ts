@@ -49,9 +49,10 @@ export function facets(field: Field, rows: FlightView[]): Facet[] {
         for (const label of row.labels) hit(label);
         break;
       case "for":
-        // The rows only a person can handle: an open question in
-        // any lane, or the `me` lane at any status.
-        if (row.question !== null || row.assignee === "me") hit("me");
+        // The rows only the viewer can handle: an open question in
+        // any lane, or the viewer's own lane — `me`, or their callsign,
+        // which the row's `mine` flag already folded — at any status.
+        if (row.question !== null || row.mine) hit("me");
         break;
       default:
         return [];

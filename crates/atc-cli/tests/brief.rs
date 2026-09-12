@@ -22,6 +22,7 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
         // A developer's own Claude Code session must not tag the fixture's
         // events: the bylines below assert the bare email.
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .output()
         .expect("spawn atc")
 }
@@ -365,6 +366,66 @@ fn the_byline_carries_the_session() {
 }
 
 #[test]
+fn the_byline_is_the_callsign_and_the_session_follows_under_it() {
+    // A move under both a callsign and a session: the callsign is the
+    // byline, and the session prints on its own dim line under the
+    // entry, the way a reason does. The wire carries all three.
+    let repo = repo();
+    let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
+    stdout(&atc(repo.path(), &["file", "flown"]));
+    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+        .args(["status", "1", "in_progress"])
+        .current_dir(repo.path())
+        .env("XDG_CONFIG_HOME", xdg(repo.path()))
+        .env("CLAUDE_CODE_SESSION_ID", uuid)
+        .env("ATC_CALLSIGN", "claude")
+        .output()
+        .expect("spawn atc");
+    stdout(&out);
+    let out = Command::new(env!("CARGO_BIN_EXE_atc"))
+        .args(["comment", "1", "-m", "a note"])
+        .current_dir(repo.path())
+        .env("XDG_CONFIG_HOME", xdg(repo.path()))
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env("ATC_CALLSIGN", "tyler")
+        .output()
+        .expect("spawn atc");
+    stdout(&out);
+
+    let data = &envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"];
+    assert!(data["filed_callsign"].is_null(), "{data}");
+    assert_eq!(data["status_callsign"], serde_json::json!("claude"));
+    assert_eq!(data["status_session"], serde_json::json!(uuid));
+    assert_eq!(data["status_by"], serde_json::json!("tests@tower.invalid"));
+    assert_eq!(data["comments"][0]["callsign"], serde_json::json!("tyler"));
+    let history = data["history"].as_array().expect("a history");
+    assert!(history[0]["callsign"].is_null(), "{data}");
+    assert_eq!(history[1]["callsign"], serde_json::json!("claude"));
+    assert_eq!(history[1]["session"], serde_json::json!(uuid));
+    assert_eq!(history[2]["callsign"], serde_json::json!("tyler"));
+
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    assert!(text.contains("in progress — claude "), "{text}");
+    assert!(
+        text.contains("pi.2 · status in_progress · claude · "),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n    session [95b36d9d]\n"),
+        "the session follows the entry: {text}"
+    );
+    assert!(text.contains("pi.3 · commented · tyler · "), "{text}");
+    assert!(
+        !text.contains("session tyler"),
+        "no session, no follow line: {text}"
+    );
+    assert!(
+        text.contains("pi.1 · filed · tests@tower.invalid · "),
+        "{text}"
+    );
+}
+
+#[test]
 fn the_history_lists_every_gesture_in_log_order() {
     let repo = repo();
     stdout(&atc(
@@ -538,7 +599,7 @@ fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
         .clone();
     assert_eq!(history.len(), 2);
     assert_eq!(history[1]["what"], serde_json::json!("promoted"));
-    // Its words are unknowable, so the row is the five keys alone.
+    // Its words are unknowable, so the row is the six keys alone.
     let mut keys: Vec<&str> = history[1]
         .as_object()
         .expect("an object")
@@ -546,7 +607,7 @@ fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
         .map(String::as_str)
         .collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["at", "by", "id", "session", "what"]);
+    assert_eq!(keys, ["at", "by", "callsign", "id", "session", "what"]);
 
     // A body naming some other flight stays off this one's history.
     Store::open(repo.path())

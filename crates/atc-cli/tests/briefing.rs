@@ -24,7 +24,8 @@ fn command(cwd: &Path, home: &Path, args: &[&str]) -> Command {
         .env("USERPROFILE", home)
         .env("XDG_CONFIG_HOME", home.join("xdg"))
         .env("ATC_FF", "/nonexistent")
-        .env_remove("CLAUDE_CODE_SESSION_ID");
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN");
     command
 }
 
@@ -100,6 +101,75 @@ fn the_notice_leads_and_the_status_line_closes() {
     assert_eq!(v["data"]["text"].as_str().unwrap(), text.trim_end());
     assert_eq!(v["data"]["ready"], 2);
     assert_eq!(v["data"]["filed"], 3);
+    assert_eq!(v["data"]["on"], serde_json::json!([]));
+    assert!(
+        v["data"]["callsign"].is_null(),
+        "no callsign under the runner"
+    );
+}
+
+#[test]
+fn a_callsign_on_a_flight_gets_the_resume_line() {
+    // The pilot's own In Progress flights, ahead of the count: what a
+    // session that compacted mid-flight needs first. Another callsign's
+    // pull, and a pull with no callsign, are not this session's.
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "one", "--status", "ready"]));
+    stdout(&atc(repo.path(), &["file", "two", "--status", "ready"]));
+    stdout(&atc(repo.path(), &["file", "three", "--status", "ready"]));
+    let as_claude = |args: &[&str]| {
+        let mut command = command(repo.path(), root(repo.path()), args);
+        command.env("ATC_CALLSIGN", "claude");
+        command.output().expect("spawn atc")
+    };
+    stdout(&as_claude(&["status", "2", "in_progress"]));
+    stdout(&atc(repo.path(), &["status", "3", "in_progress"]));
+
+    let text = stdout(&as_claude(&["briefing"]));
+    assert!(
+        text.trim_end()
+            .ends_with("You are on #2. Run `atc brief 2`."),
+        "{text}"
+    );
+    let out = as_claude(&["briefing", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("an envelope");
+    assert_eq!(v["data"]["on"], serde_json::json!(["#2"]));
+    assert_eq!(v["data"]["callsign"], serde_json::json!("claude"));
+    assert_eq!(v["data"]["ready"], 1);
+
+    // Without the callsign, the count line as before.
+    let text = stdout(&atc(repo.path(), &["briefing"]));
+    assert!(
+        text.trim_end().ends_with("1 flight ready. Run `atc`."),
+        "{text}"
+    );
+
+    // The client form under the variable carries the line too.
+    stdout(&as_claude(&["status", "1", "in_progress"]));
+    let mut hooked = command(
+        root(repo.path()),
+        root(repo.path()),
+        &["briefing", "claude"],
+    );
+    hooked.env("ATC_CALLSIGN", "claude");
+    hooked.stdin(Stdio::piped());
+    let mut child = hooked
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn atc");
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_all(format!(r#"{{"cwd":"{}"}}"#, repo.path().display()).as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait for atc");
+    let text = stdout(&out);
+    assert!(
+        text.contains("You are on #1 and #2. Run `atc brief 1`."),
+        "{text}"
+    );
 }
 
 #[test]

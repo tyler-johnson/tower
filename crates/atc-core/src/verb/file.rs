@@ -50,10 +50,12 @@ use serde::Serialize;
 
 use crate::config;
 use crate::log::{Event, EventId, Kind, Store};
-use crate::model::{Assignee, Status};
+use crate::model::Status;
 use crate::procedure::{self, Definition, Match, Registry};
 
-use super::{Error, Fields, Parent, appended, appended_all, classify};
+use super::{
+    Error, Fields, Parent, appended, appended_all, classify, lane_word, resolve_me, stored_lane,
+};
 
 /// The envelope's `data`. Struct fields serialize in declaration order,
 /// and this order — `filed, linked, parts` — is the alphabetical one the
@@ -109,7 +111,7 @@ pub fn file(
             subject: subject.to_string(),
             body: fields.message.clone().unwrap_or_default(),
             status: fields.status.clone().unwrap_or_else(|| default.to_string()),
-            assignee: fields.assignee.clone(),
+            assignee: stored_lane(fields.assignee.clone(), store.callsign()),
             priority: fields
                 .priority
                 .clone()
@@ -157,7 +159,12 @@ fn minted(
     rule: Option<&Match>,
 ) -> Result<File, Error> {
     let ids = store.append_with(|mint| {
-        let mut kinds = classify(definition, subject, fields, Parent::Mint, default, mint);
+        // `me` resolves after the mint, never before the match: a rule
+        // saying `assignee = "me"` matched the literal word above.
+        let mut kinds = resolve_me(
+            classify(definition, subject, fields, Parent::Mint, default, mint),
+            store.callsign(),
+        );
         if let Some(rule) = rule {
             kinds.push(Kind::Routed {
                 flight: mint(0),
@@ -289,18 +296,15 @@ fn born(status: Option<String>) -> Result<Option<String>, Error> {
     }
 }
 
-/// The caller's `--assignee`, validated: a lane name passes through,
-/// `none` is the absent lane spelled out, and anything else refuses —
-/// the closed vocabulary lives here, not on the wire.
+/// The caller's `--assignee`, validated: a lane word or a callsign
+/// passes through, `none` is the absent lane spelled out, and a
+/// malformed word refuses. Validation only — `me` stays the literal
+/// here so a match rule can see it, and `stored_lane` resolves it at
+/// the append.
 fn lane(assignee: Option<String>) -> Result<Option<String>, Error> {
     match assignee.as_deref() {
-        None | Some("none") => Ok(None),
-        Some(word) => match Assignee::parse(word) {
-            Some(lane) => Ok(Some(lane.name().to_string())),
-            None => Err(Error::BadAssignee {
-                word: word.to_string(),
-            }),
-        },
+        None => Ok(None),
+        Some(word) => lane_word(word),
     }
 }
 
@@ -417,7 +421,7 @@ done     = "committed"
         assert_eq!(flight.labels, ["web"]);
         assert_eq!(flight.skill.as_deref(), Some("debug"));
         assert_eq!(flight.body, "the redirect loops");
-        assert!(flight.pullable(), "agent-laned and Ready — pullable");
+        assert!(flight.pullable(None), "agent-laned and Ready — pullable");
     }
 
     #[test]
@@ -440,7 +444,7 @@ done     = "committed"
         assert_eq!(fold.flights[0].status, "backlog", "the setting's word");
         assert_eq!(fold.flights[1].status, "in_progress", "--status wins");
         assert!(
-            !fold.flights[0].pullable(),
+            !fold.flights[0].pullable(None),
             "Backlog — the lane alone clears nothing"
         );
     }
@@ -612,11 +616,16 @@ status   = "backlog"
         assert_eq!(pass.status, "ready", "no after — born Ready");
         assert_eq!(pass.assignee.as_deref(), Some("agent"));
         assert_eq!(pass.skill.as_deref(), Some("review"));
-        assert!(pass.pullable());
+        assert!(pass.pullable(None));
 
         let smoke = by_subject("· smoke");
         assert_eq!(smoke.status, "ready");
-        assert_eq!(smoke.assignee.as_deref(), Some("me"));
+        // The definition's `me` is stored as the caller's callsign, the
+        // literal when the process has none.
+        assert_eq!(
+            smoke.assignee.as_deref(),
+            Some(store.callsign().unwrap_or("me"))
+        );
 
         let verdict = by_subject("· verdict");
         assert_eq!(verdict.status, "waiting", "dependencies — born Waiting");
@@ -724,7 +733,10 @@ done     = "landed"
         let flight = &fold.flights[0];
         assert_eq!(flight.procedure.as_deref(), Some("chores"));
         assert_eq!(flight.status, "ready");
-        assert_eq!(flight.assignee.as_deref(), Some("me"));
+        assert_eq!(
+            flight.assignee.as_deref(),
+            Some(store.callsign().unwrap_or("me"))
+        );
         assert_eq!(flight.skill.as_deref(), Some("tidy"));
         assert_eq!(flight.priority, "low");
         assert_eq!(flight.labels, ["chore"], "the caller's label stays");

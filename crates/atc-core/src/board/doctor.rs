@@ -223,9 +223,13 @@ fn named(kind: &Kind) -> Vec<&EventId> {
             view: Some(view), ..
         }
         | Kind::ViewDeleted { view } => vec![view],
-        Kind::Filed { .. } | Kind::ViewSaved { view: None, .. } | Kind::Unknown { .. } => {
-            Vec::new()
-        }
+        // A roster event names a callsign, never a flight, and the fold
+        // routes every one of them.
+        Kind::Filed { .. }
+        | Kind::ViewSaved { view: None, .. }
+        | Kind::Registered { .. }
+        | Kind::Unregistered { .. }
+        | Kind::Unknown { .. } => Vec::new(),
     }
 }
 
@@ -264,6 +268,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Filed {
                 procedure: None,
@@ -288,6 +293,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Status {
                 flight: flight.parse().expect("id"),
@@ -341,6 +347,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Unknown {
                 kind: kind.to_string(),
@@ -356,6 +363,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Commented {
                 flight: flight.parse().expect("id"),

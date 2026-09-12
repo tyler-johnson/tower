@@ -116,7 +116,10 @@
       </h1>
     {/if}
     <p class="text-base-content/40 font-mono text-xs">
-      filed by {byline(brief.filed_session, brief.filed_by)} · {age(now, brief.filed_at)}
+      filed by {byline(brief.filed_callsign, brief.filed_session, brief.filed_by)} · {age(
+        now,
+        brief.filed_at,
+      )}
     </p>
   </header>
 
@@ -262,18 +265,33 @@
 							name, and what `edit` takes.
 						-->
             <p class="text-base-content/40 font-mono text-xs">
-              {entry.id} · {byline(entry.session, entry.by)} · {age(now, entry.at)}
+              {entry.id} · {byline(entry.callsign, entry.session, entry.by)} · {age(now, entry.at)}
             </p>
+            {#if entry.callsign !== null && entry.session !== null}
+              <p class="text-base-content/40 pl-4 font-mono text-xs">
+                session {byline(null, entry.session, entry.by)}
+              </p>
+            {/if}
             <div class="prose max-w-none">{@html render(entry.text)}</div>
           </div>
         {:else}
           <div class="flex flex-col gap-1">
             <p class="text-base-content/40 font-mono text-xs">
-              {entry.id} · {entry.what}{entry.line} · {byline(entry.session, entry.by)} · {age(
-                now,
-                entry.at,
-              )}
+              {entry.id} · {entry.what}{entry.line} · {byline(
+                entry.callsign,
+                entry.session,
+                entry.by,
+              )} · {age(now, entry.at)}
             </p>
+            <!--
+							The pilot is the byline; when the event carried a
+							session too, the run stays provenance under it.
+						-->
+            {#if entry.callsign !== null && entry.session !== null}
+              <p class="text-base-content/40 pl-4 font-mono text-xs">
+                session {byline(null, entry.session, entry.by)}
+              </p>
+            {/if}
             {#if entry.note}
               <div class="prose prose-dim max-w-none pl-4">{@html render(entry.note)}</div>
             {/if}

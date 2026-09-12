@@ -42,6 +42,8 @@ pub struct Brief {
     pub filed_by: String,
     /// The filer's session, when the filing carried one.
     pub filed_session: Option<String>,
+    /// The filer's callsign, when the filing carried one.
+    pub filed_callsign: Option<String>,
     pub filed_at: i64,
     /// The derived status — the brief is the read surface for one
     /// flight, so this is where the fields are meant to be read.
@@ -53,6 +55,8 @@ pub struct Brief {
     pub status_by: Option<String>,
     /// The mover's session, when that gesture carried one.
     pub status_session: Option<String>,
+    /// The mover's callsign, when that gesture carried one — the pilot.
+    pub status_callsign: Option<String>,
     pub status_at: Option<i64>,
     /// Why the mark is someone else's gesture: "dependency <id> done"
     /// or "… canceled" when a dependency's closing is what made the
@@ -105,8 +109,9 @@ pub enum Standing {
     /// it says who.
     InProgress,
     /// Not in the pool by the status and the lane alone: not Ready —
-    /// Backlog, or Waiting on a live dependency — or not in the agent
-    /// lane. Unknown never rounds down.
+    /// Backlog, or Waiting on a live dependency — or in neither the
+    /// agent lane nor the reader's own callsign's. Unknown never rounds
+    /// down.
     Yours,
     /// In the pool: `next` will hand it out in filed order.
     Ready,
@@ -132,6 +137,7 @@ pub struct CommentView {
     pub id: String,
     pub author: String,
     pub session: Option<String>,
+    pub callsign: Option<String>,
     pub at: i64,
     pub text: String,
 }
@@ -143,9 +149,11 @@ pub struct CommentView {
 ///
 /// Enrichment is `enrich`'s per-flight derivation, reused: the status
 /// mark and its reason, the progress mark, and the open question.
-pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
+/// `viewer` is the reader's callsign, which the standing reads: a
+/// flight laned to it is in the reader's pool.
+pub fn brief(fold: &Fold, events: &[Event], id: &EventId, viewer: Option<&str>) -> Option<Brief> {
     let flight = fold.flights.iter().find(|flight| &flight.id == id)?;
-    let standing = standing(flight);
+    let standing = standing(flight, viewer);
 
     Some(Brief {
         id: flight.id.to_string(),
@@ -155,6 +163,7 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
         body: flight.body.clone(),
         filed_by: flight.filed_by.clone(),
         filed_session: flight.filed_session.clone(),
+        filed_callsign: flight.filed_callsign.clone(),
         filed_at: flight.filed_at,
         status: flight.status.clone(),
         status_by: flight.status_mark.as_ref().map(|mark| mark.by.clone()),
@@ -162,6 +171,10 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
             .status_mark
             .as_ref()
             .and_then(|mark| mark.session.clone()),
+        status_callsign: flight
+            .status_mark
+            .as_ref()
+            .and_then(|mark| mark.callsign.clone()),
         status_at: flight.status_mark.as_ref().map(|mark| mark.at),
         status_reason: super::model::status_reason(fold, flight),
         assignee: flight.assignee.clone(),
@@ -184,6 +197,7 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
                 id: comment.id.to_string(),
                 author: comment.author.clone(),
                 session: comment.session.clone(),
+                callsign: comment.callsign.clone(),
                 at: comment.at,
                 text: comment.text.clone(),
             })
@@ -196,14 +210,14 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
 /// Where the flight stands, in enrich's precedence, over the same gate
 /// as pick's. A pool candidate is always ready — there is no gate for it
 /// to lose.
-fn standing(flight: &Flight) -> Standing {
+fn standing(flight: &Flight, viewer: Option<&str>) -> Standing {
     if flight.closed() {
         Standing::Done
     } else if flight.question.is_some() {
         Standing::Question
     } else if flight.status == "in_progress" {
         Standing::InProgress
-    } else if flight.pullable() {
+    } else if flight.pullable(viewer) {
         Standing::Ready
     } else {
         Standing::Yours
@@ -247,6 +261,7 @@ mod tests {
             author: "filer@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Filed {
                 procedure: Some("review".to_string()),
@@ -272,6 +287,7 @@ mod tests {
             author: "filer@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind: Kind::Filed {
                 procedure: None,
@@ -301,6 +317,7 @@ mod tests {
             author: author.to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind,
         }
@@ -403,7 +420,7 @@ mod tests {
     /// `brief` over one slice of events — the fold and the history from
     /// the same log, which is the only honest way to pair them.
     fn brief_of(events: &[Event], id: &EventId) -> Option<Brief> {
-        brief(&fold(events), events, id)
+        brief(&fold(events), events, id, None)
     }
 
     #[test]
@@ -509,6 +526,45 @@ mod tests {
         assert!(brief.filed_session.is_none());
         assert!(brief.status_session.is_none());
         assert!(brief.history.iter().all(|moment| moment.session.is_none()));
+    }
+
+    #[test]
+    fn the_callsign_rides_the_marks_the_comments_and_the_moments() {
+        let flown = |mut event: Event, callsign: Option<&str>| {
+            event.callsign = callsign.map(str::to_string);
+            event
+        };
+        let events = [
+            flown(filed("pi.1", 10, "s", ""), Some("tyler")),
+            flown(
+                moved("pi.2", "one@b.c", 20, "pi.1", "in_progress"),
+                Some("claude"),
+            ),
+            flown(commented("pi.3", "one@b.c", 30, "pi.1", "note"), None),
+        ];
+        let brief = brief_of(&events, &id("pi.1")).expect("filed");
+        assert_eq!(brief.filed_callsign.as_deref(), Some("tyler"));
+        assert_eq!(brief.status_callsign.as_deref(), Some("claude"));
+        assert_eq!(brief.status_by.as_deref(), Some("one@b.c"));
+        assert!(brief.comments[0].callsign.is_none());
+        let callsigns: Vec<Option<&str>> = brief
+            .history
+            .iter()
+            .map(|moment| moment.callsign.as_deref())
+            .collect();
+        assert_eq!(callsigns, [Some("tyler"), Some("claude"), None]);
+    }
+
+    #[test]
+    fn a_flight_laned_to_the_viewer_briefs_ready_and_yours_to_anyone_else() {
+        let events = [stored("pi.1", 10, "ready", Some("qwen-review"))];
+        let folded = fold(&events);
+        let own = brief(&folded, &events, &id("pi.1"), Some("qwen-review")).expect("filed");
+        assert!(matches!(own.standing, Standing::Ready));
+        let other = brief(&folded, &events, &id("pi.1"), Some("claude")).expect("filed");
+        assert!(matches!(other.standing, Standing::Yours));
+        let nobody = brief(&folded, &events, &id("pi.1"), None).expect("filed");
+        assert!(matches!(nobody.standing, Standing::Yours));
     }
 
     #[test]

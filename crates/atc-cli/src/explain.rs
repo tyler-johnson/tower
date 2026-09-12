@@ -204,11 +204,51 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "usage/bad-assignee",
         summary: "that is not a lane",
-        detail: "The lane is deliberately coarse — `me` or `agent`, plus `none` to clear it — \
-                 because whose queue this is in is all the field carries. Which agent actually \
-                 flies a flight needs no field: every event carries the byline of whoever \
-                 wrote it.",
+        detail: "A lane is `me`, `agent`, `none` to clear it, or a callsign — one word, no \
+                 spaces, at most 64 bytes — and the word given is none of those. `agent` is the \
+                 open pool, a callsign is one pilot's own queue, and `me` stores your own \
+                 callsign. A callsign needs no registration to be a lane; `atc register` is the \
+                 roster, which gives it a kind, a description, and a last-seen line.",
         exits: &[],
+    },
+    Entry {
+        id: "usage/bad-callsign",
+        summary: "that is not a callsign",
+        detail: "A callsign is one word — no whitespace, no control characters, at most 64 \
+                 bytes — and not one of the lane words `me`, `agent`, or `none`, which name a \
+                 lane rather than a pilot. The same rule holds everywhere a callsign is read: \
+                 `atc register`, `atc assign`, `--assignee`, and `ATC_CALLSIGN`, where an \
+                 unusable value is ignored rather than refused.",
+        exits: &[],
+    },
+    Entry {
+        id: "usage/bad-kind",
+        summary: "that is not a pilot kind",
+        detail: "`--kind` takes `person` or `agent`: what the callsign is, on the roster line. \
+                 Closed at the verb and a free string in the log, the crew precedent, so a \
+                 newer tower's kind folds through untouched.",
+        exits: &[],
+    },
+    Entry {
+        id: "usage/needs-kind",
+        summary: "registering a callsign needs `--kind`",
+        detail: "`atc register <callsign>` puts a pilot on the roster, and the roster says what \
+                 each pilot is — `--kind person` or `--kind agent`. The flag is optional in the \
+                 parser on purpose: a `--json` caller gets this envelope instead of clap's \
+                 usage text. `-d` retires the callsign instead, and takes no kind.",
+        exits: &[
+            "atc register <callsign> --kind <kind>",
+            "atc register -d <callsign>",
+        ],
+    },
+    Entry {
+        id: "callsign/not-found",
+        summary: "no such callsign on the roster",
+        detail: "`atc register -d` takes a callsign off the roster, and the one named is not \
+                 on it — never registered, or retired already. A retirement of nobody would \
+                 append a gesture the roster cannot show, so it refuses. Bare `atc register` \
+                 lists who is there.",
+        exits: &["atc register"],
     },
     Entry {
         id: "usage/self-link",

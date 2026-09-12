@@ -20,6 +20,7 @@ fn atc_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
         .args(args)
         .current_dir(repo)
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         // The hook rows read the agent clients under HOME, and the
         // runner's real `~/.claude` would add one: the fixture root is
         // the home, with no client in it.

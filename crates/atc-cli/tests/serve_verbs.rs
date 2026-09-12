@@ -634,9 +634,9 @@ fn the_usage_refusals_are_four_hundreds_with_the_clis_envelope() {
         &server,
         repo.path(),
         "/api/assign",
-        r#"{"flight":"1","assignee":"you"}"#,
+        r#"{"flight":"1","assignee":"two words"}"#,
         400,
-        &["assign", "1", "you", "--json"],
+        &["assign", "1", "two words", "--json"],
         "usage/bad-assignee",
     );
     // An empty list parses fine and refuses in core, the way a missing

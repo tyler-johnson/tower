@@ -29,6 +29,7 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
         // A developer's own Claude Code session must not tag the fixture's
         // events: the bylines below assert the bare email.
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .output()
         .expect("spawn atc")
 }
@@ -56,6 +57,18 @@ fn stdout(output: &Output) -> String {
 
 fn envelope(output: &Output) -> serde_json::Value {
     serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("an envelope")
+}
+
+/// The spawn under a callsign, the way a harness exports one.
+fn atc_as(repo: &Path, args: &[&str], callsign: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_atc"))
+        .args(args)
+        .current_dir(repo)
+        .env("XDG_CONFIG_HOME", xdg(repo))
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env("ATC_CALLSIGN", callsign)
+        .output()
+        .expect("spawn atc")
 }
 
 fn repo() -> Repo {
@@ -457,4 +470,55 @@ fn a_flight_naming_no_skill_omits_the_field() {
 
     let text = stdout(&atc(repo.path(), &["next"]));
     assert!(!text.contains("skill"), "{text}");
+}
+
+#[test]
+fn a_callsigns_own_queue_is_pulled_by_that_callsign_alone() {
+    // The brief's verify: `atc assign 5 qwen-review`, then the pull under
+    // that callsign picks it and a pull under another does not — and the
+    // pick's In Progress carries the callsign onto the board.
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "the review"]));
+    stdout(&atc(repo.path(), &["assign", "1", "qwen-review"]));
+
+    let out = atc_as(repo.path(), &["next"], "claude");
+    assert_eq!(out.status.code(), Some(1), "another callsign's queue");
+    let json = envelope(&atc_as(repo.path(), &["next", "--json"], "claude"));
+    assert_eq!(json["data"]["outcome"], serde_json::json!("yours"));
+
+    let out = atc_as(repo.path(), &["next"], "qwen-review");
+    assert_eq!(out.status.code(), Some(0));
+    let text = stdout(&out);
+    assert!(text.contains("in progress #1: the review"), "{text}");
+
+    let board = envelope(&atc(repo.path(), &["--json"]));
+    let flown = &board["data"]["in_progress"][0];
+    assert_eq!(flown["id"], serde_json::json!("pi.1"));
+    assert_eq!(flown["status_callsign"], serde_json::json!("qwen-review"));
+    assert_eq!(flown["status_by"], serde_json::json!("tests@tower.invalid"));
+    let rendered = stdout(&atc(repo.path(), &[]));
+    assert!(rendered.contains("in progress — qwen-review"), "{rendered}");
+}
+
+#[test]
+fn a_callsign_pulls_its_own_queue_and_the_pool_in_filed_order() {
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "own first"]));
+    stdout(&atc(repo.path(), &["assign", "1", "claude"]));
+    file_pipeline(&repo, "the pool");
+    stdout(&atc(repo.path(), &["file", "own last"]));
+    stdout(&atc(repo.path(), &["assign", "5", "claude"]));
+
+    let json = envelope(&atc_as(
+        repo.path(),
+        &["next", "-n", "3", "--json"],
+        "claude",
+    ));
+    let picked: Vec<&str> = json["data"]["picked"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["flight"].as_str().expect("flight"))
+        .collect();
+    assert_eq!(picked, ["pi.1", "pi.4", "pi.9"], "filed order across both");
 }

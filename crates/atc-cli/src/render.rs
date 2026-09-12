@@ -108,15 +108,18 @@ pub fn age(now: i64, then: i64) -> String {
     format!("{} ago", span(now - then))
 }
 
-/// The byline: the session when the event carries one, else the author.
-/// A session shaped like a UUID renders as its first eight characters in
-/// brackets, the short form fufu's capture summaries use; anything else
-/// — a login name, a hand-typed tag — renders verbatim.
-pub fn byline(session: Option<&str>, by: &str) -> String {
-    match session {
-        Some(session) if is_uuid(session) => format!("[{}]", &session[..8]),
-        Some(session) => session.to_string(),
-        None => by.to_string(),
+/// The byline: the callsign when the event carries one, else the
+/// session, else the author. A callsign renders verbatim — it is the
+/// chosen readable name. A session shaped like a UUID renders as its
+/// first eight characters in brackets, the short form fufu's capture
+/// summaries use; anything else — a login name, a hand-typed tag —
+/// renders verbatim.
+pub fn byline(callsign: Option<&str>, session: Option<&str>, by: &str) -> String {
+    match (callsign, session) {
+        (Some(callsign), _) => callsign.to_string(),
+        (None, Some(session)) if is_uuid(session) => format!("[{}]", &session[..8]),
+        (None, Some(session)) => session.to_string(),
+        (None, None) => by.to_string(),
     }
 }
 
@@ -157,7 +160,11 @@ fn note(view: &FlightView, now: i64, colored: bool) -> String {
             &match view.status_by.as_deref() {
                 Some(by) => format!(
                     "in progress — {}",
-                    byline(view.status_session.as_deref(), by)
+                    byline(
+                        view.status_callsign.as_deref(),
+                        view.status_session.as_deref(),
+                        by
+                    )
                 ),
                 None => "in progress".to_string(),
             },
@@ -309,6 +316,7 @@ mod tests {
             body: String::new(),
             filed_by: "a@b.c".to_string(),
             filed_session: None,
+            filed_callsign: None,
             filed_at: NOW - 60,
             comments: 0,
             depends_on: Vec::new(),
@@ -316,9 +324,11 @@ mod tests {
             status: status.to_string(),
             status_by: None,
             status_session: None,
+            status_callsign: None,
             status_reason: None,
             status_at: None,
             assignee: None,
+            mine: false,
             priority: "none".to_string(),
             labels: Vec::new(),
             skill: None,
@@ -347,20 +357,27 @@ mod tests {
     }
 
     #[test]
-    fn a_byline_is_the_session_over_the_author() {
+    fn a_byline_is_the_callsign_over_the_session_over_the_author() {
+        let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
         assert_eq!(
-            byline(Some("95b36d9d-efdc-4564-9b06-91842f51ef6b"), "a@b.c"),
+            byline(None, Some(uuid), "a@b.c"),
             "[95b36d9d]",
             "a UUID shortens to its first eight characters"
         );
-        assert_eq!(byline(Some("tyler"), "a@b.c"), "tyler");
-        assert_eq!(byline(Some("hand-typed"), "a@b.c"), "hand-typed");
-        assert_eq!(byline(None, "a@b.c"), "a@b.c");
+        assert_eq!(byline(None, Some("tyler"), "a@b.c"), "tyler");
+        assert_eq!(byline(None, Some("hand-typed"), "a@b.c"), "hand-typed");
+        assert_eq!(byline(None, None, "a@b.c"), "a@b.c");
         assert_eq!(
-            byline(Some("95b36d9d-efdc-4564-9b06-91842f51ef6"), "a@b.c"),
+            byline(None, Some("95b36d9d-efdc-4564-9b06-91842f51ef6"), "a@b.c"),
             "95b36d9d-efdc-4564-9b06-91842f51ef6",
             "one character short of the shape is not a UUID"
         );
+        assert_eq!(
+            byline(Some("claude"), Some(uuid), "a@b.c"),
+            "claude",
+            "the callsign wins over the session"
+        );
+        assert_eq!(byline(Some("claude"), None, "a@b.c"), "claude");
     }
 
     #[test]

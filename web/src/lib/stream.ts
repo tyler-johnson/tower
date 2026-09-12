@@ -23,6 +23,7 @@ export type Entry =
       at: number;
       by: string;
       session: string | null;
+      callsign: string | null;
       text: string;
     }
   | {
@@ -32,6 +33,8 @@ export type Entry =
       by: string;
       /// The session behind the byline, when the event carried one.
       session: string | null;
+      /// The pilot, when the event carried a callsign.
+      callsign: string | null;
       what: string;
       line: string;
       note: string | null;
@@ -57,6 +60,7 @@ export function stream(brief: Brief): Entry[] {
       at: moment.at,
       by: moment.by,
       session: moment.session,
+      callsign: moment.callsign,
       what: moment.what,
       line: phrase.line,
       note: phrase.note ?? null,
@@ -80,6 +84,7 @@ function note(comment: CommentView): Entry {
     at: comment.at,
     by: comment.author,
     session: comment.session,
+    callsign: comment.callsign,
     text: comment.text,
   };
 }

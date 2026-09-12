@@ -47,6 +47,7 @@ pub struct Store {
     repo: gix::Repository,
     author: String,
     session: Option<String>,
+    callsign: Option<String>,
     writer: std::cell::OnceCell<String>,
 }
 
@@ -56,6 +57,7 @@ impl Store {
         let repo = gix::discover(path).map_err(Error::repo)?;
         let author = resolve_author(&repo)?;
         let session = session_from_environment(&repo);
+        let callsign = callsign_from_environment();
         let writer = std::cell::OnceCell::new();
         if let Some(configured) = configured_writer(&repo) {
             validate_component("writer", &configured)?;
@@ -65,6 +67,7 @@ impl Store {
             repo,
             author,
             session,
+            callsign,
             writer,
         })
     }
@@ -78,6 +81,13 @@ impl Store {
     /// tag, or the login name at a terminal.
     pub fn session(&self) -> Option<&str> {
         self.session.as_deref()
+    }
+
+    /// The callsign every append is stamped with, when there is one:
+    /// [`CALLSIGN_VAR`], or the login name at a terminal. The pilot —
+    /// which the session, a run, and the author, an email, never say.
+    pub fn callsign(&self) -> Option<&str> {
+        self.callsign.as_deref()
     }
 
     /// This machine's writer id, once one exists — `None` until the first
@@ -202,6 +212,7 @@ impl Store {
                     writer: writer.clone(),
                     time: now,
                     session: self.session.clone(),
+                    callsign: self.callsign.clone(),
                     kind,
                 })
                 .collect();
@@ -375,10 +386,7 @@ pub const SESSION_VAR: &str = "CLAUDE_CODE_SESSION_ID";
 fn session_from_environment(repo: &gix::Repository) -> Option<String> {
     let tag = std::env::var(SESSION_VAR).ok();
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
-    let login = ["USER", "LOGNAME", "USERNAME"]
-        .iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .find(|value| !value.trim().is_empty());
+    let login = login_name();
     let git_name = repo
         .committer()
         .and_then(|sig| sig.ok())
@@ -389,6 +397,63 @@ fn session_from_environment(repo: &gix::Repository) -> Option<String> {
         login.as_deref(),
         git_name.as_deref(),
     )
+}
+
+/// The variable a harness names its pilot with. Set it in the agent's
+/// environment — `ATC_CALLSIGN=claude` — and every event that agent
+/// appends carries the name; a person at a terminal gets the login
+/// name without setting anything.
+pub const CALLSIGN_VAR: &str = "ATC_CALLSIGN";
+
+/// The one rule a callsign is held to, at every boundary that takes one:
+/// trimmed, non-empty, at most 64 bytes, no whitespace or control
+/// characters, and not one of the lane words `me`, `agent`, `none`,
+/// which name a lane rather than a pilot. `Some` is the usable word.
+pub fn usable_callsign(word: &str) -> Option<String> {
+    let trimmed = word.trim();
+    let usable = !trimmed.is_empty()
+        && trimmed.len() <= 64
+        && !trimmed.chars().any(|c| c.is_whitespace() || c.is_control())
+        && !matches!(trimmed, "me" | "agent" | "none");
+    usable.then(|| trimmed.to_string())
+}
+
+/// The callsign an append is stamped with, by three rules in order: the
+/// variable when it is set and usable, the login name when a person is
+/// at the terminal, else none. No git-name fallback — a committer name
+/// has spaces and is not a callsign. An unusable variable is ignored
+/// rather than fatal, the session's rule: under a hook or an agent with
+/// nothing set, the callsign is none and folds like any other.
+pub(crate) fn resolve_callsign(
+    tag: Option<&str>,
+    interactive: bool,
+    login: Option<&str>,
+) -> Option<String> {
+    if let Some(tag) = tag.and_then(usable_callsign) {
+        return Some(tag);
+    }
+    if !interactive {
+        return None;
+    }
+    login.and_then(usable_callsign)
+}
+
+/// [`resolve_callsign`] over the process: [`CALLSIGN_VAR`], then stdin a
+/// terminal, with `USER`, `LOGNAME`, or `USERNAME` as the login name.
+fn callsign_from_environment() -> Option<String> {
+    let tag = std::env::var(CALLSIGN_VAR).ok();
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let login = login_name();
+    resolve_callsign(tag.as_deref(), interactive, login.as_deref())
+}
+
+/// The first set login variable — `USER`, `LOGNAME`, or `USERNAME` —
+/// the name a terminal's session and callsign both fall back to.
+fn login_name() -> Option<String> {
+    ["USER", "LOGNAME", "USERNAME"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.trim().is_empty())
 }
 
 /// `tower.writer` from config, when set. Local config lives in the common
@@ -654,6 +719,66 @@ mod tests {
             resolve_session(Some(&long), true, Some("tyler"), None).as_deref(),
             Some("tyler"),
             "a tag past 128 bytes is ignored"
+        );
+    }
+
+    /// The three rules in order: the variable beats everything, a
+    /// terminal gives the login name, and a non-terminal with no
+    /// variable gives none. There is no git-name fallback, and an
+    /// unusable variable — blank, spaced, a lane word — is ignored, not
+    /// fatal.
+    #[test]
+    fn a_callsign_resolves_by_variable_then_terminal_then_none() {
+        struct Case {
+            tag: Option<&'static str>,
+            interactive: bool,
+            login: Option<&'static str>,
+            want: Option<&'static str>,
+        }
+        let case = |tag, interactive, login, want| Case {
+            tag,
+            interactive,
+            login,
+            want,
+        };
+        let cases = [
+            case(Some("claude"), true, Some("tyler"), Some("claude")),
+            case(Some("claude"), false, None, Some("claude")),
+            case(Some("  qwen-review  "), false, None, Some("qwen-review")),
+            case(None, true, Some("tyler"), Some("tyler")),
+            case(None, true, None, None),
+            case(None, false, Some("tyler"), None),
+            case(Some("   "), true, Some("tyler"), Some("tyler")),
+            case(Some("two words"), true, Some("tyler"), Some("tyler")),
+            case(Some("a\tb"), false, None, None),
+            case(Some("me"), true, Some("tyler"), Some("tyler")),
+            case(Some("agent"), false, None, None),
+            case(Some("none"), false, None, None),
+            case(None, true, Some("Tyler Johnson"), None),
+        ];
+        for Case {
+            tag,
+            interactive,
+            login,
+            want,
+        } in cases
+        {
+            assert_eq!(
+                resolve_callsign(tag, interactive, login).as_deref(),
+                want,
+                "tag {tag:?}, interactive {interactive}, login {login:?}"
+            );
+        }
+        let long = "x".repeat(65);
+        assert_eq!(
+            resolve_callsign(Some(&long), true, Some("tyler")).as_deref(),
+            Some("tyler"),
+            "a callsign past 64 bytes is ignored"
+        );
+        assert_eq!(
+            usable_callsign(&"x".repeat(64)).as_deref(),
+            Some("x".repeat(64).as_str()),
+            "64 bytes is the last usable length"
         );
     }
 }

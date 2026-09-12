@@ -30,6 +30,7 @@ fn atc(home: &Path, cwd: &Path, args: &[&str], stdin: Option<&str>) -> Output {
         // Nothing here spawns fufu.
         .env("ATC_FF", "/nonexistent")
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

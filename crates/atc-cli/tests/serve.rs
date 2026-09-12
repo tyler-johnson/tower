@@ -191,6 +191,7 @@ fn outside_a_repository_it_refuses_before_it_binds() {
         ])
         .current_dir(dir.path())
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .env("HOME", dir.path())
         .env("USERPROFILE", dir.path())
         .env("XDG_CONFIG_HOME", dir.path().join("xdg"))

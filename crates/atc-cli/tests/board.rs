@@ -12,6 +12,7 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(repo)
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("ATC_CALLSIGN")
         .env("XDG_CONFIG_HOME", xdg(repo))
         .output()
         .expect("spawn atc")
@@ -349,6 +350,61 @@ fn a_ready_flight_in_the_me_lane_is_the_inboxs_second_group() {
         envelope["data"]["ready"][0]["id"],
         serde_json::json!("pi.1")
     );
+}
+
+#[test]
+fn a_ready_flight_laned_to_the_viewers_callsign_is_yours() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    stdout(&atc(repo.path(), &["file", "qwen's to do"]));
+    stdout(&atc(repo.path(), &["assign", "1", "qwen-review"]));
+    stdout(&atc(repo.path(), &["file", "someone's flight"]));
+
+    let as_qwen = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_atc"))
+            .args(args)
+            .current_dir(repo.path())
+            .env("XDG_CONFIG_HOME", xdg(repo.path()))
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env("ATC_CALLSIGN", "qwen-review")
+            .output()
+            .expect("spawn atc")
+    };
+    let out = stdout(&as_qwen(&[]));
+    assert!(out.contains("yours\n! #1"), "{out}");
+    let envelope = envelope(&as_qwen(&["--json"]));
+    assert_eq!(
+        envelope["data"]["waiting_on_you"]["yours"][0]["id"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(
+        envelope["data"]["ready"][0]["mine"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        envelope["data"]["ready"][1]["mine"],
+        serde_json::json!(false)
+    );
+
+    // To a viewer with no callsign the lane is nobody's.
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(!out.contains("yours\n"), "{out}");
+    let envelope = self::envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(
+        envelope["data"]["ready"][0]["mine"],
+        serde_json::json!(false)
+    );
+
+    // The pilot phrase names the callsign over the email, and the row
+    // carries it beside the byline.
+    stdout(&as_qwen(&["status", "2", "in_progress"]));
+    let out = stdout(&atc(repo.path(), &[]));
+    assert!(out.contains("in progress — qwen-review"), "{out}");
+    let envelope = self::envelope(&atc(repo.path(), &["--json"]));
+    let flown = &envelope["data"]["in_progress"][0];
+    assert_eq!(flown["status_callsign"], serde_json::json!("qwen-review"));
+    assert_eq!(flown["status_by"], serde_json::json!("tests@tower.invalid"));
+    assert!(flown["filed_callsign"].is_null(), "{flown}");
 }
 
 #[test]

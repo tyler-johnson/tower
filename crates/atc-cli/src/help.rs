@@ -63,12 +63,16 @@ Examples:
 `atc help <command>` (or `atc <command> --help`) has the details.";
 
 pub const NEXT: &str = "\
-Pull the next Ready flight from the agent lane, or with -n <k> the
-next k. The pool is every Ready flight assigned to the agent lane,
-and the pick is filed order. The pull is the Ready check and the move
-in one command: each picked flight is set In Progress with your byline
-as the pilot. --peek is the same computation with nothing written, and
-the envelope says which happened either way.
+Pull the next Ready flight from the pool, or with -n <k> the next k.
+The pool is every Ready flight in the agent lane plus every Ready
+flight assigned to your own callsign, and the pick is filed order
+across both. The pull is the Ready check and the move in one command:
+each picked flight is set In Progress with your callsign as the pilot
+— the byline, and the session underneath it. --peek is the same
+computation with nothing written, and the envelope says which
+happened either way. Your callsign is ATC_CALLSIGN when set, else
+the login name at a terminal, else none — and with none the pool is
+the agent lane alone.
 
 An empty pick exits 1 with a full data envelope, and `outcome` on it
 says which of `drained` and `yours` it was: `drained` is a board with
@@ -117,9 +121,10 @@ that is not installed is refused, and one word is never guessed as a
 procedure name.
 
 Every stored field is a flag: -m the body, -p the priority, --label
-(repeatable), --skill, --assignee (me or agent), --status
-(backlog, ready, or in_progress). A procedure is nothing more than
-those same fields saved across a graph of flights.
+(repeatable), --skill, --assignee (me, agent, or a callsign; me
+stores your callsign), --status (backlog, ready, or in_progress). A
+procedure is nothing more than those same fields saved across a graph
+of flights.
 
 Where a filing lands is a setting: `atc config
 defaultFileStatus backlog` parks every bare filing for a person
@@ -302,22 +307,66 @@ Examples:
   atc procedures      the shapes whose agent parts name a skill";
 
 pub const ASSIGN: &str = "\
-Set a flight's lane: me, agent, or none to clear it. The lane is the
-routing decision — whose queue this is in — and it is all the field
-carries: the queue draws only from Ready flights in the agent lane,
-so assigning is what opens or closes the gate. Which agent actually
-flies it needs no field — every event carries the byline and the
-session of whoever wrote it, so the history shows the pilot.
+Set a flight's lane, in one of four shapes: me, agent, none to clear
+it, or a callsign. The lane is the routing decision — whose queue
+this is in. agent is the open pool, which any `atc next` draws from;
+a callsign is one pilot's own queue, which only that pilot's `atc
+next` draws from beside the pool; me stores your own callsign when
+you have one, and the literal word when you do not, and either way
+the flight is yours on the board. A callsign is one word, no spaces,
+and needs no registration — `atc register` is the roster, not the
+gate. Which pilot flies a flight is the callsign on the event: every
+event carries the callsign of whoever wrote it, with the session and
+the author underneath, so the history shows the pilot.
+
+Your callsign is ATC_CALLSIGN when set and usable, else the login
+name when you are at a terminal, else none. An agent has one only
+when its harness exports the variable.
 
 A closed flight refuses; everything else re-lanes freely, and the
 move is on the record with your name on it.";
 
 pub const ASSIGN_EXAMPLES: &str = "\
 Examples:
-  atc assign 17 agent       into the agent queue
-  atc assign 17 me          back to yours
+  atc assign 17 agent       into the open pool
+  atc assign 17 me          back to yours, under your callsign
+  atc assign 17 qwen-review  one pilot's own queue
   atc assign 17 none        no lane at all
-  atc next --peek           what the agent lane would hand out";
+  atc next --peek           what the pool would hand out
+  atc register              who flies here";
+
+pub const REGISTER: &str = "\
+The roster: who flies here. A callsign is a chosen readable name for
+a pilot, person or agent, shared across machines on purpose — the
+same role on two machines is one pilot. Bare `atc register` lists
+the roster: each callsign, its kind, when it was last seen on any
+event, and its description. A callsign with --kind person or agent
+registers it, -m the description; naming one already registered
+rewrites its kind and description in place. -d retires it, and a
+later registration brings it back.
+
+Registration is the roster, not the gate. Assigning a flight to a
+callsign needs no registration, an unregistered callsign on an event
+still folds, and retiring one leaves the flights laned to it where
+they are. What registration gives is the kind, the description, and
+the last-seen line — the one place that says whether a harness is
+actually exporting its callsign.
+
+The callsign a process stamps its events with is ATC_CALLSIGN when
+set and usable — one word, no spaces, at most 64 bytes, not me,
+agent, or none — else the login name when stdin is a terminal, else
+none. Under an agent harness stdin is not a terminal, so an agent has
+a callsign only when the harness exports the variable: set
+ATC_CALLSIGN=claude in the harness's environment and every event
+that agent appends names it.";
+
+pub const REGISTER_EXAMPLES: &str = "\
+Examples:
+  atc register              the roster, with last seen
+  atc register claude --kind agent -m \"Claude Code\"   put one on it
+  atc register tyler --kind person   a person, no description
+  atc register -d qwen-review        take one off
+  atc assign 17 claude      one pilot's own queue";
 
 pub const STATUS: &str = "\
 Move a flight: backlog, ready, in_progress, done, or canceled. One
@@ -616,8 +665,11 @@ The notice a wired client puts in front of an agent at every context
 boundary — a fresh session, a resumed one, a clear, a compaction:
 what tower is, the four gestures of the loop, and one line that is
 this repository's — how many flights are ready, or that nothing is
-filed here yet. Bare `atc briefing` prints it for the repository you
-are in, which is how a person reads what an agent is told.
+filed here yet. When the process has a callsign and a flight is In
+Progress under it, the line is the resume line instead: the flight
+you are on, and the brief to run. Bare `atc briefing` prints it for
+the repository you are in, which is how a person reads what an agent
+is told.
 
 Named for a client — `atc briefing claude` — it is the command
 `atc hook` wrote into that client's config, and it speaks the
@@ -629,7 +681,8 @@ terminal. Only tower spells that form, so a client it does not know
 is refused rather than silenced. Run by hand with no client named,
 the failure reports the way every verb's does.
 
---json carries the text as `data.text`, with `ready` and `filed`
+--json carries the text as `data.text`, with `ready`, `filed`, `on`
+— the flights In Progress under your callsign — and `callsign`
 beside it. The advanced surface is not here: it is in the `tower`
 skill `atc hook` writes beside the hook, read only when wanted.";
 

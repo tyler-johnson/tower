@@ -47,6 +47,8 @@ pub struct Flight {
     pub body: String,
     pub filed_by: String,
     pub filed_session: Option<String>,
+    /// The filer's callsign, when the filing carried one.
+    pub filed_callsign: Option<String>,
     pub filed_at: i64,
     /// Reading order — the union's order, which is the order a reader saw
     /// them arrive in.
@@ -112,12 +114,29 @@ impl Flight {
         self.status == "done" || self.status == "canceled"
     }
 
-    /// Whether the pool admits this flight: Ready, in the agent lane.
-    /// Exact string compares on the stored fields — unknown never rounds
-    /// down. One method because `pick` and `brief` must agree on it, and
-    /// two copies of a gate is where drift starts.
-    pub fn pullable(&self) -> bool {
-        self.status == "ready" && self.assignee.as_deref() == Some("agent")
+    /// Whether the pool admits this flight for `caller`: Ready, and in
+    /// the agent lane or the caller's own callsign's queue. Exact string
+    /// compares on the stored fields — unknown never rounds down. One
+    /// method because `pick` and `brief` must agree on it, and two
+    /// copies of a gate is where drift starts.
+    pub fn pullable(&self, caller: Option<&str>) -> bool {
+        self.status == "ready"
+            && (self.assignee.as_deref() == Some("agent") || self.laned_to(caller))
+    }
+
+    /// Whether the flight is the viewer's own: laned `me`, or laned to
+    /// the viewer's callsign. A stored `me` is a flight written before
+    /// callsigns or by a caller with none, and it stays yours
+    /// everywhere.
+    pub fn mine(&self, viewer: Option<&str>) -> bool {
+        self.assignee.as_deref() == Some("me") || self.laned_to(viewer)
+    }
+
+    /// Whether the lane is `caller`'s callsign. Spelled so a caller with
+    /// no callsign never matches an unassigned flight: two `None`s are
+    /// not the same pilot.
+    fn laned_to(&self, caller: Option<&str>) -> bool {
+        caller.is_some_and(|c| self.assignee.as_deref() == Some(c))
     }
 }
 
@@ -171,6 +190,8 @@ pub struct Mark {
     pub by: String,
     /// The session behind the byline, when the event carried one.
     pub session: Option<String>,
+    /// The pilot who made it, when the event carried a callsign.
+    pub callsign: Option<String>,
     pub at: i64,
     /// The gesture's position in the union — what orders two marks that
     /// share a second, so the derivation follows the log and never a
@@ -191,6 +212,7 @@ impl Mark {
 pub struct Question {
     pub by: String,
     pub session: Option<String>,
+    pub callsign: Option<String>,
     pub at: i64,
     pub text: String,
 }
@@ -201,8 +223,26 @@ pub struct Comment {
     pub id: EventId,
     pub author: String,
     pub session: Option<String>,
+    pub callsign: Option<String>,
     pub at: i64,
     pub text: String,
+}
+
+/// One registered callsign, as the roster holds it after every
+/// registration and retirement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pilot {
+    pub callsign: String,
+    /// `person` or `agent` — a free string here, closed at the verb.
+    pub kind: String,
+    pub description: String,
+    /// The latest standing registration's time and author.
+    pub registered_at: i64,
+    pub by: String,
+    /// The newest event anywhere in the log stamped with this callsign,
+    /// registered or not: an agent has a callsign only when its harness
+    /// exports one, so this is what says the harness is wired.
+    pub last_seen: Option<i64>,
 }
 
 /// What the fold produced: every flight, and every event it could not
@@ -211,6 +251,11 @@ pub struct Comment {
 pub struct Fold {
     /// Filed order.
     pub flights: Vec<Flight>,
+    /// The registered callsigns in registration order, retired ones
+    /// gone. Last wins in log order: a second `registered` replaces the
+    /// kind and the description, an `unregistered` drops the pilot, and
+    /// a later `registered` brings it back at the end.
+    pub roster: Vec<Pilot>,
     /// The saved views in minting order, deleted ones gone. Every
     /// author's, personal included: [`views`](super::views) is the
     /// viewer's cut.
@@ -248,8 +293,15 @@ pub fn fold(events: &[Event]) -> Fold {
     let mut deleted: HashSet<usize> = HashSet::new();
     let mut unrouted: Vec<Event> = Vec::new();
     let mut retired: Vec<Event> = Vec::new();
+    let mut roster: Vec<Pilot> = Vec::new();
+    // The newest time per callsign over every event, roster or not.
+    let mut last_seen: HashMap<&str, i64> = HashMap::new();
 
     for event in events {
+        if let Some(callsign) = event.callsign.as_deref() {
+            let seen = last_seen.entry(callsign).or_insert(event.time);
+            *seen = (*seen).max(event.time);
+        }
         match &event.kind {
             Kind::Filed {
                 procedure,
@@ -282,6 +334,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     body: body.clone(),
                     filed_by: event.author.clone(),
                     filed_session: event.session.clone(),
+                    filed_callsign: event.callsign.clone(),
                     filed_at: event.time,
                     comments: Vec::new(),
                     depends_on: Vec::new(),
@@ -375,6 +428,7 @@ pub fn fold(events: &[Event]) -> Fold {
                         flight.moved = Some(Mark {
                             by: event.author.clone(),
                             session: event.session.clone(),
+                            callsign: event.callsign.clone(),
                             at: event.time,
                             order,
                         });
@@ -404,6 +458,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     flight.moved = Some(Mark {
                         by: event.author.clone(),
                         session: event.session.clone(),
+                        callsign: event.callsign.clone(),
                         at: event.time,
                         order,
                     });
@@ -427,6 +482,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     id: event.id.clone(),
                     author: event.author.clone(),
                     session: event.session.clone(),
+                    callsign: event.callsign.clone(),
                     at: event.time,
                     text: text.clone(),
                 }),
@@ -464,6 +520,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     flight.question = Some(Question {
                         by: event.author.clone(),
                         session: event.session.clone(),
+                        callsign: event.callsign.clone(),
                         at: event.time,
                         text: question.clone(),
                     });
@@ -471,6 +528,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     flight.moved = Some(Mark {
                         by: event.author.clone(),
                         session: event.session.clone(),
+                        callsign: event.callsign.clone(),
                         at: event.time,
                         order,
                     });
@@ -490,6 +548,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     let mark = Mark {
                         by: event.author.clone(),
                         session: event.session.clone(),
+                        callsign: event.callsign.clone(),
                         at: event.time,
                         order,
                     };
@@ -528,6 +587,35 @@ pub fn fold(events: &[Event]) -> Fold {
                 }
                 None => unrouted.push(event.clone()),
             },
+            // The roster: no id lookup, so nothing here is ever unrouted.
+            // Last wins in log order — a re-registration rewrites the
+            // entry in place, and a registration after a retirement
+            // appends a fresh one.
+            Kind::Registered {
+                callsign,
+                kind,
+                description,
+            } => match roster.iter_mut().find(|pilot| &pilot.callsign == callsign) {
+                Some(pilot) => {
+                    pilot.kind = kind.clone();
+                    pilot.description = description.clone();
+                    pilot.registered_at = event.time;
+                    pilot.by = event.author.clone();
+                }
+                None => roster.push(Pilot {
+                    callsign: callsign.clone(),
+                    kind: kind.clone(),
+                    description: description.clone(),
+                    registered_at: event.time,
+                    by: event.author.clone(),
+                    last_seen: None,
+                }),
+            },
+            // A retirement of nobody is a no-op, like an unlink of no
+            // edge.
+            Kind::Unregistered { callsign } => {
+                roster.retain(|pilot| &pilot.callsign != callsign);
+            }
             Kind::Unknown { kind, .. } if RETIRED_KINDS.contains(&kind.as_str()) => {
                 retired.push(event.clone())
             }
@@ -582,6 +670,7 @@ pub fn fold(events: &[Event]) -> Fold {
         let mark = Mark {
             by: event.author.clone(),
             session: event.session.clone(),
+            callsign: event.callsign.clone(),
             at: event.time,
             order: 0,
         };
@@ -633,9 +722,13 @@ pub fn fold(events: &[Event]) -> Fold {
         .filter(|(at, _)| !deleted.contains(at))
         .map(|(_, view)| view)
         .collect();
+    for pilot in &mut roster {
+        pilot.last_seen = last_seen.get(pilot.callsign.as_str()).copied();
+    }
 
     Fold {
         flights,
+        roster,
         views,
         unrouted,
         retired,
@@ -680,6 +773,7 @@ fn derive(flights: &mut [Flight], by_id: &HashMap<&EventId, usize>) {
                 Some(Mark {
                     by: question.by.clone(),
                     session: question.session.clone(),
+                    callsign: question.callsign.clone(),
                     at: question.at,
                     order: 0,
                 }),
@@ -735,6 +829,7 @@ mod tests {
             author: "a@b.c".to_string(),
             time,
             session: None,
+            callsign: None,
             id,
             kind,
         }
@@ -900,6 +995,34 @@ mod tests {
         event
     }
 
+    /// The same event stamped with a callsign — the pilot cases.
+    fn flown(mut event: Event, callsign: &str) -> Event {
+        event.callsign = Some(callsign.to_string());
+        event
+    }
+
+    fn registered(id: &str, time: i64, callsign: &str, kind: &str, description: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Registered {
+                callsign: callsign.to_string(),
+                kind: kind.to_string(),
+                description: description.to_string(),
+            },
+        )
+    }
+
+    fn unregistered(id: &str, time: i64, callsign: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Unregistered {
+                callsign: callsign.to_string(),
+            },
+        )
+    }
+
     fn edited(
         id: &str,
         time: i64,
@@ -1043,7 +1166,7 @@ mod tests {
         assert!(flight.labels.is_empty());
         assert_eq!(flight.skill.as_deref(), Some("review"));
         assert_eq!(flight.done_kind, "asserted");
-        assert!(flight.pullable());
+        assert!(flight.pullable(None));
         assert!(!flight.closed());
     }
 
@@ -1266,7 +1389,7 @@ mod tests {
         let flight = &parked.flights[0];
         assert_eq!(flight.status, "parked");
         assert_eq!(flight.stand.foreign.as_deref(), Some("parked"));
-        assert!(!flight.pullable(), "unknown is not ready");
+        assert!(!flight.pullable(None), "unknown is not ready");
         assert!(!flight.closed(), "unknown is not closed either");
 
         // The next known word clears it.
@@ -1276,7 +1399,7 @@ mod tests {
             status("pi.3", 30, "pi.1", "ready"),
         ]);
         assert!(cleared.flights[0].stand.foreign.is_none());
-        assert!(cleared.flights[0].pullable());
+        assert!(cleared.flights[0].pullable(None));
     }
 
     #[test]
@@ -1286,7 +1409,7 @@ mod tests {
             assigned("pi.2", 20, "pi.1", Some("me")),
         ]);
         assert_eq!(laned.flights[0].assignee.as_deref(), Some("me"));
-        assert!(!laned.flights[0].pullable(), "the lane left the pool");
+        assert!(!laned.flights[0].pullable(None), "the lane left the pool");
 
         let cleared = fold(&[
             filed_agent("pi.1", 10, "s"),
@@ -1392,7 +1515,10 @@ mod tests {
         let flight = &fold.flights[0];
         assert!(!flight.stand.started, "holding is stopping");
         assert_eq!(flight.status, "ready");
-        assert!(flight.pullable(), "back in the pool for whoever pulls next");
+        assert!(
+            flight.pullable(None),
+            "back in the pool for whoever pulls next"
+        );
     }
 
     #[test]
@@ -1413,7 +1539,7 @@ mod tests {
         let mark = flight.status_mark.as_ref().expect("moved");
         assert_eq!((mark.by.as_str(), mark.at), ("mover@b.c", 30));
         assert!(flight.status_dep.is_none());
-        assert!(!flight.pullable());
+        assert!(!flight.pullable(None));
     }
 
     #[test]
@@ -1906,7 +2032,7 @@ mod tests {
             filed_agent("pi.1", 10, "s"),
             status("pi.2", 20, "pi.1", "in_progress"),
         ]);
-        assert!(!pulled.flights[0].pullable());
+        assert!(!pulled.flights[0].pullable(None));
         assert_eq!(pulled.flights[0].status, "in_progress");
 
         let released = fold(&[
@@ -1914,6 +2040,137 @@ mod tests {
             status("pi.2", 20, "pi.1", "in_progress"),
             status("pi.3", 30, "pi.1", "ready"),
         ]);
-        assert!(released.flights[0].pullable());
+        assert!(released.flights[0].pullable(None));
+    }
+
+    #[test]
+    fn the_roster_folds_last_wins_and_a_retirement_is_undone_by_a_registration() {
+        let fold = fold(&[
+            registered("pi.1", 10, "claude", "agent", "Claude Code"),
+            by(registered("qi.1", 20, "tyler", "person", ""), "t@b.c"),
+            registered("pi.2", 30, "claude", "agent", "every Claude Code session"),
+            unregistered("pi.3", 40, "tyler"),
+            unregistered("pi.4", 45, "nobody"),
+            registered("pi.5", 50, "tyler", "person", "back"),
+        ]);
+        let names: Vec<&str> = fold
+            .roster
+            .iter()
+            .map(|pilot| pilot.callsign.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            ["claude", "tyler"],
+            "a rewrite stays in place; a return lands at the end"
+        );
+        let claude = &fold.roster[0];
+        assert_eq!(claude.kind, "agent");
+        assert_eq!(claude.description, "every Claude Code session");
+        assert_eq!(claude.registered_at, 30, "the latest standing registration");
+        let tyler = &fold.roster[1];
+        assert_eq!(tyler.description, "back");
+        assert_eq!(tyler.registered_at, 50);
+        assert_eq!(tyler.by, "a@b.c", "the return's author, not the first's");
+        assert!(
+            fold.unrouted.is_empty(),
+            "a retirement of nobody is a no-op, never unrouted"
+        );
+
+        let retired = super::fold(&[
+            registered("pi.1", 10, "claude", "agent", ""),
+            unregistered("pi.2", 20, "claude"),
+        ]);
+        assert!(retired.roster.is_empty());
+    }
+
+    #[test]
+    fn last_seen_is_the_newest_event_stamped_with_the_callsign() {
+        // Over every event, roster or not: a registration carries no
+        // callsign of its own unless the registrar was flying one, and
+        // an unregistered callsign is still seen — it just has no row.
+        let fold = fold(&[
+            registered("pi.1", 10, "claude", "agent", ""),
+            registered("pi.2", 11, "idle", "agent", ""),
+            flown(filed("pi.3", 20, "s"), "claude"),
+            flown(status("pi.4", 40, "pi.3", "in_progress"), "claude"),
+            flown(commented("pi.5", 30, "pi.3"), "claude"),
+            flown(commented("pi.6", 35, "pi.3"), "qwen-review"),
+        ]);
+        assert_eq!(
+            fold.roster[0].last_seen,
+            Some(40),
+            "the newest, not the last"
+        );
+        assert_eq!(fold.roster[1].last_seen, None, "registered, never flown");
+    }
+
+    #[test]
+    fn pullable_and_mine_read_the_lane_against_the_caller() {
+        let fold = fold(&[
+            filed_agent("pi.1", 10, "pool"),
+            assigned("pi.2", 20, "pi.1", Some("qwen-review")),
+            filed_agent("pi.3", 30, "agent lane"),
+            filed_agent("pi.4", 40, "me lane"),
+            assigned("pi.5", 50, "pi.4", Some("me")),
+            filed_agent("pi.6", 60, "unassigned"),
+            assigned("pi.7", 70, "pi.6", None),
+        ]);
+        let own = &fold.flights[0];
+        let pool = &fold.flights[1];
+        let me = &fold.flights[2];
+        let nobody = &fold.flights[3];
+
+        assert!(own.pullable(Some("qwen-review")), "its own queue");
+        assert!(!own.pullable(Some("claude")), "another callsign's queue");
+        assert!(!own.pullable(None), "no callsign, no own queue");
+        assert!(pool.pullable(Some("qwen-review")) && pool.pullable(None));
+        assert!(!me.pullable(Some("qwen-review")));
+        assert!(
+            !nobody.pullable(None),
+            "an unassigned flight never matches a caller with no callsign"
+        );
+
+        assert!(own.mine(Some("qwen-review")));
+        assert!(!own.mine(Some("claude")) && !own.mine(None));
+        assert!(
+            me.mine(None) && me.mine(Some("anyone")),
+            "`me` stays yours everywhere"
+        );
+        assert!(!pool.mine(Some("qwen-review")));
+        assert!(!nobody.mine(None));
+    }
+
+    #[test]
+    fn the_callsign_rides_every_mark_the_question_and_the_comments() {
+        let fold = fold(&[
+            flown(filed("pi.1", 10, "s"), "tyler"),
+            flown(status("pi.2", 20, "pi.1", "in_progress"), "claude"),
+            flown(commented("pi.3", 30, "pi.1"), "claude"),
+            commented("pi.4", 35, "pi.1"),
+            flown(held("pi.5", 40, "pi.1", "which?"), "claude"),
+        ]);
+        let flight = &fold.flights[0];
+        assert_eq!(flight.filed_callsign.as_deref(), Some("tyler"));
+        assert_eq!(
+            flight
+                .moved
+                .as_ref()
+                .and_then(|mark| mark.callsign.as_deref()),
+            Some("claude")
+        );
+        assert_eq!(
+            flight.question.as_ref().and_then(|q| q.callsign.as_deref()),
+            Some("claude")
+        );
+        assert_eq!(
+            flight
+                .status_mark
+                .as_ref()
+                .and_then(|mark| mark.callsign.as_deref()),
+            Some("claude"),
+            "the held mark is built from the question"
+        );
+        assert_eq!(flight.comments[0].callsign.as_deref(), Some("claude"));
+        assert!(flight.comments[1].callsign.is_none());
     }
 }

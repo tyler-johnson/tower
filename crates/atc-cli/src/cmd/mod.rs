@@ -26,6 +26,7 @@ pub mod hold;
 pub mod link;
 pub mod next;
 pub mod procedures;
+pub mod register;
 pub mod serve;
 pub mod skills;
 pub mod status;
