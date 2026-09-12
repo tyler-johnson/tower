@@ -356,6 +356,84 @@ fn the_payload_session_keys_the_lease_when_the_variable_is_absent() {
     assert_eq!(leases.len(), 2, "no session, no lease: {leases:?}");
 }
 
+/// The session table is the key's: `ATC_SESSION` beats
+/// `CLAUDE_CODE_SESSION_ID` even under Claude's own hook, and the pid
+/// stored is the row's own — `CLAUDE_PID` under Claude's row, and none
+/// under the launcher's when it hands down no `ATC_PID`.
+#[test]
+fn the_launcher_row_beats_the_client_row_and_the_pid_is_the_rows_own() {
+    let repo = repo();
+    let home = root(repo.path());
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let activity = payload(repo.path(), Some("PreToolUse"), None);
+    let run = |vars: &[(&str, String)]| {
+        let mut command = command(elsewhere.path(), home, &["trigger", "claude"]);
+        for (name, value) in vars {
+            command.env(name, value);
+        }
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(activity.as_bytes())
+            .unwrap();
+        silent(&child.wait_with_output().unwrap(), "activity");
+    };
+    let body = |session: &str| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(lease(home, session)).unwrap()).unwrap()
+    };
+    let own = std::process::id().to_string();
+
+    run(&[
+        ("CLAUDE_CODE_SESSION_ID", "c1".to_string()),
+        ("CLAUDE_PID", own.clone()),
+    ]);
+    let stored = body("c1");
+    if cfg!(target_os = "linux") {
+        assert_eq!(stored["pid"], std::process::id(), "{stored}");
+        assert!(stored["pid_start"].is_u64(), "{stored}");
+    }
+    assert_eq!(stored["callsign"], serde_json::Value::Null);
+    assert_eq!(stored["session"], "c1");
+
+    run(&[
+        ("ATC_SESSION", "w1".to_string()),
+        ("CLAUDE_CODE_SESSION_ID", "c2".to_string()),
+        ("CLAUDE_PID", own.clone()),
+    ]);
+    assert!(
+        lease(home, "w1").is_file(),
+        "the launcher's row keys the lease"
+    );
+    assert!(
+        !lease(home, "c2").exists(),
+        "the client's row is not read past it"
+    );
+    let stored = body("w1");
+    assert_eq!(
+        stored["pid"],
+        serde_json::Value::Null,
+        "the pid is the launcher row's own, never Claude's: {stored}"
+    );
+
+    // The heartbeat never rewrites a body: the pid stored at creation
+    // stays through a renewal under another.
+    let before = age(&lease(home, "c1"));
+    run(&[
+        ("CLAUDE_CODE_SESSION_ID", "c1".to_string()),
+        ("CLAUDE_PID", "1".to_string()),
+    ]);
+    assert!(mtime(&lease(home, "c1")) > before);
+    if cfg!(target_os = "linux") {
+        assert_eq!(body("c1")["pid"], std::process::id());
+    }
+}
+
 /// `XDG_STATE_HOME` is the state root when set, the way it is for every
 /// XDG tool.
 #[test]

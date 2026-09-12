@@ -861,10 +861,15 @@ fn the_pilot_line_names_the_session_over_the_email() {
     let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     scrub(&mut command);
+    // A session leases: HOME into the fixture keeps the lease out of
+    // the developer's state directory.
+    let home = repo.path().parent().unwrap();
     let out = command
         .args(["status", "1", "in_progress"])
         .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
+        .env("HOME", home)
+        .env("USERPROFILE", home)
         .env("CLAUDE_CODE_SESSION_ID", uuid)
         .output()
         .expect("spawn atc");

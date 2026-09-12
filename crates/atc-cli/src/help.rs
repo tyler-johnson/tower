@@ -82,9 +82,10 @@ callsign hands it to that pilot. The re-lane rides the same append,
 and only when the lane changes — a pull from your own queue is one
 moment on the record. --peek is the same computation with nothing
 written, and the envelope says which happened either way. Your
-callsign is ATC_CALLSIGN when set, else the client you are running
-under, else the login name at a terminal, else none — and with none,
-me is the literal lane alone.
+callsign is ATC_CALLSIGN when set, else the word you gave
+`atc callsign` this session, else the client you are running under,
+else the login name at a terminal, else none — and with none, me is
+the literal lane alone.
 
 An empty pick exits 1 with a full data envelope, and `outcome` on it
 says which of `drained` and `elsewhere` it was: `drained` is a board
@@ -349,9 +350,10 @@ callsign on the event: every event carries the callsign of whoever
 wrote it, with the session and the author underneath, so the history
 shows the pilot.
 
-Your callsign is ATC_CALLSIGN when set, else the client you are
-running under — claude, codex, cursor, gemini — else the login name
-at a terminal, else none.
+Your callsign is ATC_CALLSIGN when set, else the word you gave
+`atc callsign` this session, else the client you are running under —
+claude, codex, cursor, gemini — else the login name at a terminal,
+else none.
 
 A closed flight refuses; everything else re-lanes freely, and the
 move is on the record with your name on it.";
@@ -363,6 +365,63 @@ Examples:
   atc assign 17 qwen-review  one pilot's own queue
   atc assign 17 none        no lane at all
   atc next --peek           what your queue would hand out";
+
+pub const CALLSIGN: &str = "\
+Name this session's pilot. The word is held on the session's lease —
+one file per session under the machine's state directory, keyed by
+the first session variable set: ATC_SESSION, the launcher's own, then
+the client's — CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID,
+OPENCODE_SESSION_ID — then ATC_SHELL_SESSION, a terminal's. Every atc
+call and every trigger event under the session renews the lease, and
+the trigger's end event releases it. A process with none of the
+variables has no session and this verb refuses: ATC_CALLSIGN in the
+launcher's environment is the way to name it.
+
+No two live sessions on a machine hold one word. A lease is fresh
+while its mtime is inside leaseWindow — two minutes unless
+`atc config leaseWindow` says otherwise — or its pid is alive, when
+the client hands one down (ATC_PID, CLAUDE_PID, ATC_SHELL_PID, read
+from the row that named the session and never an inherited one).
+Another session holding the word on a fresh lease or a live pid
+refuses and names it; a stale lease with a dead or absent pid is
+removed and the word taken. --force takes it from a stale holder
+inside the window too — for the session you killed and restarted
+under the same name — and says whose it was; a live pid is refused
+even then, since that is a running session. The same word as already
+held is a renewal that says so.
+
+When the word changes, the open flights this session laned under the
+old word follow it — one assigned per flight in a single append,
+byline the new word. Scoped to what this session laned: a flight a
+person laned into the old word by hand stays there, and the report
+counts it, so they re-lane it if they meant it to follow. A session
+whose word was its client's or its login name moves nothing on its
+first callsign.
+
+Refused: a word usable_callsign rejects — me, agent, none, spaces,
+past 64 bytes; a client's word — claude, codex, cursor, gemini — which
+is the name of every unnamed session of that client; ATC_CALLSIGN
+set, because the launcher's word wins and a lease under it would
+never be read. There is no unset: the trigger's end event, the pid,
+and the window are the unset.
+
+Bare, it prints who you are: the callsign and its source — env,
+session, client, login — the session and its variable, the lease
+fresh or stale and by how much, the pid. --json carries writer,
+author, client, session, session_source, callsign, callsign_source,
+lease, and pid.
+
+A session that goes idle past the window and finds its word taken on
+the next atc call drops to its client word and says so once, on
+stderr; the verb it was running proceeds.";
+
+pub const CALLSIGN_EXAMPLES: &str = "\
+Examples:
+  atc callsign              who you are: callsign, source, session, lease
+  atc callsign agent-1      hold the word; re-lane what you laned as before
+  atc callsign agent-1 --force    take it from a stale holder inside the window
+  atc assign 17 me          into your queue, under the word
+  atc config leaseWindow 30s      a shorter window for a client with no pid";
 
 pub const STATUS: &str = "\
 Move a flight: backlog, ready, in_progress, done, or canceled. One
@@ -489,10 +548,11 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: servePort, tower.servePort, and SERVEPORT all
 name one setting.
 
-Five settings ship — defaultFileStatus, where a bare `atc file`
-lands; serveHost and servePort, the address
-and the port `atc serve` binds; updateCheck, how often the
-background release check runs; autoUpdate, whether a new release
+Six settings ship — defaultFileStatus, where a bare `atc file`
+lands; serveHost and servePort, the address and the port `atc serve`
+binds; leaseWindow, how long a session's lease stays fresh without a
+heartbeat when its client hands down no pid; updateCheck, how often
+the background release check runs; autoUpdate, whether a new release
 installs itself silently. This verb opens no store and spawns no
 fufu, so settings stay reachable on a half-configured machine, before
 an identity exists.";
@@ -662,10 +722,10 @@ reads the notice. Bare `atc trigger` prints the notice for the
 repository you are in: what tower is, the four gestures of the loop,
 and one line that is this repository's — how many flights are ready,
 or that nothing is filed here yet. When the process has a callsign —
-ATC_CALLSIGN when set, else the client it runs under, else the login
-name at a terminal — and a flight is In Progress under it, the line
-is the resume line instead: the flight you are on, and the brief to
-run.
+ATC_CALLSIGN when set, else the word you gave `atc callsign` this
+session, else the client it runs under, else the login name at a
+terminal — and a flight is In Progress under it, the line is the
+resume line instead: the flight you are on, and the brief to run.
 
 Named for a source — `atc trigger claude` — it is the command
 `atc hook` wrote into that client's config under every event in the
@@ -677,9 +737,12 @@ end of a turn — it renews the lease and says nothing. At the
 session's end it releases the lease and says nothing. A payload with
 no hook_event_name is a boundary, so an older config's entry keeps
 doing what it did. The lease is one file per session under the
-machine's state directory, keyed by the session variable the client
-exports, else the payload's session_id; renewing it opens no store,
-so the activity path costs a few milliseconds on every tool call.
+machine's state directory, keyed by the first session variable set —
+ATC_SESSION, then the client's own, then ATC_SHELL_SESSION — else the
+payload's session_id, and it holds the session's pid when the client
+hands one down and the word `atc callsign` gave it; renewing it opens
+no store, so the activity path costs a few milliseconds on every tool
+call.
 
 Any failure — no repository, a store that will not open, a source or
 an event it does not know — exits 0 with nothing said, because a

@@ -95,6 +95,11 @@ pub struct Flight {
     /// The stored lane, last-wins; `assigned` overwrites it, absent
     /// clears it.
     pub assignee: Option<String>,
+    /// The gesture that set the lane — the last `assigned`, or a
+    /// routing that carried one — `None` while the lane is the filing's.
+    /// What `callsign` reads to know whose lane a flight is in: the
+    /// session on this mark, else the filing's.
+    pub assigned: Option<Mark>,
     pub priority: String,
     pub labels: Vec<String>,
     pub skill: Option<String>,
@@ -335,6 +340,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     status_mark: None,
                     status_dep: None,
                     assignee: assignee.clone(),
+                    assigned: None,
                     priority: priority.clone(),
                     labels: labels.clone(),
                     skill: skill.clone(),
@@ -428,6 +434,13 @@ pub fn fold(events: &[Event]) -> Fold {
                     }
                     if let Some(assignee) = assignee {
                         flight.assignee = Some(assignee.clone());
+                        flight.assigned = Some(Mark {
+                            by: event.author.clone(),
+                            session: event.session.clone(),
+                            callsign: event.callsign.clone(),
+                            at: event.time,
+                            order,
+                        });
                     }
                     if let Some(done) = done {
                         flight.done_kind = done.clone();
@@ -470,7 +483,17 @@ pub fn fold(events: &[Event]) -> Fold {
                 None => unrouted.push(event.clone()),
             },
             Kind::Assigned { flight, assignee } => match by_id.get(flight) {
-                Some(&at) => flights[at].assignee = assignee.clone(),
+                Some(&at) => {
+                    let flight = &mut flights[at];
+                    flight.assignee = assignee.clone();
+                    flight.assigned = Some(Mark {
+                        by: event.author.clone(),
+                        session: event.session.clone(),
+                        callsign: event.callsign.clone(),
+                        at: event.time,
+                        order,
+                    });
+                }
                 None => unrouted.push(event.clone()),
             },
             Kind::Commented {

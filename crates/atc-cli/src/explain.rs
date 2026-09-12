@@ -214,6 +214,78 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/bad-callsign",
+        summary: "that is not a callsign",
+        detail: "A callsign is one word, no spaces, at most 64 bytes, and not one of the lane \
+                 words `me`, `agent`, `none`, which name a lane rather than a pilot. The same \
+                 rule holds every callsign at every boundary — ATC_CALLSIGN, a lane word given \
+                 to `assign`, and the word given here — and `callsign` refuses at the verb \
+                 where the other two ignore or refuse in their own way.",
+        exits: &[],
+    },
+    Entry {
+        id: "callsign/no-session",
+        summary: "there is no session to name",
+        detail: "The word is held on the session's lease, keyed by the first session variable \
+                 set — ATC_SESSION, CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID, \
+                 OPENCODE_SESSION_ID, ATC_SHELL_SESSION — and none of them is. A process with \
+                 no session has nothing to hold a word on, and the launcher's variable is the \
+                 way: ATC_CALLSIGN in the environment names every event the process appends, \
+                 no lease needed. A launcher that runs a pool sets ATC_SESSION per worker and \
+                 gets leases, holds, and the move on any client or none.",
+        exits: &[],
+    },
+    Entry {
+        id: "callsign/env-set",
+        summary: "ATC_CALLSIGN is set, and the launcher's word wins",
+        detail: "The callsign resolves from ATC_CALLSIGN first, then the session's lease, then \
+                 the client, then the login name. With the variable set, a word written into \
+                 the lease would never be read, so the verb says so rather than write it. Unset \
+                 the variable in the launcher, or keep flying under its word.",
+        exits: &["atc callsign"],
+    },
+    Entry {
+        id: "callsign/client-word",
+        summary: "that is a client's word, not a pilot's",
+        detail: "claude, codex, cursor, gemini, opencode — the words the client markers name — \
+                 are the callsign of every unnamed session of that client, and the lane any \
+                 such session's bare `atc next` draws from. `atc assign <flight> claude` is a \
+                 real gesture and stays one; holding the word on one session's lease would \
+                 take it from every other. Pick a word that is yours.",
+        exits: &["atc callsign <name>"],
+    },
+    Entry {
+        id: "callsign/held",
+        summary: "another session holds the word",
+        detail: "No two live sessions on a machine hold one word. The other session's lease is \
+                 fresh — renewed inside leaseWindow — or its pid is alive, and the refusal \
+                 names the session and which. A stale lease with a dead or absent pid would \
+                 have been taken without a word. `--force` takes the word from a stale holder \
+                 inside the window — the session you killed and restarted under the same name, \
+                 on a client with no pid — and never from a live pid. Bare `atc callsign` says \
+                 what you are flying as meanwhile.",
+        exits: &["atc callsign <name> --force", "atc callsign"],
+    },
+    Entry {
+        id: "callsign/live",
+        summary: "the holder is running, and --force does not take a word from a running session",
+        detail: "The other session's pid is alive — the client handed it down with the session, \
+                 and its start time matches, so it is that process and not a reused pid. \
+                 --force is for a lease whose session is gone but whose window has not run out; \
+                 a running session keeps its word. End that session, or pick another word.",
+        exits: &["atc callsign <name>"],
+    },
+    Entry {
+        id: "callsign/lease",
+        summary: "the lease could not be written",
+        detail: "The word is held in a file under the machine's state directory — \
+                 $XDG_STATE_HOME/atc/leases/<session>, defaulting to ~/.local/state/atc/ — \
+                 and the write failed: neither XDG_STATE_HOME nor HOME is set, or the disk \
+                 refused. The refusal carries what the system said. Nothing was appended to \
+                 the log.",
+        exits: &[],
+    },
+    Entry {
         id: "usage/self-link",
         summary: "a flight cannot depend on itself",
         detail: "`link a b` declares that `a` waits on `b`, and both references resolved to the \

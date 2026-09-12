@@ -268,6 +268,16 @@ pub enum Command {
         #[arg(value_name = "lane")]
         lane: String,
     },
+    /// Name this session's pilot, or say who you are.
+    #[command(long_about = help::CALLSIGN, after_long_help = help::CALLSIGN_EXAMPLES)]
+    Callsign {
+        /// The word: one word, no spaces. Bare prints who you are.
+        #[arg(value_name = "name")]
+        name: Option<String>,
+        /// Take the word from a stale holder inside the window.
+        #[arg(long)]
+        force: bool,
+    },
     /// Move a flight to a status.
     #[command(long_about = help::STATUS, after_long_help = help::STATUS_EXAMPLES)]
     Status {
@@ -501,6 +511,7 @@ impl Command {
             | Command::Unlink { .. }
             | Command::Decompose { .. }
             | Command::Assign { .. }
+            | Command::Callsign { .. }
             | Command::Status { .. }
             | Command::Cancel { .. }
             | Command::Hold { .. }

@@ -29,13 +29,19 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
 }
 
 /// The spawn under a session tag, the way Claude Code hands one down.
+/// A session leases, so `HOME` points into the fixture: the lease lands
+/// beside the repository and never under the developer's state
+/// directory.
 fn atc_tagged(repo: &Path, args: &[&str], tag: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     scrub(&mut command);
+    let home = repo.parent().expect("the fixture nests the repository");
     command
         .args(args)
         .current_dir(repo)
         .env("XDG_CONFIG_HOME", xdg(repo))
+        .env("HOME", home)
+        .env("USERPROFILE", home)
         .env("CLAUDE_CODE_SESSION_ID", tag)
         .output()
         .expect("spawn atc")
@@ -644,10 +650,13 @@ fn the_byline_is_the_callsign_and_the_session_follows_under_it() {
     stdout(&atc(repo.path(), &["file", "flown"]));
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     scrub(&mut command);
+    let home = repo.path().parent().unwrap();
     let out = command
         .args(["status", "1", "in_progress"])
         .current_dir(repo.path())
         .env("XDG_CONFIG_HOME", xdg(repo.path()))
+        .env("HOME", home)
+        .env("USERPROFILE", home)
         .env("CLAUDE_CODE_SESSION_ID", uuid)
         .env("ATC_CALLSIGN", "claude")
         .output()

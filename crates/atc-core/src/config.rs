@@ -88,6 +88,9 @@ pub enum SettingKind {
     /// One word off a closed list — the list is the validator and the
     /// refusal's wording both.
     Choice(&'static [&'static str]),
+    /// A span — `30s`, `2m`, `1h` — of at least a second; no bool
+    /// spelling, unlike a cadence, because there is no "off".
+    Duration,
 }
 
 impl SettingKind {
@@ -99,6 +102,7 @@ impl SettingKind {
             SettingKind::Port => "port",
             SettingKind::Host => "host",
             SettingKind::Choice(_) => "choice",
+            SettingKind::Duration => "duration",
         }
     }
 }
@@ -135,6 +139,11 @@ pub const DEFAULT_HOST: &str = "127.0.0.1";
 /// nothing. The registry row below spells it, and a test holds the two
 /// together.
 pub const DEFAULT_FILE_STATUS: &str = "ready";
+
+/// How long a session's lease stays fresh without a heartbeat, as the
+/// registry row spells it; `lease::DEFAULT_WINDOW` is the compiled
+/// value, and a test holds the two together.
+pub const DEFAULT_LEASE_WINDOW: &str = "2m";
 
 /// Every setting tower ships, in display order. `tower.writer` is
 /// deliberately absent: identity minted at first append, not a tunable —
@@ -178,6 +187,18 @@ pub fn registry() -> &'static [Setting] {
             ],
         },
         Setting {
+            name: "leaseWindow",
+            key: "tower.leaseWindow",
+            def: DEFAULT_LEASE_WINDOW,
+            kind: SettingKind::Duration,
+            desc: &[
+                "How long a session's lease stays fresh without a heartbeat when",
+                "its client hands down no pid. A callsign another session holds",
+                "on a lease inside the window is refused; past it, taken. Every",
+                "atc call and every trigger event under a session is a heartbeat.",
+            ],
+        },
+        Setting {
             name: "updateCheck",
             key: "tower.updateCheck",
             def: "1d",
@@ -218,6 +239,16 @@ pub fn default_file_status(config: &Config) -> &'static str {
         .unwrap_or(DEFAULT_FILE_STATUS)
 }
 
+/// The lease window, decoded off the registry row: the configured span
+/// when it parses, the compiled default when nothing is set or the
+/// value would not — the same fallback [`default_file_status`] takes.
+pub fn lease_window(config: &Config) -> std::time::Duration {
+    let setting = lookup("leaseWindow").expect("leaseWindow is registered");
+    config
+        .read_duration(setting)
+        .unwrap_or(crate::lease::DEFAULT_WINDOW)
+}
+
 /// The setting a user's spelling names: case-insensitive, `tower.`
 /// prefix optional, so `servePort`, `tower.servePort`, and `SERVEPORT`
 /// all answer.
@@ -253,6 +284,10 @@ pub fn validate(setting: &Setting, value: &str) -> Result<()> {
             "want an IP address like 127.0.0.1, 0.0.0.0, or ::1",
         ),
         SettingKind::Choice(words) => (words.contains(&value.trim()), choice_want(words)),
+        SettingKind::Duration => (
+            parse_window(value).is_some(),
+            "want a duration like 30s, 2m, or 1h",
+        ),
     };
     if ok {
         Ok(())
@@ -355,6 +390,15 @@ pub(crate) fn parse_duration(raw: &str) -> Option<i64> {
     (secs >= 0).then_some(secs)
 }
 
+/// The window grammar: [`parse_duration`] floored at a second, so an
+/// empty window — every lease stale the moment it is written — cannot
+/// be configured.
+pub fn parse_window(raw: &str) -> Option<std::time::Duration> {
+    parse_duration(raw.trim())
+        .filter(|secs| *secs >= 1)
+        .map(|secs| std::time::Duration::from_secs(secs as u64))
+}
+
 /// A setting's effective value and where it came from. `value` is
 /// `None` when nothing sets it — the default applies, and the caller
 /// displays `Setting::def`.
@@ -416,6 +460,13 @@ impl Config {
         gix::config::Boolean::try_from(gix::bstr::BStr::new(value.as_str()))
             .ok()
             .map(|boolean| boolean.0)
+    }
+
+    /// A duration setting's effective value through the window grammar.
+    /// `None` when unset or unreadable — the caller supplies the
+    /// default.
+    pub fn read_duration(&self, setting: &Setting) -> Option<std::time::Duration> {
+        parse_window(&self.read(setting).value?)
     }
 
     /// The effective value with one scope held out — what still applies
@@ -629,6 +680,7 @@ mod tests {
                 SettingKind::Port => "70000",
                 SettingKind::Host => "localhost",
                 SettingKind::Choice(_) => "nope",
+                SettingKind::Duration => "xyz",
             };
             let err = validate(setting, bad).expect_err("a bad value refuses");
             assert_eq!(err.id(), "usage/bad-value");
@@ -662,6 +714,59 @@ mod tests {
             Status::fileable(setting.def).map(|status| status.name()),
             Some(DEFAULT_FILE_STATUS),
             "the default is itself a fileable word"
+        );
+    }
+
+    #[test]
+    fn the_lease_window_default_matches_its_registry_row() {
+        let setting = lookup("leaseWindow").expect("registered");
+        assert_eq!(setting.def, DEFAULT_LEASE_WINDOW);
+        assert_eq!(
+            parse_window(setting.def),
+            Some(crate::lease::DEFAULT_WINDOW)
+        );
+    }
+
+    /// The window grammar is the duration grammar floored at a second:
+    /// a suffix or a bare count of days, and nothing a cadence would
+    /// take as a bool.
+    #[test]
+    fn window_parse_table() {
+        use std::time::Duration;
+        assert_eq!(parse_window("30s"), Some(Duration::from_secs(30)));
+        assert_eq!(parse_window("2m"), Some(Duration::from_secs(120)));
+        assert_eq!(parse_window("1h"), Some(Duration::from_secs(3_600)));
+        assert_eq!(parse_window("  1  "), Some(Duration::from_secs(86_400)));
+        assert_eq!(parse_window("0s"), None, "an empty window is refused");
+        assert_eq!(parse_window("0"), None);
+        assert_eq!(parse_window("xyz"), None);
+        assert_eq!(parse_window("true"), None);
+        assert_eq!(parse_window(""), None);
+        let setting = lookup("leaseWindow").expect("registered");
+        let err = validate(setting, "xyz").expect_err("refused");
+        assert_eq!(
+            err.to_string(),
+            "invalid value for leaseWindow: want a duration like 30s, 2m, or 1h"
+        );
+    }
+
+    #[test]
+    fn lease_window_reads_the_key_and_falls_back() {
+        use std::time::Duration;
+        let fixture = atc_testsupport::Repo::new();
+        let config = Config::open(fixture.path()).expect("open");
+        assert_eq!(lease_window(&config), crate::lease::DEFAULT_WINDOW);
+
+        fixture.git(&["config", "tower.leaseWindow", "30s"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(lease_window(&config), Duration::from_secs(30));
+
+        fixture.git(&["config", "tower.leaseWindow", "xyz"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(
+            lease_window(&config),
+            crate::lease::DEFAULT_WINDOW,
+            "garbage falls back"
         );
     }
 

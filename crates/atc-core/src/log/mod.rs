@@ -28,10 +28,12 @@ mod event;
 mod lock;
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use gix::refs::transaction::PreviousValue;
 
 use crate::config::Config;
+use crate::lease;
 
 pub use chain::{ATC_EMAIL, ATC_NAME, CHAIN_VERSION};
 pub use error::{Error, Result};
@@ -42,22 +44,30 @@ pub use event::{Event, EventId, Kind, RETIRED_KINDS};
 /// The author is resolved at open — a store that cannot say who is filing
 /// should say so before anything leans on it. The writer is resolved from
 /// config at open and minted on the first append when there is none, so
-/// opening a store never writes anything.
+/// opening a store writes nothing to the repository; the one thing it
+/// touches is the session's lease, outside it.
 pub struct Store {
     repo: gix::Repository,
     author: String,
-    session: Option<String>,
-    callsign: Option<String>,
+    identity: Identity,
+    /// The word `atc callsign` wrote after open, so the move it appends
+    /// carries the new byline.
+    adopted: std::cell::OnceCell<String>,
     writer: std::cell::OnceCell<String>,
 }
 
 impl Store {
     /// Open the store on the repository containing `path`.
+    ///
+    /// Opening resolves the identity, and that is the one write an open
+    /// makes: the session's lease is renewed — created on the first
+    /// call, its body rewritten when the pid changed — so every `atc`
+    /// call under a session is a heartbeat. A lease that will not write
+    /// is not the verb's problem.
     pub fn open(path: &Path) -> Result<Store> {
         let repo = gix::discover(path).map_err(Error::repo)?;
         let author = resolve_author(&repo)?;
-        let session = session_from_environment(&repo);
-        let callsign = callsign_from_environment();
+        let identity = identity_from_environment(&repo);
         let writer = std::cell::OnceCell::new();
         if let Some(configured) = configured_writer(&repo) {
             validate_component("writer", &configured)?;
@@ -66,8 +76,8 @@ impl Store {
         Ok(Store {
             repo,
             author,
-            session,
-            callsign,
+            identity,
+            adopted: std::cell::OnceCell::new(),
             writer,
         })
     }
@@ -77,19 +87,36 @@ impl Store {
         &self.author
     }
 
-    /// The session every append is tagged with, when there is one: fufu's
-    /// tag, or the login name at a terminal.
+    /// The session every append is tagged with, when there is one: the
+    /// first [`SESSION_VARS`] row set, or the login name at a terminal.
     pub fn session(&self) -> Option<&str> {
-        self.session.as_deref()
+        self.identity.session.as_deref()
     }
 
     /// The callsign every append is stamped with, when there is one:
-    /// [`CALLSIGN_VAR`] as the override, else the client detected from
-    /// its own mark ([`CLIENT_MARKERS`]), else the login name at a
-    /// terminal. The pilot — which the session, a run, and the author,
-    /// an email, never say.
+    /// [`CALLSIGN_VAR`] as the override, else the word this session's
+    /// lease holds, else the client detected from its own mark
+    /// ([`CLIENT_MARKERS`]), else the login name at a terminal. The
+    /// pilot — which the session, a run, and the author, an email,
+    /// never say.
     pub fn callsign(&self) -> Option<&str> {
-        self.callsign.as_deref()
+        self.adopted
+            .get()
+            .map(String::as_str)
+            .or(self.identity.callsign.as_deref())
+    }
+
+    /// Everything identity-related, resolved at open: the session and
+    /// where it came from, the pid, the callsign and its source, the
+    /// lease's state, and the one notice a stale lease may have earned.
+    pub fn identity(&self) -> &Identity {
+        &self.identity
+    }
+
+    /// The word `atc callsign` just wrote into the lease: every append
+    /// from here on is stamped with it. Once per store.
+    pub fn adopt_callsign(&self, word: String) {
+        let _ = self.adopted.set(word);
     }
 
     /// This machine's writer id, once one exists — `None` until the first
@@ -213,8 +240,8 @@ impl Store {
                     author: self.author.clone(),
                     writer: writer.clone(),
                     time: now,
-                    session: self.session.clone(),
-                    callsign: self.callsign.clone(),
+                    session: self.identity.session.clone(),
+                    callsign: self.callsign().map(str::to_string),
                     kind,
                 })
                 .collect();
@@ -351,54 +378,304 @@ fn resolve_author(repo: &gix::Repository) -> Result<String> {
 }
 
 /// The session an append is tagged with, by three rules in order: the
-/// client's tag when it handed one down, the login name when a person is
-/// at the terminal, else none.
+/// first set and usable row of the session table, the login name when
+/// a person is at the terminal, else none. Beside the id, where it came
+/// from: the row's source, or `login`.
 ///
-/// `tag` is [`SESSION_VAR`], accepted under one rule: trimmed,
-/// non-empty, no control characters, at most 128 bytes. An unusable value
-/// is ignored rather than fatal — the session is a byline, not identity.
-/// `login` is the first set login variable, and `git_name` the committer's
+/// A row's value is accepted under one rule: trimmed, non-empty, no
+/// control characters, at most 128 bytes — [`usable_session`]. An
+/// unusable value is ignored rather than fatal — the session is a
+/// byline, not identity — and the walk moves to the next row. `login`
+/// is the first set login variable, and `git_name` the committer's
 /// name, the fallback when a terminal has no login variable.
 pub(crate) fn resolve_session(
-    tag: Option<&str>,
+    rows: &[(Option<&str>, &'static str)],
     interactive: bool,
     login: Option<&str>,
     git_name: Option<&str>,
-) -> Option<String> {
-    let usable = |value: &str| {
-        let trimmed = value.trim();
-        (!trimmed.is_empty() && !trimmed.chars().any(char::is_control) && trimmed.len() <= 128)
-            .then(|| trimmed.to_string())
-    };
-    if let Some(tag) = tag.and_then(usable) {
-        return Some(tag);
+) -> Option<(String, &'static str)> {
+    if let Some(found) = rows
+        .iter()
+        .find_map(|(value, source)| value.and_then(usable_session).map(|id| (id, *source)))
+    {
+        return Some(found);
     }
     if !interactive {
         return None;
     }
-    login.and_then(usable).or_else(|| git_name.and_then(usable))
+    login
+        .and_then(usable_session)
+        .or_else(|| git_name.and_then(usable_session))
+        .map(|id| (id, "login"))
 }
 
-/// The variable the client tags a session with: Claude Code's own, set
-/// on every process it spawns.
-pub const SESSION_VAR: &str = "CLAUDE_CODE_SESSION_ID";
+/// The one rule a session id is held to: trimmed, non-empty, no
+/// control characters, at most 128 bytes. `Some` is the usable id.
+pub fn usable_session(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty() && !trimmed.chars().any(char::is_control) && trimmed.len() <= 128)
+        .then(|| trimmed.to_string())
+}
 
-/// [`resolve_session`] over the process: [`SESSION_VAR`], then stdin a
-/// terminal, with `USER`, `LOGNAME`, or `USERNAME` as the login name.
-fn session_from_environment(repo: &gix::Repository) -> Option<String> {
-    let tag = std::env::var(SESSION_VAR).ok();
+/// One way a session names itself in the process environment: the
+/// variable, the variable its pid rides in when the client hands one
+/// down, and the word the source is reported as.
+#[derive(Debug)]
+pub struct SessionVar {
+    pub var: &'static str,
+    pub pid_var: Option<&'static str>,
+    pub source: &'static str,
+}
+
+/// The session table, walked in order, first set and usable wins.
+/// `ATC_SESSION` is the launcher's own tag, set per worker by a
+/// person's orchestrator, and beats the client's; the clients' own
+/// follow — Claude Code's on every process it spawns, Codex's, and the
+/// one tower's OpenCode plugin sets; `ATC_SHELL_SESSION` is a
+/// terminal's, minted by its rc lines, and last on purpose: a
+/// terminal's variables are inherited by every agent launched from it,
+/// and the agent's own row must win. A pid is read from the row that
+/// named the session and never from an inherited one; a row with no
+/// pid variable gets the lease window alone. No parent-process walk:
+/// Codex runs commands in a pid namespace where the client is pid 1,
+/// and a guess there holds or frees the wrong word.
+pub const SESSION_VARS: &[SessionVar] = &[
+    SessionVar {
+        var: "ATC_SESSION",
+        pid_var: Some("ATC_PID"),
+        source: "launcher",
+    },
+    SessionVar {
+        var: "CLAUDE_CODE_SESSION_ID",
+        pid_var: Some("CLAUDE_PID"),
+        source: "claude",
+    },
+    SessionVar {
+        var: "CODEX_SESSION_ID",
+        pid_var: None,
+        source: "codex",
+    },
+    SessionVar {
+        var: "OPENCODE_SESSION_ID",
+        pid_var: None,
+        source: "opencode",
+    },
+    SessionVar {
+        var: "ATC_SHELL_SESSION",
+        pid_var: Some("ATC_SHELL_PID"),
+        source: "shell",
+    },
+];
+
+/// [`resolve_session`] over the process: [`SESSION_VARS`] in order,
+/// then stdin a terminal, with `USER`, `LOGNAME`, or `USERNAME` as the
+/// login name.
+fn session_from_environment(repo: &gix::Repository) -> Option<(String, &'static str)> {
+    let values: Vec<Option<String>> = SESSION_VARS
+        .iter()
+        .map(|row| std::env::var(row.var).ok())
+        .collect();
+    let rows: Vec<(Option<&str>, &'static str)> = SESSION_VARS
+        .iter()
+        .zip(&values)
+        .map(|(row, value)| (value.as_deref(), row.source))
+        .collect();
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
     let login = login_name();
     let git_name = repo
         .committer()
         .and_then(|sig| sig.ok())
         .map(|sig| sig.name.to_string());
-    resolve_session(
+    resolve_session(&rows, interactive, login.as_deref(), git_name.as_deref())
+}
+
+/// Everything identity-related about the process, resolved once at
+/// open. What `atc callsign` reads bare, and what `atc whoami` will.
+#[derive(Debug, Clone)]
+pub struct Identity {
+    pub session: Option<String>,
+    /// The [`SessionVar`] source the session came from, or `login`.
+    pub session_source: Option<&'static str>,
+    /// This process's pid, from the session row's own pid variable.
+    pub pid: Option<lease::Pid>,
+    pub callsign: Option<String>,
+    /// `env`, `session`, `client`, or `login`.
+    pub callsign_source: Option<&'static str>,
+    /// The client marker's word, whatever the callsign is.
+    pub client: Option<&'static str>,
+    /// The lease's state as read at open, before this call renewed it.
+    pub lease: Option<lease::State>,
+    /// The one line the CLI prints on stderr: the word this session
+    /// held was taken while it was idle.
+    pub notice: Option<String>,
+}
+
+impl Identity {
+    /// The session a lease is keyed by: one a table row named. A login
+    /// name at a terminal is a byline, not a session to lease.
+    pub fn leased_session(&self) -> Option<&str> {
+        match self.session_source {
+            Some("login") | None => None,
+            Some(_) => self.session.as_deref(),
+        }
+    }
+
+    /// The variable the session came from, for a render that names it.
+    pub fn session_var(&self) -> Option<&'static str> {
+        SESSION_VARS
+            .iter()
+            .find(|row| Some(row.source) == self.session_source)
+            .map(|row| row.var)
+    }
+}
+
+/// [`Identity`] over the process: the session and its row's pid, the
+/// client, the lease read and renewed, and the callsign by the rule.
+fn identity_from_environment(repo: &gix::Repository) -> Identity {
+    let (session, session_source) = match session_from_environment(repo) {
+        Some((id, source)) => (Some(id), Some(source)),
+        None => (None, None),
+    };
+    let pid = session_source
+        .and_then(|source| SESSION_VARS.iter().find(|row| row.source == source))
+        .and_then(|row| row.pid_var)
+        .and_then(lease::Pid::from_env);
+    let client = lease::client_word();
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let login = login_name();
+    let tag = std::env::var(CALLSIGN_VAR).ok();
+    let env_word = tag.as_deref().and_then(usable_callsign);
+
+    let leased = match session_source {
+        Some("login") | None => None,
+        Some(_) => session.as_deref(),
+    };
+    let fallback = client
+        .map(str::to_string)
+        .or_else(|| login.clone().filter(|_| interactive));
+    let own = leased.map(|session| {
+        own_lease(
+            session,
+            pid,
+            env_word.is_none(),
+            || lease_window_of(repo),
+            fallback.as_deref().unwrap_or("nobody"),
+        )
+    });
+    let (lease_word, lease_state, notice) = match own {
+        Some(own) => (own.word, Some(own.state), own.notice),
+        None => (None, None, None),
+    };
+
+    let (callsign, callsign_source) = match resolve_callsign(
         tag.as_deref(),
+        lease_word.as_deref(),
+        client,
         interactive,
         login.as_deref(),
-        git_name.as_deref(),
-    )
+    ) {
+        Some((word, source)) => (Some(word), Some(source)),
+        None => (None, None),
+    };
+    Identity {
+        session,
+        session_source,
+        pid,
+        callsign,
+        callsign_source,
+        client,
+        lease: lease_state,
+        notice,
+    }
+}
+
+/// `leaseWindow` for the repository a store opened on, read only when a
+/// lease has a word to weigh.
+fn lease_window_of(repo: &gix::Repository) -> std::time::Duration {
+    crate::config::lease_window(&Config::from_repo(repo.clone()))
+}
+
+struct OwnLease {
+    word: Option<String>,
+    state: lease::State,
+    notice: Option<String>,
+}
+
+/// This session's lease, read and renewed. The word it holds is the
+/// callsign's second slot, and it is not checked against the pid or
+/// the window except for one thing: a lease that has gone stale is
+/// checked once, here, for whether another session took the word
+/// meanwhile. If not, it is renewed and nothing happened. If so, the
+/// word is dropped — the lease is rewritten empty, and the notice says
+/// who took it — and the verb proceeds under the client word. Two
+/// sessions never both hold a word believing it; at worst one learns
+/// late. The check is skipped when `ATC_CALLSIGN` is set: the launcher's
+/// word wins and the lease's is never read, so nothing is lost by
+/// keeping it.
+///
+/// The renewal rewrites the body when the pid differs from what the
+/// file holds — a resumed session, a new process — and touches
+/// otherwise. The state reported is the lease's as found, before this
+/// renewal.
+fn own_lease(
+    session: &str,
+    pid: Option<lease::Pid>,
+    check_word: bool,
+    window: impl FnOnce() -> std::time::Duration,
+    fallback: &str,
+) -> OwnLease {
+    let Some((mut held, mtime)) = lease::read(session) else {
+        let _ = lease::renew(session);
+        return OwnLease {
+            word: None,
+            state: lease::state(SystemTime::now(), pid, lease::DEFAULT_WINDOW),
+            notice: None,
+        };
+    };
+    // The window is git config, read only when there is a word to
+    // weigh: a lease with no word contends with nothing.
+    let window = if held.callsign.is_some() {
+        window()
+    } else {
+        lease::DEFAULT_WINDOW
+    };
+    let state = lease::state(mtime, held.pid(), window);
+    let mut notice = None;
+    if check_word
+        && let Some(word) = held.callsign.clone()
+        && !state.held()
+        && let Some(taker) = taken_by(session, &word, window)
+    {
+        held.callsign = None;
+        notice = Some(format!(
+            "callsign {word} was taken by session {taker} while idle; you are {fallback}"
+        ));
+    }
+    if held.pid() != pid || notice.is_some() {
+        held.pid = pid.map(|pid| pid.pid);
+        held.pid_start = pid.map(|pid| pid.start);
+        if held.client.is_none() {
+            held.client = lease::client_word().map(str::to_string);
+        }
+        let _ = lease::write(&held);
+    } else {
+        let _ = lease::renew(session);
+    }
+    OwnLease {
+        word: held.callsign,
+        state,
+        notice,
+    }
+}
+
+/// The other session holding `word` with a fresh lease or a live pid,
+/// when there is one.
+fn taken_by(own: &str, word: &str, window: std::time::Duration) -> Option<String> {
+    lease::all()
+        .into_iter()
+        .filter(|(session, held, _)| session != own && held.callsign.as_deref() == Some(word))
+        .find(|(_, held, mtime)| lease::state(*mtime, held.pid(), window).held())
+        .map(|(session, _, _)| session)
 }
 
 /// The launcher's override on the callsign. Set it in the agent's
@@ -439,45 +716,36 @@ pub fn usable_callsign(word: &str) -> Option<String> {
     usable.then(|| trimmed.to_string())
 }
 
-/// The callsign an append is stamped with, by four rules in order: the
-/// variable when it is set and usable, the detected client, the login
-/// name when a person is at the terminal, else none. The client is
-/// already a known word from the table, so it skips the rule. No
-/// git-name fallback — a committer name has spaces and is not a
-/// callsign. An unusable variable is ignored rather than fatal, the
-/// session's rule: under a hook with no mark and nothing set, the
-/// callsign is none and folds like any other.
+/// The callsign an append is stamped with, by five rules in order: the
+/// variable when it is set and usable, the word this session's lease
+/// holds, the detected client, the login name when a person is at the
+/// terminal, else none — with the source beside the word: `env`,
+/// `session`, `client`, or `login`. The lease's word and the client are
+/// already usable words — the verb held one to the rule, the table the
+/// other — so they skip it. No git-name fallback — a committer name
+/// has spaces and is not a callsign. An unusable variable is ignored
+/// rather than fatal, the session's rule: under a hook with no mark
+/// and nothing set, the callsign is none and folds like any other.
 pub(crate) fn resolve_callsign(
     tag: Option<&str>,
+    lease_word: Option<&str>,
     client: Option<&str>,
     interactive: bool,
     login: Option<&str>,
-) -> Option<String> {
+) -> Option<(String, &'static str)> {
     if let Some(tag) = tag.and_then(usable_callsign) {
-        return Some(tag);
+        return Some((tag, "env"));
+    }
+    if let Some(word) = lease_word {
+        return Some((word.to_string(), "session"));
     }
     if let Some(client) = client {
-        return Some(client.to_string());
+        return Some((client.to_string(), "client"));
     }
     if !interactive {
         return None;
     }
-    login.and_then(usable_callsign)
-}
-
-/// [`resolve_callsign`] over the process: [`CALLSIGN_VAR`], then the
-/// first [`CLIENT_MARKERS`] entry whose variable is set and non-empty,
-/// then stdin a terminal, with `USER`, `LOGNAME`, or `USERNAME` as the
-/// login name.
-fn callsign_from_environment() -> Option<String> {
-    let tag = std::env::var(CALLSIGN_VAR).ok();
-    let client = CLIENT_MARKERS
-        .iter()
-        .find(|(name, _)| std::env::var(name).is_ok_and(|value| !value.is_empty()))
-        .map(|(_, callsign)| *callsign);
-    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
-    let login = login_name();
-    resolve_callsign(tag.as_deref(), client, interactive, login.as_deref())
+    login.and_then(usable_callsign).map(|word| (word, "login"))
 }
 
 /// The first set login variable — `USER`, `LOGNAME`, or `USERNAME` —
@@ -690,136 +958,288 @@ mod tests {
         );
     }
 
-    /// The three rules in order: a tag beats everything, a terminal gives
-    /// the login name or the git name behind it, and a non-terminal with
-    /// no tag gives none. An unusable tag is ignored, not fatal.
+    /// The three rules in order: the first set and usable row beats
+    /// everything and names its source, a terminal gives the login name
+    /// or the git name behind it as `login`, and a non-terminal with no
+    /// row gives none. An unusable row is skipped, not fatal, and the
+    /// walk moves to the next.
     #[test]
-    fn a_session_resolves_by_tag_then_terminal_then_none() {
-        struct Case {
-            tag: Option<&'static str>,
-            interactive: bool,
-            login: Option<&'static str>,
-            git_name: Option<&'static str>,
-            want: Option<&'static str>,
-        }
-        let case = |tag, interactive, login, git_name, want| Case {
-            tag,
-            interactive,
-            login,
-            git_name,
-            want,
-        };
+    fn a_session_resolves_by_row_then_terminal_then_none() {
         let uuid = "95b36d9d-efdc-4564-9b06-91842f51ef6b";
-        let cases = [
-            case(Some(uuid), true, Some("tyler"), Some("Tyler"), Some(uuid)),
-            case(Some(uuid), false, None, None, Some(uuid)),
-            case(
-                Some("  hand-typed  "),
-                false,
-                None,
-                None,
-                Some("hand-typed"),
-            ),
-            case(None, true, Some("tyler"), Some("Tyler"), Some("tyler")),
-            case(
-                None,
-                true,
-                None,
-                Some("Tyler Johnson"),
-                Some("Tyler Johnson"),
-            ),
-            case(None, true, None, None, None),
-            case(None, false, Some("tyler"), Some("Tyler"), None),
-            case(Some("   "), true, Some("tyler"), None, Some("tyler")),
-            case(Some("a\nb"), true, Some("tyler"), None, Some("tyler")),
-        ];
-        for Case {
-            tag,
-            interactive,
-            login,
-            git_name,
-            want,
-        } in cases
-        {
-            assert_eq!(
-                resolve_session(tag, interactive, login, git_name).as_deref(),
-                want,
-                "tag {tag:?}, interactive {interactive}, login {login:?}, git {git_name:?}"
-            );
+        fn one(value: Option<&str>) -> Vec<(Option<&str>, &'static str)> {
+            vec![(value, "claude")]
         }
+        assert_eq!(
+            resolve_session(&one(Some(uuid)), true, Some("tyler"), Some("Tyler")),
+            Some((uuid.to_string(), "claude"))
+        );
+        assert_eq!(
+            resolve_session(&one(Some(uuid)), false, None, None),
+            Some((uuid.to_string(), "claude"))
+        );
+        assert_eq!(
+            resolve_session(&one(Some("  hand-typed  ")), false, None, None),
+            Some(("hand-typed".to_string(), "claude"))
+        );
+        assert_eq!(
+            resolve_session(&one(None), true, Some("tyler"), Some("Tyler")),
+            Some(("tyler".to_string(), "login"))
+        );
+        assert_eq!(
+            resolve_session(&one(None), true, None, Some("Tyler Johnson")),
+            Some(("Tyler Johnson".to_string(), "login"))
+        );
+        assert_eq!(resolve_session(&one(None), true, None, None), None);
+        assert_eq!(
+            resolve_session(&one(None), false, Some("tyler"), Some("Tyler")),
+            None
+        );
+        assert_eq!(
+            resolve_session(&one(Some("   ")), true, Some("tyler"), None),
+            Some(("tyler".to_string(), "login"))
+        );
+        assert_eq!(
+            resolve_session(&one(Some("a\nb")), true, Some("tyler"), None),
+            Some(("tyler".to_string(), "login"))
+        );
         let long = "x".repeat(129);
         assert_eq!(
-            resolve_session(Some(&long), true, Some("tyler"), None).as_deref(),
-            Some("tyler"),
-            "a tag past 128 bytes is ignored"
+            resolve_session(&one(Some(&long)), true, Some("tyler"), None),
+            Some(("tyler".to_string(), "login")),
+            "a row past 128 bytes is ignored"
+        );
+
+        // The table's order: the launcher's row beats the client's, the
+        // client's beats the shell's, and an unusable row falls through
+        // to the next one set.
+        let rows = |launcher, claude, shell| {
+            vec![
+                (launcher, "launcher"),
+                (claude, "claude"),
+                (None, "codex"),
+                (None, "opencode"),
+                (shell, "shell"),
+            ]
+        };
+        assert_eq!(
+            resolve_session(
+                &rows(Some("w1"), Some(uuid), Some("t1")),
+                true,
+                Some("tyler"),
+                None
+            ),
+            Some(("w1".to_string(), "launcher"))
+        );
+        assert_eq!(
+            resolve_session(
+                &rows(None, Some(uuid), Some("t1")),
+                true,
+                Some("tyler"),
+                None
+            ),
+            Some((uuid.to_string(), "claude"))
+        );
+        assert_eq!(
+            resolve_session(&rows(None, None, Some("t1")), true, Some("tyler"), None),
+            Some(("t1".to_string(), "shell"))
+        );
+        assert_eq!(
+            resolve_session(&rows(Some("  "), None, Some("t1")), false, None, None),
+            Some(("t1".to_string(), "shell"))
         );
     }
 
-    /// The four rules in order: the variable beats everything, the
-    /// detected client beats the terminal, a terminal gives the login
-    /// name, and a non-terminal with no variable and no client gives
-    /// none. There is no git-name fallback, and an unusable variable —
-    /// blank, spaced, a lane word — is ignored, not fatal: it falls
-    /// through to the client.
+    /// The table's sources are distinct words — the identity reports a
+    /// session by its source, and the pid row is found by it.
     #[test]
-    fn a_callsign_resolves_by_variable_then_client_then_terminal_then_none() {
+    fn every_session_row_has_its_own_source() {
+        let mut seen = Vec::new();
+        for row in SESSION_VARS {
+            assert!(!seen.contains(&row.source), "{} twice", row.source);
+            assert_ne!(row.source, "login", "login is the terminal's word");
+            seen.push(row.source);
+        }
+        assert_eq!(
+            SESSION_VARS[0].var, "ATC_SESSION",
+            "the launcher's row is first"
+        );
+        assert_eq!(
+            SESSION_VARS.last().map(|row| row.var),
+            Some("ATC_SHELL_SESSION"),
+            "the terminal's row is last"
+        );
+    }
+
+    /// The five rules in order: the variable beats everything, the
+    /// lease's word beats the client, the client beats the terminal, a
+    /// terminal gives the login name, and a non-terminal with no
+    /// variable, no lease, and no client gives none — each with its
+    /// source. There is no git-name fallback, and an unusable variable
+    /// — blank, spaced, a lane word — is ignored, not fatal: it falls
+    /// through to the lease, then the client.
+    #[test]
+    fn a_callsign_resolves_by_variable_then_lease_then_client_then_terminal_then_none() {
         struct Case {
             tag: Option<&'static str>,
+            lease: Option<&'static str>,
             client: Option<&'static str>,
             interactive: bool,
             login: Option<&'static str>,
-            want: Option<&'static str>,
+            want: Option<(&'static str, &'static str)>,
         }
-        let case = |tag, client, interactive, login, want| Case {
+        let case = |tag, lease, client, interactive, login, want| Case {
             tag,
+            lease,
             client,
             interactive,
             login,
             want,
         };
         let cases = [
-            case(Some("claude"), None, true, Some("tyler"), Some("claude")),
-            case(Some("claude"), None, false, None, Some("claude")),
             case(
-                Some("  qwen-review  "),
+                Some("claude"),
+                None,
+                None,
+                true,
+                Some("tyler"),
+                Some(("claude", "env")),
+            ),
+            case(
+                Some("claude"),
+                None,
                 None,
                 false,
                 None,
-                Some("qwen-review"),
+                Some(("claude", "env")),
             ),
-            case(None, None, true, Some("tyler"), Some("tyler")),
-            case(None, None, true, None, None),
-            case(None, None, false, Some("tyler"), None),
-            case(Some("   "), None, true, Some("tyler"), Some("tyler")),
-            case(Some("two words"), None, true, Some("tyler"), Some("tyler")),
-            case(Some("a\tb"), None, false, None, None),
-            case(Some("me"), None, true, Some("tyler"), Some("tyler")),
-            case(Some("agent"), None, false, None, None),
-            case(Some("none"), None, false, None, None),
-            case(None, None, true, Some("Tyler Johnson"), None),
+            case(
+                Some("  qwen-review  "),
+                None,
+                None,
+                false,
+                None,
+                Some(("qwen-review", "env")),
+            ),
+            case(
+                None,
+                None,
+                None,
+                true,
+                Some("tyler"),
+                Some(("tyler", "login")),
+            ),
+            case(None, None, None, true, None, None),
+            case(None, None, None, false, Some("tyler"), None),
+            case(
+                Some("   "),
+                None,
+                None,
+                true,
+                Some("tyler"),
+                Some(("tyler", "login")),
+            ),
+            case(
+                Some("two words"),
+                None,
+                None,
+                true,
+                Some("tyler"),
+                Some(("tyler", "login")),
+            ),
+            case(Some("a\tb"), None, None, false, None, None),
+            case(
+                Some("me"),
+                None,
+                None,
+                true,
+                Some("tyler"),
+                Some(("tyler", "login")),
+            ),
+            case(Some("agent"), None, None, false, None, None),
+            case(Some("none"), None, None, false, None, None),
+            case(None, None, None, true, Some("Tyler Johnson"), None),
             // The client rows: the tag beats the client, the client
             // beats the login, a client with no terminal still resolves,
             // and an unusable tag falls through to the client.
             case(
                 Some("qwen-review"),
+                None,
                 Some("claude"),
                 false,
                 None,
-                Some("qwen-review"),
+                Some(("qwen-review", "env")),
             ),
-            case(None, Some("claude"), true, Some("tyler"), Some("claude")),
-            case(None, Some("claude"), false, None, Some("claude")),
-            case(Some("   "), Some("gemini"), false, None, Some("gemini")),
+            case(
+                None,
+                None,
+                Some("claude"),
+                true,
+                Some("tyler"),
+                Some(("claude", "client")),
+            ),
+            case(
+                None,
+                None,
+                Some("claude"),
+                false,
+                None,
+                Some(("claude", "client")),
+            ),
+            case(
+                Some("   "),
+                None,
+                Some("gemini"),
+                false,
+                None,
+                Some(("gemini", "client")),
+            ),
             case(
                 Some("me"),
+                None,
                 Some("codex"),
                 true,
                 Some("tyler"),
-                Some("codex"),
+                Some(("codex", "client")),
+            ),
+            // The lease rows: the tag beats the lease, the lease beats
+            // the client and the login, and an unusable tag falls
+            // through to the lease.
+            case(
+                Some("qwen-review"),
+                Some("alpha"),
+                Some("claude"),
+                true,
+                Some("tyler"),
+                Some(("qwen-review", "env")),
+            ),
+            case(
+                None,
+                Some("alpha"),
+                Some("claude"),
+                true,
+                Some("tyler"),
+                Some(("alpha", "session")),
+            ),
+            case(
+                None,
+                Some("alpha"),
+                None,
+                false,
+                None,
+                Some(("alpha", "session")),
+            ),
+            case(
+                Some("me"),
+                Some("alpha"),
+                Some("claude"),
+                false,
+                None,
+                Some(("alpha", "session")),
             ),
         ];
         for Case {
             tag,
+            lease,
             client,
             interactive,
             login,
@@ -827,15 +1247,15 @@ mod tests {
         } in cases
         {
             assert_eq!(
-                resolve_callsign(tag, client, interactive, login).as_deref(),
-                want,
-                "tag {tag:?}, client {client:?}, interactive {interactive}, login {login:?}"
+                resolve_callsign(tag, lease, client, interactive, login),
+                want.map(|(word, source)| (word.to_string(), source)),
+                "tag {tag:?}, lease {lease:?}, client {client:?}, interactive {interactive}, login {login:?}"
             );
         }
         let long = "x".repeat(65);
         assert_eq!(
-            resolve_callsign(Some(&long), None, true, Some("tyler")).as_deref(),
-            Some("tyler"),
+            resolve_callsign(Some(&long), None, None, true, Some("tyler")),
+            Some(("tyler".to_string(), "login")),
             "a callsign past 64 bytes is ignored"
         );
         assert_eq!(
@@ -859,13 +1279,16 @@ mod tests {
     }
 
     /// The harness scrub list covers every variable the store reads for
-    /// a session or a callsign, or a test run inside a Claude Code
-    /// session would stamp `claude` on every fixture's events.
+    /// a session, its pid, or a callsign, or a test run inside a Claude
+    /// Code session would stamp `claude` on every fixture's events and
+    /// key every fixture's lease by the developer's own session.
     /// testsupport cannot depend on core, so the guard runs from here.
     #[test]
     fn the_test_scrub_covers_every_agent_variable() {
-        let names = [SESSION_VAR, CALLSIGN_VAR]
+        let names = [CALLSIGN_VAR]
             .into_iter()
+            .chain(SESSION_VARS.iter().map(|row| row.var))
+            .chain(SESSION_VARS.iter().filter_map(|row| row.pid_var))
             .chain(CLIENT_MARKERS.iter().map(|(name, _)| *name));
         for name in names {
             assert!(

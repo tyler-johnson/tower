@@ -123,6 +123,52 @@ pub enum Error {
     /// `view edit` with every field left unsaid.
     #[error("the edit changes nothing — give a name, a query, or shared")]
     NeedsViewEdit,
+
+    /// `callsign` with no session variable set: nothing to key a lease
+    /// on, and the launcher's variable is the way.
+    #[error(
+        "no session to name — none of the session variables is set, so there is nothing to hold the word on; set ATC_CALLSIGN in the launcher's environment instead"
+    )]
+    CallsignNoSession,
+    /// `callsign` under `ATC_CALLSIGN`: the launcher's word wins, and a
+    /// lease under it would never be read.
+    #[error(
+        "ATC_CALLSIGN is {word} — the launcher's word wins, and a lease under it would never be read"
+    )]
+    CallsignEnvSet { word: String },
+    /// A word `usable_callsign` rejects — the lane words included.
+    #[error(
+        "`{word}` is not a callsign — one word, no spaces, at most 64 bytes, and not me, agent, or none"
+    )]
+    BadCallsign { word: String },
+    /// A client marker's word — the name of every unnamed session of
+    /// that client, and so nobody's own.
+    #[error(
+        "`{word}` is a client's word — the name of every unnamed {word} session; pick your own"
+    )]
+    CallsignClientWord { word: String },
+    /// Another session holds the word on a fresh lease, or its pid is
+    /// alive.
+    #[error("`{word}` is flying: session {session}, {detail}")]
+    CallsignHeld {
+        word: String,
+        session: String,
+        detail: String,
+    },
+    /// `--force` against a holder whose pid is alive: a running session
+    /// keeps its word.
+    #[error(
+        "`{word}` is flying: session {session}, pid {pid} — a running session keeps its word, --force or not"
+    )]
+    CallsignLive {
+        word: String,
+        session: String,
+        pid: u32,
+    },
+    /// The lease would not write — no state directory, or the disk
+    /// refused.
+    #[error("the lease could not be written: {detail}")]
+    CallsignLease { detail: String },
 }
 
 impl Error {
@@ -158,6 +204,13 @@ impl Error {
             Error::BadView { .. } => "usage/bad-view",
             Error::ViewNotFound { .. } => "view/not-found",
             Error::NeedsViewEdit => "usage/needs-edit",
+            Error::CallsignNoSession => "callsign/no-session",
+            Error::CallsignEnvSet { .. } => "callsign/env-set",
+            Error::BadCallsign { .. } => "usage/bad-callsign",
+            Error::CallsignClientWord { .. } => "callsign/client-word",
+            Error::CallsignHeld { .. } => "callsign/held",
+            Error::CallsignLive { .. } => "callsign/live",
+            Error::CallsignLease { .. } => "callsign/lease",
         }
     }
 
@@ -195,6 +248,13 @@ impl Error {
             | Error::NeedsViewEdit
             | Error::EditTargetNotFound { .. } => &["atc"],
             Error::BadStatus { .. } | Error::BadAssignee { .. } | Error::FileStatus { .. } => &[],
+            Error::CallsignNoSession => &["ATC_CALLSIGN=<name> atc <verb>"],
+            Error::CallsignHeld { .. } => &["atc callsign <name> --force", "atc callsign"],
+            Error::CallsignEnvSet { .. }
+            | Error::BadCallsign { .. }
+            | Error::CallsignClientWord { .. }
+            | Error::CallsignLive { .. }
+            | Error::CallsignLease { .. } => &["atc callsign"],
         };
         exits.iter().map(|exit| (*exit).to_string()).collect()
     }

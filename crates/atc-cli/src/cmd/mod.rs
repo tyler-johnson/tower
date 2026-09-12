@@ -12,6 +12,7 @@ pub mod answer;
 pub mod assign;
 pub mod board;
 pub mod brief;
+pub mod callsign;
 pub mod cancel;
 pub mod comment;
 pub mod config;
@@ -63,9 +64,16 @@ pub fn ff() -> Result<Ff, CliError> {
     Ok(Ff::at(repo()?).env_program())
 }
 
-/// The store, opened on the current directory.
+/// The store, opened on the current directory. The one place the
+/// identity's notice prints: a session whose word was taken while it
+/// was idle learns so here, one line on stderr, and the verb proceeds.
+/// Serve opens its own stores per request and never prints.
 pub fn store() -> Result<Store, CliError> {
-    Ok(Store::open(&repo()?)?)
+    let store = Store::open(&repo()?)?;
+    if let Some(notice) = &store.identity().notice {
+        eprintln!("atc: {notice}");
+    }
+    Ok(store)
 }
 
 /// The standard dim tail — one string, every write verb.

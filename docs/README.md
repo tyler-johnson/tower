@@ -44,6 +44,8 @@ The manual is the binary's to install: `atc hook` writes the `tower` skill where
 
 A shelf skill reaches an agent by name. An agent-assigned flight names the skill it is flown with, `atc next` hands that name out on the picked row, and the agent prints it with `atc skills <name>` and follows it for that flight. tower writes no other program's config, so there is no redirect to set up: the flight carries the name, and the pick delivers it.
 
+An agent reaches the board under a callsign: `ATC_CALLSIGN` when the launcher set one, else the word it gave `atc callsign` this session, else the client it runs under, else the login name at a terminal. An agent runs `atc callsign <name>` first thing when its brief names it and otherwise flies as its client. The word is held on the session's lease — one file per session under the machine's state directory, renewed by every `atc` call and every trigger event — and no two live sessions on a machine hold one word; when a session's word changes, the open flights it laned under the old word follow it. Subagents share the session and its callsign, and separately tracked work is a separate session — `claude -p` under `ATC_SESSION` and `ATC_CALLSIGN`, the way the handoff skill runs one; a launcher that runs a pool sets `ATC_SESSION` per worker.
+
 ## A procedure should end with you
 
 The boundary where work becomes visible to the team is a human gesture. `atc procedures` and `atc doctor` warn — by name and by flight — when every terminal flight of a definition is agent-assigned. It is a warning and not a refusal, because the file is yours and the boundary that actually holds is `never auto-outward`: whatever an agent finishes, nothing leaves the machine without a person's verb.

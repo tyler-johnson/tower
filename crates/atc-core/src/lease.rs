@@ -1,31 +1,218 @@
 //! The session lease: one file per session under the machine's state
-//! directory, its mtime the renewal.
+//! directory, its mtime the renewal and its body the session's identity.
 //!
 //! A lease is what one machine knows about its own sessions, and it
 //! stays there: `$XDG_STATE_HOME/atc/leases/<session>`, defaulting to
-//! `~/.local/state/atc/leases/`. The trigger keeps it fresh — renewed at
-//! every context boundary and on every activity event the client
-//! reports, released at the session's end — so the two operations here
-//! open no store and touch no repository: a `touch` and an unlink, the
-//! `atc config` class of work, since one of them runs on every tool
-//! call.
+//! `~/.local/state/atc/leases/`. The first `atc` call or trigger under a
+//! session creates it; every `atc` call and every activity event the
+//! trigger sees renews it; the trigger's end event releases it. The
+//! body is JSON — the session, the client word, the pid with its start
+//! time when the client hands one down, and the callsign `atc callsign`
+//! fills in, empty until then. The lease is the session's, not the
+//! callsign's: a session with no word is a live session holding
+//! nothing, and the hold is only ever about the word.
 //!
-//! The session is keyed by [`crate::log::SESSION_VAR`] from the
-//! environment, else by the `session_id` a client's payload carries. The
-//! key becomes a file name, so it is held to one rule beyond the
-//! session's own: no separator and no `..`.
+//! A lease is fresh while its mtime is inside the window — `leaseWindow`
+//! in `atc config` — or its pid is alive. The pid is stored with the
+//! start time `/proc/<pid>/stat` reports so a reused pid reads as dead;
+//! a client that offers no pid gets the window alone. No parent-process
+//! walk: a guess there holds or frees the wrong word.
 //!
-//! What this file holds beyond its mtime is not this module's to say
-//! yet. Renew appends nothing and never truncates, so fields written
-//! into it later survive every heartbeat.
+//! [`renew`] and [`release`] open no store and touch no repository — a
+//! touch and an unlink, the `atc config` class of work, since one of
+//! them runs on every tool call. Renew writes the body once, when the
+//! file is empty, and never truncates after: a heartbeat is an fstat and
+//! a `set_modified`.
+//!
+//! The session is keyed by the first [`crate::log::SESSION_VARS`] row
+//! set in the environment, else by the `session_id` a client's payload
+//! carries. The key becomes a file name, so it is held to one rule
+//! beyond the session's own: no separator and no `..`.
 
 use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
-use crate::log::SESSION_VAR;
+use serde::{Deserialize, Serialize};
+
+use crate::log::{CLIENT_MARKERS, SESSION_VARS, usable_session};
+
+/// How long a lease stays fresh without a heartbeat when nothing is
+/// configured: `leaseWindow`'s compiled default, which the registry row
+/// spells and a test holds to this.
+pub const DEFAULT_WINDOW: Duration = Duration::from_secs(120);
+
+/// The body of a lease file.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lease {
+    pub session: String,
+    /// The client marker's word, whatever the callsign is.
+    #[serde(default)]
+    pub client: Option<String>,
+    #[serde(default)]
+    pub pid: Option<u32>,
+    #[serde(default)]
+    pub pid_start: Option<u64>,
+    /// The word `atc callsign` wrote; empty until it did.
+    #[serde(default)]
+    pub callsign: Option<String>,
+}
+
+impl Lease {
+    /// The stored pid as a [`Pid`], when the body carries one.
+    pub fn pid(&self) -> Option<Pid> {
+        Some(Pid {
+            pid: self.pid?,
+            start: self.pid_start?,
+        })
+    }
+
+    /// The body written on creation: the session, the client detected
+    /// from its mark, the pid the session's own row hands down, no word.
+    fn fresh(session: &str) -> Lease {
+        let pid = Pid::current();
+        Lease {
+            session: session.to_string(),
+            client: client_word().map(str::to_string),
+            pid: pid.map(|pid| pid.pid),
+            pid_start: pid.map(|pid| pid.start),
+            callsign: None,
+        }
+    }
+}
+
+/// A process, identified exactly: the pid and the start time the kernel
+/// reports for it, so a pid the system reused after the session died
+/// reads as dead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pid {
+    pub pid: u32,
+    pub start: u64,
+}
+
+impl Pid {
+    /// The pid a variable names, with its start time — `None` when the
+    /// variable is unset, not a number, or names no live process this
+    /// target can read.
+    pub fn from_env(var: &str) -> Option<Pid> {
+        let pid: u32 = std::env::var(var).ok()?.trim().parse().ok()?;
+        Some(Pid {
+            pid,
+            start: start_time(pid)?,
+        })
+    }
+
+    /// The pid of this session's own row: the first [`SESSION_VARS`] row
+    /// set and usable names the session, and only that row's pid
+    /// variable is read — never an inherited one.
+    pub fn current() -> Option<Pid> {
+        SESSION_VARS
+            .iter()
+            .find(|row| {
+                std::env::var(row.var)
+                    .ok()
+                    .as_deref()
+                    .and_then(usable_session)
+                    .is_some()
+            })
+            .and_then(|row| row.pid_var)
+            .and_then(Pid::from_env)
+    }
+
+    /// Whether the process is still running: the pid exists and its
+    /// start time is the one stored. False on a target with no reader.
+    pub fn alive(&self) -> bool {
+        start_time(self.pid) == Some(self.start)
+    }
+}
+
+/// Field 22 of `/proc/<pid>/stat`, the start time in clock ticks since
+/// boot. `None` when the process is gone.
+#[cfg(target_os = "linux")]
+fn start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_stat_start(&stat)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn start_time(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// The start time out of a stat line. The comm in field 2 is
+/// parenthesized and may hold spaces or a `)`, so the parse begins after
+/// the last `)`: field 3 is then the first token, and field 22 the
+/// twentieth.
+pub(crate) fn parse_stat_start(stat: &str) -> Option<u64> {
+    let after = &stat[stat.rfind(')')? + 1..];
+    after.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// What a lease's timestamps and pid say about the session behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct State {
+    /// The mtime is inside the window.
+    pub fresh: bool,
+    /// Since the last renewal.
+    #[serde(serialize_with = "seconds")]
+    pub age: Duration,
+    /// Whether the stored pid is running; absent when no pid is stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid_alive: Option<bool>,
+}
+
+fn seconds<S: serde::Serializer>(age: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_u64(age.as_secs())
+}
+
+impl State {
+    /// Whether the word in this lease is held: fresh by the window, or
+    /// the pid alive.
+    pub fn held(&self) -> bool {
+        self.fresh || self.pid_alive == Some(true)
+    }
+
+    /// The holder's condition, the way a refusal names it: `pid 961370`
+    /// when the process is running, else `stale 40s`.
+    pub fn detail(&self, pid: Option<Pid>) -> String {
+        match (pid, self.pid_alive) {
+            (Some(pid), Some(true)) => format!("pid {}", pid.pid),
+            _ => format!("stale {}", span(self.age)),
+        }
+    }
+}
+
+/// `4s`, `2m`, `3h` — the lease's own age render, s/m/h/d.
+pub fn span(age: Duration) -> String {
+    let secs = age.as_secs();
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3_600 => format!("{}m", secs / 60),
+        3_600..86_400 => format!("{}h", secs / 3_600),
+        _ => format!("{}d", secs / 86_400),
+    }
+}
+
+/// [`State`] from a lease's mtime and pid against the window, at `now`.
+pub fn state(mtime: SystemTime, pid: Option<Pid>, window: Duration) -> State {
+    state_at(SystemTime::now(), mtime, pid.map(|pid| pid.alive()), window)
+}
+
+pub(crate) fn state_at(
+    now: SystemTime,
+    mtime: SystemTime,
+    pid_alive: Option<bool>,
+    window: Duration,
+) -> State {
+    let age = now.duration_since(mtime).unwrap_or(Duration::ZERO);
+    State {
+        fresh: age <= window,
+        age,
+        pid_alive,
+    }
+}
 
 /// The state root: `XDG_STATE_HOME`, else `HOME` (or `USERPROFILE`) with
 /// `.local/state` under it. None when neither is set, in which case
@@ -58,16 +245,31 @@ fn usable(value: &str) -> Option<&str> {
     ok.then_some(trimmed)
 }
 
-/// The session this process is in: [`SESSION_VAR`] when set and usable,
-/// else the payload's `session_id` when that is. None is no session, and
-/// nothing to lease.
+/// The session this process is in: the first [`SESSION_VARS`] row set
+/// and usable, when its value can be a file name; else the payload's
+/// `session_id` when no row is set and that can. None is no session,
+/// and nothing to lease. The row walk is the store's, so the byline on
+/// every event and the key of the lease are one value.
 pub fn session_key(payload_session: &str) -> Option<String> {
-    std::env::var(SESSION_VAR)
-        .ok()
-        .as_deref()
-        .and_then(usable)
-        .or_else(|| usable(payload_session))
-        .map(str::to_string)
+    let row = SESSION_VARS.iter().find_map(|row| {
+        std::env::var(row.var)
+            .ok()
+            .as_deref()
+            .and_then(usable_session)
+    });
+    match row {
+        Some(session) => usable(&session).map(str::to_string),
+        None => usable(payload_session).map(str::to_string),
+    }
+}
+
+/// The first [`CLIENT_MARKERS`] entry whose variable is set and
+/// non-empty — the client's word.
+pub fn client_word() -> Option<&'static str> {
+    CLIENT_MARKERS
+        .iter()
+        .find(|(name, _)| std::env::var(name).is_ok_and(|value| !value.is_empty()))
+        .map(|(_, callsign)| *callsign)
 }
 
 /// The lease file for one session, when the machine has a state root.
@@ -76,16 +278,59 @@ pub fn path(session: &str) -> Option<PathBuf> {
     dir().map(|dir| dir.join(session))
 }
 
-/// The heartbeat: create the lease if it is not there, and move its
-/// mtime to now. Appends nothing and never truncates.
+/// One session's lease and its mtime, when the file is there. A body
+/// that will not parse — the empty file an older trigger left, a hand
+/// edit — reads as an empty lease with its mtime, never as no lease.
+pub fn read(session: &str) -> Option<(Lease, SystemTime)> {
+    let path = path(session)?;
+    let mtime = std::fs::metadata(&path).ok()?.modified().ok()?;
+    let lease = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Lease>(&bytes).ok())
+        .unwrap_or_else(|| Lease {
+            session: session.to_string(),
+            ..Lease::default()
+        });
+    Some((lease, mtime))
+}
+
+/// Write a lease whole: through a temporary file and a rename, so a
+/// reader never sees half a body. The mtime is now.
+pub fn write(lease: &Lease) -> io::Result<()> {
+    let path = path(&lease.session).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no state directory: neither XDG_STATE_HOME nor HOME is set",
+        )
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+    let body = serde_json::to_vec(lease).map_err(io::Error::other)?;
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, &path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// The heartbeat: create the lease if it is not there — the body from
+/// the environment, once — and move its mtime to now. Never truncates,
+/// so the word `atc callsign` wrote survives every heartbeat.
 pub fn renew(session: &str) -> io::Result<()> {
+    use std::io::Write as _;
+
     let Some(path) = path(session) else {
         return Ok(());
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file = OpenOptions::new().append(true).create(true).open(&path)?;
+    let mut file = OpenOptions::new().append(true).create(true).open(&path)?;
+    if file.metadata()?.len() == 0 {
+        let body = serde_json::to_vec(&Lease::fresh(session)).map_err(io::Error::other)?;
+        file.write_all(&body)?;
+    }
     file.set_modified(SystemTime::now())
 }
 
@@ -98,6 +343,31 @@ pub fn release(session: &str) -> io::Result<()> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }
+}
+
+/// Every lease on the machine: session, body, mtime. A missing
+/// directory is no leases.
+pub fn all() -> Vec<(String, Lease, SystemTime)> {
+    let Some(dir) = dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut leases: Vec<(String, Lease, SystemTime)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let session = entry.file_name().into_string().ok()?;
+            // A temporary file mid-write is not a session.
+            if session.contains(".tmp.") {
+                return None;
+            }
+            let (lease, mtime) = read(&session)?;
+            Some((session, lease, mtime))
+        })
+        .collect();
+    leases.sort_by(|a, b| a.0.cmp(&b.0));
+    leases
 }
 
 #[cfg(test)]
@@ -148,5 +418,106 @@ mod tests {
     fn path_refuses_what_the_key_refuses() {
         assert!(path("a/b").is_none());
         assert!(path("").is_none());
+    }
+
+    /// The comm is parenthesized and may hold anything, a `)` included,
+    /// so the start time is counted from the last `)`.
+    #[test]
+    fn the_start_time_is_field_22_after_the_comm() {
+        let stat = "961370 (atc (x)) S 1 961370 961370 0 -1 4194304 100 0 0 0 5 3 0 0 20 0 1 0 \
+                    123456789 12345678 100 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 2 0 0 0 0 0";
+        assert_eq!(parse_stat_start(stat), Some(123_456_789));
+        assert_eq!(parse_stat_start("garbage"), None);
+        assert_eq!(parse_stat_start("1 (short) S 1"), None);
+    }
+
+    /// Fresh is the window; held is the window or the pid; the detail
+    /// names the pid when it runs and the staleness when it does not.
+    #[test]
+    fn state_reads_the_window_and_the_pid() {
+        let now = SystemTime::now();
+        let window = Duration::from_secs(120);
+        let young = state_at(now, now - Duration::from_secs(40), None, window);
+        assert!(young.fresh && young.held());
+        assert_eq!(young.age, Duration::from_secs(40));
+        assert_eq!(young.detail(None), "stale 40s");
+
+        let old = state_at(now, now - Duration::from_secs(400), None, window);
+        assert!(!old.fresh && !old.held());
+        assert_eq!(old.detail(None), "stale 6m");
+
+        let pid = Pid { pid: 7, start: 1 };
+        let old_alive = state_at(now, now - Duration::from_secs(400), Some(true), window);
+        assert!(!old_alive.fresh && old_alive.held());
+        assert_eq!(old_alive.detail(Some(pid)), "pid 7");
+
+        let old_dead = state_at(now, now - Duration::from_secs(400), Some(false), window);
+        assert!(!old_dead.held());
+        assert_eq!(old_dead.detail(Some(pid)), "stale 6m");
+
+        // A clock that runs backwards is an age of zero, not a panic.
+        let future = state_at(now, now + Duration::from_secs(5), None, window);
+        assert!(future.fresh);
+        assert_eq!(future.age, Duration::ZERO);
+    }
+
+    #[test]
+    fn span_rounds_down_by_unit() {
+        assert_eq!(span(Duration::from_secs(0)), "0s");
+        assert_eq!(span(Duration::from_secs(59)), "59s");
+        assert_eq!(span(Duration::from_secs(60)), "1m");
+        assert_eq!(span(Duration::from_secs(3_599)), "59m");
+        assert_eq!(span(Duration::from_secs(3_600)), "1h");
+        assert_eq!(span(Duration::from_secs(90_000)), "1d");
+    }
+
+    /// The body round-trips whole, an empty or foreign file reads as an
+    /// empty lease with its mtime, and a `Lease::pid` needs both halves.
+    #[test]
+    fn a_lease_body_round_trips_and_a_bad_one_reads_empty() {
+        let lease = Lease {
+            session: "s1".to_string(),
+            client: Some("claude".to_string()),
+            pid: Some(42),
+            pid_start: Some(9),
+            callsign: Some("alpha".to_string()),
+        };
+        let json = serde_json::to_string(&lease).unwrap();
+        assert_eq!(serde_json::from_str::<Lease>(&json).unwrap(), lease);
+        assert_eq!(lease.pid(), Some(Pid { pid: 42, start: 9 }));
+
+        let partial: Lease = serde_json::from_str(r#"{"session":"s2"}"#).unwrap();
+        assert_eq!(partial.session, "s2");
+        assert!(partial.pid().is_none() && partial.callsign.is_none());
+        let half: Lease = serde_json::from_str(r#"{"session":"s3","pid":5}"#).unwrap();
+        assert!(half.pid().is_none(), "a pid without its start is no pid");
+    }
+
+    /// A pid variable that is unset or not a number is no pid; this
+    /// process's own pid is alive, and a pid with the wrong start time is
+    /// not.
+    #[test]
+    fn a_pid_is_read_with_its_start_and_checked_against_it() {
+        assert!(Pid::from_env("ATC_TEST_PID_UNSET_9f2c").is_none());
+        // The environment is process-global and tests run in parallel,
+        // so the variable is this test's own.
+        let var = "ATC_TEST_PID_9f2c";
+        unsafe { std::env::set_var(var, "not-a-pid") };
+        assert!(Pid::from_env(var).is_none());
+        unsafe { std::env::set_var(var, std::process::id().to_string()) };
+        let own = Pid::from_env(var);
+        unsafe { std::env::remove_var(var) };
+        if cfg!(target_os = "linux") {
+            let own = own.expect("this process has a start time");
+            assert_eq!(own.pid, std::process::id());
+            assert!(own.alive());
+            let reused = Pid {
+                pid: own.pid,
+                start: own.start.wrapping_add(1),
+            };
+            assert!(!reused.alive(), "a start time that differs is a reused pid");
+        } else {
+            assert!(own.is_none(), "no reader on this target, no pid");
+        }
     }
 }

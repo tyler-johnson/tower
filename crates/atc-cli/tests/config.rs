@@ -72,9 +72,10 @@ fn list_shows_every_setting_with_defaults_and_the_trailer() {
     assert!(text.contains("defaultFileStatus  ready"), "{text}");
     assert!(text.contains("serveHost  127.0.0.1"), "{text}");
     assert!(text.contains("servePort  7420"), "{text}");
+    assert!(text.contains("leaseWindow  2m"), "{text}");
     assert!(text.contains("updateCheck  1d"), "{text}");
     assert!(text.contains("autoUpdate  true"), "{text}");
-    assert_eq!(text.matches("(default)").count(), 5, "{text}");
+    assert_eq!(text.matches("(default)").count(), 6, "{text}");
     assert!(
         text.contains("Set with:     atc config <key> <value>   (--global: every repo)"),
         "{text}"
@@ -99,7 +100,7 @@ fn list_json_pins_the_registry() {
     let settings = envelope["data"]["settings"]
         .as_array()
         .expect("a settings array");
-    assert_eq!(settings.len(), 5, "{envelope}");
+    assert_eq!(settings.len(), 6, "{envelope}");
     let keys: Vec<&str> = settings
         .iter()
         .map(|entry| entry["key"].as_str().expect("a key"))
@@ -110,6 +111,7 @@ fn list_json_pins_the_registry() {
             "defaultFileStatus",
             "serveHost",
             "servePort",
+            "leaseWindow",
             "updateCheck",
             "autoUpdate"
         ]
@@ -118,7 +120,10 @@ fn list_json_pins_the_registry() {
         .iter()
         .map(|entry| entry["kind"].as_str().expect("a kind"))
         .collect();
-    assert_eq!(kinds, ["choice", "host", "port", "cadence", "bool"]);
+    assert_eq!(
+        kinds,
+        ["choice", "host", "port", "duration", "cadence", "bool"]
+    );
     let file_status = &settings[0];
     assert_eq!(file_status["value"], serde_json::json!("ready"));
     assert_eq!(
@@ -180,6 +185,30 @@ fn set_round_trips_through_real_git() {
     assert!(!port_line.contains("(default)"), "{port_line}");
 }
 
+/// `leaseWindow`: set, read back, and unset to the default, through
+/// the duration kind.
+#[test]
+fn the_lease_window_sets_and_unsets() {
+    let repo = Repo::new();
+    assert_eq!(
+        stdout(&atc(repo.path(), &["config", "leaseWindow"])),
+        "2m\n"
+    );
+    let text = stdout(&atc(repo.path(), &["config", "leaseWindow", "30s"]));
+    assert_eq!(text, "leaseWindow = 30s (this repo)\n");
+    assert_eq!(repo.git(&["config", "tower.leaseWindow"]).trim(), "30s");
+    assert_eq!(
+        stdout(&atc(repo.path(), &["config", "leaseWindow"])),
+        "30s\n"
+    );
+    let text = stdout(&atc(repo.path(), &["config", "--unset", "leaseWindow"]));
+    assert_eq!(text, "leaseWindow unset — back to the default (2m)\n");
+    assert_eq!(
+        stdout(&atc(repo.path(), &["config", "leaseWindow"])),
+        "2m\n"
+    );
+}
+
 #[test]
 fn a_standing_comment_survives_a_set() {
     let repo = Repo::new();
@@ -233,11 +262,23 @@ fn invalid_values_exit_2_and_write_nothing() {
     );
     refusal(&out, 2, "usage/bad-value");
 
+    // The duration kind: a span of at least a second, no bool spelling.
+    for bad in ["xyz", "0s", "true"] {
+        let out = atc(repo.path(), &["config", "--json", "leaseWindow", bad]);
+        let envelope = refusal(&out, 2, "usage/bad-value");
+        assert_eq!(
+            envelope["error"]["message"],
+            serde_json::json!("invalid value for leaseWindow: want a duration like 30s, 2m, or 1h"),
+            "{bad}"
+        );
+    }
+
     // Nothing touched disk on any refusal.
     let listed = repo.git(&["config", "--local", "-l"]);
     assert!(!listed.contains("tower.updatecheck"), "{listed}");
     assert!(!listed.contains("tower.autoupdate"), "{listed}");
     assert!(!listed.contains("tower.defaultfilestatus"), "{listed}");
+    assert!(!listed.contains("tower.leasewindow"), "{listed}");
 
     // The listed words set, and read back.
     for word in ["backlog", "ready", "in_progress"] {
@@ -268,7 +309,7 @@ fn global_set_creates_home_gitconfig_and_the_list_reports_global() {
 
     let out = atc(repo.path(), &["config", "--json"]);
     let envelope = envelope(&out);
-    let entry = &envelope["data"]["settings"][3];
+    let entry = &envelope["data"]["settings"][4];
     assert_eq!(entry["key"], serde_json::json!("updateCheck"));
     assert_eq!(entry["value"], serde_json::json!("12h"));
     assert_eq!(entry["source"], serde_json::json!("global"));
