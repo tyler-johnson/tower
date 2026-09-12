@@ -656,45 +656,65 @@ Examples:
   atc config servePort 9000          the same, remembered
   atc serve --json          the address as an envelope, then serve";
 
-pub const BRIEFING: &str = "\
-The notice a wired client puts in front of an agent at every context
-boundary — a fresh session, a resumed one, a clear, a compaction:
-what tower is, the four gestures of the loop, and one line that is
-this repository's — how many flights are ready, or that nothing is
-filed here yet. When the process has a callsign — ATC_CALLSIGN when
-set, else the client it runs under, else the login name at a terminal
-— and a flight is In Progress under it, the line is the resume line
-instead: the flight you are on, and the brief to run. Bare
-`atc briefing` prints it for the repository you are in, which is how
-a person reads what an agent is told.
+pub const TRIGGER: &str = "\
+What a wired client runs on every event it offers, and how a person
+reads the notice. Bare `atc trigger` prints the notice for the
+repository you are in: what tower is, the four gestures of the loop,
+and one line that is this repository's — how many flights are ready,
+or that nothing is filed here yet. When the process has a callsign —
+ATC_CALLSIGN when set, else the client it runs under, else the login
+name at a terminal — and a flight is In Progress under it, the line
+is the resume line instead: the flight you are on, and the brief to
+run.
 
-Named for a client — `atc briefing claude` — it is the command
-`atc hook` wrote into that client's config, and it speaks the
-client's dialect: the payload on stdin names the session's directory,
-the text goes out wrapped the way that client reads it, and any
-failure — no repository, a store that will not open — exits 0 with
-nothing said, because a hook's stderr is noise in someone else's
-terminal. Only tower spells that form, so a client it does not know
-is refused rather than silenced. Run by hand with no client named,
-the failure reports the way every verb's does.
+Named for a source — `atc trigger claude` — it is the command
+`atc hook` wrote into that client's config under every event in the
+client's table, and the payload on stdin says which one fired. At a
+context boundary — a fresh session, a resume, a clear, a compaction
+— it renews the session's lease and prints the notice wrapped the
+way that client reads it. On activity — a prompt, a tool call, the
+end of a turn — it renews the lease and says nothing. At the
+session's end it releases the lease and says nothing. A payload with
+no hook_event_name is a boundary, so an older config's entry keeps
+doing what it did. The lease is one file per session under the
+machine's state directory, keyed by the session variable the client
+exports, else the payload's session_id; renewing it opens no store,
+so the activity path costs a few milliseconds on every tool call.
+
+Any failure — no repository, a store that will not open, a source or
+an event it does not know — exits 0 with nothing said, because a
+hook's stderr is noise in someone else's terminal. `briefing` is the
+spelling this verb replaced, kept for the configs that still carry
+it: it prints the notice and touches no lease.
 
 --json carries the text as `data.text`, with `ready`, `filed`, `on`
 — the flights In Progress under your callsign — and `callsign`
 beside it. The advanced surface is not here: it is in the `tower`
 skill `atc hook` writes beside the hook, read only when wanted.";
 
-pub const BRIEFING_EXAMPLES: &str = "\
+pub const TRIGGER_EXAMPLES: &str = "\
 Examples:
-  atc briefing              what an agent is told here
-  atc briefing claude       the same, as Claude Code's hook runs it
-  atc briefing --json       the text as a field, with the counts";
+  atc trigger               what an agent is told here
+  atc trigger claude        the same, as Claude Code's hook runs it
+  atc trigger --json        the text as a field, with the counts";
+
+pub const BRIEFING: &str = "\
+The notice alone, the way `atc trigger` printed it before it was
+wired to every event: bare, for the repository you are in; named for
+a client, wrapped the way that client reads it, silent on any
+failure, and refusing a client it does not know. It touches no lease
+and reads no event, so it is the spelling a stored config may still
+carry and not one to write anew — `atc hook -u` rewrites it.";
 
 pub const HOOK: &str = "\
 Wire tower into the agent clients on this machine, so every session an
 agent starts in a repository is told the board is here and how to
-pull from it. The notice lands at every context boundary the client
-reports — session start, resume, clear, compact — and it is silent
-outside a git repository, so a wired client costs nothing elsewhere.
+pull from it. The hooks carry three things: the notice at every
+context boundary the client reports — session start, resume, clear,
+compact — a heartbeat on the session's lease at every prompt, tool
+call, and turn, and the lease's release at the session's end. The
+notice is silent outside a git repository, and the heartbeat opens no
+store, so a wired client costs nothing elsewhere.
 
 Bare `atc hook` reports what it found and then asks. Name clients to
 wire exactly those; --all takes everything detected without asking;

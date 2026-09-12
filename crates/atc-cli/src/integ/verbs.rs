@@ -2,7 +2,7 @@
 //!
 //! Both are for humans: an unknown slug is a real error, every failure is
 //! loud, and `--json` emits a report envelope. The machine half — what a
-//! wired client actually runs — is `atc briefing <slug>`, in `cmd/briefing.rs`.
+//! wired client actually runs — is `atc trigger <slug>`, in `cmd/trigger.rs`.
 
 use super::{Change, InstallOptions, Integration, Status, Wiring};
 use crate::error::CliError;
@@ -151,7 +151,9 @@ fn bad_flags(verb: Verb, slugs: &[String]) -> CliError {
     )
 }
 
-/// The refusal a wrong name earns, shared with `atc briefing <client>`.
+/// The refusal a wrong name earns, shared with the `atc briefing <client>`
+/// alias. `atc trigger <source>` is machine surface and stays silent on a
+/// name it does not know.
 pub fn unknown_slug(slug: &str) -> CliError {
     CliError::coded(
         "usage/unknown-slug",
@@ -306,6 +308,11 @@ fn describe(status: &Status) -> String {
     // client with no skills at all should not have to say so.
     if let Some(Wiring::Wired { .. }) = &status.skill {
         line.push_str(", skill");
+    }
+    // Stale is the same kind of fact: it delivers, and it is written the
+    // way an older tower wrote it, so the repair is named on the row.
+    if status.stale {
+        line.push_str(", stale — atc hook -u rewrites it");
     }
     line
 }

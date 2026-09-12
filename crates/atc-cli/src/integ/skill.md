@@ -29,7 +29,7 @@ Every read folds the log fresh and never blocks on the network.
 - `atc brief <flight>` (alias `show`) — the whole record: every field, the newest handoff pinned above the comments, the comments with any question and answer among them, the links with each linked flight's subject and status, a parent's body under its row (one level up, so a sub-flight reads whole), the flights whose prose names this one under `referenced by`, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
 - `atc procedures` and `atc skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `atc explain <id>` — the prose behind a refusal; `atc explain --list` is the whole catalog. A pure lookup, no repository needed.
-- `atc config` — every setting with its value and default; `atc version`; `atc doctor`, which exits 1 on findings so a script can gate on it; `atc briefing`, the line fufu shows a new session.
+- `atc config` — every setting with its value and default; `atc version`; `atc doctor`, which exits 1 on findings so a script can gate on it; `atc trigger`, the notice a wired client shows a new session.
 
 ## Filing and shaping
 

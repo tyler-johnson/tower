@@ -33,6 +33,7 @@
 pub mod board;
 pub mod config;
 pub mod ff;
+pub mod lease;
 pub mod log;
 pub mod machine;
 pub mod model;

@@ -150,18 +150,21 @@ pub fn counts(cwd: &Path) -> Result<Counts, CliError> {
 /// A payload larger than this is dropped rather than read into memory.
 const MAX_PAYLOAD: u64 = 8 * 1024 * 1024;
 
-/// What a client's session-start payload says that tower reads: where the
-/// session is, and which session it is. Every field defaults, because a
-/// payload tower cannot parse still has a session in front of it.
+/// What a client's hook payload says that tower reads: where the session
+/// is, which session it is, and which event fired. Every field defaults,
+/// because a payload tower cannot parse still has a session in front of
+/// it — and no event name is a boundary.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Payload {
     pub cwd: String,
-    /// Parsed and kept; nothing reads it. The callsign is the variable,
-    /// not the session — a session is one run, and the resume line is
-    /// about the pilot across runs.
-    #[allow(dead_code)]
+    /// The lease's key when the environment does not carry one. Never
+    /// the callsign: a session is one run, and the resume line is about
+    /// the pilot across runs.
     pub session_id: String,
+    /// The event, in the client's vocabulary; the source's table says
+    /// what it means.
+    pub hook_event_name: String,
 }
 
 impl Payload {

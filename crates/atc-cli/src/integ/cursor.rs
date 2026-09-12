@@ -15,14 +15,25 @@ use std::path::PathBuf;
 
 use super::{Change, InstallOptions, Integration, Presence, Status, Wiring, settings};
 use crate::error::CliError;
-use settings::Need;
+use settings::{Class, Event, Need};
 
 pub struct Cursor;
 
-const COMMAND: &str = "atc briefing cursor";
-const LEGACY: [&str; 0] = [];
+/// The hook command, and the spelling older installs carry — accepted
+/// forever, since it sits in a file tower rewrites only when the
+/// installer is run again.
+const COMMAND: &str = "atc trigger cursor";
+const LEGACY: [&str; 1] = ["atc briefing cursor"];
 
-const EVENTS: [(&str, Option<&str>, Need); 1] = [("sessionStart", None, Need::Required)];
+/// The boundary alone: Cursor is not on this machine, so its activity
+/// and end names are unverified, and the table stays at what is known
+/// to fire.
+const EVENTS: [Event; 1] = [Event {
+    name: "sessionStart",
+    matcher: None,
+    class: Class::Boundary,
+    need: Need::Required,
+}];
 
 const CLOUD: &str = "Cursor does not fire sessionStart for cloud agents, so the notice is \
                      absent there";
@@ -45,6 +56,10 @@ fn spec() -> Result<settings::Spec, CliError> {
 impl Integration for Cursor {
     fn slug(&self) -> &'static str {
         "cursor"
+    }
+
+    fn events(&self) -> &'static [Event] {
+        &EVENTS
     }
 
     fn detect(&self) -> Presence {

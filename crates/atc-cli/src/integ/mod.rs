@@ -7,11 +7,15 @@
 //! are for humans: an unknown slug is a real error, a failure is loud,
 //! and `--json` emits a report envelope.
 //!
-//! What every client runs is `atc briefing <slug>`: tower's notice, once
-//! per context boundary, wrapped the way that client reads it. That verb
-//! is machine surface with one absolute contract — it always exits 0 and
-//! says nothing on a failure — and `briefing.rs` holds the text and the
-//! guards that keep it true.
+//! What every client runs is `atc trigger <slug>`, on every event the
+//! client offers: at a context boundary it prints tower's notice,
+//! wrapped the way that client reads it, and renews the session's lease;
+//! on activity it renews the lease and says nothing; at the session's
+//! end it releases it. That verb is machine surface with one absolute
+//! contract — it always exits 0 and says nothing on a failure — and
+//! `briefing.rs` holds the notice and the guards that keep it true.
+//! Each adapter's event table says which of the client's names is which
+//! class, and `atc hook` writes the same table.
 //!
 //! The skills the binary ships ride the same install for the clients
 //! that read one. Each embedded constant is the staleness fingerprint —
@@ -183,11 +187,33 @@ impl Change {
 
 // ---- the trait -------------------------------------------------------------
 
-/// Everything a slug can do: install, detect, status, and the one
-/// per-vendor fact about delivery — how the notice has to be wrapped for
-/// this client to read it.
+/// Everything a slug can do: install, detect, status, the events the
+/// client fires and what each means, and the one per-vendor fact about
+/// delivery — how the notice has to be wrapped for this client to read
+/// it.
 pub trait Integration: Sync {
     fn slug(&self) -> &'static str;
+
+    /// The events tower wires on this client, in the client's own
+    /// vocabulary: what `atc hook` writes, and what the trigger
+    /// dispatches on.
+    fn events(&self) -> &'static [settings::Event];
+
+    /// What the trigger does for a payload's `hook_event_name`. No name,
+    /// or an empty one, is a boundary — an older config that wired
+    /// `SessionStart` alone, or a person piping by hand — so every stored
+    /// entry keeps doing what it did. A name in the table is its class;
+    /// anything else is nothing.
+    fn class_of(&self, name: Option<&str>) -> Option<settings::Class> {
+        match name {
+            None | Some("") => Some(settings::Class::Boundary),
+            Some(name) => self
+                .events()
+                .iter()
+                .find(|event| event.name == name)
+                .map(|event| event.class),
+        }
+    }
 
     /// Is this client on the machine?
     fn detect(&self) -> Presence;
@@ -317,6 +343,42 @@ mod tests {
                 integration.slug()
             );
             assert!(by_slug(integration.slug()).is_some());
+        }
+    }
+
+    /// The dispatch every adapter shares: no name is a boundary, a name
+    /// in the table is its class, and anything else is nothing — never a
+    /// guess, because a guess prints the notice into a tool call.
+    #[test]
+    fn the_class_is_the_table_and_no_name_is_a_boundary() {
+        use settings::Class;
+        for integration in all() {
+            let slug = integration.slug();
+            assert_eq!(
+                integration.class_of(None),
+                Some(Class::Boundary),
+                "{slug}: no name"
+            );
+            assert_eq!(
+                integration.class_of(Some("")),
+                Some(Class::Boundary),
+                "{slug}: empty name"
+            );
+            assert_eq!(integration.class_of(Some("Nonsense")), None, "{slug}");
+            let boundaries = integration
+                .events()
+                .iter()
+                .filter(|event| event.class == Class::Boundary)
+                .count();
+            assert_eq!(boundaries, 1, "{slug}: one boundary event");
+            for event in integration.events() {
+                assert_eq!(
+                    integration.class_of(Some(event.name)),
+                    Some(event.class),
+                    "{slug}: {}",
+                    event.name
+                );
+            }
         }
     }
 

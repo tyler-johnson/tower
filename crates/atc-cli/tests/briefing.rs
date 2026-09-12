@@ -1,7 +1,9 @@
-//! `atc briefing` against real repositories: the notice and its status
-//! line, the failure outside a repository, and the client form — the
-//! command a wired client runs — wrapped the way each client reads it
-//! and silent where there is nothing to say.
+//! `atc briefing` against real repositories: the alias `atc trigger`
+//! replaced, kept forever for the configs that still spell it. The
+//! notice and its status line, the failure outside a repository, and the
+//! client form — wrapped the way each client reads it, silent where
+//! there is nothing to say, and the notice whatever event the payload
+//! names, because the alias reads no event and touches no lease.
 
 use std::io::Write;
 use std::path::Path;
@@ -238,6 +240,22 @@ fn a_client_source_is_wrapped_the_way_each_client_reads_it() {
     let carried = cursor["additional_context"].as_str().unwrap();
     assert!(carried.starts_with("tower (`atc`) keeps"), "{carried}");
     assert!(carried.ends_with("1 flight ready. Run `atc`."), "{carried}");
+
+    // The alias reads no event: an activity payload still gets the
+    // notice, which is what the entry it sits in was wired for.
+    let activity = payload.replace("SessionStart", "PreToolUse");
+    let out = hook(
+        elsewhere.path(),
+        root(repo.path()),
+        "claude",
+        Some(&activity),
+    );
+    let text = stdout(&out);
+    assert!(text.starts_with("tower (`atc`) keeps"), "{text}");
+    assert!(
+        !root(repo.path()).join(".local/state/atc/leases").exists(),
+        "the alias touches no lease"
+    );
 
     // A name nothing wrote is the verb's own refusal, not a silence.
     let out = hook(elsewhere.path(), root(repo.path()), "tcsh", Some(&payload));

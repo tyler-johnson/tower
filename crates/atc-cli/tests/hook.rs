@@ -76,6 +76,16 @@ fn home() -> tempfile::TempDir {
     tempfile::TempDir::new().unwrap()
 }
 
+/// Claude's table, in the order it is written; Codex names the same
+/// five.
+const CLAUDE_EVENTS: [&str; 5] = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "Stop",
+    "SessionEnd",
+];
+
 /// The compiled skills, read back from the binary rather than the
 /// source tree: `atc skills` is the store's shelf and never the
 /// binary's, so the comparison source is the file the plugin writes for
@@ -195,23 +205,29 @@ fn the_claude_plugin_round_trips() {
     let events = hooks["hooks"].as_object().unwrap();
     assert_eq!(
         events.keys().collect::<Vec<_>>(),
-        vec!["SessionStart"],
-        "exactly one event: {hooks}"
+        CLAUDE_EVENTS.to_vec(),
+        "the five events, in order: {hooks}"
     );
     assert_eq!(
         hooks["hooks"]["SessionStart"][0]["matcher"],
         "startup|resume|clear|compact|fork"
     );
-    // The binary's absolute path is baked in, so the plugin does not
-    // depend on `atc` being on whatever PATH the client happens to have.
-    let command = hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-        .as_str()
-        .unwrap();
-    assert!(command.ends_with("briefing claude"), "{command:?}");
-    assert!(
-        command.len() > "atc briefing claude".len(),
-        "absolute path baked in: {command:?}"
-    );
+    for event in &CLAUDE_EVENTS[1..] {
+        let entry = &hooks["hooks"][*event][0];
+        assert!(
+            entry.get("matcher").is_none(),
+            "{event}: no matcher: {entry}"
+        );
+        // The binary's absolute path is baked in, so the plugin does not
+        // depend on `atc` being on whatever PATH the client happens to
+        // have.
+        let command = entry["hooks"][0]["command"].as_str().unwrap();
+        assert!(command.ends_with("trigger claude"), "{event}: {command:?}");
+        assert!(
+            command.len() > "atc trigger claude".len(),
+            "absolute path baked in: {command:?}"
+        );
+    }
     assert!(!plugin.join(".mcp.json").exists(), "no server rides along");
 
     // The skill rides inside the plugin, under the layout a plugin's
@@ -272,14 +288,20 @@ fn the_settings_hatch_wires_the_event_and_no_skill() {
     assert!(!skill.exists(), "the plugin went, and the skills with it");
     let v = json_at(&home.path().join(".claude/settings.json"));
     assert_eq!(
-        v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-        "atc briefing claude"
-    );
-    assert_eq!(
         v["hooks"]["SessionStart"][0]["matcher"],
         "startup|resume|clear|compact|fork"
     );
-    assert_eq!(v["hooks"].as_object().unwrap().len(), 1, "one event: {v}");
+    assert_eq!(
+        v["hooks"].as_object().unwrap().keys().collect::<Vec<_>>(),
+        CLAUDE_EVENTS.to_vec(),
+        "the five events: {v}"
+    );
+    for event in CLAUDE_EVENTS {
+        assert_eq!(
+            v["hooks"][event][0]["hooks"][0]["command"], "atc trigger claude",
+            "{event}"
+        );
+    }
 }
 
 /// The escape hatch: `--settings` wires the entries and removes the plugin,
@@ -330,7 +352,7 @@ fn unhook_claude_removes_both_mechanisms() {
     ok(&atc(home.path(), home.path(), &["hook", "claude"], None));
     std::fs::write(
         &settings,
-        r#"{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"atc briefing claude"}]}]}}"#,
+        r#"{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"atc trigger claude"}]}]}}"#,
     )
     .unwrap();
 
@@ -349,11 +371,24 @@ fn each_client_is_wired_in_its_own_schema() {
 
     ok(&atc(home.path(), home.path(), &["hook", "codex"], None));
     let codex = json_at(&home.path().join(".codex/hooks.json"));
-    let entry = &codex["hooks"]["SessionStart"][0];
-    assert_eq!(entry["hooks"][0]["command"], "atc briefing codex");
-    assert_eq!(entry["hooks"][0]["type"], "command");
-    assert!(entry.get("matcher").is_none(), "no matcher: {codex}");
-    assert_eq!(codex["hooks"].as_object().unwrap().len(), 1, "{codex}");
+    assert_eq!(
+        codex["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        CLAUDE_EVENTS.to_vec(),
+        "Codex names Claude's five: {codex}"
+    );
+    for event in CLAUDE_EVENTS {
+        let entry = &codex["hooks"][event][0];
+        assert_eq!(entry["hooks"][0]["command"], "atc trigger codex", "{event}");
+        assert_eq!(entry["hooks"][0]["type"], "command");
+        assert!(
+            entry.get("matcher").is_none(),
+            "{event}: no matcher: {codex}"
+        );
+    }
     let skill = home.path().join(".codex/skills/tower/SKILL.md");
     assert!(skill.exists(), "the tower skill lands beside the wiring");
     assert!(
@@ -365,17 +400,27 @@ fn each_client_is_wired_in_its_own_schema() {
     ok(&atc(home.path(), home.path(), &["hook", "gemini"], None));
     let gemini = json_at(&home.path().join(".gemini/settings.json"));
     let entry = &gemini["hooks"]["SessionStart"][0];
-    assert_eq!(entry["hooks"][0]["command"], "atc briefing gemini");
+    assert_eq!(entry["hooks"][0]["command"], "atc trigger gemini");
     assert!(entry.get("matcher").is_none(), "no matcher: {gemini}");
+    assert_eq!(
+        gemini["hooks"].as_object().unwrap().len(),
+        1,
+        "the boundary alone: {gemini}"
+    );
     assert!(!home.path().join(".gemini/skills").exists());
 
     ok(&atc(home.path(), home.path(), &["hook", "cursor"], None));
     let cursor = json_at(&home.path().join(".cursor/hooks.json"));
     assert_eq!(cursor["version"], 1);
     let entry = &cursor["hooks"]["sessionStart"][0];
-    assert_eq!(entry["command"], "atc briefing cursor");
+    assert_eq!(entry["command"], "atc trigger cursor");
     assert!(entry.get("hooks").is_none(), "the flat shape: {cursor}");
     assert!(entry.get("matcher").is_none(), "no matcher: {cursor}");
+    assert_eq!(
+        cursor["hooks"].as_object().unwrap().len(),
+        1,
+        "the boundary alone: {cursor}"
+    );
 
     // Removing the wiring removes the skill, because unhook takes back
     // exactly what hook added — both halves of it.
@@ -413,11 +458,15 @@ fn install_preserves_foreign_content() {
         "foreign hook entries preserved value-identical"
     );
     assert_eq!(
-        v["hooks"]["Stop"][0]["hooks"][0]["command"],
-        "notify-send done"
+        v["hooks"]["Stop"][0]["hooks"][0]["command"], "notify-send done",
+        "the foreign Stop entry stays first"
     );
     assert_eq!(
-        v["hooks"]["SessionStart"][1]["hooks"][0]["command"], "atc briefing codex",
+        v["hooks"]["Stop"][1]["hooks"][0]["command"], "atc trigger codex",
+        "ours appended under the event the foreign one already held"
+    );
+    assert_eq!(
+        v["hooks"]["SessionStart"][1]["hooks"][0]["command"], "atc trigger codex",
         "our entry appended after foreign ones"
     );
     // The user's key order survives the round trip.
@@ -432,10 +481,12 @@ fn install_preserves_foreign_content() {
         v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
         "my-banner"
     );
+    assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 1);
     assert_eq!(
         v["hooks"]["Stop"][0]["hooks"][0]["command"],
         "notify-send done"
     );
+    assert!(v["hooks"].get("SessionEnd").is_none(), "{v}");
     assert_eq!(v["model"], "opus");
 }
 
@@ -535,6 +586,110 @@ fn update_rewrites_only_what_is_wired() {
     // -u names nothing: the flag is the whole instruction.
     let out = atc(home.path(), home.path(), &["hook", "-u", "claude"], None);
     assert_eq!(out.status.code(), Some(2));
+}
+
+// ---- the retired spelling --------------------------------------------------
+
+/// A plugin an older tower wrote — `atc briefing claude`, one event —
+/// still delivers, so it reads as wired; it reads as stale too, on the
+/// listing and in the envelope, and `-u` moves it to the trigger and the
+/// five events.
+#[test]
+fn an_old_plugin_reads_as_stale_and_update_rewrites_it() {
+    let home = home();
+    let plugin = home.path().join(".claude/skills/tower");
+    ok(&atc(home.path(), home.path(), &["hook", "claude"], None));
+    let hooks_path = plugin.join("hooks/hooks.json");
+    let current = std::fs::read_to_string(&hooks_path).unwrap();
+    let exe = json_at(&hooks_path)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .trim_end_matches("trigger claude")
+        .to_string();
+    let old = serde_json::json!({
+        "hooks": {
+            "SessionStart": [{
+                "matcher": "startup|resume|clear|compact|fork",
+                "hooks": [{ "type": "command", "command": format!("{exe}briefing claude") }]
+            }]
+        }
+    });
+    std::fs::write(&hooks_path, serde_json::to_string_pretty(&old).unwrap()).unwrap();
+
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    assert!(listing.contains("wired (plugin)"), "{listing:?}");
+    assert!(
+        listing.contains("stale — atc hook -u rewrites it"),
+        "{listing:?}"
+    );
+    let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert_eq!(rows[0]["slug"], "claude");
+    assert_eq!(rows[0]["stale"], true, "{rows}");
+    assert_eq!(rows[0]["wiring"]["state"], "wired", "{rows}");
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("rewired"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&hooks_path).unwrap(), current);
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    assert!(!listing.contains("stale"), "{listing:?}");
+    let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert!(rows[0].get("stale").is_none(), "cleared: {rows}");
+
+    // A current plugin missing the extra events is the same repair.
+    let mut fewer: serde_json::Value = serde_json::from_str(&current).unwrap();
+    fewer["hooks"].as_object_mut().unwrap().remove("SessionEnd");
+    std::fs::write(&hooks_path, serde_json::to_string_pretty(&fewer).unwrap()).unwrap();
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    assert!(listing.contains("wired (plugin)"), "{listing:?}");
+    assert!(listing.contains("stale"), "{listing:?}");
+    ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert_eq!(std::fs::read_to_string(&hooks_path).unwrap(), current);
+}
+
+/// The same for a settings file: an entry that still says
+/// `atc briefing claude` is wired and stale, and `-u` rewrites it in
+/// place — no second entry — and adds the events it lacked.
+#[test]
+fn an_old_settings_entry_reads_as_stale_and_update_rewrites_it() {
+    let home = home();
+    let settings = home.path().join(".claude/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(
+        &settings,
+        r#"{"model":"opus","hooks":{"SessionStart":[{"matcher":"startup|resume|clear|compact|fork","hooks":[{"type":"command","command":"atc briefing claude"}]}]}}"#,
+    )
+    .unwrap();
+
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    assert!(listing.contains("wired (settings)"), "{listing:?}");
+    assert!(
+        listing.contains("stale — atc hook -u rewrites it"),
+        "{listing:?}"
+    );
+    let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert_eq!(rows[0]["stale"], true, "{rows}");
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("rewired"), "{said:?}");
+    let v = json_at(&settings);
+    assert_eq!(v["model"], "opus");
+    assert_eq!(
+        v["hooks"].as_object().unwrap().keys().collect::<Vec<_>>(),
+        CLAUDE_EVENTS.to_vec(),
+        "{v}"
+    );
+    let starts = v["hooks"]["SessionStart"].as_array().unwrap();
+    assert_eq!(starts.len(), 1, "rewritten in place: {starts:?}");
+    assert_eq!(starts[0]["hooks"][0]["command"], "atc trigger claude");
+    assert!(
+        !home.path().join(".claude/skills/tower").exists(),
+        "-u stays on the mechanism it found"
+    );
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    assert!(!listing.contains("stale"), "{listing:?}");
 }
 
 // ---- doctor ----------------------------------------------------------------

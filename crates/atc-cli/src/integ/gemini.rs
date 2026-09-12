@@ -8,14 +8,25 @@ use std::path::PathBuf;
 
 use super::{Change, InstallOptions, Integration, Presence, Status, Wiring, settings};
 use crate::error::CliError;
-use settings::Need;
+use settings::{Class, Event, Need};
 
 pub struct Gemini;
 
-const COMMAND: &str = "atc briefing gemini";
-const LEGACY: [&str; 0] = [];
+/// The hook command, and the spelling older installs carry — accepted
+/// forever, since it sits in a file tower rewrites only when the
+/// installer is run again.
+const COMMAND: &str = "atc trigger gemini";
+const LEGACY: [&str; 1] = ["atc briefing gemini"];
 
-const EVENTS: [(&str, Option<&str>, Need); 1] = [("SessionStart", None, Need::Required)];
+/// The boundary alone: Gemini CLI is not on this machine, so its
+/// activity and end names are unverified, and the table stays at what
+/// is known to fire.
+const EVENTS: [Event; 1] = [Event {
+    name: "SessionStart",
+    matcher: None,
+    class: Class::Boundary,
+    need: Need::Required,
+}];
 
 fn config_dir() -> Result<PathBuf, CliError> {
     Ok(super::home()?.join(".gemini"))
@@ -35,6 +46,10 @@ fn spec() -> Result<settings::Spec, CliError> {
 impl Integration for Gemini {
     fn slug(&self) -> &'static str {
         "gemini"
+    }
+
+    fn events(&self) -> &'static [Event] {
+        &EVENTS
     }
 
     fn detect(&self) -> Presence {

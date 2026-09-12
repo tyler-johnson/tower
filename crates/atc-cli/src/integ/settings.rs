@@ -11,6 +11,12 @@
 //! Code, Codex, and Gemini CLI share — an event maps to entries, and an
 //! entry holds a matcher and a list of commands. `Shape::Flat` is Cursor's
 //! — an entry *is* a command.
+//!
+//! What gets written under each event is one command, `atc trigger
+//! <slug>`, and the event's [`Class`] is what the trigger does when the
+//! client fires it. The table is the adapter's [`Event`] list, read here
+//! to wire and by the trigger to dispatch, so the two cannot disagree
+//! about which events a client is wired on.
 
 use std::path::{Path, PathBuf};
 
@@ -34,6 +40,30 @@ pub enum Need {
     Extra,
 }
 
+/// What the trigger does when the client fires an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    /// A context boundary — a fresh session, a resume, a clear, a
+    /// compaction: the notice goes out, and the lease is renewed.
+    Boundary,
+    /// The session is doing something — a prompt, a tool call, the end
+    /// of a turn: the lease is renewed, and nothing is said.
+    Activity,
+    /// The session is over: the lease is released.
+    End,
+}
+
+/// One event tower wires on a client: its name in the client's
+/// vocabulary, the matcher it takes (if any), what the trigger does when
+/// it fires, and whether delivery depends on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Event {
+    pub name: &'static str,
+    pub matcher: Option<&'static str>,
+    pub class: Class,
+    pub need: Need,
+}
+
 /// How a client spells one hook entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
@@ -47,9 +77,8 @@ pub enum Shape {
 pub struct Spec {
     pub path: PathBuf,
     pub shape: Shape,
-    /// The events tower hooks: the name, the matcher it takes (if any), and
-    /// whether delivery depends on it.
-    pub events: &'static [(&'static str, Option<&'static str>, Need)],
+    /// The events tower hooks, in the order they are written.
+    pub events: &'static [Event],
     /// The command the client is told to run.
     pub command: String,
     /// Spellings older installs may still carry. Recognized as ours — so
@@ -156,9 +185,9 @@ fn wired_events(spec: &Spec, settings: &Map<String, Value>) -> Vec<bool> {
     let hooks = settings.get("hooks").and_then(Value::as_object);
     spec.events
         .iter()
-        .map(|(event, ..)| {
+        .map(|event| {
             hooks
-                .and_then(|h| h.get(*event))
+                .and_then(|h| h.get(event.name))
                 .and_then(Value::as_array)
                 .is_some_and(|entries| entries.iter().any(|e| spec.entry_is_ours(e)))
         })
@@ -196,8 +225,8 @@ fn missing_of(spec: &Spec, wired: &[bool], need: Need) -> Vec<&'static str> {
     spec.events
         .iter()
         .zip(wired)
-        .filter(|((_, _, this), wired)| *this == need && !**wired)
-        .map(|((event, ..), _)| *event)
+        .filter(|(event, wired)| event.need == need && !**wired)
+        .map(|(event, _)| event.name)
         .collect()
 }
 
@@ -216,9 +245,9 @@ pub fn stale(spec: &Spec) -> bool {
     let Some(hooks) = settings.get("hooks").and_then(Value::as_object) else {
         return false;
     };
-    spec.events.iter().any(|(event, ..)| {
+    spec.events.iter().any(|event| {
         hooks
-            .get(*event)
+            .get(event.name)
             .and_then(Value::as_array)
             .is_some_and(|entries| entries.iter().any(|entry| entry_is_legacy(spec, entry)))
     })
@@ -256,12 +285,12 @@ pub fn install(spec: &Spec) -> Result<Change, CliError> {
         .as_object_mut()
         .ok_or_else(|| super::malformed(&spec.path, "\"hooks\" is not an object"))?;
 
-    for (event, matcher, _) in spec.events {
+    for event in spec.events {
         let entries = hooks
-            .entry((*event).to_string())
+            .entry(event.name.to_string())
             .or_insert_with(|| Value::Array(Vec::new()));
         let entries = entries.as_array_mut().ok_or_else(|| {
-            super::malformed(&spec.path, format!("hooks.{event} is not an array"))
+            super::malformed(&spec.path, format!("hooks.{} is not an array", event.name))
         })?;
         // Upgrade any legacy spelling before the idempotence check, so an
         // old entry is rewritten rather than joined by a second one.
@@ -271,7 +300,7 @@ pub fn install(spec: &Spec) -> Result<Change, CliError> {
         if entries.iter().any(|e| spec.entry_is_ours(e)) {
             continue;
         }
-        entries.push(spec.entry_for(*matcher));
+        entries.push(spec.entry_for(event.matcher));
         changed = true;
     }
 
@@ -298,8 +327,8 @@ pub fn uninstall(spec: &Spec) -> Result<Change, CliError> {
     };
 
     let mut changed = false;
-    for (event, ..) in spec.events {
-        let Some(entries) = hooks.get_mut(*event).and_then(Value::as_array_mut) else {
+    for event in spec.events {
+        let Some(entries) = hooks.get_mut(event.name).and_then(Value::as_array_mut) else {
             continue;
         };
         match spec.shape {
@@ -330,7 +359,7 @@ pub fn uninstall(spec: &Spec) -> Result<Change, CliError> {
             }
         }
         if entries.is_empty() {
-            hooks.remove(*event);
+            hooks.remove(event.name);
             changed = true;
         }
     }
@@ -362,11 +391,27 @@ mod tests {
             path: dir.join("settings.json"),
             shape,
             events: &[
-                ("PreToolUse", Some("Bash|Edit"), Need::Required),
-                ("SessionStart", None, Need::Required),
+                Event {
+                    name: "PreToolUse",
+                    matcher: Some("Bash|Edit"),
+                    class: Class::Activity,
+                    need: Need::Required,
+                },
+                Event {
+                    name: "SessionStart",
+                    matcher: None,
+                    class: Class::Boundary,
+                    need: Need::Required,
+                },
+                Event {
+                    name: "SessionEnd",
+                    matcher: None,
+                    class: Class::End,
+                    need: Need::Extra,
+                },
             ],
-            command: "atc briefing test".into(),
-            legacy: &["atc hook agent trigger test"],
+            command: "atc trigger test".into(),
+            legacy: &["atc briefing test"],
             version: None,
         }
     }
@@ -404,7 +449,7 @@ mod tests {
         let spec = spec(tmp.path(), Shape::Nested);
         std::fs::write(
             &spec.path,
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash|Edit","hooks":[{"type":"command","command":"atc hook agent trigger test"}]}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash|Edit","hooks":[{"type":"command","command":"atc briefing test"}]}]}}"#,
         )
         .unwrap();
         // A legacy entry already counts as wired, so delivery never stops —
@@ -416,7 +461,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&spec.path).unwrap()).unwrap();
         let entries = after["hooks"]["PreToolUse"].as_array().unwrap();
         assert_eq!(entries.len(), 1, "upgraded in place: {entries:?}");
-        assert_eq!(entries[0]["hooks"][0]["command"], "atc briefing test");
+        assert_eq!(entries[0]["hooks"][0]["command"], "atc trigger test");
         assert!(!stale(&spec), "the repair is what clears it");
     }
 
@@ -431,10 +476,14 @@ mod tests {
         assert_eq!(after["version"], 1);
         assert_eq!(
             after["hooks"]["PreToolUse"][0]["command"],
-            "atc briefing test"
+            "atc trigger test"
         );
         assert_eq!(after["hooks"]["PreToolUse"][0]["matcher"], "Bash|Edit");
         assert!(after["hooks"]["SessionStart"][0].get("matcher").is_none());
+        assert_eq!(
+            after["hooks"]["SessionEnd"][0]["command"], "atc trigger test",
+            "every event in the table is written: {after}"
+        );
 
         assert!(uninstall(&spec).unwrap().changed);
         let after: Value =

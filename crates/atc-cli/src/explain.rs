@@ -36,9 +36,10 @@ pub static ENTRIES: &[Entry] = &[
         detail: "`atc hook` and `atc unhook` take flat, permanent names — claude, codex, \
                  cursor, gemini — because they end up written inside config files tower does \
                  not own and cannot rename afterward. These two verbs are for people, so an \
-                 unknown name is a real error here; so is one on `atc briefing <client>`, since \
-                 only the wiring `atc hook` wrote ever spells that command. `atc hook -l` lists \
-                 every client with what is on this machine and what is already wired.",
+                 unknown name is a real error here. `atc trigger <source>`, the command the \
+                 wiring runs, is silent on a name it does not know — fufu's shape, since a \
+                 hook's stderr is someone else's terminal. `atc hook -l` lists every client \
+                 with what is on this machine and what is already wired.",
         exits: &["atc hook -l", "atc hook claude", "atc hook --all"],
     },
     Entry {

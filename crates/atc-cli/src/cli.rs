@@ -416,12 +416,27 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// The notice a wired client puts in front of an agent.
-    #[command(long_about = help::BRIEFING, after_long_help = help::BRIEFING_EXAMPLES)]
-    Briefing {
+    /// What a wired client runs on every event: the notice at a
+    /// boundary, a lease heartbeat on activity, a release at the end.
+    #[command(long_about = help::TRIGGER, after_long_help = help::TRIGGER_EXAMPLES)]
+    Trigger {
         /// The client whose hook is running this — claude, codex,
-        /// cursor, or gemini — which sets how the text is wrapped and
-        /// makes every failure silent. Bare, the text prints as it is.
+        /// cursor, or gemini — which names the event table and the
+        /// envelope, and makes every failure silent. Bare, the notice
+        /// prints as it is.
+        #[arg(value_name = "source")]
+        source: Option<String>,
+    },
+    /// The notice alone — the spelling `trigger` replaced.
+    ///
+    /// Hidden, and kept forever: it sits in client configs tower may
+    /// never rewrite, so typing it has to keep reaching the notice. It
+    /// touches no lease and reads no event; that is what `trigger` is
+    /// for.
+    #[command(hide = true, long_about = help::BRIEFING)]
+    Briefing {
+        /// The client whose hook is running this, which sets how the
+        /// text is wrapped and makes every failure silent.
         #[arg(value_name = "client")]
         client: Option<String>,
     },
@@ -458,10 +473,10 @@ impl Command {
                 update: false,
                 notice: false,
             },
-            // A session-start hook spawns it with nobody in front of it,
-            // under a short box: no child to fork, and no one to read a
-            // notice.
-            Command::Briefing { .. } => Lanes {
+            // A hook spawns it with nobody in front of it, under a short
+            // box, on every tool call: no child to fork, and no one to
+            // read a notice.
+            Command::Trigger { .. } | Command::Briefing { .. } => Lanes {
                 update: false,
                 notice: false,
             },

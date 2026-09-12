@@ -1,7 +1,8 @@
 //! Codex.
 //!
-//! Field-for-field compatible with Claude Code's payload, so it shares the
-//! plain-text delivery and differs only in where its config lives.
+//! Field-for-field compatible with Claude Code's payload, and its binary
+//! names the same events, so it shares the plain-text delivery and the
+//! event table and differs only in where its config lives.
 //!
 //! The one thing that needs saying out loud: Codex records trust against a
 //! hook's hash and skips new or changed hooks until they are reviewed
@@ -18,16 +19,52 @@ use std::path::PathBuf;
 
 use super::{Change, InstallOptions, Integration, Presence, Status, Wiring, settings, skill};
 use crate::error::CliError;
-use settings::Need;
+use settings::{Class, Event, Need};
 
 pub struct Codex;
 
-const COMMAND: &str = "atc briefing codex";
-const LEGACY: [&str; 0] = [];
+/// The hook command, and the spelling older installs carry — accepted
+/// forever, since it sits in a file tower rewrites only when the
+/// installer is run again.
+const COMMAND: &str = "atc trigger codex";
+const LEGACY: [&str; 1] = ["atc briefing codex"];
 
 /// Codex's `SessionStart` sources startup, resume, clear, and compact, so
-/// the one event covers every context boundary the way Claude's does.
-const EVENTS: [(&str, Option<&str>, Need); 1] = [("SessionStart", None, Need::Required)];
+/// the one boundary event covers every context boundary the way Claude's
+/// does. The rest are Claude's names too, verified against the 0.153.4
+/// binary: three activity events and the end.
+const EVENTS: [Event; 5] = [
+    Event {
+        name: "SessionStart",
+        matcher: None,
+        class: Class::Boundary,
+        need: Need::Required,
+    },
+    Event {
+        name: "UserPromptSubmit",
+        matcher: None,
+        class: Class::Activity,
+        need: Need::Extra,
+    },
+    Event {
+        name: "PreToolUse",
+        matcher: None,
+        class: Class::Activity,
+        need: Need::Extra,
+    },
+    Event {
+        name: "Stop",
+        matcher: None,
+        class: Class::Activity,
+        need: Need::Extra,
+    },
+    Event {
+        name: "SessionEnd",
+        matcher: None,
+        class: Class::End,
+        need: Need::Extra,
+    },
+];
 
 const TRUST: &str = "Codex trusts a hook by its hash: run /hooks in Codex to review this one, \
                      or it is skipped and the notice never lands";
@@ -63,6 +100,10 @@ fn spec() -> Result<settings::Spec, CliError> {
 impl Integration for Codex {
     fn slug(&self) -> &'static str {
         "codex"
+    }
+
+    fn events(&self) -> &'static [Event] {
+        &EVENTS
     }
 
     fn detect(&self) -> Presence {

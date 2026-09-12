@@ -26,30 +26,63 @@ use super::{
     Change, InstallOptions, Integration, Mechanism, Presence, Status, Wiring, settings, skill,
 };
 use crate::error::CliError;
-use settings::Need;
+use settings::{Class, Event, Need};
 
 pub struct Claude;
 
 /// The canonical hook command, and the spellings older installs carry.
 /// A stored string is accepted forever: it sits in a file tower can only
 /// rewrite when somebody runs the installer again, which they may never do.
-const COMMAND: &str = "atc briefing claude";
-const LEGACY: [&str; 0] = [];
+const COMMAND: &str = "atc trigger claude";
+const LEGACY: [&str; 1] = ["atc briefing claude"];
 
 /// The plugin bakes an absolute path, so recognizing our own wiring cannot
 /// be an equality test: the binary moves, and a moved binary must still
-/// read as wired rather than as gone.
-const TAIL: &str = "briefing claude";
+/// read as wired rather than as gone. The legacy tail is the same rule
+/// over the spelling an older plugin carries.
+const TAIL: &str = "trigger claude";
+const LEGACY_TAIL: &str = "briefing claude";
 
-/// The one event tower wires: every context boundary Claude Code reports
-/// — a fresh session, a resumed one, `/clear`, a compaction, a fork — is
-/// where the notice has to be rebuilt, because the context it was in was
-/// dropped or truncated. Delivery depends on it, so it is required.
-const EVENTS: [(&str, Option<&str>, Need); 1] = [(
-    "SessionStart",
-    Some("startup|resume|clear|compact|fork"),
-    Need::Required,
-)];
+/// The events tower wires. `SessionStart` is every context boundary
+/// Claude Code reports — a fresh session, a resumed one, `/clear`, a
+/// compaction, a fork — where the notice has to be rebuilt, because the
+/// context it was in was dropped or truncated; delivery depends on it,
+/// so it is required. The rest keep the session's lease: a prompt, a
+/// tool call, and the end of a turn are activity, and `SessionEnd` is
+/// the release. They widen delivery rather than found it, so an install
+/// without them is stale and never partial.
+const EVENTS: [Event; 5] = [
+    Event {
+        name: "SessionStart",
+        matcher: Some("startup|resume|clear|compact|fork"),
+        class: Class::Boundary,
+        need: Need::Required,
+    },
+    Event {
+        name: "UserPromptSubmit",
+        matcher: None,
+        class: Class::Activity,
+        need: Need::Extra,
+    },
+    Event {
+        name: "PreToolUse",
+        matcher: None,
+        class: Class::Activity,
+        need: Need::Extra,
+    },
+    Event {
+        name: "Stop",
+        matcher: None,
+        class: Class::Activity,
+        need: Need::Extra,
+    },
+    Event {
+        name: "SessionEnd",
+        matcher: None,
+        class: Class::End,
+        need: Need::Extra,
+    },
+];
 
 fn config_dir() -> Result<PathBuf, CliError> {
     Ok(super::home()?.join(".claude"))
@@ -92,13 +125,17 @@ fn spec() -> Result<settings::Spec, CliError> {
 }
 
 fn is_ours(command: &str) -> bool {
-    command.ends_with(TAIL) || LEGACY.contains(&command)
+    command.ends_with(TAIL) || is_legacy(command)
+}
+
+fn is_legacy(command: &str) -> bool {
+    command.ends_with(LEGACY_TAIL)
 }
 
 // ---- the plugin ------------------------------------------------------------
 
 fn plugin_body() -> (String, String) {
-    let command = super::exe_command("briefing claude");
+    let command = super::exe_command(TAIL);
     let manifest = serde_json::json!({
         "name": "tower",
         "version": env!("CARGO_PKG_VERSION"),
@@ -106,9 +143,9 @@ fn plugin_body() -> (String, String) {
         "homepage": env!("CARGO_PKG_REPOSITORY"),
     });
     let mut events = serde_json::Map::new();
-    for (event, matcher, _) in EVENTS {
+    for event in EVENTS {
         let mut entry = serde_json::Map::new();
-        if let Some(matcher) = matcher {
+        if let Some(matcher) = event.matcher {
             entry.insert("matcher".into(), matcher.into());
         }
         entry.insert(
@@ -116,7 +153,7 @@ fn plugin_body() -> (String, String) {
             serde_json::json!([{ "type": "command", "command": command }]),
         );
         events.insert(
-            event.to_string(),
+            event.name.to_string(),
             serde_json::Value::Array(vec![serde_json::Value::Object(entry)]),
         );
     }
@@ -130,22 +167,55 @@ fn pretty(value: &serde_json::Value) -> String {
     body
 }
 
+/// Every command the plugin's hooks.json runs under one event.
+fn plugin_commands<'a>(value: &'a serde_json::Value, event: &str) -> Vec<&'a str> {
+    value["hooks"][event]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry["hooks"].as_array())
+        .flatten()
+        .filter_map(|c| c["command"].as_str())
+        .collect()
+}
+
 /// Which of `EVENTS` this hooks.json does not carry, in `EVENTS` order.
 fn plugin_missing(value: &serde_json::Value) -> Vec<(&'static str, Need)> {
     EVENTS
         .iter()
-        .filter(|(event, ..)| {
-            !value["hooks"][*event].as_array().is_some_and(|entries| {
-                entries.iter().any(|entry| {
-                    entry["hooks"].as_array().is_some_and(|cmds| {
-                        cmds.iter()
-                            .any(|c| c["command"].as_str().is_some_and(is_ours))
-                    })
-                })
-            })
+        .filter(|event| {
+            !plugin_commands(value, event.name)
+                .iter()
+                .any(|c| is_ours(c))
         })
-        .map(|(event, _, need)| (*event, *need))
+        .map(|event| (event.name, event.need))
         .collect()
+}
+
+/// Whether the plugin on disk is one an older tower wrote: a command in
+/// the retired spelling, or an extra event missing while some event is
+/// there. Either still delivers, so this is the repair `atc hook -u`
+/// makes and never an outage.
+fn plugin_stale() -> bool {
+    let Ok(path) = hooks_path() else {
+        return false;
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    let legacy = EVENTS.iter().any(|event| {
+        plugin_commands(&value, event.name)
+            .iter()
+            .any(|c| is_legacy(c))
+    });
+    if legacy {
+        return true;
+    }
+    let missing = plugin_missing(&value);
+    missing.len() < EVENTS.len() && missing.iter().any(|(_, need)| *need == Need::Extra)
 }
 
 /// Whether the plugin on disk is wired, read the way the client reads it.
@@ -225,6 +295,10 @@ impl Integration for Claude {
         "claude"
     }
 
+    fn events(&self) -> &'static [Event] {
+        &EVENTS
+    }
+
     fn detect(&self) -> Presence {
         match config_dir() {
             Ok(dir) if dir.is_dir() => Presence::Present { evidence: dir },
@@ -257,9 +331,10 @@ impl Integration for Claude {
         });
         // Being on the older mechanism is news, not a finding: it still
         // delivers, and moving costs a client restart. Only a retired
-        // command spelling is stale; a skill that has drifted is its own
-        // row, because it is its own repair.
-        let stale = spec().map(|spec| settings::stale(&spec)).unwrap_or(false);
+        // command spelling or a missing extra event is stale, on either
+        // mechanism; a skill that has drifted is its own row, because it
+        // is its own repair.
+        let stale = plugin_stale() || spec().map(|spec| settings::stale(&spec)).unwrap_or(false);
         Status {
             slug: self.slug(),
             presence: self.detect(),
@@ -345,7 +420,7 @@ impl Integration for Claude {
     }
 
     /// Claude Code reads a `SessionStart` hook's stdout as context,
-    /// verbatim.
+    /// verbatim. The other events' hooks print nothing.
     fn envelope(&self, text: &str) -> String {
         text.to_string()
     }
@@ -361,29 +436,44 @@ mod tests {
     }
 
     /// Every event tower wires is in the plugin it writes, with its
-    /// matcher — and the one event is the whole list.
+    /// matcher — the five, and no more.
     #[test]
     fn the_plugin_carries_every_event() {
         let (manifest, hooks) = plugin_body();
         let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(manifest["name"], "tower");
         let value: serde_json::Value = serde_json::from_str(&hooks).unwrap();
+        assert_eq!(EVENTS.len(), 5);
         assert_eq!(
             value["hooks"].as_object().unwrap().len(),
             EVENTS.len(),
-            "one event, no more: {value}"
+            "five events, no more: {value}"
         );
-        for (event, matcher, _) in EVENTS {
-            let entry = &value["hooks"][event][0];
+        for event in EVENTS {
+            let entry = &value["hooks"][event.name][0];
             assert!(
                 entry["hooks"][0]["command"].as_str().is_some_and(is_ours),
-                "{event} runs tower: {value}"
+                "{} runs tower: {value}",
+                event.name
             );
             assert_eq!(
                 entry.get("matcher").and_then(serde_json::Value::as_str),
-                matcher,
-                "{event} matcher"
+                event.matcher,
+                "{} matcher",
+                event.name
             );
         }
+        assert!(plugin_missing(&value).is_empty());
+    }
+
+    /// The retired spelling still reads as ours — an older plugin keeps
+    /// delivering — and is what marks it stale.
+    #[test]
+    fn the_legacy_tail_is_ours_and_legacy() {
+        assert!(is_ours("/usr/bin/atc briefing claude"));
+        assert!(is_legacy("/usr/bin/atc briefing claude"));
+        assert!(is_ours("/usr/bin/atc trigger claude"));
+        assert!(!is_legacy("/usr/bin/atc trigger claude"));
+        assert!(!is_ours("/usr/bin/other"));
     }
 }
