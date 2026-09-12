@@ -376,7 +376,7 @@ struct FlightBody {
     flight: String,
 }
 
-/// The message verbs: hold, answer, comment. `message` stays optional
+/// The message verbs: hold, answer, cancel. `message` stays optional
 /// here so its absence reaches core's `usage/needs-message` — one
 /// refusal vocabulary on both surfaces.
 #[derive(Deserialize)]
@@ -384,6 +384,18 @@ struct FlightBody {
 struct MessageBody {
     flight: String,
     message: Option<String>,
+}
+
+/// `comment`'s arguments: the message verb's shape plus the handoff
+/// flag, its own body so a `handoff` on a hold is refused rather than
+/// ignored.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommentBody {
+    flight: String,
+    message: Option<String>,
+    #[serde(default)]
+    handoff: bool,
 }
 
 /// `view save`'s arguments: the name and the query are required, and
@@ -530,9 +542,9 @@ async fn cancel(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
 }
 
 async fn comment(State(state): State<Arc<AppState>>, body: Bytes) -> Reply {
-    act("comment", state, body, |repo, body: MessageBody| {
+    act("comment", state, body, |repo, body: CommentBody| {
         let store = Store::open(repo)?;
-        let outcome = verb::comment(&store, &body.flight, body.message)?;
+        let outcome = verb::comment(&store, &body.flight, body.message, body.handoff)?;
         Ok(machine::emit("comment", &outcome.payload))
     })
     .await

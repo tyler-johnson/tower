@@ -364,6 +364,7 @@ mod tests {
             kind: Kind::Commented {
                 flight: flight.parse().expect("id"),
                 text: "a note".to_string(),
+                handoff: false,
             },
         }
     }

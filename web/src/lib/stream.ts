@@ -25,6 +25,8 @@ export type Entry =
       session: string | null;
       callsign: string | null;
       text: string;
+      /// Flagged as the state of play.
+      handoff: boolean;
     }
   | {
       kind: "gesture";
@@ -86,5 +88,6 @@ function note(comment: CommentView): Entry {
     session: comment.session,
     callsign: comment.callsign,
     text: comment.text,
+    handoff: comment.handoff,
   };
 }

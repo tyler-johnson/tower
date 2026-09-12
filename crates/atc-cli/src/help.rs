@@ -108,10 +108,11 @@ Examples:
 
 pub const BRIEF: &str = "\
 Everything the log and the repository know about one flight, in one
-read: subject and body, every stored field, the comments in reading
-order, each link with the linked flight's subject and status, the
-flights whose prose names this one under `referenced by`, and the
-open question.
+read: subject and body, every stored field, the newest handoff pinned
+above the comments, the comments in reading order, each link with the
+linked flight's subject and status, a parent's body under its row —
+one level up, so a sub-flight reads whole — the flights whose prose
+names this one under `referenced by`, and the open question.
 The history lists every gesture on the record in log
 order, and each row carries the words the verb took: the status word,
 the lane, the fields an edit touched, the other end of the edge.
@@ -185,11 +186,17 @@ outlives the board.
 A flight named in the note as `#3` or `writer#3` is stored by its wire
 id and printed by its current number; a number two writers hold is
 refused the same way the flight argument is, and a match on nothing
-stays as typed.";
+stays as typed.
+
+--handoff flags the note as the state of play — done through where,
+what is wrong, what is next. The brief pins the newest handoff above
+the stream, and every prior one stays in it, flagged. A handoff never
+holds the flight: a question only a person can answer is `hold`.";
 
 pub const COMMENT_EXAMPLES: &str = "\
 Examples:
   atc comment 17 -m \"the flaky test is #12's\"   a note on the record
+  atc comment 17 --handoff -m \"done through step 3, next is the parser\"
   atc brief 17              where comments read back
   atc edit <id> -m \"…\"      reword one, by its event id";
 
@@ -916,6 +923,15 @@ mod tests {
         out
     }
 
+    /// The three worked examples under docs/skills/: prose that spells
+    /// commands, held to the tree like the manual is, though tower does
+    /// not ship them.
+    const DOCS: [(&str, &str); 3] = [
+        ("plan", include_str!("../../../docs/skills/plan.md")),
+        ("work", include_str!("../../../docs/skills/work.md")),
+        ("review", include_str!("../../../docs/skills/review.md")),
+    ];
+
     /// `lanes()`'s exhaustive-table discipline, applied to prose: a verb
     /// added without a page fails here rather than shipping with clap's
     /// joined doc comment as its whole story.
@@ -976,6 +992,14 @@ mod tests {
             spans.extend(example_rows(skill.text));
             for tokens in &spans {
                 check(&tree, tokens, &format!("{} skill", skill.name));
+                found += 1;
+            }
+        }
+        for (name, text) in DOCS {
+            let mut spans = quoted(text);
+            spans.extend(example_rows(text));
+            for tokens in &spans {
+                check(&tree, tokens, &format!("{name} doc skill"));
                 found += 1;
             }
         }

@@ -218,7 +218,7 @@ mod tests {
     fn a_field_on_a_comment_refuses_and_a_message_rewords_it() {
         let (_repo, store) = store();
         filed(&store, "commented on");
-        let comment = super::super::comment(&store, "1", Some("a note".to_string()))
+        let comment = super::super::comment(&store, "1", Some("a note".to_string()), false)
             .expect("the note lands")
             .payload
             .commented

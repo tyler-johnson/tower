@@ -282,6 +282,7 @@ mod tests {
                 Kind::Commented {
                     flight: flight.clone(),
                     text: "a note".to_string(),
+                    handoff: false,
                 },
             ),
             event(

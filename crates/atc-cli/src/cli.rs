@@ -183,6 +183,10 @@ pub enum Command {
         /// The note.
         #[arg(short = 'm', value_name = "msg")]
         message: Option<String>,
+        /// Pin this note as the state of play: the brief shows the
+        /// newest handoff first.
+        #[arg(long)]
+        handoff: bool,
     },
     /// Reword a flight or a comment — an overlay on the record; the log
     /// keeps every prior word.

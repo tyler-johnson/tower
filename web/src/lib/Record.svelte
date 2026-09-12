@@ -30,6 +30,9 @@
   /// The comment box, which is always open — a note on a closed record
   /// is fine, and comment.rs is the one verb with no active guard.
   let note = $state("");
+  /// The handoff flag on the note being written: the state of play, so
+  /// the brief pins it.
+  let handoff = $state(false);
 
   function open(which: "subject" | "body") {
     editing = which;
@@ -75,9 +78,10 @@
   async function send(event: SubmitEvent) {
     event.preventDefault();
     if (note.trim() === "") return;
-    await panel.run("comment", { message: note });
+    await panel.run("comment", { message: note, handoff });
     if (panel.error === null) {
       note = "";
+      handoff = false;
       noteTab = "write";
     }
   }
@@ -201,22 +205,29 @@
   <!--
 		The family, parents up and children down: every depends-on edge is
 		a parent edge, so `blocks` is this flight's parents and
-		`depends_on` is its children.
+		`depends_on` is its children. A parent's body reads under its row:
+		a sub-flight's real context is the parent's, one level up and no
+		further.
 	-->
-  {#if brief.blocks.length > 0}
+  {#if brief.parents.length > 0}
     <section class="flex flex-col gap-1">
       <h2 class="text-base-content/60 font-mono text-xs font-medium tracking-[0.2em] uppercase">
         parents
       </h2>
-      {#each brief.blocks as link (link.flight)}
+      {#each brief.parents as parent (parent.flight)}
         <a
-          href={query.href(`/f/${link.flight}`)}
+          href={query.href(`/f/${parent.flight}`)}
           class="rounded-field hover:bg-base-200 flex items-baseline gap-2 px-1"
         >
-          <span class="text-primary font-mono">{linkRef.get(link.flight)}</span>
-          <span class="status {statusDot(link.status)}" title={link.status}></span>
-          <span class="flex-1 truncate">{link.subject}</span>
+          <span class="text-primary font-mono">{linkRef.get(parent.flight)}</span>
+          <span class="status {statusDot(parent.status)}" title={parent.status}></span>
+          <span class="flex-1 truncate">{parent.subject}</span>
         </a>
+        {#if parent.body}
+          <div class="prose border-base-300 max-w-none border-l pl-3">
+            {@html shown(parent.body)}
+          </div>
+        {/if}
       {/each}
     </section>
   {/if}
@@ -275,6 +286,26 @@
   {/if}
 
   <!--
+		The state of play, pinned: the newest handoff, above the stream that
+		still holds it.
+	-->
+  {#if brief.handoff !== null}
+    <section class="flex flex-col gap-1">
+      <h2 class="text-base-content/60 font-mono text-xs font-medium tracking-[0.2em] uppercase">
+        handoff
+      </h2>
+      <p class="text-base-content/40 font-mono text-xs">
+        {brief.handoff.id} · {byline(
+          brief.handoff.callsign,
+          brief.handoff.session,
+          brief.handoff.author,
+        )} · {age(now, brief.handoff.at)}
+      </p>
+      <div class="prose max-w-none">{@html shown(brief.handoff.text)}</div>
+    </section>
+  {/if}
+
+  <!--
 		What happened and what was said, one column and one order: the two
 		lists the wire splits are the same events, and a reader following a
 		record follows time.
@@ -291,8 +322,14 @@
 							The wire id leads the header: it is a comment's only
 							name, and what `edit` takes.
 						-->
-            <p class="text-base-content/40 font-mono text-xs">
-              {entry.id} · {byline(entry.callsign, entry.session, entry.by)} · {age(now, entry.at)}
+            <p class="text-base-content/40 flex items-baseline gap-2 font-mono text-xs">
+              <span>
+                {entry.id} · {byline(entry.callsign, entry.session, entry.by)} · {age(
+                  now,
+                  entry.at,
+                )}
+              </span>
+              {#if entry.handoff}<span class="badge badge-sm">handoff</span>{/if}
             </p>
             {#if entry.callsign !== null && entry.session !== null}
               <p class="text-base-content/40 pl-4 font-mono text-xs">
@@ -359,10 +396,15 @@
         </div>
       {/if}
     </label>
-    <div>
+    <div class="flex items-center gap-4">
       <button type="submit" class="btn btn-sm" disabled={panel.busy || note.trim() === ""}>
         comment
       </button>
+      <!-- The state of play: the brief pins the newest flagged note. -->
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" class="checkbox checkbox-sm" bind:checked={handoff} />
+        <span>handoff</span>
+      </label>
     </div>
   </form>
 </article>

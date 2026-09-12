@@ -38,7 +38,7 @@ mod refs;
 mod resolve;
 mod view;
 
-pub use brief::{Brief, CommentView, LinkView, Standing, brief};
+pub use brief::{Brief, CommentView, LinkView, ParentView, Standing, brief};
 pub use doctor::{Doctor, DoctorRow, Level, SeamHealth, doctor};
 pub use flight::{Comment, Flight, Fold, Mark, Question, fold};
 pub use history::{Detail, Moment, history};

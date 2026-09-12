@@ -1,6 +1,6 @@
 ---
 name: work
-description: claim, do, hold or commit, repeat — the loop that pairs with `atc next`
+description: claim, fly, hold or hand off, finish, repeat — the loop that pairs with `atc next`
 ---
 
 # work
@@ -13,13 +13,15 @@ Fan-out: when the harness can run parallel subagents, `atc next me agent -n 3` c
 
 `next` hands out no tree, so choose a worktree of your own before touching anything, and never one another flight is using.
 
-Read the brief before touching anything: `atc brief <flight> --json` — the body, the comments, the links and their done states, and the open question when one stands. The brief holds this flight's facts: the files it touches, the prior art, the verify command. This skill knows how to drive tower; the brief knows the flight.
+Read the brief before touching anything: `atc brief <flight> --json` — the body, the comments, the links and their done states, and the open question when one stands. The newest handoff is pinned first: where the last pass stopped, and what is next. A sub-flight's brief carries its parent's body, so the whole is one read up. The brief holds this flight's facts: the files it touches, the prior art, the verify command. This skill knows how to drive tower; the brief knows the flight.
 
 When the pick carries a `skill`, run `atc skills <name>` and follow that markdown for this flight in place of the work step below, rejoining at the hold rule. The user never typed that name; the flight carried it.
 
 Do the work in your worktree, and commit with `ff commit` as coherent pieces land. Run the brief's verify command before calling anything done; when the brief names none, run the checks the change plainly touches.
 
 Questions are holds, never guesses. Nobody is here to ask: when the brief does not settle a decision, `atc hold <flight> -m "<question>"` and continue the loop. A held flight is parked with its question on the record, not the run's end.
+
+Before stopping for any reason other than done, leave the state of play: either the hold with its question, or `atc comment <flight> --handoff -m "<state of play>"` — done through where, what is wrong, what is next — so the next pass resumes from the brief and not from the diff. Before `atc done <flight>`, `atc comment <flight> -m "<what changed and where>"`: the record outlives the tree.
 
 Finish or give back. Verified done: `atc done <flight>`. Unworkable with no question worth holding on: `atc status <flight> ready` — the record decides between Ready and Waiting — and continue the loop, carrying the reason into the final report.
 

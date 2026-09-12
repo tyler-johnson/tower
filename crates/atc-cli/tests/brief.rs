@@ -377,6 +377,111 @@ fn json_round_trips_the_brief() {
 }
 
 #[test]
+fn the_newest_handoff_pins_above_the_stream_and_the_prior_one_stays_in_it() {
+    let repo = repo_with_a_record();
+    stdout(&atc(
+        repo.path(),
+        &["comment", "1", "--handoff", "-m", "done through step 1"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &[
+            "comment",
+            "1",
+            "--handoff",
+            "-m",
+            "done through step 3, next is the parser",
+        ],
+    ));
+
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    let handoff = text.find("handoff\n").expect("a handoff section");
+    let comments = text.find("comments\n").expect("a comments section");
+    assert!(handoff < comments, "the pin precedes the stream: {text}");
+    assert!(
+        text.contains("handoff\n  pi.6 · tests@tower.invalid · "),
+        "{text}"
+    );
+    let pinned = &text[handoff..comments];
+    assert!(
+        pinned.contains("  done through step 3, next is the parser\n"),
+        "{pinned}"
+    );
+    assert!(!pinned.contains("step 1"), "only the newest pins: {pinned}");
+    // The stream keeps both, each flagged; the plain note is not.
+    let stream = &text[comments..];
+    assert!(
+        stream.contains("· handoff\n  done through step 1\n"),
+        "{stream}"
+    );
+    assert!(
+        stream.contains("· handoff\n  done through step 3, next is the parser\n"),
+        "{stream}"
+    );
+    assert!(
+        !stream.contains("handoff\n  a note on the record\n"),
+        "a plain note is not flagged: {stream}"
+    );
+
+    let data = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
+    assert_eq!(data["handoff"]["id"], serde_json::json!("pi.6"));
+    assert_eq!(
+        data["handoff"]["text"],
+        serde_json::json!("done through step 3, next is the parser")
+    );
+    assert_eq!(data["handoff"]["handoff"], serde_json::json!(true));
+    assert_eq!(data["comments"][0]["handoff"], serde_json::json!(false));
+    assert_eq!(data["comments"][1]["handoff"], serde_json::json!(true));
+    assert_eq!(data["comments"][2]["handoff"], serde_json::json!(true));
+}
+
+#[test]
+fn a_brief_with_no_handoff_has_null_and_no_section() {
+    let repo = repo_with_a_record();
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    assert!(!text.contains("handoff"), "{text}");
+    let data = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
+    assert!(data["handoff"].is_null(), "{data}");
+    assert_eq!(data["comments"][0]["handoff"], serde_json::json!(false));
+}
+
+#[test]
+fn a_sub_flights_brief_carries_the_parents_body_one_level_up() {
+    let repo = repo_with_a_record();
+    stdout(&atc(repo.path(), &["decompose", "1", "part one"]));
+
+    let text = stdout(&atc(repo.path(), &["brief", "3"]));
+    assert!(
+        text.contains("parents\n· #1  the dependent\n  the body of the work\n"),
+        "{text}"
+    );
+    let data = envelope(&atc(repo.path(), &["brief", "3", "--json"]))["data"].clone();
+    assert_eq!(data["parents"][0]["flight"], serde_json::json!("pi.1"));
+    assert_eq!(data["parents"][0]["number"], serde_json::json!(1));
+    assert_eq!(
+        data["parents"][0]["subject"],
+        serde_json::json!("the dependent")
+    );
+    assert_eq!(
+        data["parents"][0]["body"],
+        serde_json::json!("the body of the work")
+    );
+    assert_eq!(data["blocks"][0]["flight"], serde_json::json!("pi.1"));
+    assert!(data["blocks"][0].get("body").is_none(), "{data}");
+
+    // A top-level flight has no parents; its children's bodies stay off
+    // its page.
+    let data = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
+    assert_eq!(data["parents"], serde_json::json!([]));
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    assert!(!text.contains("parents"), "{text}");
+    assert!(
+        text.contains("children\n· #2  the dependency\n· #3  part one"),
+        "{text}"
+    );
+}
+
+#[test]
 fn show_and_brief_agree_byte_for_byte() {
     let repo = repo_with_a_record();
     let brief = stdout(&atc(repo.path(), &["brief", "1"]));

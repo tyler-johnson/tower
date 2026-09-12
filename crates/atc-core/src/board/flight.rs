@@ -240,6 +240,8 @@ pub struct Comment {
     pub callsign: Option<String>,
     pub at: i64,
     pub text: String,
+    /// Flagged as the state of play; the brief pins the newest.
+    pub handoff: bool,
 }
 
 /// What the fold produced: every flight, and every event it could not
@@ -471,7 +473,11 @@ pub fn fold(events: &[Event]) -> Fold {
                 Some(&at) => flights[at].assignee = assignee.clone(),
                 None => unrouted.push(event.clone()),
             },
-            Kind::Commented { flight, text } => match by_id.get(flight) {
+            Kind::Commented {
+                flight,
+                text,
+                handoff,
+            } => match by_id.get(flight) {
                 Some(&at) => flights[at].comments.push(Comment {
                     id: event.id.clone(),
                     author: event.author.clone(),
@@ -479,6 +485,7 @@ pub fn fold(events: &[Event]) -> Fold {
                     callsign: event.callsign.clone(),
                     at: event.time,
                     text: text.clone(),
+                    handoff: *handoff,
                 }),
                 None => unrouted.push(event.clone()),
             },
@@ -907,6 +914,7 @@ mod tests {
             Kind::Commented {
                 flight: flight.parse().expect("id"),
                 text: "a note".to_string(),
+                handoff: false,
             },
         )
     }
@@ -1906,6 +1914,7 @@ mod tests {
             Kind::Commented {
                 flight: flight.parse().expect("id"),
                 text: text.to_string(),
+                handoff: false,
             },
         )
     }

@@ -185,7 +185,7 @@ mod tests {
             &["atc answer <flight> -m <answer>"],
         );
         pinned(
-            &comment(&store, "1", None).err().expect("no note"),
+            &comment(&store, "1", None, false).err().expect("no note"),
             "usage/needs-message",
             "no note given",
             &["atc comment <flight> -m <note>"],

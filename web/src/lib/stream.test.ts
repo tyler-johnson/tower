@@ -32,9 +32,11 @@ function brief(comments: CommentView[], history: Moment[]): Brief {
     asked_by: null,
     asked_at: null,
     closed_reason: null,
+    handoff: null,
     progress: null,
     depends_on: [],
     blocks: [],
+    parents: [],
     references: [],
     referenced_by: [],
     comments,
@@ -55,6 +57,7 @@ describe("the stream", () => {
             callsign: null,
             at: 2,
             text: "a note",
+            handoff: false,
           },
         ],
         [
@@ -81,6 +84,7 @@ describe("the stream", () => {
       session: null,
       callsign: null,
       text: "a note",
+      handoff: false,
     });
     expect(rows[2]).toEqual({
       kind: "gesture",
@@ -107,6 +111,7 @@ describe("the stream", () => {
             callsign: null,
             at: 2,
             text: "a note",
+            handoff: false,
           },
         ],
         [
@@ -146,6 +151,7 @@ describe("the stream", () => {
             callsign: "tyler",
             at: 2,
             text: "a note",
+            handoff: false,
           },
         ],
         [
@@ -217,6 +223,7 @@ describe("the stream", () => {
             callsign: null,
             at: 2,
             text: "from another log",
+            handoff: false,
           },
         ],
         [
@@ -227,5 +234,28 @@ describe("the stream", () => {
     );
     expect(rows.map((row) => row.id)).toEqual(["pi-8c2e.1", "pi-8c2e.2", "pi-8c2e.3"]);
     expect(rows[1].kind).toBe("comment");
+  });
+
+  it("a flagged comment's entry carries the flag", () => {
+    const rows = stream(
+      brief(
+        [
+          {
+            id: "pi-8c2e.2",
+            author: "agent",
+            session: null,
+            callsign: null,
+            at: 2,
+            text: "done through step 3",
+            handoff: true,
+          },
+        ],
+        [
+          { id: "pi-8c2e.1", at: 1, by: "tyler", session: null, callsign: null, what: "filed" },
+          { id: "pi-8c2e.2", at: 2, by: "agent", session: null, callsign: null, what: "commented" },
+        ],
+      ),
+    );
+    expect(rows[1]).toMatchObject({ kind: "comment", id: "pi-8c2e.2", handoff: true });
   });
 });

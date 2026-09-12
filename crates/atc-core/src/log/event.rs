@@ -127,8 +127,14 @@ pub enum Kind {
         flight: EventId,
         assignee: Option<String>,
     },
-    /// A note on the record, local.
-    Commented { flight: EventId, text: String },
+    /// A note on the record, local. A handoff is a comment flagged as
+    /// the state of play: the brief pins the newest above the stream and
+    /// every prior one stays in it. The flag never holds the flight.
+    Commented {
+        flight: EventId,
+        text: String,
+        handoff: bool,
+    },
     /// Rewords a flight's fields, or a comment's text — an overlay the
     /// fold applies last-wins per field; the log keeps every prior word.
     Edited {
@@ -334,10 +340,14 @@ struct AssignedBody {
     assignee: Option<String>,
 }
 
+/// `handoff` skipped when false, so a plain comment is byte-identical to
+/// one written before the flag.
 #[derive(Serialize, Deserialize)]
 struct CommentedBody {
     flight: EventId,
     text: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    handoff: bool,
 }
 
 /// Every option follows one discipline — `default`, skipped when absent
@@ -467,9 +477,14 @@ impl Serialize for Event {
                 flight: flight.clone(),
                 assignee: assignee.clone(),
             }),
-            Kind::Commented { flight, text } => serde_json::value::to_raw_value(&CommentedBody {
+            Kind::Commented {
+                flight,
+                text,
+                handoff,
+            } => serde_json::value::to_raw_value(&CommentedBody {
                 flight: flight.clone(),
                 text: text.clone(),
+                handoff: *handoff,
             }),
             Kind::Edited {
                 target,
@@ -620,9 +635,16 @@ impl<'de> Deserialize<'de> for Event {
                 serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
             Kind::Assigned { flight, assignee }
         } else if kind == "commented" {
-            let CommentedBody { flight, text } =
-                serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
-            Kind::Commented { flight, text }
+            let CommentedBody {
+                flight,
+                text,
+                handoff,
+            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Commented {
+                flight,
+                text,
+                handoff,
+            }
         } else if kind == "edited" {
             let EditedBody {
                 target,
@@ -911,6 +933,44 @@ mod tests {
             assert_eq!(name, kind);
             assert_eq!(body.get(), r#"{"flight":"pi.1"}"#);
         }
+    }
+
+    #[test]
+    fn a_handoff_rides_the_wire_only_when_flagged() {
+        // `true` round-trips, and `false` leaves no key, so a plain
+        // comment is byte-identical to one written before the flag; a
+        // line from before it reads as unflagged.
+        let mut event = Event {
+            id: "pi.2".parse().expect("id"),
+            author: "a@b.c".to_string(),
+            writer: "pi".to_string(),
+            time: 8,
+            session: None,
+            callsign: None,
+            kind: Kind::Commented {
+                flight: "pi.1".parse().expect("id"),
+                text: "done through step 3".to_string(),
+                handoff: true,
+            },
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""handoff":true"#), "{json}");
+        let back: Event = serde_json::from_str(&json).expect("parse");
+        assert!(matches!(back.kind, Kind::Commented { handoff: true, .. }));
+
+        event.kind = Kind::Commented {
+            flight: "pi.1".parse().expect("id"),
+            text: "a note".to_string(),
+            handoff: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&event).expect("serialize"),
+            r#"{"id":"pi.2","author":"a@b.c","writer":"pi","time":8,"kind":"commented","body":{"flight":"pi.1","text":"a note"}}"#
+        );
+
+        let old = r#"{"id":"pi.2","author":"a@b.c","writer":"pi","time":8,"kind":"commented","body":{"flight":"pi.1","text":"a note"}}"#;
+        let event: Event = serde_json::from_str(old).expect("parse");
+        assert!(matches!(event.kind, Kind::Commented { handoff: false, .. }));
     }
 
     #[test]

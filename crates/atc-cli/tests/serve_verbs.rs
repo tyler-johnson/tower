@@ -225,6 +225,27 @@ fn comment_done_and_cancel_land_on_the_record() {
         r#"{"flight":"1","message":"a note"}"#,
     );
     let event = appended(repo.path(), |kind| matches!(kind, Kind::Commented { .. }));
+    assert!(matches!(event.kind, Kind::Commented { handoff: false, .. }));
+    ok(
+        "/api/comment",
+        status,
+        &head,
+        &body,
+        machine::emit("comment", &verb::Commented { commented: event }),
+    );
+
+    // The handoff flag rides the body and lands on the event.
+    let (status, head, body) = post(
+        &server.addr,
+        "/api/comment",
+        r#"{"flight":"1","message":"done through step 3","handoff":true}"#,
+    );
+    let event = appended(repo.path(), |kind| matches!(kind, Kind::Commented { .. }));
+    assert!(
+        matches!(&event.kind, Kind::Commented { text, handoff: true, .. } if text == "done through step 3"),
+        "{:?}",
+        event.kind
+    );
     ok(
         "/api/comment",
         status,
@@ -771,6 +792,10 @@ fn a_body_that_is_not_the_verbs_json_is_bad_body() {
         ("/api/link", r#"{"flight":"1"}"#),
         ("/api/edit", r#"{}"#),
         ("/api/edit", r#"{"target":"1","status":"ready"}"#),
+        (
+            "/api/hold",
+            r#"{"flight":"1","message":"?","handoff":true}"#,
+        ),
     ] {
         let (status, _, answered) = post(&server.addr, path, body);
         assert_eq!(status, 400, "{path} {body}: {answered}");

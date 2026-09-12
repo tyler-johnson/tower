@@ -7,18 +7,25 @@ use crate::error::CliError;
 use crate::{machine, render};
 use atc_core::verb;
 
-pub fn run(json: bool, flight: &str, message: Option<String>) -> Result<(), CliError> {
+pub fn run(
+    json: bool,
+    flight: &str,
+    message: Option<String>,
+    handoff: bool,
+) -> Result<(), CliError> {
     let store = super::store()?;
-    let outcome = verb::comment(&store, flight, message)?;
+    let outcome = verb::comment(&store, flight, message, handoff)?;
 
     if json {
         println!("{}", machine::emit("comment", &outcome.payload));
     } else {
         let colored = render::colored();
-        println!(
-            "commented on {}",
-            render::paint_id(&outcome.display, colored)
-        );
+        let verb = if outcome.handoff {
+            "handoff on"
+        } else {
+            "commented on"
+        };
+        println!("{verb} {}", render::paint_id(&outcome.display, colored));
         println!("{}", super::tail(colored));
     }
     Ok(())

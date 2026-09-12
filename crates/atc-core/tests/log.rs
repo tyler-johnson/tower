@@ -77,6 +77,7 @@ fn a_round_trip_reads_back_in_order() {
         .append(vec![Kind::Commented {
             flight: "pi.1".parse().expect("id"),
             text: "a note".to_string(),
+            handoff: false,
         }])
         .expect("append");
     store

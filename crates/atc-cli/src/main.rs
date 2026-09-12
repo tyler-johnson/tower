@@ -234,9 +234,11 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
                 status: status.clone(),
             },
         )?,
-        Some(Command::Comment { flight, message }) => {
-            cmd::comment::run(cli.json, flight, message.clone())?
-        }
+        Some(Command::Comment {
+            flight,
+            message,
+            handoff,
+        }) => cmd::comment::run(cli.json, flight, message.clone(), *handoff)?,
         Some(Command::Edit {
             target,
             subject,

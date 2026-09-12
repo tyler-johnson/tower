@@ -560,6 +560,45 @@ fn comment_json_carries_the_appended_event() {
     assert_eq!(commented["id"], serde_json::json!("pi.2"));
     assert_eq!(commented["body"]["flight"], serde_json::json!("pi.1"));
     assert_eq!(commented["body"]["text"], serde_json::json!("a note"));
+    assert!(
+        commented["body"].get("handoff").is_none(),
+        "a plain comment leaves no key: {commented}"
+    );
+}
+
+#[test]
+fn a_handoff_is_a_flagged_comment() {
+    // The flag rides the event and the echo says so; the flight's status
+    // does not move.
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "carry a note"]));
+    let out = atc(
+        repo.path(),
+        &[
+            "comment",
+            "1",
+            "--handoff",
+            "-m",
+            "done through step 3",
+            "--json",
+        ],
+    );
+    let flagged = envelope(&out);
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    let commented = &flagged["data"]["commented"];
+    assert_eq!(commented["body"]["handoff"], serde_json::json!(true));
+    assert_eq!(
+        commented["body"]["text"],
+        serde_json::json!("done through step 3")
+    );
+
+    let out = stdout(&atc(
+        repo.path(),
+        &["comment", "1", "--handoff", "-m", "next is the parser"],
+    ));
+    assert_eq!(out, "handoff on #1\nboard: atc\n");
+    let board = envelope(&atc(repo.path(), &["--json"]));
+    assert_eq!(board["data"]["ready"][0]["comments"], serde_json::json!(2));
 }
 
 #[test]

@@ -79,11 +79,18 @@ pub struct Brief {
     /// the question stood. `None` while the flight is open or when the
     /// close said nothing.
     pub closed_reason: Option<String>,
+    /// The newest comment flagged as the state of play, pinned above the
+    /// stream; the stream still holds it, flagged. `None` when no
+    /// comment carries the flag.
+    pub handoff: Option<CommentView>,
     /// Closed children over total, whenever this flight has children at
     /// all — the family's progress, rendered `(2/6)`.
     pub progress: Option<(usize, usize)>,
     pub depends_on: Vec<LinkView>,
     pub blocks: Vec<LinkView>,
+    /// The `blocks` rows again, each with its body: a sub-flight's real
+    /// context is its parent's, one level up and no further.
+    pub parents: Vec<ParentView>,
     /// The flights this flight's prose names, as link rows — the number
     /// map a prose render needs, since a referenced flight may have
     /// aged past the board's window.
@@ -139,8 +146,20 @@ pub struct LinkView {
     pub closed: bool,
 }
 
-/// A note on the record, as the brief carries it.
+/// A parent, as a sub-flight's brief carries it: a link row plus the
+/// body, its own type so the other link lists stay bodiless.
 #[derive(Debug, Serialize)]
+pub struct ParentView {
+    pub flight: String,
+    pub number: u64,
+    pub subject: String,
+    pub status: String,
+    pub closed: bool,
+    pub body: String,
+}
+
+/// A note on the record, as the brief carries it.
+#[derive(Debug, Clone, Serialize)]
 pub struct CommentView {
     /// The wire id — a comment's only name, and what `edit` takes.
     pub id: String,
@@ -149,6 +168,22 @@ pub struct CommentView {
     pub callsign: Option<String>,
     pub at: i64,
     pub text: String,
+    /// Flagged as the state of play.
+    pub handoff: bool,
+}
+
+impl CommentView {
+    fn of(comment: &super::flight::Comment) -> Self {
+        CommentView {
+            id: comment.id.to_string(),
+            author: comment.author.clone(),
+            session: comment.session.clone(),
+            callsign: comment.callsign.clone(),
+            at: comment.at,
+            text: comment.text.clone(),
+            handoff: comment.handoff,
+        }
+    }
 }
 
 /// The brief for one flight, or `None` when no such flight is filed.
@@ -195,23 +230,22 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
         asked_by: flight.question.as_ref().map(|q| q.by.clone()),
         asked_at: flight.question.as_ref().map(|q| q.at),
         closed_reason: flight.closed_reason.clone(),
+        // Reading order is the fold's, so the last flagged is the newest;
+        // an edited handoff shows its edited text, since the fold rewords
+        // the comment in place.
+        handoff: flight
+            .comments
+            .iter()
+            .rev()
+            .find(|comment| comment.handoff)
+            .map(CommentView::of),
         progress: super::model::progress(fold, flight),
         depends_on: links(fold, &flight.depends_on),
         blocks: links(fold, &flight.blocks),
+        parents: parents(fold, &flight.blocks),
         references: links(fold, &flight.references),
         referenced_by: links(fold, &flight.referenced_by),
-        comments: flight
-            .comments
-            .iter()
-            .map(|comment| CommentView {
-                id: comment.id.to_string(),
-                author: comment.author.clone(),
-                session: comment.session.clone(),
-                callsign: comment.callsign.clone(),
-                at: comment.at,
-                text: comment.text.clone(),
-            })
-            .collect(),
+        comments: flight.comments.iter().map(CommentView::of).collect(),
         history: history(events, id),
         standing,
     })
@@ -234,23 +268,44 @@ fn standing(flight: &Flight) -> Standing {
     }
 }
 
-/// Link rows, resolved inside the fold. Infallible — the fold routes a
-/// link with a missing endpoint to `unrouted` and drops a reference to
-/// nothing filed, so every carried id names a filed flight.
+/// The flight an id names. Infallible — the fold routes a link with a
+/// missing endpoint to `unrouted` and drops a reference to nothing
+/// filed, so every carried id names a filed flight.
+fn linked<'a>(fold: &'a Fold, id: &EventId) -> &'a Flight {
+    fold.flights
+        .iter()
+        .find(|flight| &flight.id == id)
+        .expect("the fold's links resolve")
+}
+
+/// Link rows, resolved inside the fold.
 fn links(fold: &Fold, ids: &[EventId]) -> Vec<LinkView> {
     ids.iter()
         .map(|id| {
-            let other = fold
-                .flights
-                .iter()
-                .find(|flight| &flight.id == id)
-                .expect("the fold's links resolve");
+            let other = linked(fold, id);
             LinkView {
                 flight: other.id.to_string(),
                 number: other.number,
                 subject: other.subject.clone(),
                 status: other.status.clone(),
                 closed: other.closed(),
+            }
+        })
+        .collect()
+}
+
+/// Parent rows — the `blocks` rows with their bodies, in the same order.
+fn parents(fold: &Fold, ids: &[EventId]) -> Vec<ParentView> {
+    ids.iter()
+        .map(|id| {
+            let other = linked(fold, id);
+            ParentView {
+                flight: other.id.to_string(),
+                number: other.number,
+                subject: other.subject.clone(),
+                status: other.status.clone(),
+                closed: other.closed(),
+                body: other.body.clone(),
             }
         })
         .collect()
@@ -341,6 +396,21 @@ mod tests {
             Kind::Commented {
                 flight: flight.parse().expect("id"),
                 text: text.to_string(),
+                handoff: false,
+            },
+        )
+    }
+
+    /// A comment flagged as the state of play.
+    fn handed_off(id: &str, author: &str, time: i64, flight: &str, text: &str) -> Event {
+        lifecycle(
+            id,
+            author,
+            time,
+            Kind::Commented {
+                flight: flight.parse().expect("id"),
+                text: text.to_string(),
+                handoff: true,
             },
         )
     }
@@ -894,6 +964,113 @@ mod tests {
             serde_json::json!("pi.2")
         );
         assert_eq!(json["referenced_by"][0]["number"], serde_json::json!(2));
+    }
+
+    #[test]
+    fn the_newest_handoff_pins_and_every_prior_one_stays_in_the_stream() {
+        // Reading order is the fold's, so the last flagged comment is the
+        // pin; the stream keeps both, each with its flag, and a plain
+        // comment after the pin does not displace it.
+        let brief = brief_of(
+            &[
+                filed("pi.1", 10, "s", ""),
+                handed_off("pi.2", "one@b.c", 20, "pi.1", "done through step 1"),
+                commented("pi.3", "one@b.c", 30, "pi.1", "an aside"),
+                handed_off("pi.4", "two@b.c", 40, "pi.1", "done through step 3"),
+                commented("pi.5", "one@b.c", 50, "pi.1", "a later aside"),
+            ],
+            &id("pi.1"),
+        )
+        .expect("filed");
+        let pinned = brief.handoff.as_ref().expect("a handoff pins");
+        assert_eq!(pinned.id, "pi.4");
+        assert_eq!(pinned.author, "two@b.c");
+        assert_eq!(pinned.at, 40);
+        assert_eq!(pinned.text, "done through step 3");
+        assert!(pinned.handoff);
+        let flags: Vec<(&str, bool)> = brief
+            .comments
+            .iter()
+            .map(|comment| (comment.id.as_str(), comment.handoff))
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                ("pi.2", true),
+                ("pi.3", false),
+                ("pi.4", true),
+                ("pi.5", false)
+            ]
+        );
+    }
+
+    #[test]
+    fn no_handoff_is_null_on_the_wire() {
+        let brief = brief_of(
+            &[
+                filed("pi.1", 10, "s", ""),
+                commented("pi.2", "one@b.c", 20, "pi.1", "a note"),
+            ],
+            &id("pi.1"),
+        )
+        .expect("filed");
+        assert!(brief.handoff.is_none());
+        let json = serde_json::to_value(&brief).expect("serializes");
+        assert_eq!(json["handoff"], serde_json::Value::Null);
+        assert_eq!(json["comments"][0]["handoff"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn an_edit_on_the_pinned_handoff_shows_the_new_text() {
+        // The fold rewords a comment in place, so the pin reads the
+        // edited words and keeps its flag.
+        let brief = brief_of(
+            &[
+                filed("pi.1", 10, "s", ""),
+                handed_off("pi.2", "one@b.c", 20, "pi.1", "done through step 2"),
+                edited(
+                    "pi.3",
+                    "one@b.c",
+                    30,
+                    "pi.2",
+                    None,
+                    Some("done through step 3"),
+                ),
+            ],
+            &id("pi.1"),
+        )
+        .expect("filed");
+        let pinned = brief.handoff.as_ref().expect("a handoff pins");
+        assert_eq!(pinned.id, "pi.2");
+        assert_eq!(pinned.text, "done through step 3");
+        assert_eq!(brief.comments[0].text, "done through step 3");
+        assert!(brief.comments[0].handoff);
+    }
+
+    #[test]
+    fn a_sub_flights_parents_carry_the_body_and_a_top_levels_are_empty() {
+        // The parent depends on the child, so the child's `blocks` names
+        // the parent; the parent row carries the body one level up, and
+        // the parent's own brief has no parents.
+        let events = [
+            filed("pi.1", 10, "the parent", "the body of the work"),
+            filed("pi.2", 20, "part one", ""),
+            linked("pi.3", 30, "pi.1", "pi.2"),
+        ];
+        let child = brief_of(&events, &id("pi.2")).expect("filed");
+        assert_eq!(child.parents.len(), 1);
+        assert_eq!(child.parents[0].flight, "pi.1");
+        assert_eq!(child.parents[0].number, 1);
+        assert_eq!(child.parents[0].subject, "the parent");
+        assert_eq!(child.parents[0].status, "backlog");
+        assert!(!child.parents[0].closed);
+        assert_eq!(child.parents[0].body, "the body of the work");
+        assert_eq!(child.blocks[0].flight, "pi.1", "blocks stays as it was");
+
+        let parent = brief_of(&events, &id("pi.1")).expect("filed");
+        assert!(parent.parents.is_empty());
+        let json = serde_json::to_value(&parent).expect("serializes");
+        assert_eq!(json["parents"], serde_json::json!([]));
     }
 
     #[test]

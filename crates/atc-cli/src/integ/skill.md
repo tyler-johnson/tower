@@ -26,7 +26,7 @@ A flight has two names. The board prints `#3`; when two writers share a board an
 Every read folds the log fresh and never blocks on the network.
 
 - `atc`, and `atc board` — what needs a person pinned on top: `questions` (held flights, oldest ask first) and `yours` (Ready in the `me` lane); under it backlog, waiting, ready, in progress, held, and the three newest closed. `atc --closed 7d` widens that last group to a span; a count, `all`, and `none` work too.
-- `atc brief <flight>` (alias `show`) — the whole record: every field, the comments with any question and answer among them, the links with each linked flight's subject and status, the flights whose prose names this one under `referenced by`, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
+- `atc brief <flight>` (alias `show`) — the whole record: every field, the newest handoff pinned above the comments, the comments with any question and answer among them, the links with each linked flight's subject and status, a parent's body under its row (one level up, so a sub-flight reads whole), the flights whose prose names this one under `referenced by`, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
 - `atc procedures` and `atc skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `atc explain <id>` — the prose behind a refusal; `atc explain --list` is the whole catalog. A pure lookup, no repository needed.
 - `atc config` — every setting with its value and default; `atc version`; `atc doctor`, which exits 1 on findings so a script can gate on it; `atc briefing`, the line fufu shows a new session.
@@ -39,7 +39,7 @@ A procedure is those same fields saved across a graph of flights. A one-flight p
 
 - `atc decompose <flight> <part>` with one subject per argument splits a flight by hand; exactly one argument naming an installed procedure mints its flights instead. Parts are born Ready whatever the default says. Every part closed makes the parent Ready, not done: finishing the whole is a judgment.
 - `atc link <a> <b>` declares that `a` depends on `b`; `atc unlink <a> <b>` takes it back, and is the only way to disagree with a derived Waiting.
-- `atc comment <flight> -m "<note>"` goes on the record and nowhere else.
+- `atc comment <flight> -m "<note>"` goes on the record and nowhere else. `atc comment <flight> --handoff -m "<state of play>"` flags the note as the state of play: the brief pins the newest handoff above the stream, every prior one stays in it, and the flight's status does not move.
 - `atc edit <target>` rewords a flight (`-s`, `-m`, `-p`, `--label`, `--skill`) or, given a comment's event id, the comment. An overlay: the fold reads the newest value per field and the log keeps every prior one. `--label` replaces the set wholesale and cannot clear it.
 
 Procedures and skills live in two layers keyed by name, `~/.config/tower/procedures/<name>.toml` and `<main worktree>/.tower/procedures/<name>.toml` (skills under `skills/<name>.md` beside them), and a repository entry replaces the user's wholesale. tower ships none.

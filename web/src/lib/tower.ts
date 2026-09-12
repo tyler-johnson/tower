@@ -380,6 +380,12 @@ export interface LinkView {
   closed: boolean;
 }
 
+/// A parent, as a sub-flight's brief carries it: a link row plus the
+/// body — the flight's real context, one level up and no further.
+export interface ParentView extends LinkView {
+  body: string;
+}
+
 /// A note on the record. `id` is the wire id — a comment's only name, and
 /// what `edit` takes.
 export interface CommentView {
@@ -391,6 +397,8 @@ export interface CommentView {
   callsign: string | null;
   at: number;
   text: string;
+  /// Flagged as the state of play; the brief pins the newest.
+  handoff: boolean;
 }
 
 /// One gesture on the record: who did what, when, and the words the verb
@@ -506,9 +514,14 @@ export interface Brief {
   asked_by: string | null;
   asked_at: number | null;
   closed_reason: string | null;
+  /// The newest comment flagged as the state of play, pinned above the
+  /// stream that still holds it; `null` when none carries the flag.
+  handoff: CommentView | null;
   progress: [number, number] | null;
   depends_on: LinkView[];
   blocks: LinkView[];
+  /// The `blocks` rows again, each with its body.
+  parents: ParentView[];
   /// The flights this flight's prose names, as link rows — the number
   /// map for its references.
   references: LinkView[];
@@ -682,9 +695,13 @@ const KNOWN_BRIEF_KEYS = new Set([
   "asked_by",
   "asked_at",
   "closed_reason",
+  "handoff",
   "progress",
   "depends_on",
   "blocks",
+  "parents",
+  "references",
+  "referenced_by",
   "comments",
   "history",
   "standing",

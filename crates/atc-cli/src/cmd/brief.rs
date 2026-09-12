@@ -36,8 +36,9 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 }
 
 /// The detail page: head and note in the board's grammar, then the body
-/// verbatim, the family, the comments in reading order, and the history
-/// last — the record before the log of how it got that way.
+/// verbatim, the family, the pinned handoff, the comments in reading
+/// order, and the history last — the record before the log of how it
+/// got that way.
 fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     let shown = |text: &str| {
         board::project(text, |id| {
@@ -79,10 +80,41 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     // a parent edge, so `blocks` is this flight's parents and
     // `depends_on` is its children — the same two lists the fold already
     // keeps, named for what they mean rather than for the edge direction.
-    // Then the backlinks: the flights whose prose names this one. The
-    // outgoing list gets no section — the prose above already shows it.
+    // A parent's body prints under its row: a sub-flight's real context
+    // is the parent's, one level up and no further. Then the backlinks:
+    // the flights whose prose names this one. The outgoing list gets no
+    // section — the prose above already shows it.
+    let row = |flight: &str, subject: &str, status: &str, closed: bool| {
+        let mut line = format!(
+            "· {}  {}",
+            render::paint_id(&show(fold, flight), colored),
+            subject
+        );
+        if closed {
+            line.push_str(&format!(
+                "  {}",
+                render::paint_dim(&status.replace('_', " "), colored)
+            ));
+        }
+        line.push('\n');
+        line
+    };
+    if !brief.parents.is_empty() {
+        out.push('\n');
+        out.push_str("parents\n");
+        for parent in &brief.parents {
+            out.push_str(&row(
+                &parent.flight,
+                &parent.subject,
+                &parent.status,
+                parent.closed,
+            ));
+            for line in shown(&parent.body).lines() {
+                out.push_str(&format!("  {line}\n"));
+            }
+        }
+    }
     for (title, links) in [
-        ("parents", &brief.blocks),
         ("children", &brief.depends_on),
         ("referenced by", &brief.referenced_by),
     ] {
@@ -93,42 +125,43 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         out.push_str(title);
         out.push('\n');
         for link in links {
-            out.push_str(&format!(
-                "· {}  {}",
-                render::paint_id(&show(fold, &link.flight), colored),
-                link.subject
-            ));
-            if link.closed {
-                out.push_str(&format!(
-                    "  {}",
-                    render::paint_dim(&link.status.replace('_', " "), colored)
-                ));
-            }
-            out.push('\n');
+            out.push_str(&row(&link.flight, &link.subject, &link.status, link.closed));
         }
+    }
+
+    // A comment in the stream's shape: the wire id leads the header — it
+    // is a comment's only name, and what `edit` takes; what tower prints,
+    // tower accepts — then the text, indented.
+    let comment = |comment: &board::CommentView, flag: bool| {
+        let mut header = format!(
+            "{} · {} · {}",
+            comment.id,
+            comment.author,
+            render::age(now, comment.at)
+        );
+        if flag {
+            header.push_str(" · handoff");
+        }
+        let mut block = format!("  {}\n", render::paint_dim(&header, colored));
+        for line in shown(&comment.text).lines() {
+            block.push_str(&format!("  {line}\n"));
+        }
+        block
+    };
+
+    // The state of play, pinned: the newest flagged comment, above the
+    // stream that still holds it.
+    if let Some(handoff) = &brief.handoff {
+        out.push('\n');
+        out.push_str("handoff\n");
+        out.push_str(&comment(handoff, false));
     }
 
     if !brief.comments.is_empty() {
         out.push('\n');
         out.push_str("comments\n");
-        for comment in &brief.comments {
-            // The wire id leads the header: it is a comment's only name,
-            // and what `edit` takes — what tower prints, tower accepts.
-            out.push_str(&format!(
-                "  {}\n",
-                render::paint_dim(
-                    &format!(
-                        "{} · {} · {}",
-                        comment.id,
-                        comment.author,
-                        render::age(now, comment.at)
-                    ),
-                    colored
-                )
-            ));
-            for line in shown(&comment.text).lines() {
-                out.push_str(&format!("  {line}\n"));
-            }
+        for entry in &brief.comments {
+            out.push_str(&comment(entry, entry.handoff));
         }
     }
 

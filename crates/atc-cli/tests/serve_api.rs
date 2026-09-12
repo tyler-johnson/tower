@@ -206,6 +206,42 @@ fn the_brief_route_answers_every_reference_form() {
 }
 
 #[test]
+fn the_brief_route_carries_the_handoff_and_the_parents_body() {
+    // A record with a pinned handoff and a sub-flight, so parity covers
+    // both of the brief's read-side additions rather than their null and
+    // empty forms.
+    let (repo, server) = served();
+    stdout(&atc(
+        repo.path(),
+        &["edit", "1", "-m", "the body of the work"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &["comment", "1", "--handoff", "-m", "done through step 3"],
+    ));
+    stdout(&atc(repo.path(), &["decompose", "1", "part one"]));
+    let brief = board(&server, "/api/brief/1");
+    assert_eq!(
+        brief["data"]["handoff"]["text"],
+        json!("done through step 3")
+    );
+    assert_eq!(brief["data"]["parents"], json!([]));
+    let child = board(&server, "/api/brief/2");
+    assert_eq!(
+        child["data"]["parents"][0]["body"],
+        json!("the body of the work")
+    );
+    for flight in ["1", "2"] {
+        parity(
+            &server,
+            repo.path(),
+            &format!("/api/brief/{flight}"),
+            &["brief", flight, "--json"],
+        );
+    }
+}
+
+#[test]
 fn the_procedures_routes_are_the_verb_bare_and_named() {
     let (repo, server) = served();
     // The engine ships empty, so the named route needs a definition to
