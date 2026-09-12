@@ -35,6 +35,8 @@ function brief(comments: CommentView[], history: Moment[]): Brief {
     progress: null,
     depends_on: [],
     blocks: [],
+    references: [],
+    referenced_by: [],
     comments,
     history,
     standing: "ready",

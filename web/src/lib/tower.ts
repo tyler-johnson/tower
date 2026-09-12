@@ -303,13 +303,33 @@ export function buildRefs(folded: Folded): { refs: Map<string, string>; flights:
 /// flight ids, for the short decision only. `#n` when the board and the
 /// brief's family span one writer, `writer#n` otherwise. No board lookup:
 /// a linked flight may have aged past the closed window, and the brief
-/// carries its number.
+/// carries its number. The referenced flights ride too — they are the
+/// number map for the prose, and a referenced flight may be off the
+/// board the same way.
 export function linkRefs(ids: string[], brief: Brief): Map<string, string> {
-  const links = [...brief.blocks, ...brief.depends_on];
+  const links = [...brief.blocks, ...brief.depends_on, ...brief.references, ...brief.referenced_by];
   const short = shortIds([...ids, ...links.map((link) => link.flight)]);
   return new Map(
     links.map((link) => [link.flight, flightRef(writerOf(link.flight), link.number, short)]),
   );
+}
+
+// The core's tokenizer, for plain text: a run of token chars, the head
+// trimmed of its trailing non-alphanumerics, and the `#<writer>.<seq>`
+// shape alone.
+const RUN = /[A-Za-z0-9_#~.-]+/g;
+const WIRE = /^#([A-Za-z0-9_.-]+\.\d+)$/;
+
+/// Render-time, plain text: every `#<wire id>` `refs` knows becomes what
+/// `refs` says, and the rest stays — refs.rs's `project`, for the note
+/// phrases the page prints as text rather than markdown.
+export function project(text: string, refs: Map<string, string>): string {
+  return text.replace(RUN, (run) => {
+    const head = run.replace(/[^A-Za-z0-9]+$/, "");
+    const id = WIRE.exec(head)?.[1];
+    const shown = id === undefined ? undefined : refs.get(id);
+    return shown === undefined ? run : shown + run.slice(head.length);
+  });
 }
 
 export interface NotePhrase {
@@ -322,13 +342,14 @@ export interface NotePhrase {
 ///
 /// The one deliberate divergence from `note()`: the trailing age phrase is
 /// omitted, because the web row has a column for the age and the CLI has
-/// no room for one. `ageColumn` is that phrase's other half.
-export function notePhrases(view: FlightView): NotePhrase[] {
+/// no room for one. `ageColumn` is that phrase's other half. The
+/// question and a close's reason are prose, projected through `refs`.
+export function notePhrases(view: FlightView, refs: Map<string, string>): NotePhrase[] {
   const phrases: NotePhrase[] = [];
   const warn = (text: string) => phrases.push({ text, tone: "warn" });
   const dim = (text: string) => phrases.push({ text, tone: "dim" });
-  if (view.question !== null) warn(view.question);
-  else if (view.closed_reason !== null) dim(view.closed_reason);
+  if (view.question !== null) warn(project(view.question, refs));
+  else if (view.closed_reason !== null) dim(project(view.closed_reason, refs));
   // The pilot: the stored In Progress and who set it — the byline and
   // its session are the pilot, the field is the chip.
   if (view.status === "in_progress") {
@@ -488,6 +509,11 @@ export interface Brief {
   progress: [number, number] | null;
   depends_on: LinkView[];
   blocks: LinkView[];
+  /// The flights this flight's prose names, as link rows — the number
+  /// map for its references.
+  references: LinkView[];
+  /// The backlinks: the flights whose prose names this one.
+  referenced_by: LinkView[];
   comments: CommentView[];
   history: Moment[];
   standing: StandingTag;
@@ -547,8 +573,9 @@ export interface Listing {
 /// ahead of everything, because a reader must know first where the flight
 /// stands and who put it there, then the question, the standing, and the
 /// age. Precedence makes the standing exclusive with the mark phrases,
-/// so the line never says a thing twice.
-export function briefNote(brief: Brief, now: number): NotePhrase[] {
+/// so the line never says a thing twice. The prose phrases — the since
+/// line, the question, a close's reason — project through `refs`.
+export function briefNote(brief: Brief, now: number, refs: Map<string, string>): NotePhrase[] {
   const phrases: NotePhrase[] = [];
   const warn = (text: string) => phrases.push({ text, tone: "warn" });
   const dim = (text: string) => phrases.push({ text, tone: "dim" });
@@ -558,9 +585,9 @@ export function briefNote(brief: Brief, now: number): NotePhrase[] {
       ? `${status} — ${byline(brief.status_callsign, brief.status_session, brief.status_by)} ${age(now, brief.status_at)}`
       : status,
   );
-  if (brief.status_reason !== null) dim(brief.status_reason);
-  if (brief.question !== null) warn(brief.question);
-  else if (brief.closed_reason !== null) dim(brief.closed_reason);
+  if (brief.status_reason !== null) dim(project(brief.status_reason, refs));
+  if (brief.question !== null) warn(project(brief.question, refs));
+  else if (brief.closed_reason !== null) dim(project(brief.closed_reason, refs));
   switch (brief.standing) {
     // Said above, from the brief's own flat facts.
     case "done":

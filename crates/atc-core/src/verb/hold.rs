@@ -12,6 +12,10 @@
 //! Holding is stopping: the flight is no longer started, so the answer
 //! releases it to Ready or Waiting by the graph, never back In
 //! Progress — whoever pulls it next resumes on the same branch.
+//!
+//! A flight named in the question is stored as its wire id, and the
+//! echo carries the record's rendering — the current number — rather
+//! than the typed one.
 
 use serde::Serialize;
 
@@ -48,6 +52,7 @@ pub fn hold(store: &Store, flight: &str, message: Option<String>) -> Result<Hold
         });
     }
 
+    let question = board::rewrite(&fold, &question)?;
     let ids = store.append(vec![Kind::Held {
         flight: flight.clone(),
         question: question.clone(),
@@ -59,6 +64,6 @@ pub fn hold(store: &Store, flight: &str, message: Option<String>) -> Result<Hold
             held: appended(store, &id)?,
         },
         display: display(&fold, &flight),
-        question,
+        question: board::project(&question, |id| Some(display(&fold, id))),
     })
 }

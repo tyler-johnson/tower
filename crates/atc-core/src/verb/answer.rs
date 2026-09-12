@@ -8,7 +8,8 @@
 //! append a gesture the board cannot show. A closed flight refuses like
 //! every lifecycle verb, and when its close took a question off the
 //! record the refusal says so, since the asker is the one most likely
-//! to come back to it.
+//! to come back to it. A flight named in the answer is stored as its
+//! wire id, and the echo carries the record's rendering.
 
 use serde::Serialize;
 
@@ -50,6 +51,7 @@ pub fn answer(store: &Store, flight: &str, message: Option<String>) -> Result<An
         });
     }
 
+    let answer = board::rewrite(&fold, &answer)?;
     let ids = store.append(vec![Kind::Answered {
         flight: flight.clone(),
         answer: answer.clone(),
@@ -61,6 +63,6 @@ pub fn answer(store: &Store, flight: &str, message: Option<String>) -> Result<An
             answered: appended(store, &id)?,
         },
         display: display(&fold, &flight),
-        answer,
+        answer: board::project(&answer, |id| Some(display(&fold, id))),
     })
 }

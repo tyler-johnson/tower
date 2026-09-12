@@ -18,7 +18,7 @@
     show: Field[];
   } = $props();
 
-  let phrases = $derived(notePhrases(view));
+  let phrases = $derived(notePhrases(view, refs));
 </script>
 
 <!--

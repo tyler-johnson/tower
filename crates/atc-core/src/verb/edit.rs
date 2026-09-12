@@ -7,7 +7,9 @@
 //! permissive like `comment` and `link`, because a wrong word in a
 //! closed record is the motivating case. An empty message is accepted
 //! for the same reason `comment` checks no emptiness: clearing a body
-//! or a comment's text is a legitimate edit.
+//! or a comment's text is a legitimate edit. A flight named in the new
+//! text is stored as its wire id — as a flight reference, on a comment
+//! too: a comment id in prose matches nothing and stays as typed.
 
 use serde::Serialize;
 
@@ -78,6 +80,10 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
     if fields_ride && matches!(target, EditTarget::Comment { .. }) {
         return Err(Error::SubjectOnComment);
     }
+    let body = overlay
+        .message
+        .map(|message| board::rewrite(&fold, &message))
+        .transpose()?;
 
     let (edited, flight) = match &target {
         EditTarget::Flight(flight) => (flight.clone(), flight.clone()),
@@ -86,7 +92,7 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
     let ids = store.append(vec![Kind::Edited {
         target: edited,
         subject,
-        body: overlay.message,
+        body,
         priority: overlay.priority,
         labels,
         skill: overlay.skill,

@@ -77,6 +77,58 @@ describe("the markdown render", () => {
     expect(html).toContain('alt="the board"');
   });
 
+  // A flight named in prose is stored as `#<wire id>`; the page links it
+  // in the app, with the current display form as its text.
+  it("links a known wire id in the app with its display form", () => {
+    const refs = new Map([["pi.2", "#2"]]);
+    const html = render("blocked on #pi.2.", refs);
+    expect(html).toContain('<a href="/f/pi.2" data-flight="pi.2">#2</a>.');
+    expect(html).not.toContain("target=");
+    expect(html).not.toContain("rel=");
+  });
+
+  it("takes the href from the caller", () => {
+    const refs = new Map([["pi.2", "#2"]]);
+    const html = render("see #pi.2", refs, (id) => `/f/${id}?view=all`);
+    expect(html).toContain('href="/f/pi.2?view=all"');
+  });
+
+  it("links an unknown wire id with the wire id as its text", () => {
+    const html = render("see #pi.9 and #mac-1f00.3's test", new Map());
+    expect(html).toContain('<a href="/f/pi.9" data-flight="pi.9">#pi.9</a>');
+    expect(html).toContain(
+      '<a href="/f/mac-1f00.3" data-flight="mac-1f00.3">#mac-1f00.3</a>\'s test',
+    );
+  });
+
+  it("leaves a bare number and other hashes alone", () => {
+    const html = render("see #3, #ff0000, C#, and #L12", new Map([["pi.3", "#3"]]));
+    expect(html).not.toContain("<a");
+    expect(html).toContain("see #3, #ff0000, C#, and #L12");
+  });
+
+  it("leaves a wire id inside backticks and a fence alone", () => {
+    const refs = new Map([["pi.2", "#2"]]);
+    expect(render("run `atc brief #pi.2`", refs)).toContain("<code>atc brief #pi.2</code>");
+    expect(render("```\n#pi.2\n```", refs)).toContain("#pi.2");
+    expect(render("```\n#pi.2\n```", refs)).not.toContain("<a");
+  });
+
+  it("leaves a wire id inside a link the writer made alone", () => {
+    const refs = new Map([["pi.2", "#2"]]);
+    const html = render("[#pi.2](https://example.com/b)", refs);
+    expect(html).toContain('href="https://example.com/b"');
+    expect(html).toContain('target="_blank"');
+    expect(html).not.toContain("data-flight");
+  });
+
+  it("keeps an external link on its target while a flight link stays in the app", () => {
+    const refs = new Map([["pi.2", "#2"]]);
+    const html = render("[the board](https://example.com/b) and #pi.2", refs);
+    expect(html).toContain('href="https://example.com/b" target="_blank"');
+    expect(html).toContain('<a href="/f/pi.2" data-flight="pi.2">#2</a>');
+  });
+
   it("renders empty text as the empty string", () => {
     expect(render("")).toBe("");
   });

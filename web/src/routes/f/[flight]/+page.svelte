@@ -7,7 +7,7 @@
   import { feed } from "$lib/feed.svelte";
   import { panel } from "$lib/panel.svelte";
   import { query } from "$lib/query.svelte";
-  import { buildRefs, flightRef, neighbors, refusalLines, writerOf } from "$lib/tower";
+  import { buildRefs, flightRef, linkRefs, neighbors, refusalLines, writerOf } from "$lib/tower";
 
   // Two dependencies, both deliberate: the path, so a different flight
   // loads its own record, and the feed's last frame, so the page tracks
@@ -23,6 +23,9 @@
   let b = $derived(feed.board);
   let refs = $derived(b ? buildRefs(b).refs : new Map<string, string>());
   let brief = $derived(panel.brief);
+  // The brief's own number map, for the rail's note: a flight the prose
+  // names may have closed past the board's window.
+  let linkRef = $derived(brief ? linkRefs([...refs.keys()], brief) : new Map<string, string>());
 
   // The board's display form when the flight is on it; the long form
   // otherwise — a flight past the closed window has left the board, and
@@ -89,7 +92,7 @@
         <Record {brief} {refs} />
       </div>
       <div class="shrink-0 lg:w-72">
-        <Rail {brief} />
+        <Rail {brief} refs={linkRef} />
       </div>
     </div>
   {:else if panel.error !== null}

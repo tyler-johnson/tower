@@ -145,13 +145,20 @@ fn subject_column(view: &FlightView) -> String {
     text
 }
 
-fn note(view: &FlightView, now: i64, colored: bool) -> String {
+/// The note line. The question and a close's reason are prose, and print
+/// with references projected through the board's own `refs`: a flight
+/// past the closed window has no row here and prints as its wire id,
+/// which is still a name every verb accepts.
+fn note(view: &FlightView, refs: &HashMap<&str, String>, now: i64, colored: bool) -> String {
+    let shown = |text: &str| {
+        atc_core::board::project(text, |id| refs.get(id.to_string().as_str()).cloned())
+    };
     let mut phrases = Vec::new();
     if let Some(question) = view.question.as_deref() {
-        phrases.push(paint_warn(question, colored));
+        phrases.push(paint_warn(&shown(question), colored));
     } else if let Some(reason) = view.closed_reason.as_deref() {
         // The same slot, dim: a close's reason needs nobody.
-        phrases.push(paint_dim(reason, colored));
+        phrases.push(paint_dim(&shown(reason), colored));
     }
     // The pilot: the stored In Progress and who set it — the byline and
     // its session are the pilot, the field is the chip.
@@ -268,7 +275,7 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
             let id = format!("{:<id_width$}", refs[view.id.as_str()]);
             let subject = format!("{:<subject_width$}", subject_column(view));
             out.push_str(&format!("{glyph} {}  {subject}\n", paint_id(&id, colored)));
-            out.push_str(&format!("    {}\n", note(view, now, colored)));
+            out.push_str(&format!("    {}\n", note(view, &refs, now, colored)));
         }
         out.push('\n');
     }

@@ -84,6 +84,13 @@ pub struct Brief {
     pub progress: Option<(usize, usize)>,
     pub depends_on: Vec<LinkView>,
     pub blocks: Vec<LinkView>,
+    /// The flights this flight's prose names, as link rows — the number
+    /// map a prose render needs, since a referenced flight may have
+    /// aged past the board's window.
+    pub references: Vec<LinkView>,
+    /// The backlinks: the flights whose prose names this one.
+    /// Discovered-from with no edge kind.
+    pub referenced_by: Vec<LinkView>,
     /// Reading order, the fold's order.
     pub comments: Vec<CommentView>,
     /// What happened to this flight, oldest first — the log's own
@@ -191,6 +198,8 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
         progress: super::model::progress(fold, flight),
         depends_on: links(fold, &flight.depends_on),
         blocks: links(fold, &flight.blocks),
+        references: links(fold, &flight.references),
+        referenced_by: links(fold, &flight.referenced_by),
         comments: flight
             .comments
             .iter()
@@ -226,8 +235,8 @@ fn standing(flight: &Flight) -> Standing {
 }
 
 /// Link rows, resolved inside the fold. Infallible — the fold routes a
-/// link with a missing endpoint to `unrouted`, so every carried id names a
-/// filed flight.
+/// link with a missing endpoint to `unrouted` and drops a reference to
+/// nothing filed, so every carried id names a filed flight.
 fn links(fold: &Fold, ids: &[EventId]) -> Vec<LinkView> {
     ids.iter()
         .map(|id| {
@@ -856,6 +865,35 @@ mod tests {
         assert_eq!(json["status_by"], serde_json::json!("closer@b.c"));
         let text = serde_json::to_string(&brief).expect("serializes");
         assert_eq!(text.matches("\"status_by\"").count(), 1);
+    }
+
+    #[test]
+    fn a_reference_rows_both_ways_with_its_number() {
+        // The web links a reference from the brief alone, like a link
+        // row — the named flight may be off the board — so both lists
+        // carry the number beside the wire id.
+        let events = [
+            filed("pi.1", 10, "the named", ""),
+            filed("pi.2", 20, "the naming", "grew out of #pi.1"),
+        ];
+        let naming = brief_of(&events, &id("pi.2")).expect("filed");
+        let json = serde_json::to_value(&naming).expect("serializes");
+        assert_eq!(json["references"][0]["flight"], serde_json::json!("pi.1"));
+        assert_eq!(json["references"][0]["number"], serde_json::json!(1));
+        assert_eq!(
+            json["references"][0]["subject"],
+            serde_json::json!("the named")
+        );
+        assert_eq!(json["referenced_by"], serde_json::json!([]));
+
+        let named = brief_of(&events, &id("pi.1")).expect("filed");
+        let json = serde_json::to_value(&named).expect("serializes");
+        assert_eq!(json["references"], serde_json::json!([]));
+        assert_eq!(
+            json["referenced_by"][0]["flight"],
+            serde_json::json!("pi.2")
+        );
+        assert_eq!(json["referenced_by"][0]["number"], serde_json::json!(2));
     }
 
     #[test]

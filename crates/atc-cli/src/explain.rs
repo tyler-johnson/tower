@@ -390,7 +390,8 @@ pub static ENTRIES: &[Entry] = &[
         detail: "Flight numbers are dense per writer, so two writers can both have a #3. A bare \
                  number must match exactly one flight across writers; when it does not, the \
                  refusal lists every candidate in `writer#n` form — typing one of those names \
-                 exactly one.",
+                 exactly one. A bare number inside `-m` prose is held to the same rule: a note \
+                 saying `see #3` stores the flight's wire id, so it must name exactly one.",
         exits: &["atc"],
     },
     Entry {

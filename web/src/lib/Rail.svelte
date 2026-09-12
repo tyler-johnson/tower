@@ -5,11 +5,13 @@
   import { age, allowedVerbs, briefNote, unknownRows, type Brief } from "./tower";
   import { write } from "./write";
 
-  let { brief }: { brief: Brief } = $props();
+  // `refs` is the brief's own number map — the link and reference rows —
+  // so a referenced flight off the board still prints by its number.
+  let { brief, refs }: { brief: Brief; refs: Map<string, string> } = $props();
 
   let now = $derived(feed.now);
   let verbs = $derived(allowedVerbs(brief));
-  let note = $derived(briefNote(brief, now));
+  let note = $derived(briefNote(brief, now, refs));
   let other = $derived(unknownRows(brief));
   // A closed flight refuses every move and every re-laning — `ensure_active`
   // — and takes an edit, which is why the other four stay live.

@@ -6,6 +6,11 @@
 //! more. Not `ensure_active`: a closed flight briefs, the log
 //! keeps the record, and the render carries the closing move alongside
 //! everything else.
+//!
+//! The prose prints as its source text with references projected: a
+//! `#<wire id>` the record stores prints as the flight's current
+//! number, by the board's own rule. The fold has every filed flight, so
+//! a reference to a flight past the board's window still projects here.
 
 use crate::error::CliError;
 use crate::{machine, render};
@@ -34,6 +39,14 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 /// verbatim, the family, the comments in reading order, and the history
 /// last — the record before the log of how it got that way.
 fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
+    let shown = |text: &str| {
+        board::project(text, |id| {
+            fold.flights
+                .iter()
+                .any(|flight| &flight.id == id)
+                .then(|| super::display(fold, id))
+        })
+    };
     let mut out = String::new();
     let mut subject = brief.subject.clone();
     if let Some((closed, total)) = brief.progress {
@@ -43,7 +56,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
         "{}  {subject}\n",
         render::paint_id(&show(fold, &brief.id), colored),
     ));
-    out.push_str(&format!("    {}\n", note(brief, now, colored)));
+    out.push_str(&format!("    {}\n", note(brief, now, colored, &shown)));
     out.push_str(&format!("    {}\n", fields_line(brief, colored)));
     // The last edit, comment rewords included — the record has been
     // touched, and the mark says by whom.
@@ -58,7 +71,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     }
     if !brief.body.is_empty() {
         out.push('\n');
-        out.push_str(&brief.body);
+        out.push_str(&shown(&brief.body));
         out.push('\n');
     }
 
@@ -66,7 +79,13 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     // a parent edge, so `blocks` is this flight's parents and
     // `depends_on` is its children — the same two lists the fold already
     // keeps, named for what they mean rather than for the edge direction.
-    for (title, links) in [("parents", &brief.blocks), ("children", &brief.depends_on)] {
+    // Then the backlinks: the flights whose prose names this one. The
+    // outgoing list gets no section — the prose above already shows it.
+    for (title, links) in [
+        ("parents", &brief.blocks),
+        ("children", &brief.depends_on),
+        ("referenced by", &brief.referenced_by),
+    ] {
         if links.is_empty() {
             continue;
         }
@@ -107,7 +126,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
                     colored
                 )
             ));
-            for line in comment.text.lines() {
+            for line in shown(&comment.text).lines() {
                 out.push_str(&format!("  {line}\n"));
             }
         }
@@ -158,7 +177,8 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
                     )
                 ));
             }
-            for line in follow.into_iter().flat_map(str::lines) {
+            let follow = follow.map(&shown);
+            for line in follow.iter().flat_map(|text| text.lines()) {
                 out.push_str(&format!("    {}\n", render::paint_dim(line, colored)));
             }
         }
@@ -202,8 +222,9 @@ fn fields_line(brief: &Brief, colored: bool) -> String {
 /// right after. The standing joins as one phrase before the age:
 /// precedence makes it exclusive with the mark phrases — a walk standing
 /// only exists with no closing move, question, or pull — so the line
-/// never says a thing twice.
-fn note(brief: &Brief, now: i64, colored: bool) -> String {
+/// never says a thing twice. `shown` projects the prose phrases — the
+/// question, a close's reason, the since line.
+fn note(brief: &Brief, now: i64, colored: bool, shown: &dyn Fn(&str) -> String) -> String {
     let mut phrases = Vec::new();
     let status = brief.status.replace('_', " ");
     phrases.push(render::paint_dim(
@@ -222,13 +243,13 @@ fn note(brief: &Brief, now: i64, colored: bool) -> String {
         colored,
     ));
     if let Some(reason) = brief.status_reason.as_deref() {
-        phrases.push(render::paint_dim(reason, colored));
+        phrases.push(render::paint_dim(&shown(reason), colored));
     }
     if let Some(question) = brief.question.as_deref() {
-        phrases.push(render::paint_warn(question, colored));
+        phrases.push(render::paint_warn(&shown(question), colored));
     } else if let Some(reason) = brief.closed_reason.as_deref() {
         // The same slot, dim: a close's reason needs nobody.
-        phrases.push(render::paint_dim(reason, colored));
+        phrases.push(render::paint_dim(&shown(reason), colored));
     }
     match &brief.standing {
         // Said above, from the brief's own flat facts.

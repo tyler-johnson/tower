@@ -10,8 +10,11 @@
 
   // The link rows name themselves from the brief: a parent or child that
   // closed past the board's window has no row in `refs`, and would
-  // otherwise print as its wire id.
+  // otherwise print as its wire id. The same map names the references
+  // in the prose, and every render below takes it.
   let linkRef = $derived(linkRefs([...refs.keys()], brief));
+  const flightHref = (id: string) => query.href(`/f/${id}`);
+  const shown = (text: string) => render(text, linkRef, flightHref);
 
   let now = $derived(feed.now);
   let entries = $derived(stream(brief));
@@ -158,7 +161,7 @@
           onkeydown={(event) => keydown(event, "body")}></textarea>
       {:else}
         <div class="prose border-base-300 rounded-box max-w-none border p-3">
-          {@html render(draft)}
+          {@html shown(draft)}
         </div>
       {/if}
       <div class="flex gap-2">
@@ -182,7 +185,7 @@
           edit
         </button>
       </div>
-      <div class="prose max-w-none">{@html render(brief.body)}</div>
+      <div class="prose max-w-none">{@html shown(brief.body)}</div>
     </section>
   {:else}
     <!-- Nothing to click through to, so the placeholder stays the control. -->
@@ -248,6 +251,30 @@
   {/if}
 
   <!--
+		The backlinks: the flights whose prose names this one. Discovered-
+		from with no edge kind — the rows read like the family's. The
+		outgoing references get no section; the prose above links them.
+	-->
+  {#if brief.referenced_by.length > 0}
+    <section class="flex flex-col gap-1">
+      <h2 class="text-base-content/60 font-mono text-xs font-medium tracking-[0.2em] uppercase">
+        referenced by
+      </h2>
+      {#each brief.referenced_by as link (link.flight)}
+        <a
+          href={query.href(`/f/${link.flight}`)}
+          class="rounded-field hover:bg-base-200 flex items-baseline gap-2 px-1"
+        >
+          <span class="text-primary font-mono">{linkRef.get(link.flight)}</span>
+          <span class="status {statusDot(link.status)}" title={link.status}></span>
+          <span class="flex-1 truncate">{link.subject}</span>
+          {#if link.closed}<span class="text-success">✓</span>{/if}
+        </a>
+      {/each}
+    </section>
+  {/if}
+
+  <!--
 		What happened and what was said, one column and one order: the two
 		lists the wire splits are the same events, and a reader following a
 		record follows time.
@@ -272,7 +299,7 @@
                 session {byline(null, entry.session, entry.by)}
               </p>
             {/if}
-            <div class="prose max-w-none">{@html render(entry.text)}</div>
+            <div class="prose max-w-none">{@html shown(entry.text)}</div>
           </div>
         {:else}
           <div class="flex flex-col gap-1">
@@ -293,7 +320,7 @@
               </p>
             {/if}
             {#if entry.note}
-              <div class="prose prose-dim max-w-none pl-4">{@html render(entry.note)}</div>
+              <div class="prose prose-dim max-w-none pl-4">{@html shown(entry.note)}</div>
             {/if}
           </div>
         {/if}
@@ -328,7 +355,7 @@
         <textarea class="textarea w-full" rows="4" bind:value={note}></textarea>
       {:else}
         <div class="prose border-base-300 rounded-box max-w-none border p-3">
-          {@html render(note)}
+          {@html shown(note)}
         </div>
       {/if}
     </label>

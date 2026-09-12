@@ -14,7 +14,10 @@
 //! health fold — the seam's own answer and the events off the board as
 //! rows over the fold, and it observes and complains, never enforces.
 //! [`resolve`] is how a typed reference becomes a flight id against the
-//! fold — every surface's front door to one flight. [`Query`] is the
+//! fold — every surface's front door to one flight. [`rewrite`] is the
+//! same resolution over prose, at write time — a flight named in a body
+//! or a note is stored as its wire id — and [`project`] puts the display
+//! form back at render. [`Query`] is the
 //! second fold over the same rows — filters, grouping, ordering and the
 //! display window as one type, parsed once from a param string and
 //! shared by every surface, where [`enrich`] stays the board's own fixed
@@ -31,6 +34,7 @@ mod history;
 mod model;
 mod pick;
 mod query;
+mod refs;
 mod resolve;
 mod view;
 
@@ -46,6 +50,7 @@ pub use query::{
     DEFAULT_SHOW, FIELDS, Field, Filter, Folded, Group, Mode, Op, Order, Query, QueryError, Value,
     When,
 };
+pub use refs::{named, project, rewrite};
 pub use resolve::{FlightRef, ResolveError, count, display, flight, parse_ref, resolve};
 pub use view::{View, views};
 

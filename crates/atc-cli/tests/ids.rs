@@ -154,6 +154,34 @@ fn two_writers_bind_with_hash_and_a_bare_number_is_ambiguous() {
 }
 
 #[test]
+fn a_bare_number_in_prose_two_writers_hold_is_refused_the_same_way() {
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "from the pi"]));
+    repo.pin_writer("qi");
+    stdout(&atc(repo.path(), &["file", "from the qi"]));
+
+    let out = atc(repo.path(), &["comment", "pi#1", "-m", "see #1", "--json"]);
+    let refused = refusal(&out, 1, "flight/ambiguous");
+    let message = refused["error"]["message"].as_str().expect("a message");
+    assert_eq!(message, "`#1` names two flights: `pi#1`, `qi#1`");
+
+    // The exact form is stored by wire id and printed long, like a row.
+    stdout(&atc(repo.path(), &["comment", "pi#1", "-m", "see qi#1"]));
+    let brief = envelope(&atc(repo.path(), &["brief", "pi#1", "--json"]));
+    assert_eq!(
+        brief["data"]["comments"][0]["text"],
+        serde_json::json!("see #qi.1")
+    );
+    let text = stdout(&atc(repo.path(), &["brief", "pi#1"]));
+    assert!(text.contains("see qi#1"), "{text}");
+    let text = stdout(&atc(repo.path(), &["brief", "qi#1"]));
+    assert!(
+        text.contains("referenced by\n· pi#1  from the pi\n"),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_bad_reference_names_the_three_spellings() {
     let repo = repo();
     let out = atc(repo.path(), &["comment", "not-an-id", "-m", "x", "--json"]);

@@ -4,6 +4,11 @@
 //! slice, so a missing message refuses unconditionally — a coded refusal,
 //! never a clap `required = true`, so a machine caller gets an envelope.
 //! No `ensure_active`: a note on a closed record is fine.
+//!
+//! A flight named in the note — `#3`, `writer#3` — is stored as its
+//! wire id, by the resolution the flight argument gets: a bare number
+//! two writers hold refuses the same way, and a match on nothing stays
+//! as typed.
 
 use serde::Serialize;
 
@@ -31,6 +36,7 @@ pub fn comment(store: &Store, flight: &str, message: Option<String>) -> Result<C
     board::parse_ref(flight)?;
     let fold = board::fold(&store.read_all()?);
     let flight = board::resolve(&fold, flight)?;
+    let text = board::rewrite(&fold, &text)?;
 
     let ids = store.append(vec![Kind::Commented {
         flight: flight.clone(),

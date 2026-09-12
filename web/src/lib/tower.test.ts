@@ -9,6 +9,7 @@ import {
   linkRefs,
   liveRows,
   neighbors,
+  project,
   type Brief,
   type FlightView,
   type Folded,
@@ -61,7 +62,13 @@ function link(id: string, number: number, closed = false): LinkView {
   };
 }
 
-function brief(number: number, depends_on: LinkView[], blocks: LinkView[] = []): Brief {
+function brief(
+  number: number,
+  depends_on: LinkView[],
+  blocks: LinkView[] = [],
+  references: LinkView[] = [],
+  referenced_by: LinkView[] = [],
+): Brief {
   return {
     ...flight(number, "ready"),
     status_reason: null,
@@ -70,6 +77,8 @@ function brief(number: number, depends_on: LinkView[], blocks: LinkView[] = []):
     asked_by: null,
     depends_on,
     blocks,
+    references,
+    referenced_by,
     comments: [],
     history: [],
     standing: "ready",
@@ -143,6 +152,38 @@ describe("the link refs", () => {
     const refs = linkRefs(ids, brief(1, [link("pi-8c2e.2", 2)], [link("mac-1f00.3", 3)]));
     expect(refs.get("pi-8c2e.2")).toBe("pi-8c2e#2");
     expect(refs.get("mac-1f00.3")).toBe("mac-1f00#3");
+  });
+
+  it("a referenced flight names itself the same way, both directions", () => {
+    const ids = ["pi-8c2e.1"];
+    const refs = linkRefs(
+      ids,
+      brief(1, [], [], [link("pi-8c2e.4", 4, true)], [link("pi-8c2e.6", 6)]),
+    );
+    expect(refs.get("pi-8c2e.4")).toBe("#4");
+    expect(refs.get("pi-8c2e.6")).toBe("#6");
+  });
+});
+
+describe("the projection", () => {
+  const refs = new Map([
+    ["pi-8c2e.2", "#2"],
+    ["mac-1f00.3", "mac-1f00#3"],
+  ]);
+
+  it("puts the display form back and keeps the sentence's punctuation", () => {
+    expect(project("blocked on #pi-8c2e.2.", refs)).toBe("blocked on #2.");
+    expect(project("#pi-8c2e.2's test (#mac-1f00.3)", refs)).toBe("#2's test (mac-1f00#3)");
+  });
+
+  it("leaves an unknown id, a bare number, and other hashes alone", () => {
+    const text = "see #pi-8c2e.9, #3, #ff0000, C#";
+    expect(project(text, refs)).toBe(text);
+  });
+
+  it("leaves text with no reference alone", () => {
+    expect(project("", refs)).toBe("");
+    expect(project("plain words", refs)).toBe("plain words");
   });
 });
 

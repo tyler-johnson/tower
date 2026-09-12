@@ -121,6 +121,11 @@ fn append(
     target: Status,
     reason: Option<String>,
 ) -> Result<Move, Error> {
+    // A flight named in the reason is stored as its wire id, like any
+    // prose the record keeps.
+    let reason = reason
+        .map(|reason| board::rewrite(fold, &reason))
+        .transpose()?;
     let ids = store.append(vec![Kind::Status {
         flight: flight.clone(),
         status: target.name().to_string(),

@@ -25,6 +25,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::pick::Lane;
+use super::refs;
 use super::view::View;
 use crate::log::{Event, EventId, Kind, RETIRED_KINDS};
 
@@ -59,6 +60,14 @@ pub struct Flight {
     /// The reverse edge, folded in here so a render never has to scan
     /// every other flight to answer "what waits on this one".
     pub blocks: Vec<EventId>,
+    /// The filed flights this flight's prose names — `#<wire id>` in
+    /// the body, a comment, a question, an answer, or a move's reason —
+    /// in filed order, once each, self excluded.
+    pub references: Vec<EventId>,
+    /// The reverse: the filed flights whose prose names this one, in
+    /// filed order. Folded in here like `blocks`, so the brief's
+    /// backlinks never scan every other flight.
+    pub referenced_by: Vec<EventId>,
     /// The stored facts a status word assigns, last-wins as a tuple:
     /// the filing seeds them, `status` and `routed` words overwrite
     /// them, `held` clears started.
@@ -315,6 +324,8 @@ pub fn fold(events: &[Event]) -> Fold {
                     comments: Vec::new(),
                     depends_on: Vec::new(),
                     blocks: Vec::new(),
+                    references: Vec::new(),
+                    referenced_by: Vec::new(),
                     stand,
                     moved: None,
                     answered: None,
@@ -378,6 +389,10 @@ pub fn fold(events: &[Event]) -> Fold {
     // routing, in union order — so a later edit beats an earlier
     // routing's fields and the other way around.
     let mut overlays: Vec<&Event> = Vec::new();
+    // The prose the flight does not keep — an answer, a move's reason —
+    // indexed like `flights`, for the reference pass: a flight named in
+    // either is named on the record.
+    let mut spoken: Vec<Vec<String>> = vec![Vec::new(); flights.len()];
     for (order, event) in events.iter().enumerate() {
         match &event.kind {
             Kind::Filed { .. } => {}
@@ -429,6 +444,9 @@ pub fn fold(events: &[Event]) -> Fold {
                 reason,
             } => match by_id.get(flight) {
                 Some(&at) => {
+                    if let Some(reason) = reason {
+                        spoken[at].push(reason.clone());
+                    }
                     let flight = &mut flights[at];
                     assign(&mut flight.stand, status);
                     flight.moved = Some(Mark {
@@ -517,8 +535,9 @@ pub fn fold(events: &[Event]) -> Fold {
             // itself, and seq order makes it impossible single-writer.
             // An answer writes no status: it clears the question and
             // the facts beneath decide where the flight lands.
-            Kind::Answered { flight, .. } => match by_id.get(flight) {
+            Kind::Answered { flight, answer } => match by_id.get(flight) {
                 Some(&at) => {
+                    spoken[at].push(answer.clone());
                     let flight = &mut flights[at];
                     flight.question = None;
                     let mark = Mark {
@@ -659,6 +678,44 @@ pub fn fold(events: &[Event]) -> Fold {
         } else {
             unrouted.push(event.clone());
         }
+    }
+
+    // The references, after every edit has landed: each flight's prose
+    // — the body, the comments, the question open or abandoned, and
+    // what it said in passing — names flights by wire id, and the
+    // target learns who names it. Filed order on both sides, once each;
+    // a self-reference and an id nothing filed carries are nothing.
+    let mut referenced_by: Vec<Vec<EventId>> = vec![Vec::new(); flights.len()];
+    for at in 0..flights.len() {
+        let flight = &flights[at];
+        let texts = std::iter::once(flight.body.as_str())
+            .chain(flight.comments.iter().map(|comment| comment.text.as_str()))
+            .chain(
+                flight
+                    .question
+                    .iter()
+                    .map(|question| question.text.as_str()),
+            )
+            .chain(
+                flight
+                    .abandoned
+                    .iter()
+                    .map(|question| question.text.as_str()),
+            )
+            .chain(spoken[at].iter().map(String::as_str));
+        let mut references: Vec<EventId> = Vec::new();
+        for id in texts.flat_map(refs::named) {
+            if id != flight.id && by_id.contains_key(&id) && !references.contains(&id) {
+                references.push(id);
+            }
+        }
+        for id in &references {
+            referenced_by[by_id[id]].push(flight.id.clone());
+        }
+        flights[at].references = references;
+    }
+    for (flight, by) in flights.iter_mut().zip(referenced_by) {
+        flight.referenced_by = by;
     }
 
     derive(&mut flights, &by_id);
@@ -1830,6 +1887,116 @@ mod tests {
         assert!(flight.assignee.is_none());
         assert_eq!(flight.priority, "none");
         assert!(fold.unrouted.is_empty());
+    }
+
+    /// A bare filing carrying a body.
+    fn filed_saying(id: &str, time: i64, body: &str) -> Event {
+        let mut event = filed(id, time, "s");
+        if let Kind::Filed { body: stored, .. } = &mut event.kind {
+            *stored = body.to_string();
+        }
+        event
+    }
+
+    /// A comment carrying its own words.
+    fn noted(id: &str, time: i64, flight: &str, text: &str) -> Event {
+        event(
+            id,
+            time,
+            Kind::Commented {
+                flight: flight.parse().expect("id"),
+                text: text.to_string(),
+            },
+        )
+    }
+
+    fn ids(ids: &[EventId]) -> Vec<String> {
+        ids.iter().map(EventId::to_string).collect()
+    }
+
+    #[test]
+    fn a_body_naming_another_flight_shows_on_both_sides() {
+        let fold = fold(&[
+            filed("pi.1", 10, "the named"),
+            filed_saying("pi.2", 20, "grew out of #pi.1"),
+        ]);
+        assert_eq!(ids(&fold.flights[1].references), ["pi.1"]);
+        assert!(fold.flights[1].referenced_by.is_empty());
+        assert_eq!(ids(&fold.flights[0].referenced_by), ["pi.2"]);
+        assert!(fold.flights[0].references.is_empty());
+    }
+
+    #[test]
+    fn a_comment_a_question_an_answer_and_a_reason_all_name() {
+        let canceled = event(
+            "pi.9",
+            90,
+            Kind::Status {
+                flight: "pi.4".parse().expect("id"),
+                status: "canceled".to_string(),
+                reason: Some("dup of #pi.1".to_string()),
+            },
+        );
+        let answered = event(
+            "pi.8",
+            80,
+            Kind::Answered {
+                flight: "pi.3".parse().expect("id"),
+                answer: "yes, like #pi.1".to_string(),
+            },
+        );
+        let fold = fold(&[
+            filed("pi.1", 10, "the named"),
+            filed("pi.2", 20, "commenting"),
+            filed("pi.3", 30, "asking"),
+            filed("pi.4", 40, "closing"),
+            noted("pi.5", 50, "pi.2", "blocked on #pi.1"),
+            held("pi.6", 60, "pi.3", "same as #pi.1?"),
+            answered,
+            canceled,
+        ]);
+        assert_eq!(ids(&fold.flights[1].references), ["pi.1"], "a comment");
+        assert_eq!(ids(&fold.flights[2].references), ["pi.1"], "an answer");
+        assert_eq!(ids(&fold.flights[3].references), ["pi.1"], "a reason");
+        assert_eq!(
+            ids(&fold.flights[0].referenced_by),
+            ["pi.2", "pi.3", "pi.4"],
+            "filed order"
+        );
+    }
+
+    #[test]
+    fn a_body_edit_that_drops_the_reference_drops_the_backlink() {
+        let fold = fold(&[
+            filed("pi.1", 10, "the named"),
+            filed_saying("pi.2", 20, "grew out of #pi.1"),
+            edited("pi.3", 30, "pi.2", None, Some("stands alone")),
+        ]);
+        assert!(fold.flights[1].references.is_empty());
+        assert!(fold.flights[0].referenced_by.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_id_and_a_self_reference_are_nothing() {
+        let fold = fold(&[
+            filed_saying("pi.1", 10, "see #pi.1 and #pi.9 and #qi.1"),
+            noted("pi.2", 20, "pi.1", "and #pi.1 again"),
+        ]);
+        assert!(fold.flights[0].references.is_empty());
+        assert!(fold.flights[0].referenced_by.is_empty());
+    }
+
+    #[test]
+    fn two_flights_naming_one_list_in_filed_order_once_each() {
+        let fold = fold(&[
+            filed("pi.1", 10, "the named"),
+            filed_saying("pi.2", 20, "see #pi.1"),
+            filed_saying("pi.3", 30, "see #pi.1 and #pi.2"),
+            noted("pi.4", 40, "pi.3", "#pi.1 once more"),
+        ]);
+        assert_eq!(ids(&fold.flights[0].referenced_by), ["pi.2", "pi.3"]);
+        assert_eq!(ids(&fold.flights[1].referenced_by), ["pi.3"]);
+        assert_eq!(ids(&fold.flights[2].references), ["pi.1", "pi.2"]);
     }
 
     #[test]

@@ -43,11 +43,16 @@
 //! lands on the parent. All of it in one `append_with`: two appends would
 //! leave a window where the parent is live, unlinked, and Ready.
 //!
+//! A body naming another flight — `-m "after #3"` — stores the wire id,
+//! by the resolution every verb's flight argument gets; that is the one
+//! fold `file` makes, and only a filing with a body makes it.
+//!
 //! Still no fufu spawn. The registry's repository layer resolves through
 //! `Store::main_worktree`, which reads the common dir and runs nothing.
 
 use serde::Serialize;
 
+use crate::board;
 use crate::config;
 use crate::log::{Event, EventId, Kind, Store};
 use crate::model::Status;
@@ -90,9 +95,20 @@ pub fn file(
     if subject.is_empty() {
         return Err(Error::EmptySubject);
     }
+    // The body is the one field that names other flights: a reference
+    // in it is stored as its wire id, which is the only read of the log
+    // `file` makes — and only when there is a body to scan.
+    let message = match fields.message {
+        Some(message) => {
+            let fold = board::fold(&store.read_all()?);
+            Some(board::rewrite(&fold, &message)?)
+        }
+        None => None,
+    };
     let fields = Fields {
         assignee: lane(fields.assignee)?,
         status: born(fields.status)?,
+        message,
         ..fields
     };
     // Read once, ahead of the branch: the bare filing and a procedure's

@@ -19,14 +19,14 @@ tower is called and never calls. It runs no dispatch and no loop; the harness a 
 
 ## Naming a flight
 
-A flight has two names. The board prints `#3`; when two writers share a board and the numbers clash it prints `pi-8c2e#3`; the wire carries `pi-8c2e.140`, the id of the event that filed it. Every verb that takes a flight accepts all three: `<n>`, `<writer>#<n>`, or `<writer>.<seq>`, with one leading `#` stripped so what tower prints pastes back in. A bare number must match exactly one filed flight, or the verb refuses with `flight/ambiguous` and lists the full forms. Event seqs are shared by every event kind on a writer's chain, so wire ids are sparse: `pi-8c2e.140` and `pi-8c2e.146` can be neighbors.
+A flight has two names. The board prints `#3`; when two writers share a board and the numbers clash it prints `pi-8c2e#3`; the wire carries `pi-8c2e.140`, the id of the event that filed it. Every verb that takes a flight accepts all three: `<n>`, `<writer>#<n>`, or `<writer>.<seq>`, with one leading `#` stripped so what tower prints pastes back in. A bare number must match exactly one filed flight, or the verb refuses with `flight/ambiguous` and lists the full forms. A flight named inside `-m` prose — `see #3` in a body, a comment, a question, an answer, or a cancel's reason — is stored as its wire id by the same resolution and printed by its current number; a match on nothing stays as typed. Event seqs are shared by every event kind on a writer's chain, so wire ids are sparse: `pi-8c2e.140` and `pi-8c2e.146` can be neighbors.
 
 ## Reading
 
 Every read folds the log fresh and never blocks on the network.
 
 - `atc`, and `atc board` — what needs a person pinned on top: `questions` (held flights, oldest ask first) and `yours` (Ready in the `me` lane); under it backlog, waiting, ready, in progress, held, and the three newest closed. `atc --closed 7d` widens that last group to a span; a count, `all`, and `none` work too.
-- `atc brief <flight>` (alias `show`) — the whole record: every field, the comments with any question and answer among them, the links with each linked flight's subject and status, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
+- `atc brief <flight>` (alias `show`) — the whole record: every field, the comments with any question and answer among them, the links with each linked flight's subject and status, the flights whose prose names this one under `referenced by`, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
 - `atc procedures` and `atc skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `atc explain <id>` — the prose behind a refusal; `atc explain --list` is the whole catalog. A pure lookup, no repository needed.
 - `atc config` — every setting with its value and default; `atc version`; `atc doctor`, which exits 1 on findings so a script can gate on it; `atc briefing`, the line fufu shows a new session.

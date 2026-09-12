@@ -109,7 +109,8 @@ Examples:
 pub const BRIEF: &str = "\
 Everything the log and the repository know about one flight, in one
 read: subject and body, every stored field, the comments in reading
-order, each link with the linked flight's subject and status, and the
+order, each link with the linked flight's subject and status, the
+flights whose prose names this one under `referenced by`, and the
 open question.
 The history lists every gesture on the record in log
 order, and each row carries the words the verb took: the status word,
@@ -179,7 +180,12 @@ forwards nothing.
 -m is required, and the refusal is tower's rather than clap's: a
 missing note is a coded refusal with an envelope under --json, never
 usage text. A done flight still takes a comment, because the record
-outlives the board.";
+outlives the board.
+
+A flight named in the note as `#3` or `writer#3` is stored by its wire
+id and printed by its current number; a number two writers hold is
+refused the same way the flight argument is, and a match on nothing
+stays as typed.";
 
 pub const COMMENT_EXAMPLES: &str = "\
 Examples:

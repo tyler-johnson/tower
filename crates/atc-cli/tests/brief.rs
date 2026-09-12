@@ -161,6 +161,167 @@ fn brief_renders_the_full_record_both_link_directions() {
 }
 
 #[test]
+fn a_flight_named_in_a_comment_is_stored_by_wire_id_and_printed_by_number() {
+    let repo = repo_with_a_record();
+    stdout(&atc(repo.path(), &["comment", "1", "-m", "blocked on #2."]));
+
+    // The log holds the wire id.
+    let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
+    assert_eq!(
+        brief["comments"][1]["text"],
+        serde_json::json!("blocked on #pi.2.")
+    );
+    assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.2"));
+    assert_eq!(brief["references"][0]["number"], serde_json::json!(2));
+    assert_eq!(brief["referenced_by"], serde_json::json!([]));
+
+    // The page projects it back to the current number.
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    assert!(text.contains("  blocked on #2.\n"), "{text}");
+    assert!(
+        !text.contains("#pi.2"),
+        "the wire form never renders: {text}"
+    );
+    assert!(!text.contains("referenced by"), "{text}");
+
+    // The named flight lists the naming one under `referenced by`.
+    let text = stdout(&atc(repo.path(), &["brief", "2"]));
+    assert!(
+        text.contains("referenced by\n· #1  the dependent\n"),
+        "{text}"
+    );
+    let brief = envelope(&atc(repo.path(), &["brief", "2", "--json"]))["data"].clone();
+    assert_eq!(
+        brief["referenced_by"][0]["flight"],
+        serde_json::json!("pi.1")
+    );
+    assert_eq!(brief["referenced_by"][0]["number"], serde_json::json!(1));
+    assert_eq!(
+        brief["referenced_by"][0]["subject"],
+        serde_json::json!("the dependent")
+    );
+    assert_eq!(brief["references"], serde_json::json!([]));
+}
+
+#[test]
+fn a_reference_matching_nothing_stays_as_typed() {
+    let repo = repo_with_a_record();
+    stdout(&atc(
+        repo.path(),
+        &["comment", "1", "-m", "#999 stays, so does C# and #ff0000"],
+    ));
+    let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
+    assert_eq!(
+        brief["comments"][1]["text"],
+        serde_json::json!("#999 stays, so does C# and #ff0000")
+    );
+    assert_eq!(brief["references"], serde_json::json!([]));
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    assert!(
+        text.contains("#999 stays, so does C# and #ff0000"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_filing_with_a_body_naming_a_flight_stores_the_wire_id() {
+    let repo = repo_with_a_record();
+    let out = atc(
+        repo.path(),
+        &[
+            "file",
+            "the follow-up",
+            "-p",
+            "high",
+            "-m",
+            "after #1",
+            "--json",
+        ],
+    );
+    let filed = envelope(&out);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        filed["data"]["filed"]["body"]["body"],
+        serde_json::json!("after #pi.1")
+    );
+    let text = stdout(&atc(repo.path(), &["brief", "3"]));
+    assert!(text.contains("\nafter #1\n"), "{text}");
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    assert!(
+        text.contains("referenced by\n· #3  the follow-up\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_hold_and_an_answer_store_the_wire_id_and_echo_the_number() {
+    let repo = repo_with_a_record();
+    // A hold's success is exit 3.
+    let held = atc(repo.path(), &["hold", "2", "-m", "same as #1?"]);
+    assert_eq!(held.status.code(), Some(3));
+    let out = String::from_utf8_lossy(&held.stdout);
+    assert!(out.contains("same as #1?"), "{out}");
+    assert!(!out.contains("pi.1"), "{out}");
+    let brief = envelope(&atc(repo.path(), &["brief", "2", "--json"]))["data"].clone();
+    assert_eq!(brief["question"], serde_json::json!("same as #pi.1?"));
+    assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.1"));
+    let text = stdout(&atc(repo.path(), &["brief", "2"]));
+    assert!(text.contains("same as #1?"), "{text}");
+    // The board's note line projects through its own refs.
+    let text = stdout(&atc(repo.path(), &[]));
+    assert!(text.contains("same as #1?"), "{text}");
+    assert!(!text.contains("pi.1"), "{text}");
+
+    let out = stdout(&atc(repo.path(), &["answer", "2", "-m", "no, unlike #1"]));
+    assert!(out.contains("no, unlike #1"), "{out}");
+    assert!(!out.contains("pi.1"), "{out}");
+    let brief = envelope(&atc(repo.path(), &["brief", "2", "--json"]))["data"].clone();
+    assert_eq!(
+        brief["history"][3]["answer"],
+        serde_json::json!("no, unlike #pi.1")
+    );
+    assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.1"));
+}
+
+#[test]
+fn a_cancel_reason_naming_a_flight_projects_on_the_board_and_the_brief() {
+    let repo = repo_with_a_record();
+    stdout(&atc(repo.path(), &["cancel", "1", "-m", "dup of #2"]));
+    let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
+    assert_eq!(brief["closed_reason"], serde_json::json!("dup of #pi.2"));
+    let text = stdout(&atc(repo.path(), &["brief", "1"]));
+    assert!(text.contains("dup of #2"), "{text}");
+    assert!(!text.contains("#pi.2"), "{text}");
+    let text = stdout(&atc(repo.path(), &[]));
+    assert!(text.contains("dup of #2"), "{text}");
+    assert!(!text.contains("#pi.2"), "{text}");
+}
+
+#[test]
+fn an_edit_over_stored_text_keeps_its_references_and_takes_new_ones() {
+    let repo = repo_with_a_record();
+    stdout(&atc(repo.path(), &["comment", "1", "-m", "see #2"]));
+    // The comment is event pi.5; the edit names it and its new text
+    // carries the stored form, a fresh number, and a self-reference —
+    // stored like any other, indexed as none.
+    stdout(&atc(
+        repo.path(),
+        &["edit", "pi.5", "-m", "see #pi.2, and now #1 too"],
+    ));
+    let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
+    assert_eq!(
+        brief["comments"][1]["text"],
+        serde_json::json!("see #pi.2, and now #pi.1 too")
+    );
+    assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.2"));
+    assert_eq!(brief["references"].as_array().expect("rows").len(), 1);
+}
+
+#[test]
 fn the_stored_fields_get_their_own_line_under_the_head() {
     let repo = repo();
     install_review(&repo);
