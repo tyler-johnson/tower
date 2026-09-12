@@ -1,5 +1,5 @@
 ---
-name: tower-work
+name: work
 description: claim, do, hold or commit, repeat — the loop that pairs with `atc next`
 ---
 

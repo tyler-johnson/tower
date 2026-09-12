@@ -90,6 +90,16 @@ pub struct BoardArgs {
     pub closed: Option<String>,
 }
 
+// A `// agent notice quotes this` line marks surface an agent is taught
+// verbatim — by the notice a wired client delivers at every context
+// boundary (`NOTICE` in integ/briefing.rs), or by the skills shipped
+// beside it (integ/*.md). Those texts are the only spelling lessons an
+// agent gets, so a retired verb or a renamed flag in any of them teaches
+// it to fail: change one here and fix it there in the same commit.
+// `grep -rn "agent notice" crates/atc-cli/src` finds every site, both
+// directions. The notice keeps the stricter contract — every verb it
+// names carries a marker — because it is the text that cannot afford to
+// be wrong.
 #[derive(Subcommand)]
 pub enum Command {
     /// The board — what is filed, what is moving, what is stuck.
@@ -99,6 +109,7 @@ pub enum Command {
         args: BoardArgs,
     },
     /// Claim the next ready flight, or the next `k` in filed order.
+    // agent notice quotes this: `atc next`
     #[command(long_about = help::NEXT, after_long_help = help::NEXT_EXAMPLES)]
     Next {
         /// How many flights to hand out; one when unsaid.
@@ -112,6 +123,7 @@ pub enum Command {
     // `show` is fufu's read-one verb, so it is the word a hand reaches
     // for first; it is a second spelling, not a verb, and the envelope's
     // `cmd` still says `brief`.
+    // agent notice quotes this: `atc brief <flight>`
     #[command(
         visible_alias = "show",
         long_about = help::BRIEF,
@@ -265,6 +277,7 @@ pub enum Command {
         message: Option<String>,
     },
     /// Stop a flight with a question attached — exit 3.
+    // agent notice quotes this: `atc hold <flight> -m "<question>"`
     #[command(long_about = help::HOLD, after_long_help = help::HOLD_EXAMPLES)]
     Hold {
         /// The flight to hold.
@@ -285,6 +298,7 @@ pub enum Command {
         message: Option<String>,
     },
     /// Finish a flight — off the board, on the record.
+    // agent notice quotes this: `atc done <flight>`
     #[command(long_about = help::DONE, after_long_help = help::DONE_EXAMPLES)]
     Done {
         /// The flight to finish.
@@ -356,9 +370,48 @@ pub enum Command {
         #[arg(long, value_name = "n")]
         port: Option<String>,
     },
-    /// One line for a session-start hook: what is in flight here.
+    /// Wire tower into the agent clients on this machine.
+    #[command(long_about = help::HOOK, after_long_help = help::HOOK_EXAMPLES)]
+    Hook {
+        /// The clients to wire: claude, codex, cursor, gemini.
+        #[arg(value_name = "client")]
+        slugs: Vec<String>,
+        /// Every client detected on this machine, without asking.
+        #[arg(long)]
+        all: bool,
+        /// Report what is detected and what is wired, and stop.
+        #[arg(short = 'l', long)]
+        list: bool,
+        /// Claude Code only: settings entries instead of the plugin.
+        #[arg(long)]
+        settings: bool,
+        /// Rewrite what is already wired; wire nothing new.
+        #[arg(
+            short = 'u',
+            long,
+            conflicts_with_all = ["slugs", "all", "list", "settings"]
+        )]
+        update: bool,
+    },
+    /// Remove exactly what hook added.
+    #[command(long_about = help::UNHOOK, after_long_help = help::UNHOOK_EXAMPLES)]
+    Unhook {
+        /// The clients to unwire: claude, codex, cursor, gemini.
+        #[arg(value_name = "client")]
+        slugs: Vec<String>,
+        /// Every client detected on this machine.
+        #[arg(long)]
+        all: bool,
+    },
+    /// The notice a wired client puts in front of an agent.
     #[command(long_about = help::BRIEFING, after_long_help = help::BRIEFING_EXAMPLES)]
-    Briefing,
+    Briefing {
+        /// The client whose hook is running this — claude, codex,
+        /// cursor, or gemini — which sets how the text is wrapped and
+        /// makes every failure silent. Bare, the text prints as it is.
+        #[arg(value_name = "client")]
+        client: Option<String>,
+    },
 }
 
 /// The ambient lanes: what rides an invocation besides the verb itself.
@@ -395,7 +448,7 @@ impl Command {
             // A session-start hook spawns it with nobody in front of it,
             // under a short box: no child to fork, and no one to read a
             // notice.
-            Command::Briefing => Lanes {
+            Command::Briefing { .. } => Lanes {
                 update: false,
                 notice: false,
             },
@@ -424,7 +477,9 @@ impl Command {
             | Command::Cancel { .. }
             | Command::Hold { .. }
             | Command::Answer { .. }
-            | Command::Done { .. } => Lanes {
+            | Command::Done { .. }
+            | Command::Hook { .. }
+            | Command::Unhook { .. } => Lanes {
                 update: true,
                 notice: true,
             },

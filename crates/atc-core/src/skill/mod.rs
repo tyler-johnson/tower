@@ -250,7 +250,7 @@ mod tests {
     use super::*;
 
     /// A skill file with the front matter a harness redirect depends on
-    /// — the shape `docs/skills/` carries, written by the test rather
+    /// — the shape the shipped worked examples carry, written by the test rather
     /// than shipped.
     fn markdown(name: &str, description: &str) -> String {
         format!("---\nname: tower-{name}\ndescription: {description}\n---\n\n# {name}\n\nProse.\n")

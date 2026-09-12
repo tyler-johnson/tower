@@ -31,6 +31,17 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "usage/unknown-slug",
+        summary: "that is not a client atc hook knows",
+        detail: "`atc hook` and `atc unhook` take flat, permanent names — claude, codex, \
+                 cursor, gemini — because they end up written inside config files tower does \
+                 not own and cannot rename afterward. These two verbs are for people, so an \
+                 unknown name is a real error here; so is one on `atc briefing <client>`, since \
+                 only the wiring `atc hook` wrote ever spells that command. `atc hook -l` lists \
+                 every client with what is on this machine and what is already wired.",
+        exits: &["atc hook -l", "atc hook claude", "atc hook --all"],
+    },
+    Entry {
         id: "usage/bad-body",
         summary: "the POST body is not the verb's JSON",
         detail: "Only the server raises this — the CLI has clap where the verb API has JSON. A \
@@ -701,6 +712,27 @@ pub static ENTRIES: &[Entry] = &[
                  how: a permission bit, a wrong architecture, an interpreter that is not there. \
                  This is about the file itself, not about fufu's answer; running `ff -v` by \
                  hand reproduces it in isolation.",
+        exits: &[],
+    },
+    Entry {
+        id: "hook/malformed",
+        summary: "a client's hooks file is not what its client reads",
+        detail: "The file `atc hook` would merge into is not a JSON object of hooks — not JSON \
+                 at all, a top-level array, a `hooks` key that is not an object, or an event \
+                 whose entries are not a list. tower leaves it byte for byte as it found it \
+                 rather than rewrite it into something the client cannot read; the message \
+                 names the file and what was wrong with it. Fix the file by hand, or move it \
+                 aside, and run the verb again.",
+        exits: &[],
+    },
+    Entry {
+        id: "hook/failed",
+        summary: "the wiring could not be written or removed",
+        detail: "An IO failure on a client's file or directory — a permission, a full disk, a \
+                 HOME that is not set — or a plugin that did not read back as wired after it \
+                 was written, in which case the settings entries it would have replaced are \
+                 left in place. The message carries the path and the cause, and nothing partial \
+                 is reported as done.",
         exits: &[],
     },
     Entry {

@@ -183,7 +183,9 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Update { .. }) => "update",
         Some(Command::Doctor) => "doctor",
         Some(Command::Serve { .. }) => "serve",
-        Some(Command::Briefing) => "briefing",
+        Some(Command::Hook { .. }) => "hook",
+        Some(Command::Unhook { .. }) => "unhook",
+        Some(Command::Briefing { .. }) => "briefing",
     }
 }
 
@@ -273,7 +275,15 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         Some(Command::Serve { host, port }) => {
             cmd::serve::run(cli.json, host.as_deref(), port.as_deref())?
         }
-        Some(Command::Briefing) => cmd::briefing::run(cli.json)?,
+        Some(Command::Hook {
+            slugs,
+            all,
+            list,
+            settings,
+            update,
+        }) => integ::hook(cli.json, slugs.clone(), *all, *list, *settings, *update)?,
+        Some(Command::Unhook { slugs, all }) => integ::unhook(cli.json, slugs.clone(), *all)?,
+        Some(Command::Briefing { client }) => cmd::briefing::run(cli.json, client.as_deref())?,
     }
     Ok(0)
 }

@@ -52,6 +52,15 @@ pub fn run(json: bool) -> Result<i32, CliError> {
     // The update row: the passive lane's cache, whose own row is why
     // doctor suppresses the generic notice. Info level — never a finding.
     report.rows.push(update_row());
+    // One row per agent client `atc hook` knows, from the same derivation
+    // `atc hook -l` renders. Nothing here captures, so nothing wired is
+    // not a finding; only wiring an older tower wrote is one.
+    for row in hook_rows() {
+        if row.level == Level::Warn {
+            report.findings += 1;
+        }
+        report.rows.push(row);
+    }
 
     if json {
         println!("{}", machine::emit("doctor", &report));
@@ -188,6 +197,66 @@ fn installed_note(skills: &skill::Registry) -> String {
     } else {
         format!("installed: {}", skills.names().join(", "))
     }
+}
+
+/// The agent clients, one row each, under `hook/<slug>`.
+///
+/// A client that is not on this machine and not wired earns no row at
+/// all: absence is the ordinary case, and a row saying so four times
+/// over is noise. Present and not wired is information — wiring is
+/// optional, and the row names the verb. Wired is ok, unless the skills
+/// on disk are an older tower's or the entries carry a retired spelling:
+/// the notice still lands, so it is never an outage, but `atc hook -u`
+/// is the repair nothing else runs, so doctor counts it.
+fn hook_rows() -> Vec<DoctorRow> {
+    use crate::integ::{Presence, Wiring};
+    let mut rows = Vec::new();
+    for status in crate::integ::statuses() {
+        let check = format!("hook/{}", status.slug);
+        let row = |level: Level, message: String| DoctorRow {
+            level,
+            check: check.clone(),
+            message,
+        };
+        let slug = status.slug;
+        let drifted = matches!(status.skill, Some(Wiring::Partial { .. }));
+        rows.push(match &status.wiring {
+            Wiring::NotWired if status.presence == Presence::Absent => continue,
+            Wiring::NotWired => row(
+                Level::Info,
+                format!("{slug}: not wired (optional — `atc hook {slug}`)"),
+            ),
+            Wiring::Wired { mechanism, at } if status.stale => row(
+                Level::Warn,
+                format!(
+                    "{slug}: {} wired in {} — written by an older tower — `atc hook -u` rewrites it",
+                    mechanism.word(),
+                    at.display()
+                ),
+            ),
+            Wiring::Wired { mechanism, at } if drifted => row(
+                Level::Warn,
+                format!(
+                    "{slug}: {} wired in {} — an older tower wrote the skills — `atc hook -u` rewrites them",
+                    mechanism.word(),
+                    at.display()
+                ),
+            ),
+            Wiring::Wired { mechanism, at } => row(
+                Level::Ok,
+                format!("{slug}: {} wired in {}", mechanism.word(), at.display()),
+            ),
+            Wiring::Partial { missing, at } => row(
+                Level::Warn,
+                format!(
+                    "{slug}: partial — {missing} missing from {} — `atc hook {slug}`",
+                    at.display()
+                ),
+            ),
+            Wiring::Unavailable(complaint) => row(Level::Info, format!("{slug}: {complaint}")),
+        });
+    }
+    rows
 }
 
 /// The passive lane's cache, read and reported — the cache's two readers

@@ -29,9 +29,9 @@ For the team, from the root of a clone of this repository:
 mkdir -p .tower/procedures .tower/skills
 cp docs/procedures/ticket.toml .tower/procedures/     # one flight, yours
 cp docs/procedures/review.toml .tower/procedures/     # pass and smoke, then your verdict
-cp docs/skills/plan.md         .tower/skills/         # decompose a goal into linked flights
-cp docs/skills/review.md       .tower/skills/         # first-pass a branch
-cp docs/skills/work.md         .tower/skills/         # claim, do, hold or commit, repeat
+cp crates/atc-cli/src/integ/plan.md   .tower/skills/         # decompose a goal into linked flights
+cp crates/atc-cli/src/integ/review.md .tower/skills/         # first-pass a branch
+cp crates/atc-cli/src/integ/work.md   .tower/skills/         # claim, do, hold or commit, repeat
 ```
 
 For yourself, `~/.config/tower/procedures/` and `~/.config/tower/skills/` take the same files.

@@ -519,7 +519,11 @@ Then the log: every event the fold could not place, which the board
 can only count — a chain this repository has yet to fetch, a kind a
 newer tower wrote, a kind tower has retired, and the two shapes only
 a hand-edited log produces. Then the registries — the installed
-procedures and skills, and the update lane's cache.
+procedures and skills, and the update lane's cache. Then one row per
+agent client `atc hook` knows: a client not on this machine earns no
+row, wired is ok, not wired is information, and skills an older
+tower wrote are a finding, because `atc hook -u` is the only thing
+that rewrites them.
 
 Rows come at three levels: ok counts nothing, info is news rather
 than a problem, WARN is a finding. Findings drive the exit — 0
@@ -608,99 +612,108 @@ Examples:
   atc serve --json          the address as an envelope, then serve";
 
 pub const BRIEFING: &str = "\
-One line for a session-start hook: the paragraph put in front of an
-agent when a session starts. The hook takes stdout verbatim and keeps
-a line only if it is one short line — anything longer is dropped
-whole, so the subject is elided here rather than there.
+The notice a wired client puts in front of an agent at every context
+boundary — a fresh session, a resumed one, a clear, a compaction:
+what tower is, the four gestures of the loop, and one line that is
+this repository's — how many flights are ready, or that nothing is
+filed here yet. Bare `atc briefing` prints it for the repository you
+are in, which is how a person reads what an agent is told.
 
-The line counts what is Ready across the board, and points at
-`atc` when there is something to pull; otherwise it says nothing
-is ready.
+Named for a client — `atc briefing claude` — it is the command
+`atc hook` wrote into that client's config, and it speaks the
+client's dialect: the payload on stdin names the session's directory,
+the text goes out wrapped the way that client reads it, and any
+failure — no repository, a store that will not open — exits 0 with
+nothing said, because a hook's stderr is noise in someone else's
+terminal. Only tower spells that form, so a client it does not know
+is refused rather than silenced. Run by hand with no client named,
+the failure reports the way every verb's does.
 
-The hook runs it under a short box with stderr discarded, so a
-failure — no repository, a store that will not open — costs nothing
-but the line. Run by hand, the failure reports the way every verb's
-does. --json carries the line as `data.line`.";
+--json carries the text as `data.text`, with `ready` and `filed`
+beside it. The advanced surface is not here: it is in the `tower`
+skill `atc hook` writes beside the hook, read only when wanted.";
 
 pub const BRIEFING_EXAMPLES: &str = "\
 Examples:
-  atc briefing              the line the hook would show
-  atc briefing --json       the same, as a field";
+  atc briefing              what an agent is told here
+  atc briefing claude       the same, as Claude Code's hook runs it
+  atc briefing --json       the text as a field, with the counts";
 
+pub const HOOK: &str = "\
+Wire tower into the agent clients on this machine, so every session an
+agent starts in a repository is told the board is here and how to
+pull from it. The notice lands at every context boundary the client
+reports — session start, resume, clear, compact — and it is silent
+outside a git repository, so a wired client costs nothing elsewhere.
+
+Bare `atc hook` reports what it found and then asks. Name clients to
+wire exactly those; --all takes everything detected without asking;
+-l reports and stops either way. -u rewrites what is already wired
+and adds nothing: the install is re-run for every client already
+wired, on whatever mechanism it is on, so an upgraded binary
+refreshes the machine. The clients are flat names:
+
+  claude  codex  cursor  gemini
+
+What gets written is not a choice you make. Claude Code takes a
+plugin directory tower owns outright, ~/.claude/skills/tower; the
+other three take entries merged into their own hooks file, and
+whatever else that file holds is left as it was — an entry you wrote
+yourself included. --settings is
+Claude Code's escape hatch: entries in ~/.claude/settings.json
+instead of the plugin, and no skills.
+
+Claude Code and Codex also take tower's four skills — the manual,
+`tower`, and the three worked examples, `plan`, `work`, and `review`
+— typed /tower:<name> in Claude Code and $<name> in Codex. Cursor
+and Gemini read no skills directory and get the notice alone. Codex
+trusts a hook by its hash, so after wiring it review the hook with
+/hooks there, or it is skipped.";
+
+pub const HOOK_EXAMPLES: &str = "\
+Examples:
+  atc hook                  what is on this machine, then asks
+  atc hook claude codex     wire exactly those
+  atc hook --all            everything detected, no question
+  atc hook -l               report and stop
+  atc hook -u               rewrite what is wired, after an update
+  atc unhook claude         take back exactly what hook added
+  atc doctor                one row per client, with its state";
+
+pub const UNHOOK: &str = "\
+Remove exactly what hook added: Claude Code's plugin directory, and
+the settings entries an older install left; the other clients'
+entries and skill directories. Anything else in a client's file is
+left as it was, an entry you wrote yourself included. Name clients,
+or --all for every client detected on this machine.";
+
+pub const UNHOOK_EXAMPLES: &str = "\
+Examples:
+  atc unhook claude         take back exactly what hook added
+  atc unhook --all          every client detected
+  atc hook -l               what is wired now";
+
+/// The extractors the prose guards share: every `atc …` a text spells,
+/// as argv, and the check that holds one against the clap tree. Here
+/// rather than in `tests` because the notice in `integ/briefing.rs` is
+/// prose an agent reads as instructions too, and one reading of the
+/// tree is what keeps the two guards from disagreeing.
 #[cfg(test)]
-mod tests {
+pub(crate) mod guard {
     use clap::CommandFactory;
 
     use crate::cli::Cli;
 
-    struct Page {
-        path: String,
-        long_about: Option<String>,
-        examples: Option<String>,
-    }
-
     /// The clap tree with its built-ins materialized, so the `help`
     /// subcommand and the auto flags exist to be walked.
-    fn tree() -> clap::Command {
+    pub(crate) fn tree() -> clap::Command {
         let mut root = Cli::command();
         root.build();
         root
     }
 
-    /// Every visible command, with its resolved help texts — clap holds
-    /// the final strings, so there is no const list to keep in step.
-    fn walk(cmd: &clap::Command, path: &str, out: &mut Vec<Page>) {
-        out.push(Page {
-            path: path.to_string(),
-            long_about: cmd.get_long_about().map(ToString::to_string),
-            examples: cmd.get_after_long_help().map(ToString::to_string),
-        });
-        for sub in cmd.get_subcommands() {
-            if sub.is_hide_set() || sub.get_name() == "help" {
-                continue;
-            }
-            walk(sub, &format!("{path} {}", sub.get_name()), out);
-        }
-    }
-
-    fn all_pages() -> Vec<Page> {
-        let tree = tree();
-        let mut out = Vec::new();
-        walk(&tree, "atc", &mut out);
-        out
-    }
-
-    /// `lanes()`'s exhaustive-table discipline, applied to prose: a verb
-    /// added without a page fails here rather than shipping with clap's
-    /// joined doc comment as its whole story.
-    #[test]
-    fn every_command_has_a_page() {
-        let pages = all_pages();
-        assert!(
-            pages.len() >= 24,
-            "only {} commands walked — the walk is broken, not the tree",
-            pages.len()
-        );
-        for page in &pages {
-            assert!(
-                page.long_about.is_some(),
-                "`{}` has no long_about — every command gets a page",
-                page.path
-            );
-            let examples = page
-                .examples
-                .as_deref()
-                .unwrap_or_else(|| panic!("`{}` has no after_long_help examples", page.path));
-            assert!(
-                examples.contains("Examples:"),
-                "`{}`'s examples block is missing its `Examples:` opener",
-                page.path
-            );
-        }
-    }
-
     /// Every `atc …` span between backticks, as argv-shaped tokens.
-    fn quoted(text: &str) -> Vec<Vec<String>> {
+    pub(crate) fn quoted(text: &str) -> Vec<Vec<String>> {
         text.split('`')
             // Odd fields are the ones between a pair of backticks.
             .skip(1)
@@ -712,7 +725,7 @@ mod tests {
 
     /// Example rows: the command column of every line spelling
     /// `atc …` — everything before the two-space gutter.
-    fn example_rows(text: &str) -> Vec<Vec<String>> {
+    pub(crate) fn example_rows(text: &str) -> Vec<Vec<String>> {
         text.lines()
             .map(str::trim)
             .filter(|line| line.starts_with("atc "))
@@ -724,7 +737,7 @@ mod tests {
     /// placeholder before the whitespace split — a subject is one value
     /// however many words it holds — and `<…>` tokens become one after;
     /// the grammar around a placeholder is what is under test.
-    fn argv(text: &str) -> Vec<String> {
+    pub(crate) fn argv(text: &str) -> Vec<String> {
         let mut collapsed = String::new();
         let mut fields = text.split('"');
         collapsed.push_str(fields.next().unwrap_or(""));
@@ -769,7 +782,7 @@ mod tests {
     /// not teach it — and the whole line must parse. A placeholder
     /// standing where a verb goes checks the flags and skips the parse;
     /// `help <command>` resolves the path it names instead.
-    fn check(root: &clap::Command, tokens: &[String], whose: &str) {
+    pub(crate) fn check(root: &clap::Command, tokens: &[String], whose: &str) {
         let line = tokens.join(" ");
         let rest = &tokens[1..];
         if rest.first().map(String::as_str) == Some("help") {
@@ -825,6 +838,69 @@ mod tests {
             );
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::guard::{check, example_rows, quoted, tree};
+
+    struct Page {
+        path: String,
+        long_about: Option<String>,
+        examples: Option<String>,
+    }
+
+    /// Every visible command, with its resolved help texts — clap holds
+    /// the final strings, so there is no const list to keep in step.
+    fn walk(cmd: &clap::Command, path: &str, out: &mut Vec<Page>) {
+        out.push(Page {
+            path: path.to_string(),
+            long_about: cmd.get_long_about().map(ToString::to_string),
+            examples: cmd.get_after_long_help().map(ToString::to_string),
+        });
+        for sub in cmd.get_subcommands() {
+            if sub.is_hide_set() || sub.get_name() == "help" {
+                continue;
+            }
+            walk(sub, &format!("{path} {}", sub.get_name()), out);
+        }
+    }
+
+    fn all_pages() -> Vec<Page> {
+        let tree = tree();
+        let mut out = Vec::new();
+        walk(&tree, "atc", &mut out);
+        out
+    }
+
+    /// `lanes()`'s exhaustive-table discipline, applied to prose: a verb
+    /// added without a page fails here rather than shipping with clap's
+    /// joined doc comment as its whole story.
+    #[test]
+    fn every_command_has_a_page() {
+        let pages = all_pages();
+        assert!(
+            pages.len() >= 24,
+            "only {} commands walked — the walk is broken, not the tree",
+            pages.len()
+        );
+        for page in &pages {
+            assert!(
+                page.long_about.is_some(),
+                "`{}` has no long_about — every command gets a page",
+                page.path
+            );
+            let examples = page
+                .examples
+                .as_deref()
+                .unwrap_or_else(|| panic!("`{}` has no after_long_help examples", page.path));
+            assert!(
+                examples.contains("Examples:"),
+                "`{}`'s examples block is missing its `Examples:` opener",
+                page.path
+            );
+        }
+    }
 
     /// fufu's parse guard, improved: walked over every page clap holds
     /// rather than a hand-kept const list, so a new page joins the check
@@ -848,13 +924,20 @@ mod tests {
                 }
             }
         }
-        // The manual is prose that spells commands too, and it is held
-        // to the same tree: every backticked `atc …` span and every
-        // code-block line that starts with one.
-        let mut spans = quoted(crate::integ::SKILL);
-        spans.extend(example_rows(crate::integ::SKILL));
-        for tokens in &spans {
-            check(&tree, tokens, "skill");
+        // The skills are prose that spells commands too, and they are
+        // held to the same tree: every backticked `atc …` span and every
+        // code-block line that starts with one. So is the notice, which
+        // is the one text every wired session reads.
+        for skill in &crate::integ::skill::SKILLS {
+            let mut spans = quoted(skill.text);
+            spans.extend(example_rows(skill.text));
+            for tokens in &spans {
+                check(&tree, tokens, &format!("{} skill", skill.name));
+                found += 1;
+            }
+        }
+        for tokens in &quoted(crate::integ::briefing::NOTICE) {
+            check(&tree, tokens, "notice");
             found += 1;
         }
         // Same reason the exit walk proves it reads the tree: an

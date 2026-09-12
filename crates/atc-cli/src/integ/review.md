@@ -1,5 +1,5 @@
 ---
-name: tower-review
+name: review
 description: first-pass a branch — fix the mechanical half, hold the rest
 ---
 

@@ -14,11 +14,19 @@ fn atc(repo: &Path, args: &[&str]) -> Output {
 /// binary's `ff()` through the environment, the way `cmd/mod.rs` reads
 /// it back.
 fn atc_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
+    let root = repo.parent().expect("the fixture nests the repository");
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     command
         .args(args)
         .current_dir(repo)
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        // The hook rows read the agent clients under HOME, and the
+        // runner's real `~/.claude` would add one: the fixture root is
+        // the home, with no client in it.
+        .env("HOME", root)
+        // Windows' `HOME`: gix and git.exe read the profile from it, so
+        // setting `HOME` alone leaves the runner's real one reachable.
+        .env("USERPROFILE", root)
         .env("XDG_CONFIG_HOME", xdg(repo));
     if let Some(program) = program {
         command.env("ATC_FF", program);

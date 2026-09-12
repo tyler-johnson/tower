@@ -1,5 +1,5 @@
 ---
-name: tower-plan
+name: plan
 description: decompose a goal into linked flights — solo mode's entry point
 ---
 

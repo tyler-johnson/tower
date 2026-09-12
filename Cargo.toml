@@ -29,8 +29,11 @@ gix = { version = "0.73.0", default-features = false, features = [
 serde = { version = "1", features = ["derive"] }
 # `raw_value` is the seam's: the envelope's version and verb are checked
 # before its payload is parsed, so `data` has to survive one pass
-# unparsed. See crates/atc-core/src/ff/mod.rs.
-serde_json = { version = "1", features = ["raw_value"] }
+# unparsed. See crates/atc-core/src/ff/mod.rs. `preserve_order` is the
+# hook installer's: the merge engine in crates/atc-cli/src/integ writes a
+# user's settings file back in the key order it found, and the plugin
+# JSON it writes whole comes out in one deterministic order.
+serde_json = { version = "1", features = ["raw_value", "preserve_order"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 anstyle = "1"

@@ -24,6 +24,7 @@ use atc_core::board::{Board, FlightView};
 
 const ID: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan)));
 const WARN: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
+const OK: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)));
 const DIM: Style = Style::new().dimmed();
 
 /// Whether stdout gets escape codes. `AutoStream::choice` already honors
@@ -53,6 +54,11 @@ pub fn paint_warn(text: &str, colored: bool) -> String {
 
 pub fn paint_dim(text: &str, colored: bool) -> String {
     paint(DIM, text, colored)
+}
+
+/// Green: a slug `atc hook` acted on, and wiring that is whole.
+pub fn paint_ok(text: &str, colored: bool) -> String {
+    paint(OK, text, colored)
 }
 
 /// Whether the given full ids span at most one writer, so `#<n>` alone
