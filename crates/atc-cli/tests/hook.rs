@@ -1,8 +1,8 @@
 //! `atc hook` and `atc unhook` against a scratch home: the report, the
 //! Claude plugin directory, the Codex plugin and its marketplace entry
 //! with the migration off the settings file an older tower wrote, Qwen's
-//! settings merge, the shells' marked rc lines, the refresh, and
-//! doctor's row per client.
+//! settings merge, OpenCode's plugin module, the shells' marked rc
+//! lines, the refresh, and doctor's row per client.
 //!
 //! Every path here is env-redirected — HOME, USERPROFILE, the XDG roots,
 //! ZDOTDIR, LOCALAPPDATA — so the suite never touches a real config
@@ -33,10 +33,7 @@ fn atc_env(
 ) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
     scrub(&mut command);
-    for (name, value) in env {
-        command.env(name, value);
-    }
-    let mut child = command
+    command
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
@@ -47,9 +44,17 @@ fn atc_env(
         .env("XDG_CACHE_HOME", home.join("cache"))
         // The update cache root forks to `LOCALAPPDATA` on Windows.
         .env("LOCALAPPDATA", home.join("cache"))
-        // Nothing here spawns fufu, and nothing spawns Codex.
+        // Nothing here spawns fufu, and nothing spawns Codex; the
+        // developer's OpenCode, if any, is not on this machine either.
         .env("ATC_FF", "/nonexistent")
         .env("ATC_CODEX", "/nonexistent")
+        .env("ATC_OPENCODE", "/nonexistent");
+    // A test's own variables last, so one can open a seam the defaults
+    // close.
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -97,10 +102,11 @@ fn home() -> tempfile::TempDir {
 
 /// Every slug, in the order the listing walks them: the clients, then
 /// the shells.
-const SLUGS: [&str; 7] = [
+const SLUGS: [&str; 8] = [
     "claude",
     "codex",
     "qwen",
+    "opencode",
     "bash",
     "zsh",
     "fish",
@@ -162,7 +168,7 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
     // with the OS.
     let lines: Vec<&str> = listing.lines().collect();
     assert_eq!(lines.len(), SLUGS.len(), "{listing:?}");
-    let present = [true, true, false, false, false, false, cfg!(windows)];
+    let present = [true, true, false, false, false, false, false, cfg!(windows)];
     for (line, present) in lines.iter().zip(present) {
         assert!(line.ends_with("not wired"), "{line:?}");
         assert_eq!(line.contains("not on this machine"), !present, "{line:?}");
@@ -181,6 +187,8 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
     assert_eq!(rows[1]["presence"]["state"], "present");
     assert_eq!(rows[2]["slug"], "qwen");
     assert_eq!(rows[2]["presence"]["state"], "absent");
+    assert_eq!(rows[3]["slug"], "opencode");
+    assert_eq!(rows[3]["presence"]["state"], "absent");
     assert_eq!(value["data"]["changed"], serde_json::json!([]));
 }
 
@@ -199,6 +207,7 @@ fn bare_hook_acts_on_nothing_when_it_cannot_ask() {
         .env("LOCALAPPDATA", home.path().join("cache"))
         .env("ATC_FF", "/nonexistent")
         .env("ATC_CODEX", "/nonexistent")
+        .env("ATC_OPENCODE", "/nonexistent")
         .env("ATC_NONINTERACTIVE", "1")
         .stdin(Stdio::null())
         .output()
@@ -650,6 +659,220 @@ fn the_migration_strips_the_old_codex_wiring() {
     assert!(!again.contains("removed ~/.codex"), "{again:?}");
 }
 
+// ---- the opencode plugin ---------------------------------------------------
+
+/// The plugin module OpenCode loads from its config directory: one
+/// file tower owns whole, the binary's path baked in as a string
+/// literal, the three hooks, and the manual beside it; idempotent,
+/// stale when a byte differs under tower's header, refreshed by `-u`,
+/// refused when the file is someone else's, and removed whole with
+/// nothing else in either directory touched.
+#[test]
+fn the_opencode_plugin_round_trips() {
+    let home = home();
+    let config = home.path().join("xdg/opencode");
+    let plugin = config.join("plugins/tower.js");
+    let skill = config.join("skills/tower/SKILL.md");
+
+    let said = ok(&atc(home.path(), home.path(), &["hook", "opencode"], None));
+    assert!(said.contains("plugin written to"), "{said:?}");
+    assert!(said.contains("skills written to"), "{said:?}");
+    assert!(said.contains("the notice is standing"), "{said:?}");
+    assert!(said.contains("restart OpenCode to load it"), "{said:?}");
+
+    let body = std::fs::read_to_string(&plugin).expect("the plugin file");
+    assert!(
+        body.starts_with("// Written by `atc hook opencode`."),
+        "{body}"
+    );
+    let exe = serde_json::Value::String(env!("CARGO_BIN_EXE_atc").to_string()).to_string();
+    assert!(
+        body.contains(&format!("const ATC = {exe};")),
+        "the binary's path as a JS string literal: {body}"
+    );
+    for needle in [
+        "trigger opencode",
+        "OPENCODE_SESSION_ID",
+        "\"shell.env\"",
+        "\"experimental.chat.system.transform\"",
+        "\"tool.execute.before\"",
+    ] {
+        assert!(body.contains(needle), "{needle} in {body}");
+    }
+    assert!(!body.contains("__ATC__"), "{body}");
+    assert_eq!(
+        std::fs::read_to_string(&skill).expect("the skill lands beside it"),
+        compiled("tower")
+    );
+
+    // Idempotent, and reported as already wired.
+    let again = ok(&atc(home.path(), home.path(), &["hook", "opencode"], None));
+    assert!(again.contains("already wired in"), "{again:?}");
+    assert!(!again.contains("restart OpenCode"), "{again:?}");
+    let again = ok(&atc(
+        home.path(),
+        home.path(),
+        &["--json", "hook", "opencode"],
+        None,
+    ));
+    let value: serde_json::Value = serde_json::from_str(&again).unwrap();
+    assert_eq!(value["data"]["changed"], serde_json::json!([]));
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("opencode")).unwrap();
+    assert!(row.contains("wired (plugin)"), "{row:?}");
+    assert!(row.contains(", skill"), "{row:?}");
+    assert!(!row.contains("stale"), "{row:?}");
+    assert!(
+        listing.contains("the notice is standing"),
+        "the standing notice is on the row: {listing:?}"
+    );
+
+    // -u over a current plugin moves nothing.
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("already wired in"), "{said:?}");
+    assert!(!said.contains("rewired"), "{said:?}");
+
+    // A byte changed under tower's header is stale, and -u restores it.
+    std::fs::write(&plugin, format!("{body}\n// one more byte\n")).unwrap();
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("opencode")).unwrap();
+    assert!(row.contains("wired (plugin)"), "{row:?}");
+    assert!(row.contains("stale — atc hook -u rewrites it"), "{row:?}");
+    let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert_eq!(rows[3]["slug"], "opencode");
+    assert_eq!(rows[3]["stale"], true, "{rows}");
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(said.contains("rewired"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), body);
+
+    // A tower.js without the header is someone else's: reported, the
+    // install refused, and unhook leaves it.
+    let foreign = "export const Mine = async () => ({});\n";
+    std::fs::write(&plugin, foreign).unwrap();
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("opencode")).unwrap();
+    assert!(row.contains("written by hand — left alone"), "{row:?}");
+    let out = atc(
+        home.path(),
+        home.path(),
+        &["--json", "hook", "opencode"],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let value = envelope(&out);
+    assert_eq!(value["error"]["id"], "hook/failed");
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not tower's file"),
+        "{value}"
+    );
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), foreign);
+    let said = ok(&atc(
+        home.path(),
+        home.path(),
+        &["unhook", "opencode"],
+        None,
+    ));
+    assert!(said.contains("is not tower's — left alone"), "{said:?}");
+    assert_eq!(
+        std::fs::read_to_string(&plugin).unwrap(),
+        foreign,
+        "unhook leaves what tower did not write"
+    );
+    // The -u pass skips it: not wired, nothing to rewrite.
+    let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
+    assert!(!said.contains("opencode"), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), foreign);
+    assert!(
+        !skill.exists(),
+        "the skill is tower's whatever sits under the plugin's name, and unhook took it"
+    );
+
+    // Back to tower's — the plugin file restored, the skill rewritten by
+    // the install — with a neighbor in each directory: unhook takes
+    // exactly the two paths.
+    std::fs::write(&plugin, &body).unwrap();
+    let said = ok(&atc(home.path(), home.path(), &["hook", "opencode"], None));
+    assert!(said.contains("plugin written to"), "{said:?}");
+    assert!(skill.is_file());
+    let other = config.join("plugins/other.js");
+    std::fs::write(&other, "export const Other = async () => ({});\n").unwrap();
+    let mine = config.join("skills/mine/SKILL.md");
+    std::fs::create_dir_all(mine.parent().unwrap()).unwrap();
+    std::fs::write(&mine, "---\nname: mine\n---\n").unwrap();
+    let said = ok(&atc(
+        home.path(),
+        home.path(),
+        &["unhook", "opencode"],
+        None,
+    ));
+    assert!(
+        said.contains(&format!("removed {}", plugin.display())),
+        "{said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "removed {}",
+            config.join("skills/tower").display()
+        )),
+        "{said:?}"
+    );
+    assert!(!plugin.exists());
+    assert!(!config.join("skills/tower").exists());
+    assert!(other.is_file(), "a neighbor plugin stays");
+    assert!(mine.is_file(), "a neighbor skill stays");
+    let said = ok(&atc(
+        home.path(),
+        home.path(),
+        &["unhook", "opencode"],
+        None,
+    ));
+    assert!(said.contains("no tower plugin installed"), "{said:?}");
+}
+
+/// OpenCode is present when its config directory is, or when the
+/// binary is — `ATC_OPENCODE` names it, the seam the harness closes
+/// with a path that is not a file.
+#[test]
+fn opencode_is_detected_by_its_directory_or_its_binary() {
+    let home = home();
+    let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
+    let row = listing.lines().find(|l| l.starts_with("opencode")).unwrap();
+    assert!(row.contains("not on this machine"), "{row:?}");
+
+    let binary = home.path().join("bin/opencode");
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    std::fs::write(&binary, "#!/bin/sh\n").unwrap();
+    let out = atc_env(
+        home.path(),
+        home.path(),
+        &["--json", "hook", "-l"],
+        None,
+        &[("ATC_OPENCODE", binary.to_str().unwrap())],
+    );
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert_eq!(rows[3]["slug"], "opencode");
+    assert_eq!(rows[3]["presence"]["state"], "present", "{rows}");
+    assert_eq!(
+        rows[3]["presence"]["evidence"],
+        binary.to_str().unwrap(),
+        "{rows}"
+    );
+
+    std::fs::create_dir_all(home.path().join("xdg/opencode")).unwrap();
+    let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
+    let rows = envelope(&out)["data"]["integrations"].clone();
+    assert_eq!(rows[3]["presence"]["state"], "present", "{rows}");
+    assert_eq!(
+        rows[3]["presence"]["evidence"],
+        home.path().join("xdg/opencode").to_str().unwrap(),
+        "the directory is the evidence when it is there: {rows}"
+    );
+}
+
 /// The two adapters that went are ordinary unknown names to the hook,
 /// and their files are left as found — there is nothing to migrate to.
 #[test]
@@ -1033,10 +1256,10 @@ fn the_bash_lines_round_trip_byte_for_byte() {
     assert!(row.contains(&rc.display().to_string()), "{row:?}");
     let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
     let rows = envelope(&out)["data"]["integrations"].clone();
-    assert_eq!(rows[3]["slug"], "bash");
-    assert_eq!(rows[3]["wiring"]["state"], "wired");
-    assert_eq!(rows[3]["wiring"]["mechanism"], "rc");
-    assert_eq!(rows[3]["presence"]["state"], "present");
+    assert_eq!(rows[4]["slug"], "bash");
+    assert_eq!(rows[4]["wiring"]["state"], "wired");
+    assert_eq!(rows[4]["wiring"]["mechanism"], "rc");
+    assert_eq!(rows[4]["presence"]["state"], "present");
 
     let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
     assert!(said.contains("already wired in"), "{said:?}");
@@ -1095,8 +1318,8 @@ fn a_hand_written_trigger_line_is_reported_and_left_alone() {
     assert!(row.contains("written by hand — left alone"), "{row:?}");
     let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
     let rows = envelope(&out)["data"]["integrations"].clone();
-    assert_eq!(rows[3]["wiring"]["state"], "hand-written");
-    assert_eq!(rows[3]["wiring"]["at"], rc.display().to_string());
+    assert_eq!(rows[4]["wiring"]["state"], "hand-written");
+    assert_eq!(rows[4]["wiring"]["at"], rc.display().to_string());
 
     let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
     assert!(said.contains("nothing is wired"), "{said:?}");
@@ -1381,4 +1604,64 @@ fn doctor_reads_the_codex_plugin() {
     );
     let human = ok(&atc(home, repo.path(), &["doctor"], None));
     assert!(human.contains("ok    codex: plugin wired in"), "{human:?}");
+}
+
+/// Doctor reads the OpenCode plugin the way it reads the others: an ok
+/// row naming the file, a warn row when a byte drifted under tower's
+/// header, and an info row for a file that is not tower's.
+#[test]
+fn doctor_reads_the_opencode_plugin() {
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    let home = repo.path().parent().unwrap();
+    let plugin = home.join("xdg/opencode/plugins/tower.js");
+    std::fs::create_dir_all(home.join("xdg/opencode")).unwrap();
+    let row = |home: &Path| -> serde_json::Value {
+        let out = atc(home, repo.path(), &["doctor", "--json"], None);
+        envelope(&out)["data"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["check"] == "hook/opencode")
+            .cloned()
+            .unwrap_or_else(|| panic!("a hook/opencode row"))
+    };
+    let found = row(home);
+    assert_eq!(found["level"], "info", "{found}");
+    assert!(
+        found["message"]
+            .as_str()
+            .unwrap()
+            .contains("atc hook opencode"),
+        "{found}"
+    );
+    ok(&atc(home, home, &["hook", "opencode"], None));
+    let found = row(home);
+    assert_eq!(found["level"], "ok", "{found}");
+    assert_eq!(
+        found["message"],
+        format!("opencode: plugin wired in {}", plugin.display()),
+        "{found}"
+    );
+
+    let body = std::fs::read_to_string(&plugin).unwrap();
+    std::fs::write(&plugin, format!("{body}// drift\n")).unwrap();
+    let found = row(home);
+    assert_eq!(found["level"], "warn", "{found}");
+    assert!(
+        found["message"]
+            .as_str()
+            .unwrap()
+            .contains("written by an older tower — `atc hook -u` rewrites it"),
+        "{found}"
+    );
+
+    std::fs::write(&plugin, "export const Mine = async () => ({});\n").unwrap();
+    let found = row(home);
+    assert_eq!(found["level"], "info", "{found}");
+    assert_eq!(
+        found["message"],
+        format!("opencode: {} is not tower's — left alone", plugin.display()),
+        "{found}"
+    );
 }

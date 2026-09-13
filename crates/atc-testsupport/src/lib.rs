@@ -41,6 +41,7 @@ pub const AGENT_ENV: &[&str] = &[
     "CODEX_SANDBOX",
     "CURSOR_AGENT",
     "QWEN_CODE",
+    "OPENCODE",
 ];
 
 /// Remove every [`AGENT_ENV`] variable from a spawn, so the events a

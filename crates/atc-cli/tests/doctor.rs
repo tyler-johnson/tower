@@ -26,7 +26,10 @@ fn atc_via(repo: &Path, args: &[&str], program: Option<&Path>) -> Output {
         // Windows' `HOME`: gix and git.exe read the profile from it, so
         // setting `HOME` alone leaves the runner's real one reachable.
         .env("USERPROFILE", root)
-        .env("XDG_CONFIG_HOME", xdg(repo));
+        .env("XDG_CONFIG_HOME", xdg(repo))
+        // OpenCode is detected by its binary as well as its directory,
+        // and a developer's install would add a row: the seam closed.
+        .env("ATC_OPENCODE", "/nonexistent");
     scrub(&mut command);
     if let Some(program) = program {
         command.env("ATC_FF", program);

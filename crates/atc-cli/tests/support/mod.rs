@@ -446,11 +446,13 @@ pub fn scratch_home(repo: &Repo, client_dir: &str) -> PathBuf {
 /// `HOME` and its Windows twin, the XDG roots and the update cache under
 /// it, the developer's git config and client overrides out of reach,
 /// the agent variables scrubbed, this build's `atc` first on `PATH`
-/// (Qwen's settings name the bare `atc`), the working directory set,
+/// (Qwen's settings name the bare `atc`), the working directory set —
+/// as `PWD` too, which OpenCode reads ahead of the process's own cwd —
 /// and stdin closed so nothing can wait on a terminal.
 pub fn client_env(command: &mut Command, home: &Path, cwd: &Path) {
     command
         .current_dir(cwd)
+        .env("PWD", cwd)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("XDG_CONFIG_HOME", home.join("xdg"))
@@ -461,6 +463,8 @@ pub fn client_env(command: &mut Command, home: &Path, cwd: &Path) {
         .env_remove("CLAUDE_CODE_EXECPATH")
         .env_remove("CODEX_HOME")
         .env_remove("ATC_CODEX")
+        .env_remove("ATC_OPENCODE")
+        .env_remove("OPENCODE_CONFIG_DIR")
         .env_remove("ATC_FF")
         .stdin(Stdio::null());
     for (name, _) in std::env::vars_os() {

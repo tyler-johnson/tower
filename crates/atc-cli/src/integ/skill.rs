@@ -11,7 +11,8 @@
 //! that tower owns outright, written whole and removed whole, with no
 //! foreign content to preserve. Claude takes them inside the plugin it
 //! already owns; Codex inside the plugin tower writes for it, under
-//! `skills/` the same way.
+//! `skills/` the same way; OpenCode in its own skills directory beside
+//! the plugin module.
 //!
 //! It lives as markdown next to the Rust, embedded whole. The embedded
 //! constant is the staleness fingerprint — byte drift on disk reads as
@@ -38,7 +39,8 @@ pub struct Skill {
 /// The `tower` skill: the advanced manual, on fufu's model.
 pub const SKILL: &str = include_str!("skill.md");
 
-/// The manual — `/tower:tower` in Claude Code, `$tower` in Codex.
+/// The manual — `/tower:tower` in Claude Code, `$tower` in Codex and
+/// OpenCode.
 pub const SKILLS: [Skill; 1] = [Skill {
     name: "tower",
     text: SKILL,

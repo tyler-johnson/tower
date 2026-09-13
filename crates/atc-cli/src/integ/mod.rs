@@ -2,8 +2,8 @@
 //! machine, and how those clients then hear about the board.
 //!
 //! The slugs are what `atc hook` and `atc unhook` take — the clients,
-//! `claude`, `codex`, `qwen`, and the shells, `bash`, `zsh`, `fish`,
-//! `powershell`. They are flat and permanent, because they end up
+//! `claude`, `codex`, `qwen`, `opencode`, and the shells, `bash`, `zsh`,
+//! `fish`, `powershell`. They are flat and permanent, because they end up
 //! written inside config files tower does not own. The two verbs are
 //! for humans: an unknown slug is a real error, a failure is loud, and
 //! `--json` emits a report envelope.
@@ -38,6 +38,7 @@ use crate::error::CliError;
 pub mod briefing;
 pub mod claude;
 pub mod codex;
+pub mod opencode;
 pub mod plugin;
 pub mod qwen;
 pub mod retired;
@@ -288,6 +289,7 @@ pub trait Integration: Sync {
 static CLAUDE: claude::Claude = claude::Claude;
 static CODEX: codex::Codex = codex::Codex;
 static QWEN: qwen::Qwen = qwen::Qwen;
+static OPENCODE: opencode::Opencode = opencode::Opencode;
 static BASH: shell::Shell = shell::Shell { slug: "bash" };
 static ZSH: shell::Shell = shell::Shell { slug: "zsh" };
 static FISH: shell::Shell = shell::Shell { slug: "fish" };
@@ -295,8 +297,17 @@ static POWERSHELL: shell::Shell = shell::Shell { slug: "powershell" };
 
 /// Every slug, in the order `atc hook -l` and `atc hook --all` walk
 /// them: the clients, then the shells.
-pub fn all() -> [&'static dyn Integration; 7] {
-    [&CLAUDE, &CODEX, &QWEN, &BASH, &ZSH, &FISH, &POWERSHELL]
+pub fn all() -> [&'static dyn Integration; 8] {
+    [
+        &CLAUDE,
+        &CODEX,
+        &QWEN,
+        &OPENCODE,
+        &BASH,
+        &ZSH,
+        &FISH,
+        &POWERSHELL,
+    ]
 }
 
 pub fn by_slug(slug: &str) -> Option<&'static dyn Integration> {
@@ -483,7 +494,7 @@ mod tests {
             assert!(by_source(name).is_some(), "{name} answers the trigger");
             assert!(by_slug(name).is_none(), "{name} is not a slug");
         }
-        assert_eq!(all().len(), 7);
+        assert_eq!(all().len(), 8);
     }
 
     fn front_matter<'a>(name: &str, text: &'a str) -> Vec<&'a str> {

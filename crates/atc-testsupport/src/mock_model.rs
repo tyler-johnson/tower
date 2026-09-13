@@ -10,12 +10,14 @@
 //!
 //! Three dialects, told apart by the path the client posts to: the
 //! OpenAI Responses API (`/responses`, Codex), OpenAI chat completions
-//! (`/chat/completions`, Qwen Code), and Anthropic messages
-//! (`/messages`, Claude Code — SSE when the body asks to stream, one
-//! JSON object when it does not, since Claude Code retries a failed
-//! stream unstreamed). Each dialect's first answer is a call to its shell
-//! tool running the command the server was started with, and its second
-//! is the text `done`.
+//! (`/chat/completions`, Qwen Code and OpenCode), and Anthropic
+//! messages (`/messages`, Claude Code — SSE when the body asks to
+//! stream, one JSON object when it does not, since Claude Code retries
+//! a failed stream unstreamed). Each dialect's first answer is a call
+//! to its shell tool running the command the server was started with
+//! — the chat dialect names the tool the request offers, OpenCode's
+//! `bash` or Qwen's `run_shell_command` — and its second is the text
+//! `done`.
 //!
 //! The rule is stateless per request on purpose: a body that does not
 //! yet carry the command's output gets the tool call, and a body that
@@ -135,9 +137,9 @@ impl Drop for MockModel {
 
 /// The three dialects' answers, built once from the command.
 struct Script {
+    command: String,
     responses_call: String,
     responses_done: String,
-    chat_call: String,
     chat_done: String,
     messages_call: String,
     messages_done: String,
@@ -148,15 +150,9 @@ struct Script {
 impl Script {
     fn new(command: &str) -> Script {
         Script {
+            command: command.to_string(),
             responses_call: responses_sse(&function_call_item(command)),
             responses_done: responses_sse(ASSISTANT_MESSAGE_ITEM),
-            chat_call: chat_sse(
-                &format!(
-                    r#"{{"role":"assistant","content":null,"tool_calls":[{{"index":0,"id":"call_1","type":"function","function":{{"name":"run_shell_command","arguments":{}}}}}]}}"#,
-                    json_string(&format!(r#"{{"command":{}}}"#, json_string(command)))
-                ),
-                "tool_calls",
-            ),
             chat_done: chat_sse(r#"{"role":"assistant","content":"done"}"#, "stop"),
             messages_call: messages_sse(Some(command)),
             messages_done: messages_sse(None),
@@ -165,9 +161,28 @@ impl Script {
         }
     }
 
+    /// The chat dialect's tool call, naming the tool the request offers:
+    /// `bash` when the body declares one (OpenCode), else Qwen Code's
+    /// `run_shell_command`. The arguments are `{"command": …}` either
+    /// way.
+    fn chat_call(&self, body: &str) -> String {
+        let name = if body.contains(r#""name":"bash""#) {
+            "bash"
+        } else {
+            "run_shell_command"
+        };
+        chat_sse(
+            &format!(
+                r#"{{"role":"assistant","content":null,"tool_calls":[{{"index":0,"id":"call_1","type":"function","function":{{"name":"{name}","arguments":{}}}}}]}}"#,
+                json_string(&format!(r#"{{"command":{}}}"#, json_string(&self.command)))
+            ),
+            "tool_calls",
+        )
+    }
+
     /// The answer for one POST: the body and its content type, or
     /// `None` for a path no dialect claims.
-    fn answer(&self, path: &str, body: &str) -> Option<(&str, &str)> {
+    fn answer(&self, path: &str, body: &str) -> Option<(String, &str)> {
         let outputs: usize = TOOL_OUTPUTS
             .iter()
             .map(|marker| body.matches(marker).count())
@@ -177,9 +192,9 @@ impl Script {
         if path.ends_with("/responses") {
             return Some((
                 if done {
-                    &self.responses_done
+                    self.responses_done.clone()
                 } else {
-                    &self.responses_call
+                    self.responses_call.clone()
                 },
                 SSE,
             ));
@@ -187,9 +202,9 @@ impl Script {
         if path.ends_with("/chat/completions") {
             return Some((
                 if done {
-                    &self.chat_done
+                    self.chat_done.clone()
                 } else {
-                    &self.chat_call
+                    self.chat_call(body)
                 },
                 SSE,
             ));
@@ -198,18 +213,18 @@ impl Script {
             return Some(if body.contains(r#""stream":true"#) {
                 (
                     if done {
-                        &self.messages_done
+                        self.messages_done.clone()
                     } else {
-                        &self.messages_call
+                        self.messages_call.clone()
                     },
                     SSE,
                 )
             } else {
                 (
                     if done {
-                        &self.messages_done_json
+                        self.messages_done_json.clone()
                     } else {
-                        &self.messages_call_json
+                        self.messages_call_json.clone()
                     },
                     JSON,
                 )
@@ -388,7 +403,7 @@ fn serve(stream: TcpStream, recorded: &Mutex<Vec<Recorded>>, script: &Script) {
                     body,
                 });
                 match answer {
-                    Some((body, content_type)) => ("200 OK", content_type, body.to_string()),
+                    Some((body, content_type)) => ("200 OK", content_type, body),
                     None => ("404 Not Found", JSON, "{}".to_string()),
                 }
             }
@@ -500,6 +515,31 @@ mod tests {
         );
         assert!(body.contains(r#""content":"done""#), "{body}");
         assert!(body.contains(r#""finish_reason":"stop""#), "{body}");
+    }
+
+    /// The chat call names the tool the request offers: a body
+    /// declaring `bash` gets `bash`, and one declaring
+    /// `run_shell_command` keeps that name.
+    #[test]
+    fn chat_completions_names_the_tool_the_request_offers() {
+        let model = MockModel::start("atc whoami --json");
+        let (_, _, body) = post(
+            &model,
+            "/v1/chat/completions",
+            r#"{"messages":[],"tools":[{"type":"function","function":{"name":"bash","parameters":{}}}]}"#,
+        );
+        assert!(body.contains(r#""name":"bash""#), "{body}");
+        assert!(!body.contains("run_shell_command"), "{body}");
+        assert!(
+            body.contains(r#""arguments":"{\"command\":\"atc whoami --json\"}""#),
+            "{body}"
+        );
+        let (_, _, body) = post(
+            &model,
+            "/v1/chat/completions",
+            r#"{"messages":[],"tools":[{"type":"function","function":{"name":"run_shell_command","parameters":{}}}]}"#,
+        );
+        assert!(body.contains(r#""name":"run_shell_command""#), "{body}");
     }
 
     #[test]

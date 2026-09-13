@@ -206,7 +206,8 @@ fn installed_note(skills: &skill::Registry) -> String {
 /// over is noise. Present and not wired is information — wiring is
 /// optional, and the row names the verb; so is a shell whose rc file
 /// calls the trigger by hand, which delivers and is not tower's to
-/// touch. Wired is ok, unless the skills on disk are an older tower's
+/// touch, and a client's file under tower's name that tower did not
+/// write. Wired is ok, unless the skills on disk are an older tower's
 /// or the entries carry a retired spelling: the notice still lands, so
 /// it is never an outage, but `atc hook -u` is the repair nothing else
 /// runs, so doctor counts it.
@@ -255,10 +256,24 @@ fn hook_rows() -> Vec<DoctorRow> {
                     at.display()
                 ),
             ),
+            // A shell's rc line a person wrote calls the trigger; a
+            // client's file under tower's name without tower's header
+            // is someone else's. Both are left alone.
+            Wiring::HandWritten { at }
+                if crate::integ::by_slug(slug).is_some_and(|i| i.source() == "shell") =>
+            {
+                row(
+                    Level::Info,
+                    format!(
+                        "{slug}: atc trigger shell is wired by hand in {}",
+                        at.display()
+                    ),
+                )
+            }
             Wiring::HandWritten { at } => row(
                 Level::Info,
                 format!(
-                    "{slug}: atc trigger shell is wired by hand in {}",
+                    "{slug}: {} is not tower's — left alone",
                     at.display()
                 ),
             ),

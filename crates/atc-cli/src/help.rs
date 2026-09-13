@@ -403,8 +403,9 @@ whose word was its client's or its login name moves nothing on its
 first callsign.
 
 Refused: a word usable_callsign rejects — me, agent, none, spaces,
-past 64 bytes; a client's word — claude, codex, cursor, qwen — which
-is the name of every unnamed session of that client; ATC_CALLSIGN
+past 64 bytes; a client's word — claude, codex, cursor, qwen,
+opencode — which is the name of every unnamed session of that
+client; ATC_CALLSIGN
 set, because the launcher's word wins and a lease under it would
 never be read. There is no unset: the trigger's end event, the pid,
 and the window are the unset.
@@ -430,7 +431,8 @@ pub const WHOAMI: &str = "\
 Who you are, on every axis tower stamps: the writer chain this
 machine appends to, the author from git, the client detected from
 the mark it leaves — CLAUDECODE, QWEN_CODE, CURSOR_AGENT,
-CODEX_SANDBOX — the session and where it came from, the callsign and
+CODEX_SANDBOX, OPENCODE, and OPENCODE_SESSION_ID, which tower's own
+plugin sets — the session and where it came from, the callsign and
 where it came from, the lease, the pid when the session's row hands
 one down, and the repositories the session was seen in.
 
@@ -808,9 +810,10 @@ session, else the client it runs under, else the login name at a
 terminal — and a flight is In Progress under it, the line is the
 resume line instead: the flight you are on, and the brief to run.
 
-Named for a source — `atc trigger claude` — it is the command
-`atc hook` wrote into that client's config under every event in the
-client's table, and the payload on stdin says which one fired. At a
+Named for a source — `atc trigger claude`, codex, qwen, opencode —
+it is the command `atc hook` wrote into that client's config under
+every event in the client's table, and the payload on stdin says
+which one fired. At a
 context boundary — a fresh session, a resume, a clear, a compaction
 — it renews the session's lease and prints the notice wrapped the
 way that client reads it. On activity — a prompt, a tool call, the
@@ -882,7 +885,7 @@ wired and adds nothing: the install is re-run for every slug already
 wired, on whatever mechanism it is on, so an upgraded binary
 refreshes the machine. The names are flat:
 
-  claude  codex  qwen
+  claude  codex  qwen  opencode
   bash  zsh  fish  powershell
 
 What gets written is not a choice you make. Claude Code and Codex
@@ -899,9 +902,15 @@ carries. `atc hook codex` also moves a machine off the entries an
 older tower wrote in ~/.codex/hooks.json, once the plugin has
 verified. Qwen Code takes entries merged into ~/.qwen/settings.json,
 and whatever else that file holds is left as it was — an entry you
-wrote yourself included. --settings is Claude Code's escape hatch:
-entries in ~/.claude/settings.json instead of the plugin, and no
-skills.
+wrote yourself included. OpenCode takes one plugin module tower
+owns, ~/.config/opencode/plugins/tower.js, written whole and removed
+whole, and the manual at ~/.config/opencode/skills/tower; the plugin
+puts the notice in the system prompt on every model call rather than
+once per boundary, so it is standing and survives compaction, sets
+OPENCODE_SESSION_ID on every shell command, and renews the lease on
+every tool call; `atc unhook opencode` removes exactly those two
+paths. --settings is Claude Code's escape hatch: entries in
+~/.claude/settings.json instead of the plugin, and no skills.
 
 A shell takes marked lines appended to its rc file — ~/.bashrc,
 $ZDOTDIR/.zshrc, fish's config.fish, PowerShell's profile — that
@@ -918,10 +927,10 @@ ATC_SHELL_SESSION. A line you wrote yourself that calls the trigger
 is reported and left alone; fufu's lines in the same file are fufu's
 and untouched.
 
-Both plugins carry the manual, `tower` — typed /tower:tower in Claude
-Code and $tower in Codex; a skill an older tower shipped and this
-one does not is removed on the next write. Qwen reads no skills
-directory and gets the notice alone. Codex trusts a plugin's hook by
+The three plugins carry the manual, `tower` — typed /tower:tower in
+Claude Code and $tower in Codex and OpenCode; a skill an older tower
+shipped and this one does not is removed on the next write. Qwen
+reads no skills directory and gets the notice alone. Codex trusts a plugin's hook by
 its hash, so after wiring it review the hook with /hooks there, or
 it is skipped.";
 
@@ -939,10 +948,10 @@ Examples:
 pub const UNHOOK: &str = "\
 Remove exactly what hook added: Claude Code's plugin directory, and
 the settings entries an older install left; Codex's plugin directory
-and its entry in the personal marketplace; Qwen's entries; a shell's
-marked rc lines. Anything else in a file is left as it was
-— an entry or a line you wrote yourself included, and fufu's lines
-beside tower's. Name clients or shells, or --all for everything
+and its entry in the personal marketplace; Qwen's entries; OpenCode's
+plugin file and skill; a shell's marked rc lines. Anything else in a
+file is left as it was — an entry or a line you wrote yourself
+included, and fufu's lines beside tower's. Name clients or shells, or --all for everything
 detected on this machine.";
 
 pub const UNHOOK_EXAMPLES: &str = "\

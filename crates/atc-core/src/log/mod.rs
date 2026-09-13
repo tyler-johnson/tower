@@ -729,10 +729,13 @@ pub const CALLSIGN_VAR: &str = "ATC_CALLSIGN";
 /// names its client, first match in table order. Claude Code sets
 /// `CLAUDECODE`, Qwen Code `QWEN_CODE`, Cursor's IDE agent
 /// `CURSOR_AGENT`, and Codex's shell tool `CODEX_SANDBOX_NETWORK_DISABLED`
-/// and `CODEX_SANDBOX` under its sandbox. Best-effort on purpose: a
-/// client that leaves no mark, or Codex with sandboxing off, resolves
-/// like a bare shell, and the launcher's [`CALLSIGN_VAR`] is the way to
-/// name it. The callsigns are the words the clients are wired under —
+/// and `CODEX_SANDBOX` under its sandbox. OpenCode's shell tool sets
+/// `OPENCODE=1` (1.18.30, captured on this machine), and tower's own
+/// plugin sets `OPENCODE_SESSION_ID` on every shell command, so the
+/// session variable is a marker too. Best-effort on purpose: a client
+/// that leaves no mark, or Codex with sandboxing off, resolves like a
+/// bare shell, and the launcher's [`CALLSIGN_VAR`] is the way to name
+/// it. The callsigns are the words the clients are wired under —
 /// an `atc hook` slug, or the source a retired adapter wrote — so the
 /// client a hook wires is the one its events name.
 pub const CLIENT_MARKERS: &[(&str, &str)] = &[
@@ -741,6 +744,8 @@ pub const CLIENT_MARKERS: &[(&str, &str)] = &[
     ("CURSOR_AGENT", "cursor"),
     ("CODEX_SANDBOX_NETWORK_DISABLED", "codex"),
     ("CODEX_SANDBOX", "codex"),
+    ("OPENCODE", "opencode"),
+    ("OPENCODE_SESSION_ID", "opencode"),
 ];
 
 /// The one rule a callsign is held to, at every boundary that takes one:

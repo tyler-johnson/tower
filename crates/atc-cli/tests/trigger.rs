@@ -424,6 +424,49 @@ fn the_payload_session_keys_the_lease_when_the_variable_is_absent() {
     assert_eq!(leases.len(), 2, "no session, no lease: {leases:?}");
 }
 
+/// OpenCode's plugin spells two payloads: the standing notice's
+/// `SessionStart` with the session, which prints the notice plain and
+/// takes the lease, and `PreToolUse`, which renews it silently. No
+/// payload at all is the notice with no lease.
+#[test]
+fn the_opencode_boundary_and_activity_payloads() {
+    let repo = repo();
+    let home = root(repo.path());
+    let elsewhere = tempfile::TempDir::new().unwrap();
+
+    let boundary = payload(repo.path(), Some("SessionStart"), Some("o1"));
+    let out = trigger(elsewhere.path(), home, "opencode", None, Some(&boundary));
+    assert!(
+        out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    assert!(text.starts_with("tower (`atc`) keeps"), "{text}");
+    assert!(
+        text.trim_end()
+            .ends_with("Nothing filed here yet. Run `atc`."),
+        "plain, no envelope: {text}"
+    );
+    let lease = lease(home, "o1");
+    assert!(lease.is_file(), "the boundary takes the lease");
+
+    let before = age(&lease);
+    let activity = payload(repo.path(), Some("PreToolUse"), Some("o1"));
+    silent(
+        &trigger(elsewhere.path(), home, "opencode", None, Some(&activity)),
+        "opencode activity",
+    );
+    assert!(mtime(&lease) > before, "activity renews the lease");
+
+    // No payload at all: the repository is the cwd, since there is no
+    // payload to name one.
+    let out = trigger(repo.path(), home, "opencode", None, None);
+    let text = stdout(&out);
+    assert!(text.starts_with("tower (`atc`) keeps"), "{text}");
+    assert_eq!(lease_names(home).len(), 1, "no session, no new lease");
+}
+
 /// The heartbeat sweeps once per `leaseSweep`, through the marker: the
 /// first activity under a session removes an expired lease and writes
 /// the marker an hour out; the next leaves an expired lease alone while
@@ -900,7 +943,7 @@ fn a_source_it_does_not_know_and_a_place_with_no_board_are_silent() {
         Some(String::new()),
         None,
     ] {
-        for source in ["claude", "codex", "qwen", "cursor", "gemini"] {
+        for source in ["claude", "codex", "qwen", "opencode", "cursor", "gemini"] {
             silent(
                 &trigger(home, home, source, Some("s9"), stdin.as_deref()),
                 &format!("{source}: {stdin:?}"),

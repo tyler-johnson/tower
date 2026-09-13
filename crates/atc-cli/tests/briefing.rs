@@ -287,7 +287,7 @@ fn a_client_source_outside_a_repository_says_nothing() {
     let elsewhere = tempfile::TempDir::new().unwrap();
     let silent = |stdin: Option<&str>| {
         // The live clients and the retired spellings alike.
-        for client in ["claude", "codex", "qwen", "cursor", "gemini"] {
+        for client in ["claude", "codex", "qwen", "opencode", "cursor", "gemini"] {
             let out = hook(elsewhere.path(), elsewhere.path(), client, stdin);
             assert_eq!(out.status.code(), Some(0), "{client}: {stdin:?}");
             assert!(

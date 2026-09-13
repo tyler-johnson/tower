@@ -409,8 +409,8 @@ pub enum Command {
     /// Wire tower into the agent clients and the shells on this machine.
     #[command(long_about = help::HOOK, after_long_help = help::HOOK_EXAMPLES)]
     Hook {
-        /// The clients to wire — claude, codex, qwen — or the shells:
-        /// bash, zsh, fish, powershell.
+        /// The clients to wire — claude, codex, qwen, opencode — or the
+        /// shells: bash, zsh, fish, powershell.
         #[arg(value_name = "client")]
         slugs: Vec<String>,
         /// Every client and shell detected on this machine, without asking.
@@ -433,8 +433,8 @@ pub enum Command {
     /// Remove exactly what hook added.
     #[command(long_about = help::UNHOOK, after_long_help = help::UNHOOK_EXAMPLES)]
     Unhook {
-        /// The clients to unwire — claude, codex, qwen — or the shells:
-        /// bash, zsh, fish, powershell.
+        /// The clients to unwire — claude, codex, qwen, opencode — or the
+        /// shells: bash, zsh, fish, powershell.
         #[arg(value_name = "client")]
         slugs: Vec<String>,
         /// Every client and shell detected on this machine.
@@ -446,7 +446,7 @@ pub enum Command {
     #[command(long_about = help::TRIGGER, after_long_help = help::TRIGGER_EXAMPLES)]
     Trigger {
         /// The source whose hook is running this — claude, codex, qwen,
-        /// or shell — which names the event table and the envelope, and
+        /// opencode, or shell — which names the event table and the envelope, and
         /// makes every failure silent. Bare, the notice prints as it is.
         #[arg(value_name = "source")]
         source: Option<String>,

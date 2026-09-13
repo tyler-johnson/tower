@@ -120,8 +120,8 @@ jobs:
   # binary from a skip into a failure, so an install that failed cannot
   # pass by skipping; `--nocapture` puts the client's own output in the
   # log when it fails. The `test` job still compiles these suites and
-  # skips them: no binary, no `ATC_LIVE`. Copilot, Cursor, and OpenCode
-  # rows come with #157, #158, and #150.
+  # skips them: no binary, no `ATC_LIVE`. Copilot and Cursor rows come
+  # with #157 and #158.
   live:
     strategy:
       fail-fast: false
@@ -130,6 +130,7 @@ jobs:
           - { client: codex, package: "@openai/codex@0.154.0" }
           - { client: claude, package: "@anthropic-ai/claude-code@2.1.270" }
           - { client: qwen, package: "@qwen-code/qwen-code@0.23.3" }
+          - { client: opencode, package: "opencode-ai@1.18.30" }
     name: live (${{ matrix.client }})
     runs-on: ubuntu-latest
     env:
