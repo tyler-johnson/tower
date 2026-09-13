@@ -310,7 +310,11 @@ fn an_opencode_session_is_its_own_row() {
         serde_json::json!(own_pid()),
         "OPENCODE_PID: {data}"
     );
-    assert_eq!(data["lease"]["pid_alive"], true, "{data}");
+    assert_eq!(
+        data["lease"]["pid_alive"],
+        serde_json::json!(own_pid().map(|_| true)),
+        "{data}"
+    );
 }
 
 /// Bare `atc callsign` prints what `atc whoami` prints, under its own

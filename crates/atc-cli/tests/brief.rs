@@ -507,11 +507,28 @@ fn expand_prints_each_parents_body_under_its_row() {
 }
 
 #[test]
-fn show_and_brief_agree_byte_for_byte() {
+fn show_and_brief_agree_apart_from_elapsed_time() {
     let repo = repo_with_a_record();
     let brief = stdout(&atc(repo.path(), &["brief", "1"]));
     let show = stdout(&atc(repo.path(), &["show", "1"]));
-    assert_eq!(show, brief);
+    // Separate processes can straddle a clock tick. Normalize only the rendered age at the end of a line; preserve every other byte and compare the full JSON below.
+    let without_ages = |text: &str| -> String {
+        text.split_inclusive('\n')
+            .map(|line| {
+                let (body, newline) = line
+                    .strip_suffix('\n')
+                    .map_or((line, ""), |body| (body, "\n"));
+                let Some(before) = body.strip_suffix(" ago") else {
+                    return line.to_string();
+                };
+                let (prefix, age) = before.rsplit_once(' ').expect("an age after a space");
+                assert!(age.ends_with(['s', 'm', 'h', 'd', 'w']), "{age}");
+                assert!(age[..age.len() - 1].parse::<u64>().is_ok(), "{age}");
+                format!("{prefix} <age> ago{newline}")
+            })
+            .collect()
+    };
+    assert_eq!(without_ages(&show), without_ages(&brief));
 
     // A spelling, not a verb: the envelope names `brief` under either.
     let brief = atc(repo.path(), &["brief", "1", "--json"]);
