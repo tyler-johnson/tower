@@ -72,6 +72,8 @@ impl Fixture {
         let mut names: Vec<String> = entries
             .flatten()
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            // The heartbeat's sweep marker is not a lease.
+            .filter(|name| name != "sweep")
             .collect();
         names.sort();
         names

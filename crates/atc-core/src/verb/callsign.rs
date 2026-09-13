@@ -5,8 +5,9 @@
 //! and the word is a field in it: this verb fills the field and reports
 //! it. No two live sessions on a machine hold one word — every other
 //! lease holding it is read, a fresh lease or a live pid refuses, a
-//! stale one with a dead or absent pid is removed and the word taken,
-//! and `--force` takes it from a stale holder inside the window too,
+//! stale one with a dead or absent pid is removed and the word taken —
+//! a lease past `leaseExpiry` is swept first, whatever its pid — and
+//! `--force` takes it from a stale holder inside the window too,
 //! never from a live pid. When the session's word changes, the open
 //! flights it laned under the old word follow it: one `assigned` per
 //! flight in a single append, byline the new word. Scoped to what this
@@ -104,8 +105,10 @@ pub fn callsign(store: &Store, name: &str, force: bool) -> Result<Callsign, Erro
         return Err(Error::CallsignClientWord { word });
     }
 
-    let window = crate::config::lease_window(&store.config());
-    let took = hold(session, &word, force, window)?;
+    let config = store.config();
+    let window = crate::config::lease_window(&config);
+    let expiry = crate::config::lease_expiry(&config);
+    let took = hold(session, &word, force, window, expiry)?;
 
     let previous = identity.callsign.clone();
     let renewed = identity.callsign_source == Some("session") && previous.as_deref() == Some(&word);
@@ -155,16 +158,19 @@ pub fn callsign(store: &Store, name: &str, force: bool) -> Result<Callsign, Erro
     })
 }
 
-/// The hold: sweep every lease whose pid is dead, then weigh every
-/// other lease holding the word. This session's own id is this session
-/// again — a resumed session under a new process — and is skipped.
+/// The hold: sweep every lease past `expiry` whatever its pid, then
+/// every lease whose pid is dead, then weigh every other lease holding
+/// the word. This session's own id is this session again — a resumed
+/// session under a new process — and is skipped.
 fn hold(
     own: &str,
     word: &str,
     force: bool,
     window: std::time::Duration,
+    expiry: std::time::Duration,
 ) -> Result<Option<Took>, Error> {
     let mut took = None;
+    lease::sweep(expiry);
     for (session, held, mtime) in lease::all() {
         if session == own {
             continue;

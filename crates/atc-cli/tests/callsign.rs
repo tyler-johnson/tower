@@ -737,9 +737,12 @@ fn every_verb_under_a_session_is_a_heartbeat() {
     assert_eq!(lease_body(path, "s9")["callsign"], serde_json::Value::Null);
 
     stdout(&atc(path, None, None, &["brief", "1"]));
+    // The store's heartbeat wrote the sweep marker beside the lease; it
+    // is not a session.
     let leases: Vec<_> = std::fs::read_dir(root(path).join(".local/state/atc/leases"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name != "sweep")
         .collect();
     assert_eq!(leases.len(), 1, "no session, no lease: {leases:?}");
 }

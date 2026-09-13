@@ -18,6 +18,20 @@
 //! a client that offers no pid gets the window alone. No parent-process
 //! walk: a guess there holds or frees the wrong word.
 //!
+//! Expiry is the rule for the leases the pid rule cannot judge — no
+//! pid handed down, or a pid still alive under a newer session id after
+//! a `/clear` or a resume. A lease whose mtime is older than
+//! `leaseExpiry` in `atc config` is dead whatever its pid says, and
+//! [`sweep`] removes it: `atc session` and `atc callsign` sweep every
+//! time, and the heartbeat sweeps once per `leaseSweep` through
+//! [`sweep_if_due`], gated by the `sweep` marker in the lease directory.
+//! The marker's body is the unix second the next sweep is due rather
+//! than an mtime, so a heartbeat compares one number and never opens
+//! config while the due time is ahead. One accepted edge: a session
+//! idle past the expiry that heartbeats in the instant a sweep runs
+//! loses its lease and is recreated fresh on the next heartbeat, without
+//! its word.
+//!
 //! [`renew`] and [`release`] open no store and touch no repository — a
 //! touch and an unlink, the `atc config` class of work, since one of
 //! them runs on every tool call. Renew writes the body once, when the
@@ -34,17 +48,30 @@
 use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::{self, Config};
 use crate::log::{CLIENT_MARKERS, SESSION_VARS, usable_session};
 
 /// How long a lease stays fresh without a heartbeat when nothing is
 /// configured: `leaseWindow`'s compiled default, which the registry row
 /// spells and a test holds to this.
 pub const DEFAULT_WINDOW: Duration = Duration::from_secs(120);
+
+/// A lease whose mtime is older than this is dead whatever its pid
+/// says: `leaseExpiry`'s compiled default, held to its registry row.
+pub const DEFAULT_EXPIRY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// How often the heartbeat looks for dead leases: `leaseSweep`'s
+/// compiled default, held to its registry row.
+pub const DEFAULT_SWEEP: Duration = Duration::from_secs(60 * 60);
+
+/// The marker in the lease directory whose body is the unix second the
+/// next heartbeat sweep is due. Not a lease; `all()` skips it.
+const SWEEP_MARKER: &str = "sweep";
 
 /// The body of a lease file.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -398,6 +425,73 @@ pub fn mint() -> String {
     )
 }
 
+/// Whether a file in the lease directory is a lease: a temporary file
+/// mid-write is not a session, and neither is the sweep marker.
+fn is_lease_name(name: &str) -> bool {
+    !name.contains(".tmp.") && name != SWEEP_MARKER
+}
+
+/// Remove every lease whose mtime is older than `expiry`, whatever its
+/// body says: a read_dir and a stat per lease, no body reads, no pid
+/// checks. A NotFound on the unlink is fine — two sessions may sweep at
+/// once.
+pub fn sweep(expiry: Duration) {
+    if let Some(dir) = dir() {
+        sweep_in(&dir, SystemTime::now(), expiry);
+    }
+}
+
+fn sweep_in(dir: &Path, now: SystemTime, expiry: Duration) {
+    // No directory is nothing to sweep.
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_str().is_some_and(is_lease_name) {
+            continue;
+        }
+        let Ok(mtime) = entry.metadata().and_then(|meta| meta.modified()) else {
+            continue;
+        };
+        if now.duration_since(mtime).unwrap_or(Duration::ZERO) > expiry {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The heartbeat's sweep: read the marker; while its due time is ahead
+/// do nothing. Past it, or with no marker, open the config once through
+/// the closure, sweep with the configured expiry, and rewrite the marker
+/// with now plus the configured leaseSweep. None from the closure is no
+/// repository: both settings at their compiled defaults.
+pub fn sweep_if_due(config: impl FnOnce() -> Option<Config>) {
+    if let Some(dir) = dir() {
+        sweep_if_due_in(&dir, SystemTime::now(), config);
+    }
+}
+
+fn sweep_if_due_in(dir: &Path, now: SystemTime, config: impl FnOnce() -> Option<Config>) {
+    let now_secs = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    let marker = dir.join(SWEEP_MARKER);
+    let due = std::fs::read_to_string(&marker)
+        .ok()
+        .and_then(|body| body.trim().parse::<u64>().ok());
+    if due.is_some_and(|due| due > now_secs) {
+        return;
+    }
+    let (expiry, interval) = match config() {
+        Some(config) => (config::lease_expiry(&config), config::lease_sweep(&config)),
+        None => (DEFAULT_EXPIRY, DEFAULT_SWEEP),
+    };
+    sweep_in(dir, now, expiry);
+    // A plain write: a torn body fails to parse and reads as due, which
+    // is one extra sweep, not a bug.
+    let _ = std::fs::write(&marker, (now_secs + interval.as_secs()).to_string());
+}
+
 /// Every lease on the machine: session, body, mtime. A missing
 /// directory is no leases.
 pub fn all() -> Vec<(String, Lease, SystemTime)> {
@@ -411,8 +505,7 @@ pub fn all() -> Vec<(String, Lease, SystemTime)> {
         .flatten()
         .filter_map(|entry| {
             let session = entry.file_name().into_string().ok()?;
-            // A temporary file mid-write is not a session.
-            if session.contains(".tmp.") {
+            if !is_lease_name(&session) {
                 return None;
             }
             let (lease, mtime) = read(&session)?;
@@ -584,6 +677,152 @@ mod tests {
         }
         assert!(first < second, "{first} then {second}");
         assert_ne!(first, second);
+    }
+
+    /// A lease by hand in a scratch directory — never `dir()`, since the
+    /// environment is process-global — with its mtime `age` seconds back.
+    fn plant(dir: &Path, name: &str, age_secs: u64) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, format!(r#"{{"session":"{name}"}}"#)).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(age_secs))
+            .unwrap();
+        path
+    }
+
+    fn now_secs() -> u64 {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    fn marker_body(dir: &Path) -> u64 {
+        std::fs::read_to_string(dir.join(SWEEP_MARKER))
+            .expect("a marker")
+            .trim()
+            .parse()
+            .expect("a unix second")
+    }
+
+    /// The sweep reads mtimes and nothing else: a pidless lease past the
+    /// expiry goes, one inside it stays, one with a live pid past it goes
+    /// all the same, and the names that are not leases are left alone.
+    #[test]
+    fn sweep_removes_by_mtime_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let dead = plant(dir, "dead", 25 * 3_600);
+        let old = plant(dir, "old", 400);
+        let ghost = dir.join("ghost");
+        let pid = std::process::id();
+        std::fs::write(
+            &ghost,
+            format!(r#"{{"session":"ghost","pid":{pid},"pid_start":1}}"#),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&ghost)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(25 * 3_600))
+            .unwrap();
+        let young = plant(dir, "young", 3);
+        let tmp_file = plant(dir, "x.tmp.1", 25 * 3_600);
+        let marker = plant(dir, SWEEP_MARKER, 25 * 3_600);
+
+        sweep_in(dir, SystemTime::now(), DEFAULT_EXPIRY);
+        assert!(!dead.exists(), "pidless past the expiry goes");
+        assert!(old.exists(), "pidless inside the expiry stays");
+        assert!(
+            !ghost.exists(),
+            "a live pid past the expiry goes all the same"
+        );
+        assert!(young.exists(), "a fresh lease is never touched");
+        assert!(tmp_file.exists(), "a temporary file is not a lease");
+        assert!(marker.exists(), "the marker is not a lease");
+
+        // A missing directory is nothing to sweep.
+        sweep_in(&dir.join("absent"), SystemTime::now(), DEFAULT_EXPIRY);
+    }
+
+    /// A marker with its due time ahead is the whole check: the
+    /// directory is not read, config is not opened, the expired lease
+    /// beside it survives.
+    #[test]
+    fn the_heartbeat_sweep_waits_on_the_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let due = now_secs() + 600;
+        std::fs::write(dir.join(SWEEP_MARKER), due.to_string()).unwrap();
+        let expired = plant(dir, "expired", 25 * 3_600);
+        let opened = std::cell::Cell::new(false);
+
+        sweep_if_due_in(dir, SystemTime::now(), || {
+            opened.set(true);
+            None
+        });
+        assert!(expired.exists(), "the marker is ahead: no sweep");
+        assert!(!opened.get(), "the marker is ahead: no config open");
+        assert_eq!(marker_body(dir), due, "the marker is left as it was");
+    }
+
+    /// No marker, or one whose due time is past: the sweep runs with the
+    /// closure's config and the marker is rewritten a leaseSweep out.
+    #[test]
+    fn the_heartbeat_sweep_runs_when_the_marker_is_missing_or_past() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        for stale_marker in [None, Some(now_secs() - 1)] {
+            if let Some(due) = stale_marker {
+                std::fs::write(dir.join(SWEEP_MARKER), due.to_string()).unwrap();
+            }
+            let expired = plant(dir, "expired", 25 * 3_600);
+            let opened = std::cell::Cell::new(false);
+            let before = now_secs();
+            sweep_if_due_in(dir, SystemTime::now(), || {
+                opened.set(true);
+                None
+            });
+            assert!(
+                !expired.exists(),
+                "{stale_marker:?}: the expired lease goes"
+            );
+            assert!(opened.get(), "{stale_marker:?}: config is opened once");
+            let due = marker_body(dir);
+            assert!(
+                (before + 3_600..=before + 3_602).contains(&due),
+                "{stale_marker:?}: the marker is an hour out, got {due} from {before}"
+            );
+        }
+    }
+
+    /// A configured leaseSweep is the marker's distance.
+    #[test]
+    fn a_configured_sweep_sets_the_due_time() {
+        let fixture = atc_testsupport::Repo::new();
+        fixture.git(&["config", "tower.leaseSweep", "5m"]);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let before = now_secs();
+        sweep_if_due_in(dir, SystemTime::now(), || {
+            Some(Config::open(fixture.path()).expect("open"))
+        });
+        let due = marker_body(dir);
+        assert!(
+            (before + 300..=before + 302).contains(&due),
+            "five minutes out, got {due} from {before}"
+        );
+    }
+
+    #[test]
+    fn all_ignores_the_marker() {
+        assert!(!is_lease_name("sweep"));
+        assert!(!is_lease_name("a.tmp.1"));
+        assert!(is_lease_name("s1"));
     }
 
     /// A pid variable that is unset or not a number is no pid; this

@@ -17,7 +17,8 @@
 //! with no `hook_event_name` is a boundary, so a stored `atc briefing
 //! <client>` entry keeps doing what it did. The lease path opens no
 //! store: a `touch` or an unlink, a few milliseconds, since it runs on
-//! every tool call.
+//! every tool call — plus one small read of the sweep marker, and a
+//! sweep with a config open only once per `leaseSweep`.
 //!
 //! The `shell` source is the four shells' rc lines: no payload — a
 //! shell has none to hand down, and reading a piped interactive bash's
@@ -34,6 +35,7 @@ use crate::error::CliError;
 use crate::integ::settings::Class;
 use crate::integ::{self, briefing};
 use crate::machine;
+use atc_core::config::Config;
 use atc_core::lease;
 
 pub fn run(json: bool, source: Option<&str>, end: bool) -> Result<(), CliError> {
@@ -64,12 +66,14 @@ pub fn run(json: bool, source: Option<&str>, end: bool) -> Result<(), CliError> 
                 // A lease that would not write is not the notice's
                 // problem: the boundary still delivers.
                 let _ = lease::renew(session);
+                lease::sweep_if_due(|| Config::open(&payload.cwd()).ok());
             }
             notice(json, integration, &payload)
         }
         Some(Class::Activity) => {
             if let Some(session) = &session {
                 let _ = lease::renew(session);
+                lease::sweep_if_due(|| Config::open(&payload.cwd()).ok());
             }
             Ok(())
         }

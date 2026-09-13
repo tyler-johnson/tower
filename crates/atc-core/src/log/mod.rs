@@ -568,6 +568,9 @@ fn identity_from_environment(repo: &gix::Repository) -> Identity {
             fallback.as_deref().unwrap_or("nobody"),
         )
     });
+    if leased.is_some() {
+        lease::sweep_if_due(|| Some(Config::from_repo(repo.clone())));
+    }
     let (lease_word, lease_state, notice) = match own {
         Some(own) => (own.word, Some(own.state), own.notice),
         None => (None, None, None),
@@ -622,7 +625,8 @@ struct OwnLease {
 /// The renewal rewrites the body when the pid differs from what the
 /// file holds — a resumed session, a new process — and touches
 /// otherwise. The state reported is the lease's as found, before this
-/// renewal.
+/// renewal. Beside it the heartbeat sweeps dead leases once per
+/// `leaseSweep`, through the marker [`lease::sweep_if_due`] reads.
 fn own_lease(
     session: &str,
     pid: Option<lease::Pid>,

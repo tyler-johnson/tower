@@ -129,6 +129,25 @@ fn lease(home: &Path, session: &str) -> PathBuf {
     home.join(".local/state/atc/leases").join(session)
 }
 
+/// Every lease name in the state directory, the heartbeat's `sweep`
+/// marker left out: it is not a session.
+fn lease_names(home: &Path) -> Vec<std::ffi::OsString> {
+    let Ok(entries) = std::fs::read_dir(home.join(".local/state/atc/leases")) else {
+        return Vec::new();
+    };
+    entries
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name != "sweep")
+        .collect()
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
 fn mtime(path: &Path) -> SystemTime {
     std::fs::metadata(path).unwrap().modified().unwrap()
 }
@@ -401,11 +420,116 @@ fn the_payload_session_keys_the_lease_when_the_variable_is_absent() {
     let out = trigger(elsewhere.path(), home, "claude", None, Some(&none));
     let text = stdout(&out);
     assert!(text.starts_with("tower (`atc`) keeps"), "{text}");
-    let leases: Vec<_> = std::fs::read_dir(home.join(".local/state/atc/leases"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect();
+    let leases = lease_names(home);
     assert_eq!(leases.len(), 2, "no session, no lease: {leases:?}");
+}
+
+/// The heartbeat sweeps once per `leaseSweep`, through the marker: the
+/// first activity under a session removes an expired lease and writes
+/// the marker an hour out; the next leaves an expired lease alone while
+/// the marker is ahead; a marker past due sweeps again, and the
+/// repository's `leaseSweep` sets the next due time; outside a
+/// repository the defaults rule.
+#[test]
+fn the_heartbeat_sweeps_once_per_interval() {
+    let repo = repo();
+    let home = root(repo.path());
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let activity = payload(repo.path(), Some("PreToolUse"), None);
+    let marker = home.join(".local/state/atc/leases/sweep");
+    let plant = |name: &str| {
+        let path = lease(home, name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!(r#"{{"session":"{name}"}}"#)).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(90_000))
+            .unwrap();
+        path
+    };
+    let due = || -> u64 {
+        std::fs::read_to_string(&marker)
+            .expect("a marker")
+            .trim()
+            .parse()
+            .expect("a unix second")
+    };
+
+    let x1 = plant("x1");
+    let before = now_secs();
+    silent(
+        &trigger(
+            elsewhere.path(),
+            home,
+            "claude",
+            Some("c1"),
+            Some(&activity),
+        ),
+        "the first activity",
+    );
+    assert!(!x1.exists(), "no marker: the expired lease is swept");
+    assert!(lease(home, "c1").is_file(), "the heartbeat's own lease");
+    let first = due();
+    assert!(
+        (before + 3_600..=before + 3_602).contains(&first),
+        "an hour out: {first} from {before}"
+    );
+
+    let x2 = plant("x2");
+    silent(
+        &trigger(
+            elsewhere.path(),
+            home,
+            "claude",
+            Some("c1"),
+            Some(&activity),
+        ),
+        "the second activity",
+    );
+    assert!(x2.exists(), "the marker is ahead: no sweep");
+    assert_eq!(due(), first, "the marker is left as it was");
+
+    std::fs::write(&marker, (now_secs() - 1).to_string()).unwrap();
+    repo.git(&["config", "tower.leaseSweep", "5m"]);
+    let before = now_secs();
+    silent(
+        &trigger(
+            elsewhere.path(),
+            home,
+            "claude",
+            Some("c1"),
+            Some(&activity),
+        ),
+        "past due",
+    );
+    assert!(!x2.exists(), "past due: swept");
+    let next = due();
+    assert!(
+        (before + 300..=before + 302).contains(&next),
+        "the repository's leaseSweep: {next} from {before}"
+    );
+
+    // Outside a repository — the payload's cwd a bare tempdir — the
+    // defaults rule.
+    std::fs::remove_file(&marker).unwrap();
+    let x3 = plant("x3");
+    let bare = payload(elsewhere.path(), Some("PreToolUse"), None);
+    let before = now_secs();
+    silent(
+        &trigger(elsewhere.path(), home, "claude", Some("c1"), Some(&bare)),
+        "no repository",
+    );
+    assert!(
+        !x3.exists(),
+        "no repository: the default expiry still sweeps"
+    );
+    let next = due();
+    assert!(
+        (before + 3_600..=before + 3_602).contains(&next),
+        "no repository: the default interval, {next} from {before}"
+    );
 }
 
 /// The session table is the key's: `ATC_SESSION` beats
@@ -550,14 +674,7 @@ fn the_shell_source_is_the_terminals_heartbeat_and_release() {
     // No session variable: nothing to lease, nothing said.
     silent(&shell(&[], &[], None), "no session");
     silent(&shell(&["--end"], &[], None), "no session, the end");
-    assert!(
-        !home.join(".local/state/atc/leases").exists()
-            || std::fs::read_dir(home.join(".local/state/atc/leases"))
-                .unwrap()
-                .next()
-                .is_none(),
-        "nothing was leased"
-    );
+    assert!(lease_names(home).is_empty(), "nothing was leased");
 
     // The shell source reads no stdin: a payload naming a session keys
     // nothing, and the script it would have eaten is left alone.

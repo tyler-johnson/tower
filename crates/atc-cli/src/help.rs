@@ -387,7 +387,8 @@ the client hands one down (ATC_PID, CLAUDE_PID, ATC_SHELL_PID, read
 from the row that named the session and never an inherited one).
 Another session holding the word on a fresh lease or a live pid
 refuses and names it; a stale lease with a dead or absent pid is
-removed and the word taken. --force takes it from a stale holder
+removed and the word taken, and a lease past leaseExpiry is swept
+before the word is weighed. --force takes it from a stale holder
 inside the window too — for the session you killed and restarted
 under the same name — and says whose it was; a live pid is refused
 even then, since that is a running session. The same word as already
@@ -474,9 +475,11 @@ id is a UUIDv7, so a terminal's sessions sort by birth.
 Leases are per machine — one file per session under the machine's
 state directory — so this opens no store and needs no repository;
 the window is leaseWindow from the repository you are in when there
-is one, two minutes otherwise. A read and not a sweep: a stale lease
-is listed as stale and left where it is, and nothing here renews
-one.
+is one, two minutes otherwise. The listing sweeps first: a lease
+whose last heartbeat is older than leaseExpiry — a day unless
+`atc config leaseExpiry` says otherwise — is dead whatever its pid
+says and goes. A stale lease inside it is listed as stale and left
+where it is, and nothing here renews one.
 
 --mint prints a fresh session id and touches nothing: a UUIDv7, the
 one the shells' rc lines export as ATC_SHELL_SESSION once per
@@ -619,10 +622,12 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: servePort, tower.servePort, and SERVEPORT all
 name one setting.
 
-Six settings ship — defaultFileStatus, where a bare `atc file`
+Eight settings ship — defaultFileStatus, where a bare `atc file`
 lands; serveHost and servePort, the address and the port `atc serve`
 binds; leaseWindow, how long a session's lease stays fresh without a
-heartbeat when its client hands down no pid; updateCheck, how often
+heartbeat when its client hands down no pid; leaseExpiry, the age
+past which a lease is dead whatever its pid says; leaseSweep, how
+often the heartbeat looks for dead leases; updateCheck, how often
 the background release check runs; autoUpdate, whether a new release
 installs itself silently. This verb opens no store and spawns no
 fufu, so settings stay reachable on a half-configured machine, before
@@ -634,6 +639,7 @@ Examples:
   atc config servePort      what port serve binds
   atc config servePort 7777   set it, this repo
   atc config defaultFileStatus backlog   bare filings park for a person
+  atc config leaseExpiry 12h   a shorter life for leases nothing ends
   atc config --global autoUpdate false   set it, every repo
   atc config --unset servePort   back to the default";
 

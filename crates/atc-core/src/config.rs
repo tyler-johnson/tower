@@ -145,6 +145,16 @@ pub const DEFAULT_FILE_STATUS: &str = "ready";
 /// value, and a test holds the two together.
 pub const DEFAULT_LEASE_WINDOW: &str = "2m";
 
+/// The age past which a lease is dead whatever its pid says, as the
+/// registry row spells it; `lease::DEFAULT_EXPIRY` is the compiled
+/// value, and a test holds the two together.
+pub const DEFAULT_LEASE_EXPIRY: &str = "24h";
+
+/// How often the heartbeat looks for dead leases, as the registry row
+/// spells it; `lease::DEFAULT_SWEEP` is the compiled value, and a test
+/// holds the two together.
+pub const DEFAULT_LEASE_SWEEP: &str = "1h";
+
 /// Every setting tower ships, in display order. `tower.writer` is
 /// deliberately absent: identity minted at first append, not a tunable —
 /// setting it to another machine's id forks that writer's chain.
@@ -199,6 +209,31 @@ pub fn registry() -> &'static [Setting] {
             ],
         },
         Setting {
+            name: "leaseExpiry",
+            key: "tower.leaseExpiry",
+            def: DEFAULT_LEASE_EXPIRY,
+            kind: SettingKind::Duration,
+            desc: &[
+                "A lease whose last heartbeat is older than this is dead whatever",
+                "its pid says, and the next sweep removes it: the rule for a",
+                "session whose end hook never fired and whose pid cannot judge it",
+                "— no pid handed down, or one still alive under a newer session",
+                "id.",
+            ],
+        },
+        Setting {
+            name: "leaseSweep",
+            key: "tower.leaseSweep",
+            def: DEFAULT_LEASE_SWEEP,
+            kind: SettingKind::Duration,
+            desc: &[
+                "How often the heartbeat looks for dead leases. Every atc call",
+                "and trigger event under a session reads a marker in the lease",
+                "directory and sweeps once it is due; atc session and atc callsign",
+                "sweep every time.",
+            ],
+        },
+        Setting {
             name: "updateCheck",
             key: "tower.updateCheck",
             def: "1d",
@@ -247,6 +282,24 @@ pub fn lease_window(config: &Config) -> std::time::Duration {
     config
         .read_duration(setting)
         .unwrap_or(crate::lease::DEFAULT_WINDOW)
+}
+
+/// The lease expiry, decoded off the registry row the way
+/// [`lease_window`] is.
+pub fn lease_expiry(config: &Config) -> std::time::Duration {
+    let setting = lookup("leaseExpiry").expect("leaseExpiry is registered");
+    config
+        .read_duration(setting)
+        .unwrap_or(crate::lease::DEFAULT_EXPIRY)
+}
+
+/// The sweep interval, decoded off the registry row the way
+/// [`lease_window`] is.
+pub fn lease_sweep(config: &Config) -> std::time::Duration {
+    let setting = lookup("leaseSweep").expect("leaseSweep is registered");
+    config
+        .read_duration(setting)
+        .unwrap_or(crate::lease::DEFAULT_SWEEP)
 }
 
 /// The setting a user's spelling names: case-insensitive, `tower.`
@@ -727,6 +780,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_lease_expiry_and_sweep_defaults_match_their_registry_rows() {
+        let expiry = lookup("leaseExpiry").expect("registered");
+        assert_eq!(expiry.def, DEFAULT_LEASE_EXPIRY);
+        assert_eq!(parse_window(expiry.def), Some(crate::lease::DEFAULT_EXPIRY));
+        let sweep = lookup("leaseSweep").expect("registered");
+        assert_eq!(sweep.def, DEFAULT_LEASE_SWEEP);
+        assert_eq!(parse_window(sweep.def), Some(crate::lease::DEFAULT_SWEEP));
+    }
+
     /// The window grammar is the duration grammar floored at a second:
     /// a suffix or a bare count of days, and nothing a cadence would
     /// take as a bool.
@@ -768,6 +831,31 @@ mod tests {
             crate::lease::DEFAULT_WINDOW,
             "garbage falls back"
         );
+    }
+
+    #[test]
+    fn lease_expiry_and_sweep_read_the_key_and_fall_back() {
+        use std::time::Duration;
+        let fixture = atc_testsupport::Repo::new();
+        let config = Config::open(fixture.path()).expect("open");
+        assert_eq!(lease_expiry(&config), crate::lease::DEFAULT_EXPIRY);
+        assert_eq!(lease_sweep(&config), crate::lease::DEFAULT_SWEEP);
+
+        fixture.git(&["config", "tower.leaseExpiry", "12h"]);
+        fixture.git(&["config", "tower.leaseSweep", "5m"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(lease_expiry(&config), Duration::from_secs(12 * 3_600));
+        assert_eq!(lease_sweep(&config), Duration::from_secs(300));
+
+        fixture.git(&["config", "tower.leaseExpiry", "xyz"]);
+        fixture.git(&["config", "tower.leaseSweep", "xyz"]);
+        let config = Config::open(fixture.path()).expect("reopen");
+        assert_eq!(
+            lease_expiry(&config),
+            crate::lease::DEFAULT_EXPIRY,
+            "garbage falls back"
+        );
+        assert_eq!(lease_sweep(&config), crate::lease::DEFAULT_SWEEP);
     }
 
     #[test]

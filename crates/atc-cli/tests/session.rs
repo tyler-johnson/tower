@@ -233,10 +233,69 @@ fn the_listing_is_every_lease_on_the_machine() {
         ["callsign", "client", "lease", "pid", "session", "this"]
     );
 
-    // A read, not a heartbeat and not a sweep: the stale lease is still
-    // there, and the listing wrote none of its own.
+    // Not a heartbeat, and inside the expiry not a sweep either: the
+    // stale lease is still there, and the listing wrote none of its own.
     assert!(leases(home).join("b-old").is_file());
     assert_eq!(std::fs::read_dir(leases(home)).unwrap().count(), 3);
+}
+
+/// The listing sweeps first, by mtime alone: a pidless lease past
+/// `leaseExpiry` is gone, one with a live pid past it is gone all the
+/// same, a stale one inside it is listed stale and kept, and a fresh
+/// one is never touched. The repository's own `leaseExpiry` moves the
+/// line.
+#[test]
+fn a_lease_past_the_expiry_is_gone_after_the_listing() {
+    let repo = repo();
+    let path = repo.path();
+    let home = root(path);
+    let alive = own_start().map(|start| (std::process::id(), start));
+    plant(home, "dead", None, None, None, 90_000);
+    plant(home, "old", None, None, None, 400);
+    plant(home, "ghost", None, None, alive, 90_000);
+    plant(home, "young", None, None, None, 3);
+
+    let v = envelope(&atc(path, &[], &["session", "--json"]));
+    let sessions = v["data"]["sessions"].as_array().unwrap();
+    let names: Vec<&str> = sessions
+        .iter()
+        .map(|row| row["session"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["old", "young"], "{v}");
+    assert_eq!(sessions[0]["lease"]["fresh"], false, "old is stale, kept");
+    assert_eq!(sessions[1]["lease"]["fresh"], true);
+    assert!(!leases(home).join("dead").exists(), "past the expiry, gone");
+    assert!(
+        !leases(home).join("ghost").exists(),
+        "a live pid past the expiry is gone all the same"
+    );
+    assert!(leases(home).join("old").is_file());
+    assert!(leases(home).join("young").is_file());
+
+    repo.git(&["config", "tower.leaseExpiry", "1h"]);
+    plant(home, "hour", None, None, None, 4_000);
+    let text = stdout(&atc(path, &[], &["session"]));
+    assert!(!text.contains("hour"), "{text}");
+    assert!(!leases(home).join("hour").exists(), "past a shorter expiry");
+    assert!(leases(home).join("old").is_file(), "inside it, kept");
+}
+
+/// The heartbeat's `sweep` marker lives in the lease directory and is
+/// not a session: the listing never names it.
+#[test]
+fn the_marker_is_not_a_session() {
+    let repo = repo();
+    let path = repo.path();
+    let home = root(path);
+    plant(home, "s1", None, None, None, 3);
+    std::fs::write(leases(home).join("sweep"), "0").unwrap();
+
+    let v = envelope(&atc(path, &[], &["session", "--json"]));
+    let sessions = v["data"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "{v}");
+    assert_eq!(sessions[0]["session"], "s1");
+    let text = stdout(&atc(path, &[], &["session"]));
+    assert!(!text.contains("sweep"), "{text}");
 }
 
 /// `leaseWindow` from the repository you are in decides fresh: a 45s

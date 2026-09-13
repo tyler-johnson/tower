@@ -3,12 +3,13 @@
 //!
 //! Leases are per machine, so the listing opens no store: it reads
 //! `lease::all()`, marks this process's own row, and takes the window
-//! from the repository's config when there is one — `leaseWindow` —
-//! and the compiled default otherwise. A read, not a sweep: a stale
-//! lease is listed as stale and left where it is. `--mint` prints a
-//! UUIDv7 and touches nothing, so the shells' rc lines can run it
-//! inside `$(…)` at every interactive start with no repository in
-//! sight. Neither form renews a lease.
+//! and the expiry from the repository's config when there is one —
+//! `leaseWindow` and `leaseExpiry` — and the compiled defaults
+//! otherwise. The listing sweeps first: a lease past `leaseExpiry` is
+//! gone, a stale one inside it is listed stale and kept, and nothing
+//! here renews one. `--mint` prints a UUIDv7 and touches nothing, so the
+//! shells' rc lines can run it inside `$(…)` at every interactive start
+//! with no repository in sight.
 
 use crate::error::CliError;
 use crate::{machine, render};
@@ -40,11 +41,18 @@ struct Row {
 }
 
 fn list(json: bool) -> Result<(), CliError> {
-    let window = std::env::current_dir()
+    let config = std::env::current_dir()
         .ok()
-        .and_then(|cwd| Config::open(&cwd).ok())
-        .map(|config| config::lease_window(&config))
+        .and_then(|cwd| Config::open(&cwd).ok());
+    let window = config
+        .as_ref()
+        .map(config::lease_window)
         .unwrap_or(lease::DEFAULT_WINDOW);
+    let expiry = config
+        .as_ref()
+        .map(config::lease_expiry)
+        .unwrap_or(lease::DEFAULT_EXPIRY);
+    lease::sweep(expiry);
     let own = lease::session_key("");
     let rows: Vec<Row> = lease::all()
         .into_iter()
