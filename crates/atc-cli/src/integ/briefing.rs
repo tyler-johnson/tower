@@ -166,15 +166,19 @@ pub struct Payload {
     /// The event, in the client's vocabulary; the source's table says
     /// what it means.
     pub hook_event_name: String,
+    /// Cursor runs hooks from the plugin directory and names the repository here, often without a cwd.
+    pub workspace_roots: Vec<String>,
 }
 
 impl Payload {
-    /// The directory the session is in. The payload's when it names one,
-    /// else the process's own — a `sessionStart` with no cwd is the
-    /// client's working directory, which is where the session started.
+    /// The directory the session is in: the payload's cwd, then its first workspace root, then the process's own directory. Cursor's hook cwd is the plugin directory, so the workspace fallback comes first.
     pub fn cwd(&self) -> std::path::PathBuf {
         if self.cwd.is_empty() {
-            std::env::current_dir().unwrap_or_default()
+            self.workspace_roots
+                .iter()
+                .find(|root| !root.is_empty())
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
         } else {
             std::path::PathBuf::from(&self.cwd)
         }

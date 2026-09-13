@@ -1,0 +1,28 @@
+{
+  "client_version": "2026.09.10-fd3934a",
+  "session_id": "9bd66592-ba44-4f40-ab2f-be23a7d50389",
+  "request_id": "0aca3b82-0107-4a2d-a8fa-0dd5d52a4388",
+  "command": "cursor-agent --trust --force --print --output-format json 'Quote the tower notice injected at session start verbatim, then run atc whoami --json exactly once and include its unmodified JSON output. Do not edit files or use other tools.'",
+  "subtype": "success",
+  "is_error": false,
+  "quoted_notice": "tower (`atc`) keeps this repository's board. A flight is one unit of work for a person or an agent, stored in the repository beside history and moved from the shell. tower runs nothing: you pull work, fly it, and report back.\n\n`atc` shows the board. `atc next` claims the next ready flight for you and names the skill it is flown with. `atc brief <flight>` is everything on record about one. `atc hold <flight> -m \"<question>\"` stops on a question only a person can answer. `atc done <flight>` finishes.\n\nEvery verb's own `--help` is the authority on it.\n\nNothing filed here yet. Run `atc`.",
+  "reported_whoami": {
+    "atc": 1,
+    "cmd": "whoami",
+    "data": {
+      "writer": null,
+      "author": "<redacted>",
+      "client": "cursor",
+      "session": "9bd66592-ba44-4f40-ab2f-be23a7d50389",
+      "session_source": "cursor",
+      "callsign": "cursor",
+      "callsign_source": "client",
+      "lease": { "fresh": true, "age": 0 },
+      "repos": ["/tmp/opencode/cursor-158/workspace"],
+      "pid": null
+    }
+  },
+  "lease_absent_after_session_end": true,
+  "unhook_stdout": "cursor removed /home/pi/.cursor/plugins/local/tower\n",
+  "loader_after_unhook": { "plugins": [], "failures": [], "sourceUnavailable": false }
+}

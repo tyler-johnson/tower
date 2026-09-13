@@ -121,7 +121,7 @@ jobs:
   # pass by skipping; `--nocapture` puts the client's own output in the
   # log when it fails. The `test` job still compiles these suites and
   # skips them: no binary, no `ATC_LIVE`. Copilot checks the loader layer
-  # without a model session. Cursor's row comes with #158.
+  # without a model session. Cursor checks the installed local plugin loader.
   live:
     strategy:
       fail-fast: false
@@ -132,6 +132,7 @@ jobs:
           - { client: qwen, package: "@qwen-code/qwen-code@0.23.3" }
           - { client: opencode, package: "opencode-ai@1.18.30" }
           - { client: copilot, package: "@github/copilot@1.0.83" }
+          - { client: cursor, version: "2026.09.10-fd3934a" }
     name: live (${{ matrix.client }})
     runs-on: ubuntu-latest
     env:
@@ -167,9 +168,19 @@ jobs:
           cargo install --git https://github.com/tyler-johnson/fufu --rev "$FUFU_REV" --locked ff-cli
           ff --version
       - name: install ${{ matrix.client }}
+        if: matrix.client != 'cursor'
         run: |
           npm i -g ${{ matrix.package }}
           ${{ matrix.client }} --version
+      - name: install Cursor CLI
+        if: matrix.client == 'cursor'
+        # The curl installer's versioned payload, pinned instead of following latest.
+        run: |
+          mkdir -p "$RUNNER_TEMP/cursor" "$HOME/.local/bin"
+          curl -fsSL "https://downloads.cursor.com/lab/${{ matrix.version }}/linux/x64/agent-cli-package.tar.gz" | tar --strip-components=1 -xzf - -C "$RUNNER_TEMP/cursor"
+          ln -s "$RUNNER_TEMP/cursor/cursor-agent" "$HOME/.local/bin/cursor-agent"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/cursor/cursor-agent" --version
       # Codex runs the shell tool under bubblewrap, which needs an
       # unprivileged user namespace; Ubuntu 24.04 gates those behind
       # AppArmor, and the runner image ships the gate closed.

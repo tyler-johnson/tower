@@ -2,7 +2,7 @@
 //! machine, and how those clients then hear about the board.
 //!
 //! The slugs are what `atc hook` and `atc unhook` take — the clients,
-//! `claude`, `codex`, `qwen`, `opencode`, `copilot`, and the shells, `bash`, `zsh`,
+//! `claude`, `codex`, `cursor`, `qwen`, `opencode`, `copilot`, and the shells, `bash`, `zsh`,
 //! `fish`, `powershell`. They are flat and permanent, because they end up
 //! written inside config files tower does not own. The two verbs are
 //! for humans: an unknown slug is a real error, a failure is loud, and
@@ -20,9 +20,8 @@
 //! and a source is what fires the trigger; for a client the two are one
 //! word, and the four shells share the one source `shell`, since their
 //! rc lines differ in syntax and call the same command. A source once
-//! written is answered forever: `retired.rs` keeps `cursor` and
-//! `gemini`, the spellings of two adapters that went, and they are
-//! sources and never slugs.
+//! written is answered forever: `retired.rs` keeps `gemini`, the spelling
+//! of an adapter that went, as a source and never a slug.
 //!
 //! The skills the binary ships ride the same install for the clients
 //! that read one. Each embedded constant is the staleness fingerprint —
@@ -39,6 +38,7 @@ pub mod briefing;
 pub mod claude;
 pub mod codex;
 pub mod copilot;
+pub mod cursor;
 pub mod opencode;
 pub mod plugin;
 pub mod qwen;
@@ -291,6 +291,7 @@ pub trait Integration: Sync {
 
 static CLAUDE: claude::Claude = claude::Claude;
 static CODEX: codex::Codex = codex::Codex;
+static CURSOR: cursor::Cursor = cursor::Cursor;
 static QWEN: qwen::Qwen = qwen::Qwen;
 static OPENCODE: opencode::Opencode = opencode::Opencode;
 static COPILOT: copilot::Copilot = copilot::Copilot;
@@ -301,13 +302,14 @@ static POWERSHELL: shell::Shell = shell::Shell { slug: "powershell" };
 
 /// Every slug, in the order `atc hook -l` and `atc hook --all` walk
 /// them: the clients, then the shells.
-pub fn all() -> [&'static dyn Integration; 9] {
+pub fn all() -> [&'static dyn Integration; 10] {
     [
         &CLAUDE,
         &CODEX,
         &QWEN,
         &OPENCODE,
         &COPILOT,
+        &CURSOR,
         &BASH,
         &ZSH,
         &FISH,
@@ -499,7 +501,7 @@ mod tests {
             assert!(by_source(name).is_some(), "{name} answers the trigger");
             assert!(by_slug(name).is_none(), "{name} is not a slug");
         }
-        assert_eq!(all().len(), 9);
+        assert_eq!(all().len(), 10);
     }
 
     fn front_matter<'a>(name: &str, text: &'a str) -> Vec<&'a str> {

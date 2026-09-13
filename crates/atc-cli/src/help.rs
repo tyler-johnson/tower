@@ -818,7 +818,7 @@ session, else the client it runs under, else the login name at a
 terminal — and a flight is In Progress under it, the line is the
 resume line instead: the flight you are on, and the brief to run.
 
-Named for a source — `atc trigger claude`, codex, qwen, opencode, copilot —
+Named for a source — `atc trigger claude`, codex, cursor, qwen, opencode, copilot —
 it is the command `atc hook` wrote into that client's config under
 every event in the client's table, and the payload on stdin says
 which one fired. At a
@@ -830,8 +830,8 @@ session's end it releases the lease and says nothing. A payload with
 no hook_event_name is a boundary, so an older config's entry keeps
 doing what it did. The lease is one file per session under the
 machine's state directory, keyed by the first session variable set —
-ATC_SESSION, then the client's own, then ATC_SHELL_SESSION — else the
-payload's session_id, and it holds the session's pid when the client
+ATC_SESSION, then the client's own, then the payload's session_id,
+then ATC_SHELL_SESSION — and it holds the session's pid when the client
 hands one down and the word `atc callsign` gave it; renewing it opens
 no store, so the activity path costs a few milliseconds on every tool
 call.
@@ -842,6 +842,14 @@ the notice as additionalContext JSON; userPromptSubmitted, preToolUse,
 and agentStop renew silently; sessionEnd releases the lease. Its shell
 tool carries COPILOT_AGENT_SESSION_ID, and COPILOT_CLI identifies the
 client as copilot.
+
+Cursor CLI sends session_id, hook_event_name, and workspace_roots on
+stdin. Its hooks run from the plugin directory, so workspace_roots
+locates the repository when cwd is empty. sessionStart prints the
+notice as additional_context JSON; preToolUse renews silently;
+sessionEnd releases the lease. Its shell carries CURSOR_CONVERSATION_ID
+and CURSOR_AGENT. The payload session outranks an inherited terminal
+session so the hook and shell renew the same lease.
 
 The `shell` source is what the rc lines `atc hook bash` (or zsh,
 fish, powershell) write call: `atc trigger shell` before every
@@ -855,9 +863,8 @@ Any failure — no repository, a store that will not open, a source or
 an event it does not know — exits 0 with nothing said, because a
 hook's stderr is noise in someone else's terminal. `briefing` is the
 spelling this verb replaced, kept for the configs that still carry
-it: it prints the notice and touches no lease. The sources of the
-two adapters that went — cursor, gemini — answer forever too, each
-as it did.
+it: it prints the notice and touches no lease. The retired source
+gemini answers forever too, as it did.
 
 --json carries the text as `data.text`, with `ready`, `filed`, `on`
 — the flights In Progress under your callsign — and `callsign`
@@ -879,8 +886,8 @@ a client, wrapped the way that client reads it, silent on any
 failure, and refusing a client it does not know. It touches no lease
 and reads no event, so it is the spelling a stored config may still
 carry and not one to write anew — `atc hook -u` rewrites it. The
-retired client names — cursor, gemini — are answered here as they
-were, since a config file may still spell them.";
+retired client name gemini is answered here as it was, since a
+config file may still spell it.";
 
 pub const HOOK: &str = "\
 Wire tower into the agent clients and the shells on this machine, so
@@ -900,7 +907,7 @@ wired and adds nothing: the install is re-run for every slug already
 wired, on whatever mechanism it is on, so an upgraded binary
 refreshes the machine. The names are flat:
 
-  claude  codex  qwen  opencode  copilot
+  claude  codex  qwen  opencode  copilot  cursor
   bash  zsh  fish  powershell
 
 What gets written is not a choice you make. Claude Code and Codex
@@ -938,6 +945,19 @@ the tower skill and com.github.copilot/hooks/hooks.json; each command
 sets ATC_HOOK_EVENT because the payload names no event. Detection uses
 ~/.copilot or copilot on PATH.
 
+Cursor CLI discovers ~/.cursor/plugins/local/tower on a new session,
+without a marketplace registration. tower owns that directory: the
+native .cursor-plugin/plugin.json manifest, hooks/hooks.json, and
+the tower skill. Install verifies the plugin before removing old tower
+entries from ~/.cursor/hooks.json and old skills from ~/.cursor/skills;
+other settings and hooks stay as found. -u also recognizes old settings
+and migrates them. Detection uses ~/.cursor or cursor-agent/agent on PATH.
+The workspace must be trusted and team policy must allow local plugin
+imports. User-local hooks are unavailable in cloud agents. Resumed chats
+keep their context and skip sessionStart. This CLI build gates prompt
+and stop hooks on user/project settings, so the plugin wires only the
+verified sessionStart, preToolUse, and sessionEnd events.
+
 A shell takes marked lines appended to its rc file — ~/.bashrc,
 $ZDOTDIR/.zshrc, fish's config.fish, PowerShell's profile — that
 mint a session id once per interactive shell and export it as
@@ -953,7 +973,7 @@ ATC_SHELL_SESSION. A line you wrote yourself that calls the trigger
 is reported and left alone; fufu's lines in the same file are fufu's
 and untouched.
 
-The four plugins carry the manual, `tower` — typed /tower:tower in
+The five plugins carry the manual, `tower` — typed /tower:tower in
 Claude Code and $tower in Codex and OpenCode; a skill an older tower
 shipped and this one does not is removed on the next write. Qwen
 reads no skills directory and gets the notice alone. Codex trusts a plugin's hook by

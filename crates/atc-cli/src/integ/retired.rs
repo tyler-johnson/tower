@@ -5,13 +5,10 @@
 //! never do. So a spelling once written is accepted for good, at the
 //! cost of a line here: `atc briefing gemini` from a
 //! `~/.gemini/settings.json` nobody cleaned keeps printing what it
-//! printed, and `atc trigger cursor` from a `~/.cursor/hooks.json` the
-//! same. Each carries the event table and the envelope it was written
-//! with, and nothing else: no slug — `by_slug` never sees them, so
-//! `atc hook cursor` is the ordinary unknown name — no detection, and no
-//! install. The two files are left as found: neither adapter has a
-//! successor to migrate to, Cursor's delivery being unverified and
-//! Gemini CLI's hook names having diverged from the family.
+//! printed. Each carries the event table and the envelope it was written
+//! with, and nothing else: no slug, detection, or install. Gemini CLI's
+//! hook names diverged from the family. Cursor has a live successor in
+//! `cursor.rs`, which answers the stored spellings and migrates the settings.
 
 use super::{Change, InstallOptions, Integration, Presence, Status, Wiring, settings};
 use crate::error::CliError;
@@ -23,14 +20,6 @@ pub struct Retired {
     envelope: fn(&str) -> String,
 }
 
-/// Cursor's boundary alone, in its own casing, from `~/.cursor/hooks.json`.
-const CURSOR_EVENTS: [Event; 1] = [Event {
-    name: "sessionStart",
-    matcher: None,
-    class: Class::Boundary,
-    need: Need::Required,
-}];
-
 /// Gemini CLI's boundary alone, from `~/.gemini/settings.json`.
 const GEMINI_EVENTS: [Event; 1] = [Event {
     name: "SessionStart",
@@ -39,10 +28,6 @@ const GEMINI_EVENTS: [Event; 1] = [Event {
     need: Need::Required,
 }];
 
-fn cursor_field(text: &str) -> String {
-    serde_json::json!({ "additional_context": text }).to_string()
-}
-
 fn gemini_field(text: &str) -> String {
     serde_json::json!({
         "hookSpecificOutput": { "additionalContext": text }
@@ -50,11 +35,6 @@ fn gemini_field(text: &str) -> String {
     .to_string()
 }
 
-static CURSOR: Retired = Retired {
-    source: "cursor",
-    events: &CURSOR_EVENTS,
-    envelope: cursor_field,
-};
 static GEMINI: Retired = Retired {
     source: "gemini",
     events: &GEMINI_EVENTS,
@@ -62,8 +42,8 @@ static GEMINI: Retired = Retired {
 };
 
 /// Every retired source, for the tests that walk the class of each.
-pub fn all() -> [&'static Retired; 2] {
-    [&CURSOR, &GEMINI]
+pub fn all() -> [&'static Retired; 1] {
+    [&GEMINI]
 }
 
 /// The retired source a stored spelling names, if it is one.
@@ -121,18 +101,12 @@ mod tests {
     /// and no more events than it wired.
     #[test]
     fn each_retired_source_keeps_its_envelope_and_table() {
-        let cursor = by_source("cursor").unwrap();
-        let value: serde_json::Value = serde_json::from_str(&cursor.envelope("hello")).unwrap();
-        assert_eq!(value["additional_context"], "hello");
-        assert_eq!(cursor.class_of(Some("sessionStart")), Some(Class::Boundary));
-        assert_eq!(cursor.class_of(Some("PreToolUse")), None);
-
         let gemini = by_source("gemini").unwrap();
         let value: serde_json::Value = serde_json::from_str(&gemini.envelope("hello")).unwrap();
         assert_eq!(value["hookSpecificOutput"]["additionalContext"], "hello");
         assert_eq!(gemini.class_of(Some("SessionStart")), Some(Class::Boundary));
 
-        for live in ["claude", "codex", "qwen"] {
+        for live in ["claude", "codex", "cursor", "qwen", "copilot", "opencode"] {
             assert!(by_source(live).is_none(), "{live} is a live source");
         }
     }

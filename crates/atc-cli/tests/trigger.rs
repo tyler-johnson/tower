@@ -167,6 +167,89 @@ fn age(path: &Path) -> SystemTime {
 
 // ---- the dispatch ----------------------------------------------------------
 
+/// Replay the real Cursor payloads from a plugin cwd. The terminal environment on the hooks must not divert their lease from the shell's native conversation id.
+#[test]
+fn cursor_uses_the_captured_workspace_session_and_event() {
+    let repo = repo();
+    let home = root(repo.path());
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let records: Vec<serde_json::Value> = include_str!("fixtures/cursor/capture.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let session = records[0]["stdin"]["session_id"].as_str().unwrap();
+    let path = lease(home, session);
+    let fire = |record: &serde_json::Value, env: &[(&str, &str)]| {
+        let mut payload = record["stdin"].clone();
+        payload["workspace_roots"] = serde_json::json!([repo.path()]);
+        trigger_env(
+            elsewhere.path(),
+            home,
+            "cursor",
+            None,
+            Some(&payload.to_string()),
+            env,
+        )
+    };
+    let inherited = [("ATC_SHELL_SESSION", "terminal"), ("ATC_SHELL_PID", "1")];
+    let text = stdout(&fire(&records[0], &inherited));
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        value["additional_context"]
+            .as_str()
+            .unwrap()
+            .starts_with("tower (`atc`) keeps")
+    );
+    assert_eq!(value.as_object().unwrap().len(), 1);
+    assert!(path.is_file());
+    let body: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        body["repos"],
+        serde_json::json!([atc_testsupport::as_reported(repo.path())])
+    );
+    assert!(
+        body["pid"].is_null(),
+        "a payload-keyed lease has no inherited terminal pid: {body}"
+    );
+    // Opening the board to produce a notice also performs Store's ordinary environment heartbeat. The lifecycle-only paths must leave that terminal lease alone.
+    let terminal = lease(home, "terminal");
+    let terminal_before = age(&terminal);
+    let before = age(&path);
+    silent(&fire(&records[1], &inherited), "Cursor tool activity");
+    assert!(mtime(&path) > before);
+    let body: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(
+        body["pid"].is_null(),
+        "activity cannot adopt the inherited terminal pid: {body}"
+    );
+    let before = age(&path);
+    let mut unknown = records[0].clone();
+    unknown["stdin"]["hook_event_name"] = "Nonsense".into();
+    silent(&fire(&unknown, &inherited), "unknown Cursor event");
+    assert_eq!(mtime(&path), before);
+    silent(&fire(&records[3], &inherited), "Cursor end");
+    assert!(!path.exists());
+    assert_eq!(mtime(&terminal), terminal_before);
+
+    for (name, value) in [
+        ("ATC_SESSION", "launcher"),
+        ("CURSOR_CONVERSATION_ID", "native"),
+    ] {
+        stdout(&fire(
+            &records[0],
+            &[(name, value), ("ATC_SHELL_SESSION", "terminal")],
+        ));
+        assert!(lease(home, value).is_file(), "{name} retains precedence");
+        assert!(!path.exists());
+    }
+    // An explicit cwd still wins, even when a workspace root is also supplied.
+    let mut moved = records[0].clone();
+    moved["stdin"]["cwd"] = elsewhere.path().to_str().unwrap().into();
+    silent(&fire(&moved, &[]), "explicit cwd outside a repository");
+}
+
 #[test]
 fn copilot_dispatches_the_environment_event_and_keys_the_camelcase_session() {
     let repo = repo();
@@ -391,7 +474,7 @@ fn the_boundary_is_wrapped_the_way_each_client_reads_it() {
         "codex under its marker",
     );
 
-    // The retired sources, each in the envelope it was written with.
+    // Cursor's stored spelling and the retired Gemini source keep their envelopes.
     let text = carried(
         &plain("gemini", "SessionStart"),
         &["hookSpecificOutput", "additionalContext"],
@@ -407,7 +490,7 @@ fn the_boundary_is_wrapped_the_way_each_client_reads_it() {
     is_plain(&text, "qwen");
 
     // Each source's table is its own: Claude's activity name means
-    // nothing to the two retired ones that wired the boundary alone,
+    // nothing to Gemini or Cursor, which use different event names,
     // and renews the lease silently on Codex.
     for source in ["gemini", "cursor"] {
         let text = payload(repo.path(), Some("PreToolUse"), None);

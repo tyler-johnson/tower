@@ -11,8 +11,8 @@
 //! hatch and Qwen Code take — an event maps to entries, and an entry
 //! holds a matcher and a list of commands — and the shape an older
 //! tower wrote into Codex's settings file, which the plugin's migration
-//! strips. `Shape::Flat` was Cursor's — an entry *is* a command — and
-//! stays for the day a client spells it again. The Codex plugin's
+//! strips. `Shape::Flat` is Cursor's — an entry *is* a command — and
+//! is used to migrate its old settings. The Codex plugin's
 //! marketplace entry rides `load` and `write` here too: a file tower
 //! does not own, merged the same way.
 //!
@@ -73,8 +73,7 @@ pub struct Event {
 pub enum Shape {
     /// `{"matcher": …, "hooks": [{"type": "command", "command": …}]}`
     Nested,
-    /// `{"matcher": …, "command": …}` — no live client spells it today.
-    #[allow(dead_code)]
+    /// `{"matcher": …, "command": …}` — Cursor's old settings.
     Flat,
 }
 

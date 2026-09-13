@@ -34,10 +34,10 @@ pub static ENTRIES: &[Entry] = &[
         id: "usage/unknown-slug",
         summary: "that is not a client atc hook knows",
         detail: "`atc hook` and `atc unhook` take flat, permanent names — claude, codex, \
-                 qwen, opencode, and the shells — because they end up written inside config files tower \
+                 cursor, qwen, opencode, copilot, and the shells — because they end up written inside config files tower \
                  does not own and cannot rename afterward. These two verbs are for people, so \
-                 an unknown name is a real error here; cursor and gemini were names once, and \
-                 their adapters went, so the hook refuses them while `atc trigger <source>` \
+                 an unknown name is a real error here; gemini was a name once, and \
+                 its adapter went, so the hook refuses it while `atc trigger <source>` \
                  and `atc briefing <client>` answer the stored spellings forever. The trigger, \
                  the command the wiring runs, is silent on any name it does not know — fufu's \
                  shape, since a hook's stderr is someone else's terminal. `atc hook -l` lists \

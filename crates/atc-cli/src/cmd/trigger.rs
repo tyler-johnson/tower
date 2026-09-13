@@ -31,7 +31,7 @@
 //!
 //! `atc briefing [client]` stays as an alias that prints the notice and
 //! touches no lease, for the configs that still spell it; a source an
-//! adapter that went once wrote — `cursor`, `gemini` — answers both
+//! adapter that went once wrote — `gemini` — answers both
 //! verbs forever, from `retired.rs`.
 
 use crate::error::CliError;
@@ -97,7 +97,7 @@ pub fn run(json: bool, source: Option<&str>, end: bool) -> Result<(), CliError> 
 
 /// `atc briefing [client]`: the notice alone, as it always printed. The
 /// client form refuses a name it does not know, because a person typing
-/// this by hand deserves the answer; a retired one — `cursor`, `gemini`
+/// this by hand deserves the answer; a retired one — `gemini`
 /// — is a stored spelling and prints what it printed.
 pub fn run_briefing(json: bool, client: Option<&str>) -> Result<(), CliError> {
     let Some(slug) = client else {

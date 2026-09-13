@@ -47,9 +47,9 @@
 //! `<session>.lock` sidecar beside the lease; the heartbeat's touch is
 //! outside it, since it never rewrites.
 //!
-//! The session is keyed by the first [`crate::log::SESSION_VARS`] row
+//! The session is keyed by the first launcher or client [`crate::log::SESSION_VARS`] row
 //! set in the environment, else by the `session_id` a client's payload
-//! carries. The key becomes a file name, so it is held to one rule
+//! carries, then the terminal row. The key becomes a file name, so it is held to one rule
 //! beyond the session's own: no separator and no `..`. A terminal's
 //! session is one [`mint`] made — a UUIDv7, so it sorts by birth — and
 //! `atc session` lists every lease on the machine through [`all`].
@@ -116,7 +116,7 @@ impl Lease {
     /// from its mark, the pid the session's own row hands down, the root
     /// it was seen in when there is one, no word.
     fn fresh(session: &str, root: Option<&str>) -> Lease {
-        let pid = Pid::current();
+        let pid = Pid::for_session(session);
         Lease {
             session: session.to_string(),
             client: client_word().map(str::to_string),
@@ -200,6 +200,13 @@ impl Pid {
             })
             .and_then(|row| row.pid_var)
             .and_then(Pid::from_env)
+    }
+
+    /// A payload-keyed hook lease cannot adopt the pid of a different session inherited through the environment.
+    fn for_session(session: &str) -> Option<Pid> {
+        (session_key("").as_deref() == Some(session))
+            .then(Self::current)
+            .flatten()
     }
 
     /// Whether the process is still running: the pid exists and its
@@ -326,13 +333,14 @@ fn usable(value: &str) -> Option<&str> {
     ok.then_some(trimmed)
 }
 
-/// The session this process is in: the first [`SESSION_VARS`] row set
-/// and usable, when its value can be a file name; else the payload's
-/// `session_id` when no row is set and that can. None is no session,
-/// and nothing to lease. The row walk is the store's, so the byline on
-/// every event and the key of the lease are one value.
+/// The session this process is in: launcher and client environment rows first, then the hook payload, then the terminal row. Cursor's hook process inherits the terminal session but gets its own session only in the payload; its shell tool carries that same id in CURSOR_CONVERSATION_ID. None is no session and nothing to lease.
 pub fn session_key(payload_session: &str) -> Option<String> {
     let row = SESSION_VARS.iter().find_map(|row| {
+        if row.source == "shell"
+            && let Some(session) = usable(payload_session)
+        {
+            return Some(session.to_string());
+        }
         std::env::var(row.var)
             .ok()
             .as_deref()
@@ -480,7 +488,11 @@ pub fn renew(session: &str, root: Option<&Path>) -> io::Result<()> {
         let sighting = root
             .as_ref()
             .is_some_and(|root| held.repos.last() != Some(root));
-        let pid = held.pid.is_none().then(Pid::current).flatten();
+        let pid = held
+            .pid
+            .is_none()
+            .then(|| Pid::for_session(session))
+            .flatten();
         if sighting || pid.is_some() {
             return update(session, |lease| {
                 let mut changed = false;

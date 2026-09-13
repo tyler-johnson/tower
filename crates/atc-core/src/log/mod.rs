@@ -474,6 +474,11 @@ pub const SESSION_VARS: &[SessionVar] = &[
         source: "copilot",
     },
     SessionVar {
+        var: "CURSOR_CONVERSATION_ID",
+        pid_var: None,
+        source: "cursor",
+    },
+    SessionVar {
         var: "ATC_SHELL_SESSION",
         pid_var: Some("ATC_SHELL_PID"),
         source: "shell",

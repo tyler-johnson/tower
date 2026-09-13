@@ -49,6 +49,7 @@ fn atc_env(
         .env("ATC_FF", "/nonexistent")
         .env("ATC_CODEX", "/nonexistent")
         .env("ATC_COPILOT", "/nonexistent")
+        .env("ATC_CURSOR", "/nonexistent")
         .env("ATC_OPENCODE", "/nonexistent");
     // A test's own variables last, so one can open a seam the defaults
     // close.
@@ -103,12 +104,13 @@ fn home() -> tempfile::TempDir {
 
 /// Every slug, in the order the listing walks them: the clients, then
 /// the shells.
-const SLUGS: [&str; 9] = [
+const SLUGS: [&str; 10] = [
     "claude",
     "codex",
     "qwen",
     "opencode",
     "copilot",
+    "cursor",
     "bash",
     "zsh",
     "fish",
@@ -179,6 +181,7 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
         false,
         false,
         false,
+        false,
         cfg!(windows),
     ];
     for (line, present) in lines.iter().zip(present) {
@@ -221,6 +224,7 @@ fn bare_hook_acts_on_nothing_when_it_cannot_ask() {
         .env("ATC_CODEX", "/nonexistent")
         .env("ATC_COPILOT", "/nonexistent")
         .env("ATC_OPENCODE", "/nonexistent")
+        .env("ATC_CURSOR", "/nonexistent")
         .env("ATC_NONINTERACTIVE", "1")
         .stdin(Stdio::null())
         .output()
@@ -257,6 +261,262 @@ fn unknown_slugs_are_hard_errors() {
             );
         }
     }
+}
+
+// ---- the cursor plugin -----------------------------------------------------
+
+fn cursor_status(home: &Path) -> serde_json::Value {
+    let out = atc(home, home, &["hook", "-l", "--json"], None);
+    ok(&out);
+    envelope(&out)["data"]["integrations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["slug"] == "cursor")
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn cursor_round_trips_without_changing_foreign_hooks_plugins_or_settings() {
+    let home = home();
+    let home = home.path();
+    let dir = home.join(".cursor/plugins/local/tower");
+    let foreign = [
+        (
+            ".cursor/hooks.json",
+            r#"{"version":1,"hooks":{"sessionStart":[{"command":"foreign"}]},"extra":true}"#,
+        ),
+        (".cursor/cli-config.json", r#"{"theme":"dark"}"#),
+        (
+            ".cursor/plugins/local/other/plugin.json",
+            r#"{"name":"other"}"#,
+        ),
+        (
+            ".agents/plugins/marketplace.json",
+            r#"{"name":"mine","plugins":[]}"#,
+        ),
+    ];
+    for (path, body) in foreign {
+        let path = home.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let out = atc(home, home, &["hook", "cursor", "--json"], None);
+    ok(&out);
+    assert_eq!(
+        envelope(&out)["data"]["changed"],
+        serde_json::json!(["cursor"])
+    );
+    let row = cursor_status(home);
+    assert_eq!(row["wiring"]["state"], "wired", "{row}");
+    assert_eq!(row["wiring"]["mechanism"], "plugin");
+    assert_eq!(row["skill"]["state"], "wired");
+    assert!(row["note"].as_str().unwrap().contains("cloud agents"));
+    assert!(row.get("stale").is_none());
+    assert_eq!(
+        json_at(&dir.join(".cursor-plugin/plugin.json"))["name"],
+        "tower"
+    );
+    assert!(!dir.join("plugin.json").exists());
+    let hooks = json_at(&dir.join("hooks/hooks.json"));
+    assert_eq!(hooks["version"], 1);
+    assert_eq!(hooks["hooks"].as_object().unwrap().len(), 3);
+    for event in ["sessionStart", "preToolUse", "sessionEnd"] {
+        let entries = hooks["hooks"][event].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        let command = entries[0]["command"].as_str().unwrap();
+        assert!(command.ends_with("trigger cursor"), "{command}");
+        assert!(
+            command.len() > "atc trigger cursor".len(),
+            "absolute binary path: {command}"
+        );
+        assert!(entries[0].get("hooks").is_none());
+    }
+    assert_eq!(
+        std::fs::read_to_string(dir.join("skills/tower/SKILL.md")).unwrap(),
+        compiled("tower")
+    );
+    let hook_path = dir.join("hooks/hooks.json");
+    let before = std::fs::metadata(&hook_path).unwrap().modified().unwrap();
+    let out = atc(home, home, &["hook", "cursor", "--json"], None);
+    ok(&out);
+    assert_eq!(envelope(&out)["data"]["changed"], serde_json::json!([]));
+    assert_eq!(
+        std::fs::metadata(&hook_path).unwrap().modified().unwrap(),
+        before
+    );
+    ok(&atc(home, home, &["unhook", "cursor"], None));
+    assert!(!dir.exists());
+    assert_eq!(cursor_status(home)["wiring"]["state"], "not-wired");
+    let out = atc(home, home, &["unhook", "cursor", "--json"], None);
+    ok(&out);
+    assert_eq!(envelope(&out)["data"]["changed"], serde_json::json!([]));
+    for (path, body) in foreign {
+        assert_eq!(std::fs::read_to_string(home.join(path)).unwrap(), body);
+    }
+}
+
+#[test]
+fn cursor_refresh_migrates_both_stored_spellings_and_the_old_manual() {
+    for spelling in ["atc trigger cursor", "atc briefing cursor"] {
+        let home = home();
+        let home = home.path();
+        let path = home.join(".cursor/hooks.json");
+        let old_skill = home.join(".cursor/skills/tower/SKILL.md");
+        std::fs::create_dir_all(old_skill.parent().unwrap()).unwrap();
+        std::fs::write(&old_skill, "old tower manual").unwrap();
+        let foreign_skill = home.join(".cursor/skills/plan/SKILL.md");
+        std::fs::create_dir_all(foreign_skill.parent().unwrap()).unwrap();
+        std::fs::write(&foreign_skill, "my plan skill").unwrap();
+        let seed = serde_json::json!({"version":1,"hooks":{
+            "sessionStart":[{"command":spelling},{"command":"foreign"}],
+            "afterFileEdit":[{"command":"formatter"}]
+        },"extra":true});
+        std::fs::write(&path, seed.to_string()).unwrap();
+        let row = cursor_status(home);
+        assert_eq!(row["wiring"]["mechanism"], "settings");
+        assert_eq!(row["stale"], true);
+        ok(&atc(home, home, &["hook", "-u"], None));
+        assert_eq!(cursor_status(home)["wiring"]["mechanism"], "plugin");
+        assert!(!old_skill.exists());
+        assert_eq!(
+            std::fs::read_to_string(&foreign_skill).unwrap(),
+            "my plan skill"
+        );
+        let remaining = json_at(&path);
+        assert_eq!(
+            remaining["hooks"]["sessionStart"],
+            serde_json::json!([{"command":"foreign"}])
+        );
+        assert_eq!(
+            remaining["hooks"]["afterFileEdit"],
+            seed["hooks"]["afterFileEdit"]
+        );
+        assert_eq!(remaining["extra"], true);
+    }
+}
+
+#[test]
+fn cursor_keeps_old_wiring_on_write_failure_and_reports_malformed_migration() {
+    let home = home();
+    let home = home.path();
+    let dir = home.join(".cursor/plugins/local/tower");
+    std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+    std::fs::write(&dir, "blocks plugin creation").unwrap();
+    let old = home.join(".cursor/hooks.json");
+    let seed = r#"{"version":1,"hooks":{"sessionStart":[{"command":"atc trigger cursor"}]}}"#;
+    std::fs::write(&old, seed).unwrap();
+    let out = atc(home, home, &["hook", "cursor", "--json"], None);
+    assert!(!out.status.success());
+    assert_eq!(std::fs::read_to_string(&old).unwrap(), seed);
+    std::fs::remove_file(&dir).unwrap();
+    for bad in ["{ broken", "[]", r#"{"hooks":false}"#] {
+        std::fs::write(&old, bad).unwrap();
+        let text = ok(&atc(home, home, &["hook", "cursor"], None));
+        assert!(
+            text.contains("left ~/.cursor/hooks.json as found"),
+            "{text}"
+        );
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), bad);
+        assert_eq!(cursor_status(home)["wiring"]["state"], "wired");
+        let text = ok(&atc(home, home, &["unhook", "cursor"], None));
+        assert!(
+            text.contains("left ~/.cursor/hooks.json as found"),
+            "{text}"
+        );
+        assert!(!dir.exists());
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), bad);
+    }
+    std::fs::write(&old, seed).unwrap();
+    ok(&atc(home, home, &["unhook", "cursor"], None));
+    assert_eq!(
+        cursor_status(home)["wiring"]["state"],
+        "not-wired",
+        "unhook also removes an unmigrated settings install"
+    );
+}
+
+#[test]
+fn cursor_repairs_missing_events_manifest_and_manual_and_doctor_agrees() {
+    let repo = Repo::new();
+    let home = repo.path().parent().unwrap();
+    let dir = home.join(".cursor/plugins/local/tower");
+    ok(&atc(home, home, &["hook", "cursor"], None));
+    let path = dir.join("hooks/hooks.json");
+    let hooks = json_at(&path);
+    let doctor = || {
+        envelope(&atc(home, repo.path(), &["doctor", "--json"], None))["data"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["check"] == "hook/cursor")
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(doctor()["level"], "ok");
+    for event in ["preToolUse", "sessionEnd", "sessionStart"] {
+        let mut damaged = hooks.clone();
+        damaged["hooks"].as_object_mut().unwrap().remove(event);
+        std::fs::write(&path, damaged.to_string()).unwrap();
+        let row = cursor_status(home);
+        assert_eq!(
+            row["wiring"]["state"],
+            if event == "sessionStart" {
+                "partial"
+            } else {
+                "wired"
+            }
+        );
+        assert_eq!(doctor()["level"], "warn");
+        ok(&atc(home, home, &["hook", "-u"], None));
+        assert_eq!(json_at(&path), hooks);
+        assert_eq!(doctor()["level"], "ok");
+    }
+    std::fs::remove_file(dir.join(".cursor-plugin/plugin.json")).unwrap();
+    assert_eq!(cursor_status(home)["wiring"]["state"], "partial");
+    ok(&atc(home, home, &["hook", "-u"], None));
+    std::fs::write(dir.join("skills/tower/SKILL.md"), "old manual").unwrap();
+    assert_eq!(doctor()["level"], "warn");
+    ok(&atc(home, home, &["hook", "-u"], None));
+    assert_eq!(doctor()["level"], "ok");
+    std::fs::write(&path, "{ broken").unwrap();
+    assert_eq!(cursor_status(home)["wiring"]["state"], "unavailable");
+    ok(&atc(home, home, &["hook", "cursor"], None));
+    assert_eq!(doctor()["level"], "ok");
+    std::fs::remove_file(dir.join("skills/tower/SKILL.md")).unwrap();
+    assert_eq!(doctor()["level"], "warn");
+    ok(&atc(home, home, &["hook", "-u"], None));
+    assert_eq!(cursor_status(home)["skill"]["state"], "wired");
+    assert_eq!(doctor()["level"], "ok");
+}
+
+#[test]
+fn cursor_is_detected_by_directory_or_binary() {
+    let home = home();
+    let home = home.path();
+    assert_eq!(cursor_status(home)["presence"]["state"], "absent");
+    let binary = home.join("cursor-agent");
+    std::fs::write(&binary, "fake").unwrap();
+    let out = atc_env(
+        home,
+        home,
+        &["hook", "-l", "--json"],
+        None,
+        &[("ATC_CURSOR", binary.to_str().unwrap())],
+    );
+    ok(&out);
+    let value = envelope(&out);
+    let row = value["data"]["integrations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["slug"] == "cursor")
+        .unwrap();
+    assert_eq!(row["presence"]["state"], "present");
+    assert_eq!(row["presence"]["evidence"], binary.to_str().unwrap());
+    std::fs::create_dir(home.join(".cursor")).unwrap();
+    assert_eq!(cursor_status(home)["presence"]["state"], "present");
 }
 
 // ---- the copilot plugin ----------------------------------------------------
@@ -1125,38 +1385,28 @@ fn opencode_is_detected_by_its_directory_or_its_binary() {
     );
 }
 
-/// The two adapters that went are ordinary unknown names to the hook,
-/// and their files are left as found — there is nothing to migrate to.
+/// Gemini is an ordinary unknown name to the hook and its file stays as found.
 #[test]
-fn cursor_and_gemini_are_unknown_slugs_and_their_files_are_left() {
+fn gemini_is_an_unknown_slug_and_its_file_is_left() {
     let home = home();
-    let cursor = home.path().join(".cursor/hooks.json");
-    std::fs::create_dir_all(cursor.parent().unwrap()).unwrap();
-    let cursor_seed =
-        r#"{"version":1,"hooks":{"sessionStart":[{"command":"atc trigger cursor"}]}}"#;
-    std::fs::write(&cursor, cursor_seed).unwrap();
     let gemini = home.path().join(".gemini/settings.json");
     std::fs::create_dir_all(gemini.parent().unwrap()).unwrap();
     let gemini_seed = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"atc briefing gemini"}]}]}}"#;
     std::fs::write(&gemini, gemini_seed).unwrap();
 
     for verb in ["hook", "unhook"] {
-        for old in ["cursor", "gemini"] {
-            let out = atc(home.path(), home.path(), &["--json", verb, old], None);
-            assert_eq!(out.status.code(), Some(2), "{verb} {old}");
-            let value = envelope(&out);
-            assert_eq!(value["error"]["id"], "usage/unknown-slug");
-            let message = value["error"]["message"].as_str().unwrap();
-            assert!(message.contains("unknown client or shell"), "{message}");
-            assert!(message.contains("codex"), "names the known: {message}");
-        }
+        let out = atc(home.path(), home.path(), &["--json", verb, "gemini"], None);
+        assert_eq!(out.status.code(), Some(2), "{verb} gemini");
+        let value = envelope(&out);
+        assert_eq!(value["error"]["id"], "usage/unknown-slug");
+        let message = value["error"]["message"].as_str().unwrap();
+        assert!(message.contains("unknown client or shell"), "{message}");
+        assert!(message.contains("codex"), "names the known: {message}");
     }
     std::fs::create_dir_all(home.path().join(".codex")).unwrap();
     ok(&atc(home.path(), home.path(), &["hook", "--all"], None));
-    assert_eq!(std::fs::read_to_string(&cursor).unwrap(), cursor_seed);
     assert_eq!(std::fs::read_to_string(&gemini).unwrap(), gemini_seed);
     let listing = ok(&atc(home.path(), home.path(), &["hook", "-l"], None));
-    assert!(!listing.contains("cursor"), "{listing:?}");
     assert!(!listing.contains("gemini"), "{listing:?}");
 }
 

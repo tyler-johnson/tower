@@ -465,6 +465,7 @@ pub fn client_env(command: &mut Command, home: &Path, cwd: &Path) {
         .env_remove("ATC_CODEX")
         .env_remove("ATC_OPENCODE")
         .env_remove("ATC_COPILOT")
+        .env_remove("ATC_CURSOR")
         .env_remove("COPILOT_HOME")
         .env_remove("OPENCODE_CONFIG_DIR")
         .env_remove("ATC_FF")

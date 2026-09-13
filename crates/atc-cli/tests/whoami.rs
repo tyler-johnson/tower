@@ -65,6 +65,51 @@ fn own_pid() -> Option<u32> {
     cfg!(target_os = "linux").then(std::process::id)
 }
 
+/// Cursor's captured shell environment identifies the same session that its lifecycle hooks name.
+#[test]
+fn cursor_has_its_own_session_and_callsign_under_a_terminal() {
+    let repo = repo();
+    let record: serde_json::Value = serde_json::from_str(
+        include_str!("fixtures/cursor/capture.jsonl")
+            .lines()
+            .nth(2)
+            .unwrap(),
+    )
+    .unwrap();
+    let session = record["env"]["CURSOR_CONVERSATION_ID"].as_str().unwrap();
+    let out = atc(
+        repo.path(),
+        &[
+            (
+                "CURSOR_AGENT",
+                record["env"]["CURSOR_AGENT"].as_str().unwrap(),
+            ),
+            ("CURSOR_CONVERSATION_ID", session),
+            ("ATC_SHELL_SESSION", "terminal"),
+            ("ATC_SHELL_PID", "1"),
+        ],
+        &["whoami", "--json"],
+    );
+    stdout(&out);
+    let data = envelope(&out)["data"].clone();
+    assert_eq!(data["session"], session);
+    assert_eq!(data["session_source"], "cursor");
+    assert_eq!(data["client"], "cursor");
+    assert_eq!(data["callsign"], "cursor");
+    assert_eq!(data["pid"], serde_json::Value::Null);
+    assert!(
+        root(repo.path())
+            .join(".local/state/atc/leases")
+            .join(session)
+            .exists()
+    );
+    assert!(
+        !root(repo.path())
+            .join(".local/state/atc/leases/terminal")
+            .exists()
+    );
+}
+
 /// Copilot's shell tool gets its session from the client, ahead of the inherited terminal's row, and no inherited pid.
 #[test]
 fn copilot_has_its_own_session_and_callsign_under_a_terminal() {
