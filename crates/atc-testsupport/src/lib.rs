@@ -273,6 +273,22 @@ pub fn null_device() -> &'static str {
     if cfg!(windows) { "NUL" } else { "/dev/null" }
 }
 
+/// A fixture path the way a verb reports it: the main worktree gix
+/// discovers from the working directory. On macOS the tempdir sits
+/// behind the `/var` link to `/private/var` and the working directory
+/// comes back resolved, so unix resolves too; Windows hands a directory
+/// back as it was entered, 8.3 aliases and all, so it is left alone —
+/// `std::fs::canonicalize` there would expand the alias and add the
+/// `\\?\` prefix, and the verb prints neither.
+pub fn as_reported(path: &Path) -> PathBuf {
+    if cfg!(unix) {
+        std::fs::canonicalize(path)
+            .unwrap_or_else(|err| panic!("canonicalize {}: {err}", path.display()))
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// A string with backslashes flipped to `/`, for containment assertions
 /// where ff chose the separators on one side and the test built the other
 /// natively.

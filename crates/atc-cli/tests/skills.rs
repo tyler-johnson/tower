@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use atc_testsupport::{Repo, scrub};
+use atc_testsupport::{Repo, as_reported, scrub};
 
 /// A skill file with the front matter a harness redirect depends on,
 /// the shape of the `work` example. Written by the fixture, so the
@@ -87,6 +87,11 @@ fn repo() -> Repo {
     repo
 }
 
+/// The repository layer's directory as the verb reports it.
+fn repo_layer(repo: &Path) -> PathBuf {
+    as_reported(repo).join(".tower").join("skills")
+}
+
 /// A repository with the two example skills installed in its own layer.
 fn stocked() -> Repo {
     let repo = repo();
@@ -105,11 +110,7 @@ fn an_empty_shelf_says_so_and_where_a_skill_goes() {
         out,
         format!(
             "no skills installed\nauthor: {} · {}\n",
-            repo.path()
-                .join(".tower")
-                .join("skills")
-                .join("<name>.md")
-                .display(),
+            repo_layer(repo.path()).join("<name>.md").display(),
             xdg(repo.path())
                 .join("tower")
                 .join("skills")
@@ -144,11 +145,7 @@ fn the_listing_is_what_is_installed_with_layers_and_descriptions() {
     assert!(
         out.contains(&format!(
             "fork: {}",
-            repo.path()
-                .join(".tower")
-                .join("skills")
-                .join("<name>.md")
-                .display()
+            repo_layer(repo.path()).join("<name>.md").display()
         )),
         "{out}"
     );
@@ -191,7 +188,7 @@ fn the_json_forms_carry_summary_and_text() {
         skills[0]["source"],
         serde_json::json!({
             "layer": "repo",
-            "path": repo.path().join(".tower").join("skills").join("plan.md").display().to_string(),
+            "path": repo_layer(repo.path()).join("plan.md").display().to_string(),
         })
     );
     assert!(
@@ -267,9 +264,7 @@ fn a_repo_fork_shadows_the_user_layer_wholesale_and_says_so() {
     assert_eq!(
         one["data"]["skill"]["source"]["path"],
         serde_json::json!(
-            repo.path()
-                .join(".tower")
-                .join("skills")
+            repo_layer(repo.path())
                 .join("work.md")
                 .display()
                 .to_string()

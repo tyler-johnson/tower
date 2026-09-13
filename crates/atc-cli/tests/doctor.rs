@@ -66,11 +66,25 @@ fn repo() -> Repo {
 }
 
 /// The doctor rows out of a `--json` run, with the findings count.
+///
+/// No hook row is in a fixture — `SHELL` is scrubbed and the home holds
+/// no client and no rc file — except PowerShell's on Windows, where the
+/// shell is present unconditionally (5.1 ships with the OS). That row
+/// is asserted and then set aside, so the counts here are the same on
+/// every platform.
 fn rows(output: &Output) -> (Vec<serde_json::Value>, u64) {
     let envelope = envelope(output);
     assert_eq!(envelope["cmd"], serde_json::json!("doctor"));
-    let rows = envelope["data"]["rows"].as_array().expect("rows").clone();
+    let mut rows = envelope["data"]["rows"].as_array().expect("rows").clone();
     let findings = envelope["data"]["findings"].as_u64().expect("findings");
+    if cfg!(windows) {
+        let powershell = rows
+            .iter()
+            .position(|row| row["check"] == serde_json::json!("hook/powershell"))
+            .unwrap_or_else(|| panic!("no `hook/powershell` row on Windows: {rows:?}"));
+        let row = rows.remove(powershell);
+        assert_eq!(row["level"], serde_json::json!("info"), "{row}");
+    }
     (rows, findings)
 }
 

@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use atc_testsupport::{Repo, scrub};
+use atc_testsupport::{Repo, as_reported, scrub};
 
 /// `docs/procedures/review.toml`, verbatim enough to assert against.
 const REVIEW: &str = "\
@@ -99,18 +99,9 @@ fn repo() -> Repo {
     repo
 }
 
-/// The repository layer's directory as the verb reports it: the main
-/// worktree gix discovers from the working directory, which on macOS
-/// is the tempdir behind its `/var` link to `/private/var`. Windows
-/// hands the directory back as it was entered, 8.3 aliases and all, so
-/// only unix resolves.
+/// The repository layer's directory as the verb reports it.
 fn repo_layer(repo: &Path) -> PathBuf {
-    let root = if cfg!(unix) {
-        std::fs::canonicalize(repo).expect("the repository resolves")
-    } else {
-        repo.to_path_buf()
-    };
-    root.join(".tower").join("procedures")
+    as_reported(repo).join(".tower").join("procedures")
 }
 
 /// A repository with both example shapes in its own layer.
