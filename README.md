@@ -2,9 +2,9 @@
 
 # tower
 
-**the board over fufu**
+**the board in your repository**
 
-*Project management for people and agents, built on [fufu](https://github.com/tyler-johnson/fufu).<br>
+*Project management for people and agents, stored in git.<br>
 Intent is stored; the board is derived.*
 
 </div>
@@ -17,26 +17,22 @@ The model is the one every tracker uses, on purpose: a flight is an issue with a
 
 **tower is a thing agents call. It never calls agents.** There is no dispatch and no iteration verb: the harness loops and calls `atc next`, which hands back the next ready work — the harness is the scheduler, tower is only the queue. tower ships the manual and the mechanism and no workflow: one skill, `tower`, installed by `atc hook`; a `skill` field on a flight, a shelf it names into, and `atc skills <name>` to print one raw. No built-in procedures, no built-in loop, no default opinions about how work should flow. Structure and judgment are files their owner authors; the documentation teaches by example, and [`docs/`](docs/) carries the worked ones to copy in.
 
-## The seam
+## The program
 
-tower is a separate program with its own authority, its own store, and its own cadence. It is a declared extension of fufu's, speaks the machine contract, and never links `ff-core`:
+tower is a standalone program with its own store and release cadence. The CLI and embedded web board read the same repository-backed log:
 
 ```
 reached   atc, in the current directory
-envelope  {"atc": 1, "cmd": "<verb>", data | error} — bare ids, fufu's exit codes
+envelope  {"atc": 1, "cmd": "<verb>", data | error} — bare ids
 stores    refs/tower/log/<author>/<writer>
-spawns    ff --version in doctor · ff watch --all in serve
-writes    nothing under refs/fufu/*, ever
 ```
-
-That last line is fufu's extension rule unmodified: extensions read fufu state and call fufu verbs; only fufu writes fufu state. Outside `doctor` and `serve`, tower spawns fufu for nothing, and no verb's answer depends on a fufu read.
 
 ## Layout
 
 | crate | what it is |
 |---|---|
 | `atc-core` | the flight log, the fold that becomes a board and the query over it, procedures, intake |
-| `atc-cli` | the one binary, `atc`, which fufu's dispatch finds for `atc` |
+| `atc-cli` | the standalone binary, `atc` |
 | `atc-serve` | the standing server: the embedded web board, its API, and the change feed |
 | `atc-testsupport` | shared fixtures |
 
@@ -44,7 +40,9 @@ Forge adapters are separate binaries discovered on PATH — `atc-github`, `atc-l
 
 ## Install
 
-tower rides fufu, so install [fufu](https://github.com/tyler-johnson/fufu) first — the verb is reached as `atc`.
+### 1. Install the binary
+
+The binary gives you every CLI verb and the embedded web board. It is complete on its own; agent integration is the second step.
 
 Linux/macOS:
 
@@ -64,7 +62,31 @@ Homebrew:
 brew install tyler-johnson/tap/atc
 ```
 
-Official builds check for releases about daily and announce each new release once (`atc config updateCheck false` turns checks and notices off). `atc update` names the command for this install: Cargo for source builds, Homebrew for brew installs, the installer for its default destination, or the releases page for other installs. Only the installer channel runs, after `-y` or a typed yes; without a terminal, the command is printed for you to run. Both installers refresh existing client wiring with `atc hook -u` after placing the new binary.
+### 2. Connect your agent clients
+
+```sh
+atc hook
+```
+
+The same command works on Windows. It reports the clients and shells it found, then asks which to wire. tower supports Claude Code, Codex, Qwen Code, OpenCode, Copilot CLI, and Cursor CLI. The wiring delivers the board's notice to agent sessions and installs the `tower` manual in clients that load skills; Qwen receives the notice alone. Codex requires you to review the installed hook through `/hooks`. See [Reaching an agent](docs/README.md#reaching-an-agent) for client details and shell integration.
+
+Both install scripts already run `atc hook -u`: it refreshes existing wiring and skills without adding unwired clients. On a fresh machine it wires nothing, so run `atc hook` to choose your clients. `atc unhook` removes tower-owned wiring and skills while preserving other entries in shared files.
+
+`atc update` names the command that owns the binary; the install scripts refresh existing hooks and skills with `atc hook -u`.
+
+## Web board
+
+Run `atc serve` inside a repository and open [http://127.0.0.1:7420](http://127.0.0.1:7420). The binary includes the web app, its API, and a live change feed over the same board the CLI reads and edits.
+
+A planned Changes tab will use [fufu](https://github.com/tyler-johnson/fufu), when installed, to put repository history and changes on a repository's page. That tab is later work; the board and agent integration work on their own.
+
+## Skills
+
+`atc hook` ships one manual, `tower`, reached as `/tower:tower` in Claude Code and `$tower` in Codex and OpenCode. It teaches the model, command contract, and how to find each verb's help.
+
+Workflow instructions are yours to write on the shelf: `~/.config/tower/skills/<name>.md` for yourself or `.tower/skills/<name>.md` in the main worktree for the team. A repository skill replaces a user skill of the same name. A flight's `skill` field names one; `atc next` hands that name to the agent, which reads it with `atc skills <name>` and follows it for the flight. The manual is installed separately from this shelf.
+
+The [plan](docs/skills/plan.md), [work](docs/skills/work.md), and [review](docs/skills/review.md) skills are worked examples to copy and fork. See [the shelf and copying instructions](docs/README.md#the-two-layers) for the full layout.
 
 ## Building
 
@@ -76,9 +98,9 @@ $ make release      # the honest fat-LTO build
 
 The suite includes a live test per wired agent client (`crates/atc-cli/tests/live_<client>.rs`) that runs the real client binary against a scripted mock model when it is on PATH and skips otherwise; `ATC_LIVE=1` makes a skip a failure, which is how CI runs them.
 
-`make` is the whole install: fufu's `ff-<name>` dispatch searches PATH, and with cargo's target dir shared machine-wide and its dogfood/ on PATH, `atc` is live the moment a build links — no reinstall step between editing and running.
+With cargo's target dir shared machine-wide and its `dogfood/` directory on PATH, `make` makes `atc` available the moment a build links — no reinstall step between editing and running. Run `atc hook -u` after building to refresh existing client wiring and skills.
 
-Building needs Node and pnpm: cargo's build script runs the web build itself and embeds the output, so `cargo build` alone yields the full binary with the board inside. They are build dependencies only — fufu stays a runtime dependency rather than a build one: tower spawns `ff`, so running tower needs `ff` on PATH and nothing else.
+Building needs the Rust toolchain, Node, and pnpm: cargo's build script runs the web build itself and embeds the output, so `cargo build` alone yields the full binary with the board inside. Node and pnpm are build dependencies only.
 
 ## License
 

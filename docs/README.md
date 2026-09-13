@@ -1,6 +1,6 @@
 # Worked examples
 
-The engine ships empty. There are no built-in procedures and no built-in skills — every opinion about how work flows is a file its owner authored, and this directory is where the examples live so you can copy one in and fork it.
+The engine ships empty. There are no built-in procedures and no built-in workflow skills — every opinion about how work flows is a file its owner authored, and this directory is where the examples live so you can copy one in and fork it.
 
 The three skills here are one workflow among many. tower ships the manual and the mechanism, and the shape of the loop is yours to fork.
 
