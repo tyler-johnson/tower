@@ -24,7 +24,7 @@ tower is called and never calls agents. It runs no agent dispatch and no loop; t
 
 The five plugins carry this manual and skills from declared adapters. The trigger has three event classes: a context boundary prints the notice and renews the session's lease, activity renews it silently, and the session's end releases it. Each client wires the events it supports; ending a turn is activity. OpenCode's notice is standing in the system prompt on every model call, so it survives compaction. Unknown events and trigger failures exit 0 without output. Shell wiring installs marked rc lines for a session heartbeat at each prompt and a release at exit, with no notice.
 
-`atc hook -u` re-asks every declared adapter's manifest, even when no client is wired, then repairs existing client and shell installs without adding unwired ones. It refreshes the binary path, hook entries, manual, and adapter skills. Failed skill replies preserve older installed copies; retired skills are removed on repair.
+`atc hook -u` refreshes declared adapters and repairs existing client and shell installs without adding unwired ones. It refreshes the binary path, hook entries, manual, and adapter skills. If a skill cannot be refreshed, its older installed copy stays; retired skills are removed on repair.
 
 `atc unhook claude` takes back exactly tower's wiring for that client; other names and `atc unhook --all` work the same way. Tower-owned plugin directories and OpenCode's module are removed whole, together with the skills tower installed. Shared settings and marketplaces lose only tower's entries, and shell rc files lose only tower's marked lines; other entries and manually authored trigger lines remain. Copilot's dedicated marketplace and registration are removed with its plugin. Codex's plugin and marketplace entry are removed, and the report names a separate command to clear its client cache. Board records and workflow shelves are independent of wiring.
 
@@ -34,7 +34,7 @@ The five plugins carry this manual and skills from declared adapters. The trigge
 
 **Intent is stored; the board is derived.** The word a row shows is folded from the record at every render — in backlog, started, closed, the open question, the edges — and nothing on it was read from a tree or asked of fufu. In Progress is a word someone set, with their byline; Done is asserted, never derived. tower checks neither against the repository, and it stores nothing it did not receive as a verb.
 
-**Nothing tower writes is undoable by `ff undo`.** The manifest says so (`undoable: false`): the log is append-only, and every verb is a new event. Disagreeing with the record is another event — `atc edit <target>`, `atc unlink <a> <b>`, `atc cancel <flight> -m "<why>"` — and the brief's history keeps both.
+**The log is append-only, and every verb is a new event.** Disagreeing with the record is another event — `atc edit <target>`, `atc unlink <a> <b>`, `atc cancel <flight> -m "<why>"` — and the brief's history keeps both.
 
 ## Naming a flight
 
@@ -97,7 +97,7 @@ The pick is the claim and nothing else: each picked flight is set In Progress wi
 {"atc":1,"cmd":"status","error":{"id":"status/held","message":"…","exits":["…"]}}
 ```
 
-`data` and `error` never appear together. A refusal fufu shaped itself is forwarded verbatim under fufu's id, and `ff explain <id>` holds its prose; `atc explain <id>` holds tower's.
+`data` and `error` never appear together. `atc explain <id>` gives the prose behind a refusal.
 
 | Exit | Meaning |
 | --- | --- |
@@ -108,6 +108,14 @@ The pick is the claim and nothing else: each picked flight is set In Progress wi
 | 4 | `ref/contended`; another writer had the lock, run it again |
 
 The log is `refs/tower/log/<author>/<writer>`, one orphan chain per writer; `tower.writer` is minted at the first append and is not a setting to copy between machines. Sync is a `git push` or `git fetch` of that refspec; there is no verb, and a chain this repository has not fetched shows in `atc doctor` as events off the board. `atc serve` answers the same envelopes at `/api/…` and streams changes at `/api/feed`; a person starts it, and every other interface works with it down.
+
+## Using adapters
+
+Install an adapter's binary using its own installation instructions and put it on PATH. A binary named `atc-<name>` is reached as `atc <name>`; built-in tower commands take precedence. `atc adapter <name>` declares an installed adapter to tower, and bare `atc adapter` lists declarations. Declaration makes its help, notices, skills, update instructions, and diagnostics available through tower.
+
+Use `atc help <name>` for a declared adapter's commands and `atc explain <name>/<id>` for its refusals. Run `atc hook -u` after declaring one to refresh existing clients with its skills. `atc update` includes declared adapters, and `atc doctor` reports missing or changed installations.
+
+`atc adapter -d <name>` forgets the declaration without uninstalling the executable; run `atc hook -u` afterward to remove its installed skills. As long as the binary remains on PATH, `atc <name>` can still invoke it.
 
 ## Landmines
 

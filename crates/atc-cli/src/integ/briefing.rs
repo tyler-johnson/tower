@@ -371,11 +371,13 @@ mod tests {
     /// A skill is paid for only when it is read, so its budget is loose —
     /// but it is a budget, because an unwatched manual grows until it is
     /// one nobody finishes.
+    /// The standalone manual covers client setup and adapter use;
+    /// its budget is 20,000 bytes.
     #[test]
     fn every_skill_stays_within_its_budget() {
         for skill in &SKILLS {
             assert!(
-                skill.text.len() <= 16_000,
+                skill.text.len() <= 20_000,
                 "the {} skill is {} bytes; trim it or raise the budget deliberately",
                 skill.name,
                 skill.text.len()
