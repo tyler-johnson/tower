@@ -19,4 +19,4 @@ Decisions settle here. The person they belong to is in this conversation, so ask
 
 End with a person. The last flight of any plan is theirs — review, verify, decide.
 
-Sanity pass, then report: `atc board` to see the whole shape, then report the flights filed with their numbers and edges, and stop.
+Sanity pass, then report: `atc board` to see the whole shape, then report the flights filed with their display names and edges, and stop. Under `--json`, `file` and `decompose` return `data.flights`: the filing or updated parent first, then its new parts. Each row carries `id` for subsequent commands and `display` for the report, plus the derived status, edges, and progress.

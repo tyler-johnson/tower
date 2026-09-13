@@ -57,7 +57,11 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool, expand: bool) -> St
     }
     out.push_str(&format!(
         "{}  {subject}\n",
-        render::paint_id(&show(fold, &brief.id), colored),
+        render::paint_id(&brief.display, colored),
+    ));
+    out.push_str(&format!(
+        "    {}\n",
+        render::paint_dim(&format!("{} · {}", brief.id, brief.writer_ref), colored)
     ));
     out.push_str(&format!("    {}\n", note(brief, now, colored, &shown)));
     out.push_str(&format!("    {}\n", fields_line(brief, colored)));
@@ -89,12 +93,8 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool, expand: bool) -> St
     // default. Then the backlinks:
     // the flights whose prose names this one. The outgoing list gets no
     // section — the prose above already shows it.
-    let row = |flight: &str, subject: &str, status: &str, closed: bool| {
-        let mut line = format!(
-            "· {}  {}",
-            render::paint_id(&show(fold, flight), colored),
-            subject
-        );
+    let row = |display: &str, subject: &str, status: &str, closed: bool| {
+        let mut line = format!("· {}  {}", render::paint_id(display, colored), subject);
         if closed {
             line.push_str(&format!(
                 "  {}",
@@ -109,7 +109,7 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool, expand: bool) -> St
         out.push_str("parents\n");
         for parent in &brief.parents {
             out.push_str(&row(
-                &parent.flight,
+                &parent.display,
                 &parent.subject,
                 &parent.status,
                 parent.closed,
@@ -132,7 +132,12 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool, expand: bool) -> St
         out.push_str(title);
         out.push('\n');
         for link in links {
-            out.push_str(&row(&link.flight, &link.subject, &link.status, link.closed));
+            out.push_str(&row(
+                &link.display,
+                &link.subject,
+                &link.status,
+                link.closed,
+            ));
         }
     }
 
@@ -366,10 +371,4 @@ fn endpoint(fold: &Fold, id: &str) -> String {
         }
         _ => id.to_string(),
     }
-}
-
-/// A wire id from the brief, in the board's display form. Infallible —
-/// the ids came out of this fold's filed flights.
-fn show(fold: &Fold, id: &str) -> String {
-    super::display(fold, &id.parse().expect("the fold's ids parse"))
 }

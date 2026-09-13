@@ -50,9 +50,12 @@ Type it often; it is the fastest way to learn what to do next.
 `board` is the same render made explicit, so this page is also
 `atc help board`.
 
-A flight has two names, human against wire. The board prints the dense
-number, #3; the wire name is the id of the event that filed it,
-<writer>.<seq>, and JSON carries it raw. Any verb taking a flight
+A flight has two names, human against wire. The board prints #3 for
+a single-writer fold, or writer#3 when the complete fold has several
+writers, including flights outside the closed window. JSON rows carry
+id (the filing event's wire name, <writer>.<seq>), writer, and display
+(the pasteable name). Clients print display without reconstructing it.
+Any verb taking a flight
 accepts <n>, <writer>#<n>, or <writer>.<seq> — a bare number resolves
 against the board's filed flights, and an ambiguous one refuses with
 the full forms — and a leading # is stripped, so what tower prints
@@ -114,6 +117,10 @@ says which of `drained` and `elsewhere` it was: `drained` is a board
 with nothing left, and `elsewhere` is Ready work in a lane the walk
 never entered — the count rides beside it. A --json reader branches
 on the word; a shell loop stops on the code.
+
+Each picked row carries id, writer, display, subject, and skill when
+the flight names one. Use id for subsequent commands and display when
+reporting the flight to a person.
 
 A flight with a live dependency is Waiting, in no walk, and never
 reaches the pick.";
@@ -187,7 +194,13 @@ on them all. One flight collapses onto the filing — your flags,
 saying one thing must not cost two flights. Two or more file a
 parent plus one flight each, on the same edges `decompose` writes,
 all in one append, so no flight is ever live, unlinked, and
-pullable.";
+pullable.
+
+--json also returns flights: the board row for every flight minted,
+the filing first and then its parts in definition order. Each row
+carries id, writer, display, derived status, edges, progress, and the
+merged fields. The filed, linked, parts, and optional routed events
+keep their log shapes; derived fields live only on the rows.";
 
 pub const FILE_EXAMPLES: &str = "\
 Examples:
@@ -298,7 +311,12 @@ reader works on both unchanged — and the filings and the edges land
 in one append, so no sub-flight is ever live, unlinked, and pullable.
 Every sub-flight closed, canceled included, makes the parent Ready,
 not finished: whether the broad task is over is a judgment, and
-`atc done <flight>` is where it gets made.";
+`atc done <flight>` is where it gets made.
+
+--json also returns flights: the updated parent's board row first,
+then every new part in filing order. The rows carry display names,
+derived statuses, edges, and progress. Existing parent facts are
+preserved; filed, linked, and parent keep their existing shapes.";
 
 pub const DECOMPOSE_EXAMPLES: &str = "\
 Examples:

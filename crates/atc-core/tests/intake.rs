@@ -138,7 +138,7 @@ fn a_multi_flight_rule_mints_the_family_and_the_routing_in_one_commit() {
     let store = Store::open(repo.path()).expect("open");
 
     let outcome = verb::file(&store, "feather", labeled("review"), None).expect("files");
-    assert_eq!(outcome.part_ids.len(), 2);
+    assert_eq!(outcome.payload.parts.len(), 2);
     assert_eq!(commits(&repo), 1, "the family lands atomically");
 
     // The parent, two children, the parent's two edges, the after edge,
@@ -172,7 +172,7 @@ fn a_multi_flight_rule_mints_the_family_and_the_routing_in_one_commit() {
     else {
         panic!("the routing is the last event, got {:?}", routed.kind);
     };
-    assert_eq!(flight, &outcome.parent);
+    assert_eq!(flight, &outcome.payload.filed.id);
     assert_eq!(rule, "review-label");
     assert_eq!(because, "matched label review");
 }

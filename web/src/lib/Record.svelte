@@ -6,13 +6,13 @@
   import { age, byline, linkRefs, statusDot, type Brief } from "./tower";
   import { feed } from "./feed.svelte";
 
-  let { brief, refs }: { brief: Brief; refs: Map<string, string> } = $props();
+  let { brief }: { brief: Brief } = $props();
 
   // The link rows name themselves from the brief: a parent or child that
-  // closed past the board's window has no row in `refs`, and would
-  // otherwise print as its wire id. The same map names the references
+  // closed past the board's window still carries its display here.
+  // The same map names the references
   // in the prose, and every render below takes it.
-  let linkRef = $derived(linkRefs([...refs.keys()], brief));
+  let linkRef = $derived(linkRefs(brief));
   const flightHref = (id: string) => query.href(`/f/${id}`);
   const shown = (text: string) => render(text, linkRef, flightHref);
 

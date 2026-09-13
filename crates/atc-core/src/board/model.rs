@@ -117,9 +117,9 @@ pub struct WaitingOnYou {
 #[derive(Debug, Clone, Serialize)]
 pub struct FlightView {
     pub id: String,
-    /// The dense per-writer flight number — the human name's numeric
-    /// half, beside the wire id.
-    pub number: u64,
+    pub writer: String,
+    /// The pasteable name, resolved against the complete fold.
+    pub display: String,
     /// Provenance only: the procedure the filing was minted under, or
     /// a match rule chose at file time.
     pub procedure: Option<String>,
@@ -210,10 +210,18 @@ pub fn rows(fold: Fold, viewer: Option<&str>) -> Rows {
         .filter_map(|flight| Some((flight.id.to_string(), status_reason(&fold, flight)?)))
         .collect();
 
+    let mut displays: HashMap<String, String> = fold
+        .flights
+        .iter()
+        .map(|flight| (flight.id.to_string(), super::display(&fold, &flight.id)))
+        .collect();
     let mut flights = Vec::with_capacity(fold.flights.len());
     for flight in fold.flights {
         let id = flight.id.to_string();
-        let mut view = view(flight, reasons.remove(&id), viewer);
+        let display = displays
+            .remove(&id)
+            .expect("every flight has a display name");
+        let mut view = view(flight, display, reasons.remove(&id), viewer);
         view.progress = marks.get(&id).copied();
         flights.push(view);
     }
@@ -388,7 +396,12 @@ pub(super) fn rank(priority: &str) -> u8 {
     }
 }
 
-fn view(flight: Flight, status_reason: Option<String>, viewer: Option<&str>) -> FlightView {
+fn view(
+    flight: Flight,
+    display: String,
+    status_reason: Option<String>,
+    viewer: Option<&str>,
+) -> FlightView {
     let mine = flight.mine(viewer);
     let (question, asked_at) = match flight.question {
         Some(question) => (Some(question.text), Some(question.at)),
@@ -396,7 +409,8 @@ fn view(flight: Flight, status_reason: Option<String>, viewer: Option<&str>) -> 
     };
     FlightView {
         id: flight.id.to_string(),
-        number: flight.number,
+        writer: flight.id.writer.clone(),
+        display,
         procedure: flight.procedure,
         subject: flight.subject,
         body: flight.body,
@@ -897,7 +911,8 @@ mod tests {
         let board = board(&[filed("pi.1", 10)]);
         let view = &board.backlog[0];
         assert_eq!(view.id, "pi.1");
-        assert_eq!(view.number, 1);
+        assert_eq!(view.writer, "pi");
+        assert_eq!(view.display, "#1");
         assert_eq!(view.status, "backlog");
         assert!(view.status_by.is_none() && view.status_at.is_none());
         assert!(view.assignee.is_none());

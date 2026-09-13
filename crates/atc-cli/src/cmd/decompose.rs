@@ -6,13 +6,11 @@
 //! the parent; anything else is the by-hand form, one subject per
 //! argument. The verb's body lives in core's `verb::decompose`, where
 //! the server mounts it too; this file is the human echo — the parent's
-//! line, then one row per minted sub-flight. The re-fold here is for
-//! their display numbers and their folded statuses alone; the machine
-//! path never folds.
+//! line, then one row per minted sub-flight, using the same post-append
+//! board rows as the machine response.
 
 use crate::error::CliError;
 use crate::{machine, render};
-use atc_core::board;
 use atc_core::verb;
 
 pub fn run(json: bool, flight: &str, parts: &[String]) -> Result<(), CliError> {
@@ -23,12 +21,13 @@ pub fn run(json: bool, flight: &str, parts: &[String]) -> Result<(), CliError> {
         println!("{}", machine::emit("decompose", &outcome.payload));
         return Ok(());
     }
-    // Re-fold after the append: the echo's numbers live on the fold's
-    // flights, so the flights must be in it.
-    let after = board::fold(&store.read_all()?);
     let colored = render::colored();
-    let filed = &outcome.filed_ids;
-    let refs: Vec<String> = filed.iter().map(|id| super::display(&after, id)).collect();
+    let (parent, filed) = outcome
+        .payload
+        .flights
+        .split_first()
+        .expect("decompose returns its parent");
+    let refs: Vec<String> = filed.iter().map(|row| row.display.clone()).collect();
     let width = refs
         .iter()
         .map(|reference| reference.chars().count())
@@ -36,10 +35,7 @@ pub fn run(json: bool, flight: &str, parts: &[String]) -> Result<(), CliError> {
         .unwrap_or(0);
     let rows: Vec<(&str, &str)> = filed
         .iter()
-        .map(|id| {
-            let flight = super::flight(&after, id);
-            (flight.subject.as_str(), flight.status.as_str())
-        })
+        .map(|flight| (flight.subject.as_str(), flight.status.as_str()))
         .collect();
     let noun = if filed.len() == 1 {
         "sub-flight"
@@ -48,7 +44,7 @@ pub fn run(json: bool, flight: &str, parts: &[String]) -> Result<(), CliError> {
     };
     println!(
         "decomposed {} into {} {noun}",
-        render::paint_id(&super::display(&after, &outcome.parent), colored),
+        render::paint_id(&parent.display, colored),
         super::count(filed.len())
     );
     for (reference, (subject, status)) in refs.iter().zip(&rows) {

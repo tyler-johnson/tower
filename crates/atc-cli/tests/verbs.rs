@@ -187,6 +187,131 @@ fn a_bare_file_is_one_ready_flight_and_one_event() {
 
     let board = envelope(&atc(repo.path(), &["--json"]));
     assert_eq!(board["data"]["ready"].as_array().expect("open").len(), 1);
+    let rows = filing["data"]["flights"].as_array().expect("minted rows");
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row, &board["data"]["ready"][0]);
+    assert_eq!(row["id"], "pi.1");
+    assert_eq!(row["writer"], "pi");
+    assert_eq!(row["display"], "#1");
+    assert_eq!(row["status"], "ready");
+    assert_eq!(row["comments"], 0);
+    assert_eq!(row["depends_on"], serde_json::json!([]));
+    assert_eq!(row["blocks"], serde_json::json!([]));
+    for key in [
+        "status_by",
+        "status_at",
+        "status_reason",
+        "progress",
+        "question",
+        "asked_at",
+    ] {
+        assert!(row.get(key).expect("row field").is_null(), "{key}: {row}");
+    }
+    assert!(row.get("number").is_none());
+    assert!(
+        filing["data"]["filed"].get("display").is_none(),
+        "display never becomes an event field"
+    );
+    let raw = stdout(&out);
+    assert!(raw.find("\"flights\":").unwrap() > raw.find("\"parts\":").unwrap());
+}
+
+#[test]
+fn a_two_part_procedure_returns_ordered_rows_with_derived_edges_and_fields() {
+    let repo = repo();
+    repo.write(
+        ".tower/procedures/pipeline.toml",
+        r#"
+name = "pipeline"
+[[flight]]
+id = "build"
+priority = "high"
+assignee = "agent"
+skill = "work"
+[[flight]]
+id = "review"
+after = ["build"]
+assignee = "me"
+"#,
+    );
+    let out = atc(
+        repo.path(),
+        &[
+            "file", "pipeline", "ship it", "-p", "urgent", "--label", "release", "--json",
+        ],
+    );
+    let data = envelope(&out)["data"].clone();
+    stdout(&out);
+    let rows = data["flights"].as_array().expect("rows");
+    assert_eq!(row_ids(&data["flights"]), ["pi.1", "pi.2", "pi.3"]);
+    assert_eq!(rows[0]["progress"], serde_json::json!([0, 2]));
+    assert_eq!(rows[0]["status"], "waiting");
+    assert_eq!(rows[0]["priority"], "urgent");
+    assert_eq!(rows[0]["labels"], serde_json::json!(["release"]));
+    assert_eq!(rows[0]["depends_on"], serde_json::json!(["pi.2", "pi.3"]));
+    assert_eq!(rows[0]["blocks"], serde_json::json!([]));
+    assert_eq!(rows[1]["status"], "ready");
+    assert_eq!(rows[1]["priority"], "high");
+    assert_eq!(rows[1]["skill"], "work");
+    assert_eq!(rows[1]["assignee"], "agent");
+    assert_eq!(rows[1]["depends_on"], serde_json::json!([]));
+    assert_eq!(rows[1]["blocks"], serde_json::json!(["pi.1", "pi.3"]));
+    assert_eq!(rows[2]["status"], "waiting");
+    assert_eq!(rows[2]["depends_on"], serde_json::json!(["pi.2"]));
+    assert_eq!(rows[2]["blocks"], serde_json::json!(["pi.1"]));
+    for (row, display) in rows.iter().zip(["#1", "#2", "#3"]) {
+        assert_eq!(row["writer"], "pi");
+        assert_eq!(row["display"], display);
+        assert!(row.get("number").is_none());
+    }
+    assert_eq!(
+        data["filed"]["body"]["status"], "ready",
+        "events retain their stored word"
+    );
+    assert_eq!(data["parts"][1]["body"]["status"], "ready");
+}
+
+#[test]
+fn a_collapsed_procedures_row_carries_the_callers_overrides() {
+    let repo = repo();
+    repo.write(
+        ".tower/procedures/ticket.toml",
+        r#"
+name = "ticket"
+[[flight]]
+id = "work"
+priority = "low"
+assignee = "agent"
+skill = "work"
+status = "backlog"
+"#,
+    );
+    let out = atc(
+        repo.path(),
+        &[
+            "file",
+            "ticket",
+            "one",
+            "-p",
+            "high",
+            "--assignee",
+            "me",
+            "--status",
+            "ready",
+            "--json",
+        ],
+    );
+    stdout(&out);
+    let data = envelope(&out)["data"].clone();
+    let rows = data["flights"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["priority"], "high");
+    assert_eq!(rows[0]["assignee"], "me");
+    assert_eq!(rows[0]["mine"], true);
+    assert_eq!(rows[0]["status"], "ready");
+    assert_eq!(rows[0]["skill"], "work");
+    assert_eq!(data["parts"], serde_json::json!([]));
 }
 
 #[test]
@@ -1176,7 +1301,7 @@ fn a_release_back_to_ready_rejoins_the_pool() {
     ));
     let envelope = envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     assert_eq!(
-        envelope["data"]["picked"][0]["flight"],
+        envelope["data"]["picked"][0]["id"],
         serde_json::json!("pi.1")
     );
 
@@ -1191,7 +1316,7 @@ fn a_release_back_to_ready_rejoins_the_pool() {
     stdout(&atc(repo.path(), &["status", "1", "ready"]));
     let peeked = self::envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     assert_eq!(
-        peeked["data"]["picked"][0]["flight"],
+        peeked["data"]["picked"][0]["id"],
         serde_json::json!("pi.1"),
         "the release is the recovery path"
     );
@@ -1534,6 +1659,19 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
     assert_eq!(decomposed["cmd"], serde_json::json!("decompose"));
     let data = &decomposed["data"];
     assert_eq!(data["parent"], serde_json::json!("pi.1"));
+    let rows = data["flights"].as_array().expect("rows");
+    assert_eq!(row_ids(&data["flights"]), ["pi.1", "pi.2", "pi.3"]);
+    assert_eq!(rows[0]["status"], "waiting");
+    assert_eq!(rows[0]["progress"], serde_json::json!([0, 2]));
+    assert_eq!(rows[0]["depends_on"], serde_json::json!(["pi.2", "pi.3"]));
+    for (row, name) in rows.iter().zip(["#1", "#2", "#3"]) {
+        assert_eq!(row["display"], name);
+        assert!(row.get("number").is_none());
+    }
+    for row in &rows[1..] {
+        assert_eq!(row["status"], "ready");
+        assert_eq!(row["blocks"], serde_json::json!(["pi.1"]));
+    }
 
     let filed = data["filed"].as_array().expect("filed");
     assert_eq!(filed.len(), 2);
@@ -1565,6 +1703,51 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
     );
     assert_eq!(family(&brief_of(repo.path(), "pi.2"), "blocks"), ["pi.1"]);
     assert_eq!(family(&brief_of(repo.path(), "pi.3"), "blocks"), ["pi.1"]);
+}
+
+#[test]
+fn decompose_preserves_the_existing_parents_marks_comments_and_progress() {
+    let repo = repo();
+    stdout(&atc(
+        repo.path(),
+        &["file", "ongoing", "-m", "keep the context", "-p", "high"],
+    ));
+    stdout(&atc(repo.path(), &["decompose", "1", "finished part"]));
+    stdout(&atc(repo.path(), &["done", "2"]));
+    stdout(&atc(repo.path(), &["comment", "1", "-m", "existing note"]));
+    stdout(&atc(repo.path(), &["status", "1", "in_progress"]));
+    let before = envelope(&atc(repo.path(), &["--json"]))["data"]["in_progress"][0].clone();
+    install_review(&repo);
+    let out = atc(repo.path(), &["decompose", "1", "review", "--json"]);
+    stdout(&out);
+    let data = envelope(&out)["data"].clone();
+    let rows = data["flights"].as_array().expect("rows");
+    assert_eq!(rows.len(), 4, "the existing child is not a new part");
+    let parent = &rows[0];
+    assert_eq!(parent["id"], "pi.1");
+    assert_eq!(parent["progress"], serde_json::json!([1, 4]));
+    assert_eq!(parent["comments"], 1);
+    assert_eq!(parent["status"], "in_progress");
+    for key in [
+        "body",
+        "priority",
+        "status_by",
+        "status_at",
+        "status_reason",
+        "filed_at",
+    ] {
+        assert_eq!(parent[key], before[key], "{key}");
+    }
+    assert!(parent["status_at"].is_number());
+    let after = envelope(&atc(repo.path(), &["--json"]))["data"]["in_progress"][0].clone();
+    assert_eq!(
+        parent, &after,
+        "the mint response is the board's current row"
+    );
+    for (row, event) in rows[1..].iter().zip(data["filed"].as_array().unwrap()) {
+        assert_eq!(row["id"], event["id"], "parts stay in filing order");
+    }
+    assert_eq!(rows[3]["status"], "waiting");
 }
 
 #[test]

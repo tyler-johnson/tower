@@ -178,7 +178,7 @@ fn a_flight_named_in_a_comment_is_stored_by_wire_id_and_printed_by_number() {
         serde_json::json!("blocked on #pi.2.")
     );
     assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.2"));
-    assert_eq!(brief["references"][0]["number"], serde_json::json!(2));
+    assert_eq!(brief["references"][0]["display"], serde_json::json!("#2"));
     assert_eq!(brief["referenced_by"], serde_json::json!([]));
 
     // The page projects it back to the current number.
@@ -201,7 +201,10 @@ fn a_flight_named_in_a_comment_is_stored_by_wire_id_and_printed_by_number() {
         brief["referenced_by"][0]["flight"],
         serde_json::json!("pi.1")
     );
-    assert_eq!(brief["referenced_by"][0]["number"], serde_json::json!(1));
+    assert_eq!(
+        brief["referenced_by"][0]["display"],
+        serde_json::json!("#1")
+    );
     assert_eq!(
         brief["referenced_by"][0]["subject"],
         serde_json::json!("the dependent")
@@ -461,7 +464,7 @@ fn a_sub_flights_brief_lists_its_parent_and_keeps_the_body_off_the_page() {
     assert!(!text.contains("  the body of the work\n"), "{text}");
     let data = envelope(&atc(repo.path(), &["brief", "3", "--json"]))["data"].clone();
     assert_eq!(data["parents"][0]["flight"], serde_json::json!("pi.1"));
-    assert_eq!(data["parents"][0]["number"], serde_json::json!(1));
+    assert_eq!(data["parents"][0]["display"], serde_json::json!("#1"));
     assert_eq!(
         data["parents"][0]["subject"],
         serde_json::json!("the dependent")
@@ -1018,7 +1021,7 @@ fn the_json_pins_the_merged_envelope() {
     assert_eq!(envelope["cmd"], serde_json::json!("brief"));
     let data = &envelope["data"];
     assert_eq!(data["id"], serde_json::json!("pi.8"));
-    assert_eq!(data["number"], serde_json::json!(5));
+    assert_eq!(data["display"], serde_json::json!("#5"));
     assert_eq!(data["standing"], serde_json::json!("ready"));
     assert_eq!(data["procedure"], serde_json::json!("pipeline"));
     assert_eq!(data["subject"], serde_json::json!("right work · pass"));

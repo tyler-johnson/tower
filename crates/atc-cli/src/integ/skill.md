@@ -82,7 +82,7 @@ Hold is the fallback for an unattended run. With a person in the conversation, a
 
 `atc next [<lane>...]` pulls from the lanes named, walked in the order given and nothing appended: `me`, your own queue, the literal `me` lane and your callsign's; `agent`, the shared pool alone; `none`, the unassigned lane; or a callsign, that pilot's queue. Nothing named is your own default — under a client, `me`, your client's lane, `agent`, `none`, with the client's lane left out when your callsign already is the client word; at a shell with no client, `me` then `none`. Each lane walks by priority, then filed order. A lane named twice walks once. `-n 3` admits up to three the same way; `--assignee <lane>` says where each pick lands, with `file`'s words — `me` when unsaid, storing your callsign, so `--assignee agent` is how a pick stays in the pool — and the re-lane is written only when the lane changes; `--peek` runs the same computation with nothing written, and the envelope's `pulled` says which happened. Three outcomes: `work` (exit 0, something picked), `drained` (exit 1, the board has nothing left), and `elsewhere` (exit 1, Ready work exists in a lane the walk never entered — the count rides as `elsewhere`). Both empties are full data envelopes: `--json` exits 0 on a pick and 1 on an empty one, a JSON reader branches on `outcome`, and a shell loop stops on the code. `-n 0` refuses.
 
-The pick is the claim and nothing else: each picked flight is set In Progress with your callsign as the pilot and moves into your queue unless `--assignee` says otherwise, the re-lane riding in the same append, and `next` hands out no branch and no tree. Each `picked` row carries `flight`, `number`, `subject`, and `skill` (absent when the flight names none); a `skill` is an installed skill's name, and `atc skills <name>` prints it raw. A flight with a live dependency is Waiting, not in the pool, and never reaches the walk.
+The pick is the claim and nothing else: each picked flight is set In Progress with your callsign as the pilot and moves into your queue unless `--assignee` says otherwise, the re-lane riding in the same append, and `next` hands out no branch and no tree. Each `picked` row carries `id`, `writer`, `display`, `subject`, and `skill` (absent when the flight names none); a `skill` is an installed skill's name, and `atc skills <name>` prints it raw. A flight with a live dependency is Waiting, not in the pool, and never reaches the walk.
 
 ## Lanes
 
@@ -98,6 +98,8 @@ The pick is the claim and nothing else: each picked flight is set In Progress wi
 ```
 
 `data` and `error` never appear together. `atc explain <id>` gives the prose behind a refusal.
+
+Board rows, briefs, and picks carry the wire `id`, `writer`, and a ready-to-print `display`; use the supplied display rather than rebuilding a name from a number. `file --json` and `decompose --json` also return `data.flights`: post-append board rows, the filing or updated parent first, then new parts in filing order. These include derived statuses, edges, progress, and merged fields alongside the unchanged log events.
 
 | Exit | Meaning |
 | --- | --- |

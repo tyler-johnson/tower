@@ -10,7 +10,8 @@ const now = 1_700_000_000;
 
 const view: FlightView = {
   id: "pi-8c2e.3",
-  number: 3,
+  writer: "pi-8c2e",
+  display: "#3",
   procedure: null,
   subject: "the list view",
   body: "",

@@ -6,13 +6,11 @@
 //! name — and none is a coded refusal. The verb's body lives in core's
 //! `verb::file`, where the server mounts it too; this file is the human
 //! echo — the filing line, and one row per minted flight when the
-//! definition had two or more. The rows read off the payload's own
-//! events, so the echo shows what the log holds, and the re-fold here is
-//! for their display numbers alone — the machine path never folds.
+//! definition had two or more. Both render paths use the payload's
+//! post-append board rows.
 
 use crate::error::CliError;
 use crate::{machine, render};
-use atc_core::board;
 use atc_core::log::Kind;
 use atc_core::verb::{self, Fields};
 
@@ -40,19 +38,15 @@ pub fn run(
     if json {
         println!("{}", machine::emit("file", &outcome.payload));
     } else {
-        // Re-fold after the append: the echo's numbers live on the fold's
-        // flights, so the flights must be in it.
-        let fold = board::fold(&store.read_all()?);
         let colored = render::colored();
-        let Kind::Filed {
-            procedure,
-            subject,
-            status,
-            ..
-        } = &outcome.payload.filed.kind
-        else {
-            unreachable!("`file` files");
-        };
+        let (parent, parts) = outcome
+            .payload
+            .flights
+            .split_first()
+            .expect("file returns its filing");
+        let procedure = &parent.procedure;
+        let subject = &parent.subject;
+        let status = &parent.status;
         // A routed filing says which rule chose the procedure, so the
         // line reads `filed #3 under chores · matched label chore: …`.
         let landed = match procedure.as_deref() {
@@ -64,32 +58,19 @@ pub fn run(
         };
         println!(
             "filed {} {landed}: {subject}",
-            render::paint_id(&super::display(&fold, &outcome.parent), colored)
+            render::paint_id(&parent.display, colored)
         );
-        let refs: Vec<String> = outcome
-            .part_ids
-            .iter()
-            .map(|id| super::display(&fold, id))
-            .collect();
+        let refs: Vec<String> = parts.iter().map(|row| row.display.clone()).collect();
         // The status is the fold's, not the filing's word: every part
         // is filed cleared, and the edges are what make one Waiting.
-        let rows: Vec<(&str, String)> = outcome
-            .payload
-            .parts
+        let rows: Vec<(&str, String)> = parts
             .iter()
-            .zip(&outcome.part_ids)
-            .map(|(event, id)| {
-                let Kind::Filed {
-                    subject, assignee, ..
-                } = &event.kind
-                else {
-                    unreachable!("a minted row is a filing")
-                };
-                let mut note = board::flight(&fold, id).status.replace('_', " ");
-                if let Some(lane) = assignee.as_deref() {
+            .map(|row| {
+                let mut note = row.status.replace('_', " ");
+                if let Some(lane) = row.assignee.as_deref() {
                     note.push_str(&format!(" · {lane}"));
                 }
-                (subject.as_str(), note)
+                (row.subject.as_str(), note)
             })
             .collect();
         let id_width = width(refs.iter().map(String::as_str));

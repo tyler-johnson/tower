@@ -126,10 +126,9 @@ impl Picks {
 /// One picked flight, in wire form.
 #[derive(Debug, Serialize)]
 pub struct Pick {
-    pub flight: String,
-    /// The dense per-writer flight number — the human name's numeric
-    /// half, beside the wire id.
-    pub number: u64,
+    pub id: String,
+    pub writer: String,
+    pub display: String,
     pub subject: String,
     /// The lane the flight was in when picked, as the log stores it —
     /// `None` for the unassigned lane — so a caller deciding a re-lane
@@ -183,8 +182,9 @@ pub fn pick(fold: &Fold, want: usize, lanes: &[Lane], caller: Option<&str>) -> P
             Some(index) => buckets[index].push((
                 rank(&flight.priority),
                 Pick {
-                    flight: flight.id.to_string(),
-                    number: flight.number,
+                    id: flight.id.to_string(),
+                    writer: flight.id.writer.clone(),
+                    display: super::display(fold, &flight.id),
                     subject: flight.subject.clone(),
                     assignee: flight.assignee.clone(),
                 },
@@ -320,7 +320,7 @@ mod tests {
 
     /// The picked ids, in walk order.
     fn ids(picks: &Picks) -> Vec<&str> {
-        picks.picked.iter().map(|p| p.flight.as_str()).collect()
+        picks.picked.iter().map(|p| p.id.as_str()).collect()
     }
 
     #[test]
@@ -338,8 +338,8 @@ mod tests {
             None,
         );
         assert_eq!(picks.picked.len(), 1);
-        assert_eq!(picks.picked[0].flight, "pi.2");
-        assert_eq!(picks.picked[0].number, 2);
+        assert_eq!(picks.picked[0].id, "pi.2");
+        assert_eq!(picks.picked[0].display, "#2");
         assert_eq!(picks.elsewhere, 0, "waiting is not elsewhere either");
     }
 
@@ -356,7 +356,7 @@ mod tests {
             &[Lane::Agent, Lane::None],
             None,
         );
-        assert_eq!(picks.picked[0].flight, "pi.1");
+        assert_eq!(picks.picked[0].id, "pi.1");
     }
 
     #[test]
@@ -374,7 +374,7 @@ mod tests {
             &[Lane::Agent, Lane::None],
             None,
         );
-        assert_eq!(picks.picked[0].flight, "pi.1");
+        assert_eq!(picks.picked[0].id, "pi.1");
     }
 
     #[test]
@@ -417,7 +417,7 @@ mod tests {
             None,
         );
         assert_eq!(picks.picked.len(), 1);
-        assert_eq!(picks.picked[0].flight, "pi.1");
+        assert_eq!(picks.picked[0].id, "pi.1");
     }
 
     #[test]
@@ -562,7 +562,7 @@ mod tests {
             &[Lane::Agent, Lane::None],
             None,
         );
-        assert_eq!(picks.picked[0].flight, "pi.1");
+        assert_eq!(picks.picked[0].id, "pi.1");
     }
 
     #[test]

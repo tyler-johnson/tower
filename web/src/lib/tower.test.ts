@@ -20,7 +20,8 @@ import {
 function flight(number: number, status: string, labels: string[] = []): FlightView {
   return {
     id: `pi-8c2e.${number}`,
-    number,
+    writer: "pi-8c2e",
+    display: `#${number}`,
     procedure: null,
     subject: `flight ${number}`,
     body: "",
@@ -55,7 +56,8 @@ function group(key: string | null, rows: FlightView[], subgroups: Group[] = []):
 function link(id: string, number: number, closed = false): LinkView {
   return {
     flight: id,
-    number,
+    writer: id.split(".")[0],
+    display: `#${number}`,
     subject: `flight ${number}`,
     status: closed ? "done" : "ready",
     closed,
@@ -108,6 +110,12 @@ describe("the byline", () => {
 });
 
 describe("the fold", () => {
+  it("keeps the server's display when a second writer is outside the closed window", () => {
+    const visible = { ...flight(1, "ready"), display: "pi-8c2e#1" };
+    const folded: Folded = { groups: [group("ready", [visible])], hidden: 1, filtered: 0 };
+    expect(buildRefs(folded).refs.get(visible.id)).toBe("pi-8c2e#1");
+  });
+
   it("a fold is counted once however it is grouped", () => {
     const both = flight(1, "ready", ["web", "ui"]);
     const one = flight(2, "in_progress", ["web"]);
@@ -143,25 +151,22 @@ describe("the link refs", () => {
     // The child closed past the board's window: no row in the fold, so
     // the board's ref map has nothing for it, and the brief's number is
     // the whole of what names it.
-    const ids = ["pi-8c2e.1", "pi-8c2e.2"];
-    const refs = linkRefs(ids, brief(1, [link("pi-8c2e.2", 2), link("pi-8c2e.7", 7, true)]));
+    const refs = linkRefs(brief(1, [link("pi-8c2e.2", 2), link("pi-8c2e.7", 7, true)]));
     expect(refs.get("pi-8c2e.2")).toBe("#2");
     expect(refs.get("pi-8c2e.7")).toBe("#7");
   });
 
-  it("a link from a second writer makes every ref long", () => {
-    const ids = ["pi-8c2e.1"];
-    const refs = linkRefs(ids, brief(1, [link("pi-8c2e.2", 2)], [link("mac-1f00.3", 3)]));
+  it("uses the supplied display even when the other writer is outside the response", () => {
+    const child = { ...link("pi-8c2e.2", 2), display: "pi-8c2e#2" };
+    const parent = { ...link("mac-1f00.3", 3), display: "mac-1f00#3" };
+    const refs = linkRefs(brief(1, [child], [parent]));
     expect(refs.get("pi-8c2e.2")).toBe("pi-8c2e#2");
     expect(refs.get("mac-1f00.3")).toBe("mac-1f00#3");
+    expect(linkRefs(brief(1, [child])).get(child.flight)).toBe(child.display);
   });
 
   it("a referenced flight names itself the same way, both directions", () => {
-    const ids = ["pi-8c2e.1"];
-    const refs = linkRefs(
-      ids,
-      brief(1, [], [], [link("pi-8c2e.4", 4, true)], [link("pi-8c2e.6", 6)]),
-    );
+    const refs = linkRefs(brief(1, [], [], [link("pi-8c2e.4", 4, true)], [link("pi-8c2e.6", 6)]));
     expect(refs.get("pi-8c2e.4")).toBe("#4");
     expect(refs.get("pi-8c2e.6")).toBe("#6");
   });

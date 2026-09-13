@@ -45,7 +45,7 @@ use crate::render;
 // core now, every surface's front door to one flight; so do the write
 // verbs' shared guards and read-backs, in `verb`. The files here keep
 // calling them as `super::…` through these re-exports.
-pub use atc_core::board::{count, display, flight, parse_ref, resolve};
+pub use atc_core::board::{count, display, parse_ref, resolve};
 use atc_core::ff::Ff;
 use atc_core::log::Store;
 

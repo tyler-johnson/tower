@@ -7,7 +7,7 @@
   import { feed } from "$lib/feed.svelte";
   import { panel } from "$lib/panel.svelte";
   import { query } from "$lib/query.svelte";
-  import { buildRefs, flightRef, linkRefs, neighbors, refusalLines, writerOf } from "$lib/tower";
+  import { linkRefs, neighbors, refusalLines } from "$lib/tower";
 
   // Two dependencies, both deliberate: the path, so a different flight
   // loads its own record, and the feed's last frame, so the page tracks
@@ -21,18 +21,13 @@
   });
 
   let b = $derived(feed.board);
-  let refs = $derived(b ? buildRefs(b).refs : new Map<string, string>());
   let brief = $derived(panel.brief);
   // The brief's own number map, for the rail's note: a flight the prose
   // names may have closed past the board's window.
-  let linkRef = $derived(brief ? linkRefs([...refs.keys()], brief) : new Map<string, string>());
+  let linkRef = $derived(brief ? linkRefs(brief) : new Map<string, string>());
 
-  // The board's display form when the flight is on it; the long form
-  // otherwise — a flight past the closed window has left the board, and
-  // the brief still knows its own number.
-  let ref = $derived(
-    brief ? (refs.get(brief.id) ?? flightRef(writerOf(brief.id), brief.number, false)) : "",
-  );
+  // The brief carries its display even when the board's window omits it.
+  let ref = $derived(brief?.display ?? "");
   // The current view's order, so the arrows step the way the board reads.
   // A flight the fold does not carry gets neither.
   let step = $derived(b && brief ? neighbors(b, brief.id) : { prev: null, next: null });
@@ -89,7 +84,7 @@
     {/if}
     <div class="flex flex-col gap-8 lg:flex-row lg:items-start">
       <div class="min-w-0 flex-1">
-        <Record {brief} {refs} />
+        <Record {brief} />
       </div>
       <div class="shrink-0 lg:w-72">
         <Rail {brief} refs={linkRef} />

@@ -112,7 +112,8 @@ export function liveRows(folded: Folded): FlightView[] {
 
 export interface FlightView {
   id: string;
-  number: number;
+  writer: string;
+  display: string;
   /// Provenance only: the procedure the filing was minted under, or a
   /// match rule chose at file time.
   procedure: string | null;
@@ -154,25 +155,6 @@ export interface FlightView {
   /// A close's `-m` — a cancel's reason, most often — standing where the
   /// question stood; `null` while open or when the close said nothing.
   closed_reason: string | null;
-}
-
-/// The writer half of a wire id — everything before the last `.`.
-export function writerOf(id: string): string {
-  const dot = id.lastIndexOf(".");
-  return dot === -1 ? id : id.slice(0, dot);
-}
-
-/// Whether the given full ids span at most one writer, so `#<n>` alone
-/// names a flight unambiguously.
-export function shortIds(ids: string[]): boolean {
-  const writers = ids.map(writerOf);
-  return writers.every((writer) => writer === writers[0]);
-}
-
-/// The display form of a flight's number: `#3` when short, `pi-8c2e#3`
-/// otherwise — the long form takes no leading `#`.
-export function flightRef(writer: string, number: number, short: boolean): string {
-  return short ? `#${number}` : `${writer}#${number}`;
 }
 
 /// `4m ago`, `2d ago` — s/m/h/d/w. `now` is an argument so a render is a
@@ -292,26 +274,17 @@ export function subjectColumn(view: FlightView): string {
 /// however the fold dealt it.
 export function buildRefs(folded: Folded): { refs: Map<string, string>; flights: number } {
   const views = foldRows(folded);
-  const short = shortIds(views.map((view) => view.id));
-  const refs = new Map(
-    views.map((view) => [view.id, flightRef(writerOf(view.id), view.number, short)]),
-  );
+  const refs = new Map(views.map((view) => [view.id, view.display]));
   return { refs, flights: liveRows(folded).length };
 }
 
-/// Link rows' display forms from the brief alone; `ids` is the board's
-/// flight ids, for the short decision only. `#n` when the board and the
-/// brief's family span one writer, `writer#n` otherwise. No board lookup:
-/// a linked flight may have aged past the closed window, and the brief
-/// carries its number. The referenced flights ride too — they are the
-/// number map for the prose, and a referenced flight may be off the
-/// board the same way.
-export function linkRefs(ids: string[], brief: Brief): Map<string, string> {
+/// Names from the brief, including linked flights outside the board's window.
+export function linkRefs(brief: Brief): Map<string, string> {
   const links = [...brief.blocks, ...brief.depends_on, ...brief.references, ...brief.referenced_by];
-  const short = shortIds([...ids, ...links.map((link) => link.flight)]);
-  return new Map(
-    links.map((link) => [link.flight, flightRef(writerOf(link.flight), link.number, short)]),
-  );
+  return new Map([
+    [brief.id, brief.display],
+    ...links.map((link) => [link.flight, link.display] as [string, string]),
+  ]);
 }
 
 // The core's tokenizer, for plain text: a run of token chars, the head
@@ -374,7 +347,8 @@ export type StandingTag = "done" | "question" | "in-progress" | "yours" | "ready
 /// words for one end.
 export interface LinkView {
   flight: string;
-  number: number;
+  writer: string;
+  display: string;
   subject: string;
   status: string;
   closed: boolean;
@@ -484,7 +458,8 @@ export function momentPhrase(moment: Moment, briefId: string): { line: string; n
 
 export interface Brief {
   id: string;
-  number: number;
+  writer: string;
+  display: string;
   procedure: string | null;
   subject: string;
   body: string;
@@ -671,7 +646,8 @@ export function allowedVerbs(brief: Brief): Verb[] {
 /// `Kind::Unknown` makes the fold.
 const KNOWN_BRIEF_KEYS = new Set([
   "id",
-  "number",
+  "writer",
+  "display",
   "procedure",
   "subject",
   "body",

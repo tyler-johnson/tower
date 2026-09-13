@@ -44,8 +44,8 @@
 //! leave a window where the parent is live, unlinked, and Ready.
 //!
 //! A body naming another flight — `-m "after #3"` — stores the wire id,
-//! by the resolution every verb's flight argument gets; that is the one
-//! fold `file` makes, and only a filing with a body makes it.
+//! by the resolution every verb's flight argument gets. After appending,
+//! the response also carries the derived board rows in filing order.
 //!
 //! Still no fufu spawn. The registry's repository layer resolves through
 //! `Store::main_worktree`, which reads the common dir and runs nothing.
@@ -54,19 +54,20 @@ use serde::Serialize;
 
 use crate::board;
 use crate::config;
-use crate::log::{Event, EventId, Kind, Store};
+use crate::log::{Event, Kind, Store};
 use crate::model::Status;
 use crate::procedure::{self, Definition, Match, Registry};
 
 use super::{
-    Error, Fields, Parent, appended, appended_all, classify, lane_word, resolve_me, stored_lane,
+    Error, Fields, Parent, appended, appended_all, classify, lane_word, minted_rows, resolve_me,
+    stored_lane,
 };
 
 /// The envelope's `data`. Struct fields serialize in declaration order,
 /// and this order — `filed, linked, parts` — is the alphabetical one the
-/// CLI's `json!` emitted before the payload moved here, so the bytes on
-/// the wire never changed. `routed` is last and absent when no rule
-/// fired, so an unrouted filing's bytes never changed either.
+/// CLI's `json!` emitted before the payload moved here. Those event fields
+/// retain their shapes; `routed` is absent when no rule fired.
+/// Derived `flights` are last, separate from the log's events.
 #[derive(Serialize)]
 pub struct Filed {
     pub filed: Event,
@@ -75,14 +76,12 @@ pub struct Filed {
     /// The `routed` event, when a match rule chose the procedure.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub routed: Option<Event>,
+    pub flights: Vec<board::FlightView>,
 }
 
-/// The outcome: the payload, plus the ids a human render echoes — it
-/// re-folds for the display numbers, so the machine path never has to.
+/// The payload is shared by machine responses and human echoes.
 pub struct File {
     pub payload: Filed,
-    pub parent: EventId,
-    pub part_ids: Vec<EventId>,
 }
 
 pub fn file(
@@ -96,8 +95,7 @@ pub fn file(
         return Err(Error::EmptySubject);
     }
     // The body is the one field that names other flights: a reference
-    // in it is stored as its wire id, which is the only read of the log
-    // `file` makes — and only when there is a body to scan.
+    // in it is stored as its wire id before the filing is appended.
     let message = match fields.message {
         Some(message) => {
             let fold = board::fold(&store.read_all()?);
@@ -145,9 +143,8 @@ pub fn file(
                 linked: Vec::new(),
                 parts: Vec::new(),
                 routed: None,
+                flights: minted_rows(store, &id, &[])?,
             },
-            parent: id,
-            part_ids: Vec::new(),
         });
     };
 
@@ -220,9 +217,8 @@ fn minted(
             linked: appended_all(store, linked)?,
             parts: appended_all(store, filed)?,
             routed: routed.map(|id| appended(store, id)).transpose()?,
+            flights: minted_rows(store, parent, filed)?,
         },
-        parent: parent.clone(),
-        part_ids: filed.to_vec(),
     })
 }
 
@@ -424,7 +420,7 @@ done     = "committed"
             None,
         )
         .expect("files");
-        assert!(outcome.part_ids.is_empty());
+        assert!(outcome.payload.parts.is_empty());
         assert!(outcome.payload.linked.is_empty());
         assert!(outcome.payload.routed.is_none());
 
@@ -613,7 +609,7 @@ status   = "backlog"
             Some("review"),
         )
         .expect("files");
-        assert_eq!(outcome.part_ids.len(), 3);
+        assert_eq!(outcome.payload.parts.len(), 3);
 
         let fold = folded(&store);
         let by_subject = |tail: &str| {
@@ -625,7 +621,7 @@ status   = "backlog"
         let parent = fold
             .flights
             .iter()
-            .find(|flight| flight.id == outcome.parent)
+            .find(|flight| flight.id == outcome.payload.filed.id)
             .expect("the parent is filed");
         assert_eq!(parent.status, "waiting", "the parent waits on them all");
         assert_eq!(parent.priority, "urgent", "caller flags land on the parent");
@@ -666,7 +662,7 @@ status   = "backlog"
             Some("ticket"),
         )
         .expect("files");
-        assert!(outcome.part_ids.is_empty(), "one flight, no parent");
+        assert!(outcome.payload.parts.is_empty(), "one flight, no parent");
 
         let fold = folded(&store);
         let flight = &fold.flights[0];
@@ -710,7 +706,7 @@ done     = "landed"
         let (repo, store) = store();
         install(&repo, "chores", CHORES);
         let outcome = file(&store, "sweep the logs", labeled("chore"), None).expect("files");
-        assert!(outcome.part_ids.is_empty(), "one flight collapses");
+        assert!(outcome.payload.parts.is_empty(), "one flight collapses");
         let routed = outcome.payload.routed.as_ref().expect("a routed event");
         let Kind::Routed {
             flight,
@@ -729,7 +725,10 @@ done     = "landed"
         else {
             panic!("expected a routing, got {:?}", routed.kind);
         };
-        assert_eq!(flight, &outcome.parent, "the routing names the filing");
+        assert_eq!(
+            flight, &outcome.payload.filed.id,
+            "the routing names the filing"
+        );
         assert_eq!(procedure, "chores");
         assert_eq!(rule, "chore-label");
         assert_eq!(because, "matched label chore");

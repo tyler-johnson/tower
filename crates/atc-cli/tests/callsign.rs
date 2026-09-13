@@ -132,14 +132,14 @@ fn mtime(path: &Path) -> SystemTime {
     std::fs::metadata(path).unwrap().modified().unwrap()
 }
 
-/// The board's lanes by number, from the JSON envelope.
-fn lanes(repo: &Path) -> Vec<(u64, Option<String>)> {
+/// The board's lanes by display name, from the JSON envelope.
+fn lanes(repo: &Path) -> Vec<(String, Option<String>)> {
     let board = envelope(&atc(repo, None, None, &["--json"]));
     let mut rows = Vec::new();
     for key in ["ready", "in_progress"] {
         for row in board["data"][key].as_array().into_iter().flatten() {
             rows.push((
-                row["number"].as_u64().unwrap(),
+                row["display"].as_str().unwrap().to_string(),
                 row["assignee"].as_str().map(str::to_string),
             ));
         }
@@ -174,9 +174,9 @@ fn the_word_is_stored_by_me_and_follows_the_session_when_it_changes() {
     assert_eq!(
         lanes(path),
         [
-            (1, Some("alpha".into())),
-            (3, Some("alpha".into())),
-            (4, Some("alpha".into())),
+            ("#1".into(), Some("alpha".into())),
+            ("#3".into(), Some("alpha".into())),
+            ("#4".into(), Some("alpha".into())),
         ]
     );
 
@@ -204,9 +204,9 @@ fn the_word_is_stored_by_me_and_follows_the_session_when_it_changes() {
     assert_eq!(
         lanes(path),
         [
-            (1, Some("beta".into())),
-            (3, Some("alpha".into())),
-            (4, Some("alpha".into())),
+            ("#1".into(), Some("beta".into())),
+            ("#3".into(), Some("alpha".into())),
+            ("#4".into(), Some("alpha".into())),
         ]
     );
     // The closed flight kept its lane and was not counted.
@@ -263,7 +263,7 @@ fn the_first_callsign_moves_nothing_from_a_client_word() {
     stdout(&atc(path, None, None, &["file", "one"]));
     let claude = ("CLAUDECODE", "1");
     stdout(&atc_with(path, Some("c1"), claude, &["assign", "1", "me"]));
-    assert_eq!(lanes(path), [(1, Some("claude".into()))]);
+    assert_eq!(lanes(path), [("#1".into(), Some("claude".into()))]);
 
     let out = atc_with(path, Some("c1"), claude, &["callsign", "named", "--json"]);
     stdout(&out);
@@ -271,7 +271,7 @@ fn the_first_callsign_moves_nothing_from_a_client_word() {
     assert_eq!(data["previous"], "claude");
     assert_eq!(data["moved"], serde_json::json!([]));
     assert_eq!(data["left"], serde_json::json!([]));
-    assert_eq!(lanes(path), [(1, Some("claude".into()))]);
+    assert_eq!(lanes(path), [("#1".into(), Some("claude".into()))]);
 
     assert_eq!(
         stdout(&atc_with(path, Some("c2"), claude, &["callsign", "other"])),

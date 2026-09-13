@@ -20,25 +20,26 @@ use crate::board;
 use crate::log::{Event, EventId, Kind, Store};
 use crate::procedure;
 
-use super::{Error, Fields, Parent, appended_all, classify, ensure_active, resolve_me};
+use super::{
+    Error, Fields, Parent, appended_all, classify, ensure_active, minted_rows, resolve_me,
+};
 
 /// The envelope's `data`. Struct fields serialize in declaration order,
 /// and this order — `filed, linked, parent` — is the alphabetical one
-/// the CLI's `json!` emitted before the payload moved here, so the bytes
-/// on the wire never changed.
+/// the CLI's `json!` emitted before the payload moved here. Derived
+/// `flights` follow those unchanged event fields.
 #[derive(Serialize)]
 pub struct Decomposed {
     pub filed: Vec<Event>,
     pub linked: Vec<Event>,
     pub parent: String,
+    /// The updated parent first, then the new parts, as board rows.
+    pub flights: Vec<board::FlightView>,
 }
 
-/// The outcome: the payload, plus the ids a human render echoes — it
-/// re-folds for the display numbers, so the machine path never has to.
+/// The payload is shared by machine responses and human echoes.
 pub struct Decompose {
     pub payload: Decomposed,
-    pub parent: EventId,
-    pub filed_ids: Vec<EventId>,
 }
 
 pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decompose, Error> {
@@ -119,8 +120,7 @@ pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decomp
     outcome(store, parent, filed, linked)
 }
 
-/// The shared tail: the appended events read back off the chain, and the
-/// echo facts beside them.
+/// The shared tail: appended events and the post-append board rows.
 fn outcome(
     store: &Store,
     parent: EventId,
@@ -132,9 +132,8 @@ fn outcome(
             filed: appended_all(store, filed)?,
             linked: appended_all(store, linked)?,
             parent: parent.to_string(),
+            flights: minted_rows(store, &parent, filed)?,
         },
-        parent,
-        filed_ids: filed.to_vec(),
     })
 }
 
@@ -209,7 +208,7 @@ after    = ["pass", "smoke"]
         )
         .expect("decomposes");
         assert_eq!(outcome.payload.parent, "pi.1");
-        assert_eq!(outcome.filed_ids.len(), 2);
+        assert_eq!(outcome.payload.flights.len(), 3);
         assert_eq!(outcome.payload.filed.len(), 2);
         assert_eq!(outcome.payload.linked.len(), 2, "one edge per child");
 
@@ -220,9 +219,9 @@ after    = ["pass", "smoke"]
                 .find(|flight| &flight.id == id)
                 .expect("minted")
         };
-        let first = child(&outcome.filed_ids[0]);
+        let first = child(&outcome.payload.filed[0].id);
         assert_eq!(first.subject, "part one", "the subject is trimmed");
-        assert_eq!(child(&outcome.filed_ids[1]).subject, "part two");
+        assert_eq!(child(&outcome.payload.filed[1].id).subject, "part two");
         assert_eq!(first.status, "ready", "a part is born cleared");
         assert!(first.assignee.is_none());
         assert_eq!(
@@ -230,7 +229,7 @@ after    = ["pass", "smoke"]
             Some("chore"),
             "provenance follows the parent"
         );
-        let parent = child(&outcome.parent);
+        let parent = child(&outcome.payload.parent.parse().expect("parent id"));
         assert_eq!(parent.depends_on.len(), 2);
         assert_eq!(parent.status, "backlog", "the mint never re-stamps");
     }
@@ -242,7 +241,7 @@ after    = ["pass", "smoke"]
         filed(&store, "look this over");
         let outcome =
             decompose(&store, "1", &["review".to_string()]).expect("the definition is installed");
-        assert_eq!(outcome.filed_ids.len(), 3);
+        assert_eq!(outcome.payload.filed.len(), 3);
         assert_eq!(
             outcome.payload.linked.len(),
             5,
@@ -268,12 +267,12 @@ after    = ["pass", "smoke"]
         filed(&store, "a broad task");
         let outcome = decompose(&store, "1", &["review the docs".to_string()])
             .expect("the by-hand form takes it");
-        assert_eq!(outcome.filed_ids.len(), 1);
+        assert_eq!(outcome.payload.filed.len(), 1);
         let fold = folded(&store);
         let child = fold
             .flights
             .iter()
-            .find(|flight| flight.id == outcome.filed_ids[0])
+            .find(|flight| flight.id == outcome.payload.filed[0].id)
             .expect("minted");
         assert_eq!(child.subject, "review the docs");
         assert_eq!(child.status, "ready");

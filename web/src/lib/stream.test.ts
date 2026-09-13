@@ -8,7 +8,8 @@ import type { Brief, CommentView, Moment } from "./tower";
 function brief(comments: CommentView[], history: Moment[]): Brief {
   return {
     id: "pi-8c2e.1",
-    number: 1,
+    writer: "pi-8c2e",
+    display: "#1",
     procedure: null,
     subject: "the work",
     body: "",

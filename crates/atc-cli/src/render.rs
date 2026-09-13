@@ -61,34 +61,6 @@ pub fn paint_ok(text: &str, colored: bool) -> String {
     paint(OK, text, colored)
 }
 
-/// Whether the given full ids span at most one writer, so `#<n>` alone
-/// names a flight unambiguously.
-pub fn short_ids<'a>(ids: impl Iterator<Item = &'a str>) -> bool {
-    let mut writers = ids.map(writer_of);
-    match writers.next() {
-        None => true,
-        Some(first) => writers.all(|writer| writer == first),
-    }
-}
-
-/// The writer half of a wire id — everything before the last `.`, safe to
-/// split on because a sanitized writer contains no dots.
-fn writer_of(id: &str) -> &str {
-    id.rsplit_once('.').map_or(id, |(writer, _)| writer)
-}
-
-/// The display form of a flight's number: `#3` when short, `pi-8c2e#3`
-/// otherwise. The long form takes no leading `#` — the interior `#` is
-/// the marker, and it binds a writer to a flight number the way `.` binds
-/// one to an event seq, so the two names cannot be confused.
-pub fn flight_ref(writer: &str, number: u64, short: bool) -> String {
-    if short {
-        format!("#{number}")
-    } else {
-        format!("{writer}#{number}")
-    }
-}
-
 /// `4m`, `2h`, `2d` — a duration in seconds, s/m/h/d/w, with no trailing
 /// "ago". The row's own age prints the span with the word.
 pub fn span(seconds: i64) -> String {
@@ -235,22 +207,11 @@ pub fn board(board: &Board, now: i64, colored: bool) -> String {
         .iter()
         .map(|(_, _, views)| views.len())
         .sum::<usize>();
-    let short = short_ids(
-        sections
-            .iter()
-            .flat_map(|(_, _, views)| views.iter())
-            .map(|view| view.id.as_str()),
-    );
     // Wire id to display form, over every section at once.
     let refs: HashMap<&str, String> = sections
         .iter()
         .flat_map(|(_, _, views)| views.iter())
-        .map(|view| {
-            (
-                view.id.as_str(),
-                flight_ref(writer_of(&view.id), view.number, short),
-            )
-        })
+        .map(|view| (view.id.as_str(), view.display.clone()))
         .collect();
     let id_width = refs
         .values()
@@ -317,7 +278,8 @@ mod tests {
     fn view(id: &str, number: u64, status: &str, subject: &str) -> FlightView {
         FlightView {
             id: id.to_string(),
-            number,
+            writer: id.rsplit_once('.').expect("wire id").0.to_string(),
+            display: format!("#{number}"),
             procedure: None,
             subject: subject.to_string(),
             body: String::new(),

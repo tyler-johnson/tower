@@ -33,9 +33,11 @@ use super::history::{Moment, history};
 #[derive(Debug, Serialize)]
 pub struct Brief {
     pub id: String,
-    /// The dense per-writer flight number — the human name's numeric
-    /// half, beside the wire id.
-    pub number: u64,
+    pub writer: String,
+    pub display: String,
+    /// The writer-local input alias, shown beside the wire id in the CLI header.
+    #[serde(skip)]
+    pub writer_ref: String,
     /// Provenance only: the procedure the filing was minted under, or
     /// a match rule chose at file time.
     pub procedure: Option<String>,
@@ -138,9 +140,8 @@ pub enum Standing {
 #[derive(Debug, Serialize)]
 pub struct LinkView {
     pub flight: String,
-    /// The dense per-writer flight number — the human name's numeric
-    /// half, beside the wire id.
-    pub number: u64,
+    pub writer: String,
+    pub display: String,
     pub subject: String,
     pub status: String,
     pub closed: bool,
@@ -151,7 +152,8 @@ pub struct LinkView {
 #[derive(Debug, Serialize)]
 pub struct ParentView {
     pub flight: String,
-    pub number: u64,
+    pub writer: String,
+    pub display: String,
     pub subject: String,
     pub status: String,
     pub closed: bool,
@@ -200,7 +202,9 @@ pub fn brief(fold: &Fold, events: &[Event], id: &EventId) -> Option<Brief> {
 
     Some(Brief {
         id: flight.id.to_string(),
-        number: flight.number,
+        writer: flight.id.writer.clone(),
+        display: super::display(fold, id),
+        writer_ref: format!("{}#{}", flight.id.writer, flight.number),
         procedure: flight.procedure.clone(),
         subject: flight.subject.clone(),
         body: flight.body.clone(),
@@ -285,7 +289,8 @@ fn links(fold: &Fold, ids: &[EventId]) -> Vec<LinkView> {
             let other = linked(fold, id);
             LinkView {
                 flight: other.id.to_string(),
-                number: other.number,
+                writer: other.id.writer.clone(),
+                display: super::display(fold, id),
                 subject: other.subject.clone(),
                 status: other.status.clone(),
                 closed: other.closed(),
@@ -301,7 +306,8 @@ fn parents(fold: &Fold, ids: &[EventId]) -> Vec<ParentView> {
             let other = linked(fold, id);
             ParentView {
                 flight: other.id.to_string(),
-                number: other.number,
+                writer: other.id.writer.clone(),
+                display: super::display(fold, id),
                 subject: other.subject.clone(),
                 status: other.status.clone(),
                 closed: other.closed(),
@@ -511,7 +517,7 @@ mod tests {
         )
         .expect("filed");
         assert_eq!(brief.id, "pi.1");
-        assert_eq!(brief.number, 1);
+        assert_eq!(brief.display, "#1");
         assert!(brief.procedure.is_none(), "a bare filing has no procedure");
         assert_eq!(brief.subject, "the subject");
         assert_eq!(brief.body, "the body\ntwo lines");
@@ -698,7 +704,7 @@ mod tests {
         let one = brief_of(&events, &id("pi.1")).expect("filed");
         assert_eq!(one.depends_on.len(), 1);
         assert_eq!(one.depends_on[0].flight, "pi.2");
-        assert_eq!(one.depends_on[0].number, 2);
+        assert_eq!(one.depends_on[0].display, "#2");
         assert_eq!(one.depends_on[0].subject, "the dependency");
         assert_eq!(one.depends_on[0].status, "done");
         assert!(one.depends_on[0].closed);
@@ -707,7 +713,7 @@ mod tests {
         let two = brief_of(&events, &id("pi.2")).expect("filed");
         assert_eq!(two.blocks.len(), 1);
         assert_eq!(two.blocks[0].flight, "pi.1");
-        assert_eq!(two.blocks[0].number, 1);
+        assert_eq!(two.blocks[0].display, "#1");
         assert_eq!(two.blocks[0].subject, "the dependent");
         assert_eq!(two.blocks[0].status, "backlog");
         assert!(!two.blocks[0].closed);
@@ -938,10 +944,10 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_rows_both_ways_with_its_number() {
+    fn a_reference_rows_both_ways_with_its_display() {
         // The web links a reference from the brief alone, like a link
         // row — the named flight may be off the board — so both lists
-        // carry the number beside the wire id.
+        // carry the display beside the wire id.
         let events = [
             filed("pi.1", 10, "the named", ""),
             filed("pi.2", 20, "the naming", "grew out of #pi.1"),
@@ -949,7 +955,8 @@ mod tests {
         let naming = brief_of(&events, &id("pi.2")).expect("filed");
         let json = serde_json::to_value(&naming).expect("serializes");
         assert_eq!(json["references"][0]["flight"], serde_json::json!("pi.1"));
-        assert_eq!(json["references"][0]["number"], serde_json::json!(1));
+        assert_eq!(json["references"][0]["display"], serde_json::json!("#1"));
+        assert!(json["references"][0].get("number").is_none());
         assert_eq!(
             json["references"][0]["subject"],
             serde_json::json!("the named")
@@ -963,7 +970,7 @@ mod tests {
             json["referenced_by"][0]["flight"],
             serde_json::json!("pi.2")
         );
-        assert_eq!(json["referenced_by"][0]["number"], serde_json::json!(2));
+        assert_eq!(json["referenced_by"][0]["display"], serde_json::json!("#2"));
     }
 
     #[test]
@@ -1060,7 +1067,7 @@ mod tests {
         let child = brief_of(&events, &id("pi.2")).expect("filed");
         assert_eq!(child.parents.len(), 1);
         assert_eq!(child.parents[0].flight, "pi.1");
-        assert_eq!(child.parents[0].number, 1);
+        assert_eq!(child.parents[0].display, "#1");
         assert_eq!(child.parents[0].subject, "the parent");
         assert_eq!(child.parents[0].status, "backlog");
         assert!(!child.parents[0].closed);
@@ -1074,9 +1081,9 @@ mod tests {
     }
 
     #[test]
-    fn a_link_row_carries_its_number_on_the_wire() {
+    fn a_link_row_carries_its_display_on_the_wire() {
         // The web renders a link from the brief alone — a linked flight
-        // may have aged past the board's closed window — so the number
+        // may have aged past the board's closed window — so the display
         // rides beside the wire id.
         let brief = brief_of(
             &[
@@ -1089,6 +1096,7 @@ mod tests {
         .expect("filed");
         let json = serde_json::to_value(&brief).expect("serializes");
         assert_eq!(json["depends_on"][0]["flight"], serde_json::json!("pi.2"));
-        assert_eq!(json["depends_on"][0]["number"], serde_json::json!(2));
+        assert_eq!(json["depends_on"][0]["display"], serde_json::json!("#2"));
+        assert!(json["depends_on"][0].get("number").is_none());
     }
 }

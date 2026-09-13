@@ -127,7 +127,7 @@ fn picked(envelope: &serde_json::Value) -> Vec<&str> {
         .as_array()
         .expect("rows")
         .iter()
-        .map(|row| row["flight"].as_str().expect("flight"))
+        .map(|row| row["id"].as_str().expect("flight id"))
         .collect()
 }
 
@@ -326,17 +326,20 @@ fn peek_reads_without_pulling() {
     );
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     let row = &envelope["data"]["picked"][0];
-    assert_eq!(row["flight"], serde_json::json!("pi.2"));
-    assert_eq!(keys(row), ["flight", "number", "subject"]);
+    assert_eq!(row["id"], serde_json::json!("pi.2"));
+    assert_eq!(keys(row), ["display", "id", "subject", "writer"]);
 }
 
-/// The keys on one JSON object, in emitted order.
+/// The keys on one JSON object, independent of serde_json's map backend.
 fn keys(row: &serde_json::Value) -> Vec<&str> {
-    row.as_object()
+    let mut keys: Vec<_> = row
+        .as_object()
         .expect("a row is an object")
         .keys()
         .map(String::as_str)
-        .collect()
+        .collect();
+    keys.sort_unstable();
+    keys
 }
 
 #[test]
@@ -347,12 +350,13 @@ fn a_pull_writes_nothing_to_the_repository() {
     let envelope = envelope(&atc(repo.path(), &["next", "agent", "--json"]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(true));
     let row = &envelope["data"]["picked"][0];
-    assert_eq!(row["flight"], serde_json::json!("pi.2"));
-    assert_eq!(row["number"], serde_json::json!(2));
+    assert_eq!(row["id"], serde_json::json!("pi.2"));
+    assert_eq!(row["display"], serde_json::json!("#2"));
+    assert_eq!(row["writer"], serde_json::json!("pi"));
     assert_eq!(row["subject"], serde_json::json!("the one flight · pass"));
     assert_eq!(
         keys(row),
-        ["flight", "number", "subject"],
+        ["display", "id", "subject", "writer"],
         "no branch, no skill the flight never named: {row}"
     );
 
@@ -441,12 +445,12 @@ fn a_count_picks_in_filed_order_and_the_envelope_has_no_passed_key() {
     assert_eq!(
         keys(&envelope["data"]),
         [
-            "outcome",
-            "lanes",
             "assignee",
+            "elsewhere",
+            "lanes",
+            "outcome",
             "picked",
-            "pulled",
-            "elsewhere"
+            "pulled"
         ],
         "no `passed`, and the re-lane said even when unsaid: {envelope}"
     );
@@ -565,7 +569,7 @@ fn a_flight_naming_no_skill_omits_the_field() {
 
     let envelope = envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
     let row = &envelope["data"]["picked"][0];
-    assert_eq!(row["flight"], serde_json::json!("pi.2"));
+    assert_eq!(row["id"], serde_json::json!("pi.2"));
     assert!(
         row.get("skill").is_none(),
         "absent, not null, when the flight names none: {row}"

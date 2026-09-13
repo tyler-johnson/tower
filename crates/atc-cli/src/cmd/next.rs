@@ -36,7 +36,7 @@ use serde::Serialize;
 
 use crate::error::CliError;
 use crate::{machine, render};
-use atc_core::board::{self, Fold, Lane, Outcome};
+use atc_core::board::{self, Lane, Outcome};
 use atc_core::log::{EventId, Kind};
 use atc_core::verb;
 
@@ -64,8 +64,9 @@ struct Data<'a> {
 /// One pulled flight.
 #[derive(Serialize)]
 struct Row {
-    flight: String,
-    number: u64,
+    id: String,
+    writer: String,
+    display: String,
     subject: String,
     /// The skill the flight is flown with, for the harness to resolve
     /// through `atc skills <name>`. Absent, not null, when the
@@ -116,7 +117,7 @@ pub fn run(
     if pulled {
         let mut batch = Vec::with_capacity(picks.picked.len() * 2);
         for pick in &picks.picked {
-            let flight: EventId = pick.flight.parse().expect("the fold's ids parse");
+            let flight: EventId = pick.id.parse().expect("the fold's ids parse");
             batch.push(Kind::Status {
                 flight: flight.clone(),
                 status: "in_progress".to_string(),
@@ -137,13 +138,14 @@ pub fn run(
         .picked
         .iter()
         .map(|pick| Row {
-            flight: pick.flight.clone(),
-            number: pick.number,
+            id: pick.id.clone(),
+            writer: pick.writer.clone(),
+            display: pick.display.clone(),
             subject: pick.subject.clone(),
             skill: fold
                 .flights
                 .iter()
-                .find(|flight| flight.id.to_string() == pick.flight)
+                .find(|flight| flight.id.to_string() == pick.id)
                 .and_then(|flight| flight.skill.clone()),
             relaned: pick.assignee != assignee,
         })
@@ -170,7 +172,7 @@ pub fn run(
         for row in &rows {
             let mut line = format!(
                 "{verb} {}: {}",
-                render::paint_id(&show(&fold, &row.flight), colored),
+                render::paint_id(&row.display, colored),
                 row.subject
             );
             if let Some(skill) = &row.skill {
@@ -203,10 +205,4 @@ pub fn run(
         Outcome::Work => 0,
         Outcome::Drained | Outcome::Elsewhere => 1,
     })
-}
-
-/// A wire id from the pick, in the board's display form. Infallible — the
-/// ids came out of this fold's filed flights.
-fn show(fold: &Fold, id: &str) -> String {
-    super::display(fold, &id.parse().expect("the fold's ids parse"))
 }

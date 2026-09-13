@@ -302,6 +302,15 @@ fn file_appends_the_whole_batch_and_answers_it() {
     assert_eq!(batch.len(), 9, "the parent, three flights, five edges");
     let (filed, rest) = batch.split_first().expect("the parent");
     let (parts, linked) = rest.split_at(3);
+    let response: serde_json::Value = serde_json::from_str(&body).expect("file response");
+    let rows = response["data"]["flights"].as_array().expect("board rows");
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0]["id"], filed.id.to_string());
+    assert_eq!(rows[0]["display"], "#2");
+    assert_eq!(rows[0]["status"], "waiting");
+    assert_eq!(rows[0]["progress"], json!([0, 3]));
+    assert_eq!(rows[3]["status"], "waiting");
+    assert!(rows.iter().all(|row| row.get("number").is_none()));
     ok(
         "/api/file",
         status,
@@ -314,6 +323,11 @@ fn file_appends_the_whole_batch_and_answers_it() {
                 linked: linked.to_vec(),
                 parts: parts.to_vec(),
                 routed: None,
+                flights: atc_core::board::rows(atc_core::board::fold(&chain), None)
+                    .flights
+                    .into_iter()
+                    .skip(1)
+                    .collect(),
             },
         ),
     );
@@ -363,6 +377,16 @@ fn decompose_appends_the_children_and_the_edges_and_answers_them() {
     let batch = &chain[1..];
     assert_eq!(batch.len(), 4, "two children and two edges");
     let (filed, linked) = batch.split_at(2);
+    let response: serde_json::Value = serde_json::from_str(&body).expect("decompose response");
+    let rows = response["data"]["flights"].as_array().expect("board rows");
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["id"], chain[0].id.to_string());
+    assert_eq!(rows[0]["display"], "#1");
+    assert_eq!(rows[0]["progress"], json!([0, 2]));
+    for (row, event) in rows[1..].iter().zip(filed) {
+        assert_eq!(row["id"], event.id.to_string());
+        assert_eq!(row["status"], "ready");
+    }
     ok(
         "/api/decompose",
         status,
@@ -374,6 +398,7 @@ fn decompose_appends_the_children_and_the_edges_and_answers_them() {
                 filed: filed.to_vec(),
                 linked: linked.to_vec(),
                 parent: chain[0].id.to_string(),
+                flights: atc_core::board::rows(atc_core::board::fold(&chain), None).flights,
             },
         ),
     );
@@ -411,6 +436,7 @@ fn decompose_under_a_procedure_mints_the_definitions_flights_over_http() {
                 filed: filed.to_vec(),
                 linked: linked.to_vec(),
                 parent: chain[0].id.to_string(),
+                flights: atc_core::board::rows(atc_core::board::fold(&chain), None).flights,
             },
         ),
     );

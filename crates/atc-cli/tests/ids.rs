@@ -87,7 +87,9 @@ fn the_flight_number_is_dense_while_the_event_seq_is_not() {
     let board = envelope(&atc(repo.path(), &["--json"]));
     let second = &board["data"]["ready"][1];
     assert_eq!(second["id"], serde_json::json!("pi.3"));
-    assert_eq!(second["number"], serde_json::json!(2));
+    assert_eq!(second["display"], serde_json::json!("#2"));
+    assert_eq!(second["writer"], serde_json::json!("pi"));
+    assert!(second.get("number").is_none());
 }
 
 #[test]
@@ -101,8 +103,8 @@ fn both_names_brief_the_same_flight() {
             "`{reference}`"
         );
         assert_eq!(
-            brief["data"]["number"],
-            serde_json::json!(2),
+            brief["data"]["display"],
+            serde_json::json!("#2"),
             "`{reference}`"
         );
     }
@@ -151,6 +153,45 @@ fn two_writers_bind_with_hash_and_a_bare_number_is_ambiguous() {
 
     let out = atc(repo.path(), &["comment", "qi#9", "-m", "x", "--json"]);
     refusal(&out, 1, "flight/not-found");
+}
+
+#[test]
+fn display_names_include_writers_hidden_by_the_closed_window() {
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "still open"]));
+    repo.pin_writer("qi");
+    stdout(&atc(repo.path(), &["file", "now hidden"]));
+    stdout(&atc(repo.path(), &["done", "qi#1"]));
+    let board = envelope(&atc(repo.path(), &["--closed", "none", "--json"]));
+    let rows = board["data"]["ready"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "pi.1");
+    assert_eq!(rows[0]["writer"], "pi");
+    assert_eq!(rows[0]["display"], "pi#1");
+    assert!(rows[0].get("number").is_none());
+    let rendered = stdout(&atc(repo.path(), &["--closed", "none"]));
+    assert!(rendered.contains("pi#1"), "{rendered}");
+    assert!(
+        !rendered.contains("qi#1"),
+        "the other writer is hidden: {rendered}"
+    );
+    for reference in ["pi#1", "qi#1"] {
+        let brief = envelope(&atc(repo.path(), &["brief", reference, "--json"]));
+        assert_eq!(brief["data"]["display"], reference);
+        assert!(brief["data"].get("number").is_none());
+        let text = stdout(&atc(repo.path(), &["brief", reference]));
+        let wire = brief["data"]["id"].as_str().unwrap();
+        assert!(text.contains(&format!("{wire} · {reference}")), "{text}");
+    }
+    let picked = envelope(&atc(repo.path(), &["next", "none", "--peek", "--json"]));
+    let pick = &picked["data"]["picked"][0];
+    for key in ["id", "writer", "display"] {
+        assert_eq!(pick[key], rows[0][key], "{key}");
+    }
+    assert!(pick.get("number").is_none());
+    let out = atc(repo.path(), &["file", "another", "--json"]);
+    let filed = envelope(&out);
+    assert_eq!(filed["data"]["flights"][0]["display"], "qi#2");
 }
 
 #[test]

@@ -13,7 +13,8 @@ function flight(
 ): FlightView {
   return {
     id: `pi-8c2e.${number}`,
-    number,
+    writer: "pi-8c2e",
+    display: `#${number}`,
     procedure: null,
     subject: `flight ${number}`,
     body: "",

@@ -117,6 +117,29 @@ pub fn appended_all(store: &Store, ids: &[EventId]) -> Result<Vec<Event>, log::E
         .collect())
 }
 
+/// Post-append board rows in response order: the parent, then the new parts.
+pub(crate) fn minted_rows(
+    store: &Store,
+    parent: &EventId,
+    parts: &[EventId],
+) -> Result<Vec<crate::board::FlightView>, log::Error> {
+    let fold = crate::board::fold(&store.read_all()?);
+    let rows = crate::board::rows(fold, store.callsign());
+    let mut by_id: std::collections::HashMap<_, _> = rows
+        .flights
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect();
+    Ok(std::iter::once(parent)
+        .chain(parts)
+        .map(|id| {
+            by_id
+                .remove(&id.to_string())
+                .expect("the minted flight is on the board")
+        })
+        .collect())
+}
+
 /// The flight, refused when it is already closed — done or canceled.
 /// The lifecycle verbs stop here; `comment`, `link`, and `edit` stay
 /// permissive on purpose — a note on the record is fine, and a wrong
