@@ -70,11 +70,11 @@ pub fn run(json: bool, id: Option<&str>, list: bool) -> Result<(), CliError> {
         } else {
             vec![local]
         };
-        let bytes = crate::ext::delegate(name, "explain", &rest)?;
+        let bytes = crate::adapter::delegate(name, "explain", &rest)?;
         use std::io::Write;
         std::io::stdout()
             .write_all(&bytes)
-            .map_err(|err| CliError::coded("extension/delegate-failed", err.to_string(), vec![]))?;
+            .map_err(|err| CliError::coded("adapter/delegate-failed", err.to_string(), vec![]))?;
         return Ok(());
     }
     let entry = explain::find(id).ok_or_else(|| explain::unknown_id(id))?;

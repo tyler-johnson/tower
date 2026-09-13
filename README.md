@@ -40,7 +40,7 @@ That last line is fufu's extension rule unmodified: extensions read fufu state a
 | `atc-serve` | the standing server: the embedded web board, its API, and the change feed |
 | `atc-testsupport` | shared fixtures |
 
-Forge adapters are separate binaries discovered on PATH — `tower-github`, `tower-linear` — on git's extension model, so a third party can write one without touching this repository.
+Forge adapters are separate binaries discovered on PATH — `atc-github`, `atc-linear` — dispatched through `atc <name>`, so a third party can write one without touching this repository. `atc adapter <name>` declares one on this machine; bare `atc adapter` lists declarations, and `atc adapter -d <name>` removes one.
 
 ## Install
 

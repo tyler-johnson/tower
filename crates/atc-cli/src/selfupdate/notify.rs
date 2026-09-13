@@ -24,17 +24,17 @@ pub struct UpdateState {
     pub notified: Option<String>,
     pub interval_secs: i64,
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub extensions: std::collections::BTreeMap<String, ExtensionState>,
+    pub adapters: std::collections::BTreeMap<String, AdapterState>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExtensionState {
+pub struct AdapterState {
     pub repo: String,
     pub latest: String,
     pub notified: Option<String>,
 }
 
-pub fn refresh_extensions(
+pub fn refresh_adapters(
     state: &mut UpdateState,
     declared: &[crate::registry::Declared],
     mut fetch: impl FnMut(&str) -> Option<String>,
@@ -48,7 +48,7 @@ pub fn refresh_extensions(
             ))
         })
         .collect();
-    state.extensions.retain(|name, cached| {
+    state.adapters.retain(|name, cached| {
         eligible
             .get(name.as_str())
             .is_some_and(|repo| repo == &cached.repo)
@@ -57,19 +57,19 @@ pub fn refresh_extensions(
         if let Some(latest) = fetch(&repo)
             && crate::selfupdate::parse_tag(&latest).is_some()
         {
-            let cached = state.extensions.entry(name.into()).or_default();
+            let cached = state.adapters.entry(name.into()).or_default();
             cached.repo = repo;
             cached.latest = latest;
         }
     }
 }
 
-fn extension_notices(state: &UpdateState) -> Vec<String> {
+fn adapter_notices(state: &UpdateState) -> Vec<String> {
     crate::registry::read()
         .declared()
         .iter()
         .filter_map(|entry| {
-            let cached = state.extensions.get(entry.name())?;
+            let cached = state.adapters.get(entry.name())?;
             if cached.repo != crate::selfupdate::release_repo(&entry.manifest)?
                 || cached.notified.as_deref() == Some(&cached.latest)
             {
@@ -344,8 +344,8 @@ pub fn pending(repo: &std::path::Path, current_version: &str, want_notice: bool)
         return None;
     }
     let due = compute_due(&state, current, tty);
-    let mut extensions = extension_notices(&state);
-    if due.is_none() && extensions.is_empty() {
+    let mut adapters = adapter_notices(&state);
+    if due.is_none() && adapters.is_empty() {
         return None;
     }
 
@@ -358,9 +358,9 @@ pub fn pending(repo: &std::path::Path, current_version: &str, want_notice: bool)
     let exe = crate::selfupdate::resolve_exe().ok()?;
     let kind = crate::selfupdate::classify_install(&exe, true);
     if let Some(own) = due.and_then(|due| notice_for(&due, want_notice, current_version, kind)) {
-        extensions.insert(0, own);
+        adapters.insert(0, own);
     }
-    Some(extensions.join("\n"))
+    Some(adapters.join("\n"))
 }
 
 /// Mark the current latest as notified — a release announces at most once, ever.
@@ -371,7 +371,7 @@ pub fn mark_notified() {
     let mut state = load_state(&path);
     state.notified = state.latest.clone();
     for entry in crate::registry::read().declared() {
-        if let Some(cached) = state.extensions.get_mut(entry.name()) {
+        if let Some(cached) = state.adapters.get_mut(entry.name()) {
             cached.notified = Some(cached.latest.clone());
         }
     }
@@ -395,7 +395,7 @@ mod tests {
     use std::ffi::OsString;
 
     #[test]
-    fn extension_cache_keeps_offline_answers_and_drops_retired_or_reaimed_recipes() {
+    fn adapter_cache_keeps_offline_answers_and_drops_retired_or_reaimed_recipes() {
         let declared = |name: &str, repo: &str| {
             crate::registry::Declared {
             path: format!("/bin/atc-{name}").into(), declared_at: 1,
@@ -403,28 +403,28 @@ mod tests {
         }
         };
         let mut state = UpdateState::default();
-        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| {
+        refresh_adapters(&mut state, &[declared("probe", "probe")], |_| {
             Some("v2.0.0".into())
         });
-        assert_eq!(state.extensions["probe"].latest, "v2.0.0");
-        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| None);
-        assert_eq!(state.extensions["probe"].latest, "v2.0.0");
-        refresh_extensions(&mut state, &[declared("probe", "new")], |_| None);
-        assert!(state.extensions.is_empty());
-        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| {
+        assert_eq!(state.adapters["probe"].latest, "v2.0.0");
+        refresh_adapters(&mut state, &[declared("probe", "probe")], |_| None);
+        assert_eq!(state.adapters["probe"].latest, "v2.0.0");
+        refresh_adapters(&mut state, &[declared("probe", "new")], |_| None);
+        assert!(state.adapters.is_empty());
+        refresh_adapters(&mut state, &[declared("probe", "probe")], |_| {
             Some("bad tag".into())
         });
-        assert!(state.extensions.is_empty());
+        assert!(state.adapters.is_empty());
         let mut source = declared("probe", "probe");
         source.manifest.build = Some(crate::manifest::Build::Source);
-        refresh_extensions(&mut state, &[source], |_| {
+        refresh_adapters(&mut state, &[source], |_| {
             panic!("a source build has no release check")
         });
-        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| {
+        refresh_adapters(&mut state, &[declared("probe", "probe")], |_| {
             Some("v3.0.0".into())
         });
-        refresh_extensions(&mut state, &[], |_| panic!("no declarations"));
-        assert!(state.extensions.is_empty());
+        refresh_adapters(&mut state, &[], |_| panic!("no declarations"));
+        assert!(state.adapters.is_empty());
     }
 
     #[test]
@@ -528,7 +528,7 @@ mod tests {
             latest: Some("v0.2.0".into()),
             notified: Some("v0.2.0".into()),
             interval_secs: 86_400,
-            extensions: std::collections::BTreeMap::new(),
+            adapters: std::collections::BTreeMap::new(),
         };
         save_state(&path, &state).unwrap();
         assert_eq!(load_state(&path), state);

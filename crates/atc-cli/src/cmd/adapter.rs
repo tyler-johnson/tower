@@ -5,16 +5,16 @@ pub fn run(json: bool, name: Option<&str>, delete: Option<&str>) -> Result<(), C
     if let Some(name) = delete {
         if !registry::forget(name)? {
             return Err(CliError::coded(
-                "extension/not-declared",
+                "adapter/not-declared",
                 format!("nothing on this machine is declared under `{name}`"),
-                vec!["atc extension".into(), format!("atc extension {name}")],
+                vec!["atc adapter".into(), format!("atc adapter {name}")],
             ));
         }
         if json {
             println!(
                 "{}",
                 machine::emit(
-                    "extension",
+                    "adapter",
                     &serde_json::json!({"removed": name, "file": registry::path()})
                 )
             );
@@ -33,7 +33,7 @@ pub fn run(json: bool, name: Option<&str>, delete: Option<&str>) -> Result<(), C
             println!(
                 "{}",
                 machine::emit(
-                    "extension",
+                    "adapter",
                     &serde_json::json!({"declared": {"manifest": shook.manifest, "path": shook.path}, "replaced": replaced, "file": registry::path()})
                 )
             );
@@ -56,7 +56,7 @@ pub fn run(json: bool, name: Option<&str>, delete: Option<&str>) -> Result<(), C
             if !shook.manifest.skills.is_empty() {
                 println!("  its skills install beside tower's on atc hook");
             }
-            println!("undo: atc extension -d {name}");
+            println!("undo: atc adapter -d {name}");
         }
     } else {
         let registry = registry::read();
@@ -70,13 +70,13 @@ pub fn run(json: bool, name: Option<&str>, delete: Option<&str>) -> Result<(), C
             {
                 row["resolved"] = serde_json::to_value(entry.resolve()).expect("path serializes");
             }
-            println!("{}", machine::emit("extension", &data));
+            println!("{}", machine::emit("adapter", &data));
         } else {
             if let Some(why) = &registry.unreadable {
                 eprintln!("atc: the registry does not read as one: {why}");
             }
             if registry.declared().is_empty() {
-                println!("nothing is declared on this machine\natc extension <name> declares one");
+                println!("nothing is declared on this machine\natc adapter <name> declares one");
             }
             for entry in registry.declared() {
                 println!(

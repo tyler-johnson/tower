@@ -139,7 +139,7 @@ pub fn install_command_for(url: &str) -> String {
     }
 }
 
-pub fn extension_bin_dir(bin: Option<&str>) -> Option<PathBuf> {
+pub fn adapter_bin_dir(bin: Option<&str>) -> Option<PathBuf> {
     let path = match bin {
         Some("~") => crate::integ::home().ok()?,
         Some(bin) if bin.starts_with("~/") => crate::integ::home().ok()?.join(&bin[2..]),
@@ -149,12 +149,7 @@ pub fn extension_bin_dir(bin: Option<&str>) -> Option<PathBuf> {
     Some(path.canonicalize().unwrap_or(path))
 }
 
-pub fn classify_extension_at(
-    path: &Path,
-    official: bool,
-    install: bool,
-    bin: &Path,
-) -> InstallKind {
+pub fn classify_adapter_at(path: &Path, official: bool, install: bool, bin: &Path) -> InstallKind {
     let own = classify_install_at(path, official, Path::new(""));
     if own != InstallKind::Unmanaged {
         return own;
@@ -247,7 +242,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extension_channels_and_recipes_follow_the_owners_directory() {
+    fn adapter_channels_and_recipes_follow_the_owners_directory() {
         let bin = Path::new("/home/u/.local/bin");
         let block = crate::manifest::Update {
             brew: Some("owner/tap/probe".into()),
@@ -260,17 +255,14 @@ mod tests {
             ("/home/u/.local/bin/sub/atc-probe", InstallKind::Unmanaged),
             ("/opt/homebrew/bin/atc-probe", InstallKind::Homebrew),
         ] {
+            assert_eq!(classify_adapter_at(Path::new(path), true, true, bin), kind);
             assert_eq!(
-                classify_extension_at(Path::new(path), true, true, bin),
-                kind
-            );
-            assert_eq!(
-                classify_extension_at(Path::new(path), false, true, bin),
+                classify_adapter_at(Path::new(path), false, true, bin),
                 InstallKind::Source
             );
         }
         assert_eq!(
-            classify_extension_at(&bin.join("atc-probe"), true, false, bin),
+            classify_adapter_at(&bin.join("atc-probe"), true, false, bin),
             InstallKind::Unmanaged
         );
         assert_eq!(

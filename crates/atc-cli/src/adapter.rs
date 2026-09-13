@@ -169,8 +169,8 @@ pub fn delegate(name: &str, verb: &str, rest: &[&str]) -> Result<Vec<u8>, CliErr
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let session = atc_core::lease::session_key("");
     ask(name, verb, rest, &cwd, None, session.as_deref()).ok_or_else(|| CliError::coded(
-        "extension/delegate-failed",
+        "adapter/delegate-failed",
         format!("atc-{name} did not answer: it may have left PATH since it was declared, refused to start, exited nonzero, or run past the time box tower gives it"),
-        vec!["atc doctor".into(), "atc extension".into()],
+        vec!["atc doctor".into(), "atc adapter".into()],
     ))
 }

@@ -84,9 +84,9 @@ pub struct SkillFile {
 }
 
 pub fn handshake(name: &str) -> Result<Handshake, CliError> {
-    let path = crate::ext::resolve(name).ok_or_else(|| {
+    let path = crate::adapter::resolve(name).ok_or_else(|| {
         CliError::coded(
-            "extension/not-found",
+            "adapter/not-found",
             format!("no atc-{name} on PATH, so there is nothing to ask for a manifest"),
             vec!["atc doctor".into()],
         )
@@ -138,7 +138,7 @@ fn answer(path: &Path, args: &[&str]) -> Result<serde_json::Value, String> {
 pub fn ask(path: &Path, name: &str) -> Result<Manifest, CliError> {
     let data = answer(path, &[FLAG]).map_err(|why| {
         CliError::coded(
-            "extension/handshake-failed",
+            "adapter/handshake-failed",
             format!("atc-{name} {FLAG} did not answer with a manifest: {why}"),
             vec![],
         )
@@ -151,7 +151,7 @@ pub fn ask(path: &Path, name: &str) -> Result<Manifest, CliError> {
 pub fn accept(manifest: &Manifest, name: &str) -> Result<(), CliError> {
     if manifest.contract != atc_core::machine::CONTRACT {
         return Err(CliError::coded(
-            "extension/unsupported-contract",
+            "adapter/unsupported-contract",
             format!(
                 "atc-{name} speaks contract {}, and this tower speaks {}",
                 manifest.contract,
@@ -162,7 +162,7 @@ pub fn accept(manifest: &Manifest, name: &str) -> Result<(), CliError> {
     }
     if manifest.name != name {
         return Err(CliError::coded(
-            "extension/name-mismatch",
+            "adapter/name-mismatch",
             format!(
                 "atc-{name} calls itself `{}`, and a manifest names the binary tower resolved",
                 manifest.name
@@ -175,9 +175,9 @@ pub fn accept(manifest: &Manifest, name: &str) -> Result<(), CliError> {
 
 pub fn parse(value: serde_json::Value) -> Result<Manifest, CliError> {
     let manifest: Manifest = serde_json::from_value(value).map_err(|err| bad(err.to_string()))?;
-    if !crate::ext::valid_name(&manifest.name) {
+    if !crate::adapter::valid_name(&manifest.name) {
         return Err(bad(format!(
-            "`{}` is not a name an extension can have: ASCII letters and digits, `-` and `_`, starting with a letter or a digit",
+            "`{}` is not a name an adapter can have: ASCII letters and digits, `-` and `_`, starting with a letter or a digit",
             manifest.name
         )));
     }
@@ -186,7 +186,7 @@ pub fn parse(value: serde_json::Value) -> Result<Manifest, CliError> {
     }
     if manifest.verbs.is_empty() {
         return Err(bad(
-            "verbs is empty: an extension tower will describe has to answer to at least one verb",
+            "verbs is empty: an adapter tower will describe has to answer to at least one verb",
         ));
     }
     for verb in &manifest.verbs {
@@ -233,7 +233,7 @@ pub fn parse(value: serde_json::Value) -> Result<Manifest, CliError> {
 }
 
 pub fn skill_name(name: &str, skill: &str) -> bool {
-    crate::ext::valid_name(skill)
+    crate::adapter::valid_name(skill)
         && (skill == name
             || skill
                 .strip_prefix(name)
@@ -243,7 +243,7 @@ pub fn skill_name(name: &str, skill: &str) -> bool {
 
 fn bad(why: impl std::fmt::Display) -> CliError {
     CliError::coded(
-        "extension/bad-manifest",
+        "adapter/bad-manifest",
         format!("that is not a manifest tower can read: {why}"),
         vec![],
     )
@@ -252,7 +252,7 @@ fn bad(why: impl std::fmt::Display) -> CliError {
 pub fn ask_skill(path: &Path, name: &str, skill: &str) -> Result<Vec<SkillFile>, CliError> {
     let data = answer(path, &[SKILL_FLAG, skill]).map_err(|why| {
         CliError::coded(
-            "extension/skill-failed",
+            "adapter/skill-failed",
             format!("atc-{name} {SKILL_FLAG} {skill} did not answer with a skill: {why}"),
             vec!["atc doctor".into()],
         )
@@ -309,7 +309,7 @@ pub fn parse_skill(value: serde_json::Value) -> Result<Vec<SkillFile>, CliError>
 
 fn bad_skill(why: impl std::fmt::Display) -> CliError {
     CliError::coded(
-        "extension/bad-skill",
+        "adapter/bad-skill",
         format!("that is not a skill tower can read: {why}"),
         vec![],
     )
@@ -337,7 +337,7 @@ mod tests {
         for field in ["name", "version", "contract", "verbs", "undoable"] {
             let mut value = smallest();
             value.as_object_mut().unwrap().remove(field);
-            assert_eq!(parse(value).unwrap_err().id(), "extension/bad-manifest");
+            assert_eq!(parse(value).unwrap_err().id(), "adapter/bad-manifest");
         }
     }
     #[test]
@@ -396,7 +396,7 @@ mod tests {
                 value[field] = bad;
                 assert_eq!(
                     parse(value.clone()).unwrap_err().id(),
-                    "extension/bad-manifest",
+                    "adapter/bad-manifest",
                     "{value}"
                 );
             }
@@ -411,12 +411,12 @@ mod tests {
         manifest.contract = 99;
         assert_eq!(
             accept(&manifest, "other").unwrap_err().id(),
-            "extension/unsupported-contract"
+            "adapter/unsupported-contract"
         );
         manifest.contract = 1;
         assert_eq!(
             accept(&manifest, "other").unwrap_err().id(),
-            "extension/name-mismatch"
+            "adapter/name-mismatch"
         );
         accept(&manifest, "probe").unwrap();
     }
@@ -430,7 +430,7 @@ mod tests {
         ] {
             assert_eq!(
                 parse_skill(json!({"files":files})).unwrap_err().id(),
-                "extension/bad-skill"
+                "adapter/bad-skill"
             );
         }
         for path in [
@@ -447,7 +447,7 @@ mod tests {
                 )
                 .unwrap_err()
                 .id(),
-                "extension/bad-skill",
+                "adapter/bad-skill",
                 "{path}"
             );
         }

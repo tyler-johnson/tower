@@ -9,7 +9,7 @@ use std::sync::RwLock;
 pub fn path() -> Option<PathBuf> {
     Some(
         config_root_from(std::env::consts::OS, |name| std::env::var_os(name))?
-            .join("tower/extensions.json"),
+            .join("tower/adapters.json"),
     )
 }
 
@@ -37,7 +37,7 @@ impl Declared {
         &self.manifest.name
     }
     pub fn resolve(&self) -> Option<PathBuf> {
-        crate::ext::resolve(self.name())
+        crate::adapter::resolve(self.name())
     }
 }
 #[derive(Debug, Serialize)]
@@ -102,9 +102,8 @@ pub fn load(file: Option<&Path>) -> Registry {
         let (Some(name), Some(contract)) = (name, contract) else {
             registry.entries.clear();
             registry.stale.clear();
-            registry.unreadable = Some(
-                "a record is missing its name or its contract, so it names no extension".into(),
-            );
+            registry.unreadable =
+                Some("a record is missing its name or its contract, so it names no adapter".into());
             return registry;
         };
         if contract != u64::from(atc_core::machine::CONTRACT) {
@@ -175,12 +174,12 @@ fn forget_from(file: &Path, name: &str) -> Result<bool, CliError> {
     Ok(true)
 }
 fn writable() -> Result<PathBuf, CliError> {
-    path().ok_or_else(|| CliError::coded("extension/registry-unwritable", "there is nowhere to record a declaration: nothing in the environment names a config directory", vec!["atc doctor".into()]))
+    path().ok_or_else(|| CliError::coded("adapter/registry-unwritable", "there is nowhere to record a declaration: nothing in the environment names a config directory", vec!["atc doctor".into()]))
 }
 fn for_writing(file: &Path) -> Result<Vec<Record>, CliError> {
     raw(file).map_err(|why| {
         CliError::coded(
-            "extension/registry-unreadable",
+            "adapter/registry-unreadable",
             format!("{} is not a registry tower can read: {why}", file.display()),
             vec!["atc doctor".into()],
         )
@@ -193,13 +192,13 @@ fn raw(file: &Path) -> Result<Vec<Record>, String> {
         Err(err) => return Err(err.to_string()),
     };
     serde_json::from_slice::<File>(&body)
-        .map(|file| file.extensions)
+        .map(|file| file.adapters)
         .map_err(|err| err.to_string())
 }
 fn write(file: &Path, records: &[Record]) -> Result<(), CliError> {
     let failed = |err: std::io::Error| {
         CliError::coded(
-            "extension/registry-unwritable",
+            "adapter/registry-unwritable",
             format!("{} could not be written: {err}", file.display()),
             vec!["atc doctor".into()],
         )
@@ -209,7 +208,7 @@ fn write(file: &Path, records: &[Record]) -> Result<(), CliError> {
     }
     let mut body = serde_json::to_string_pretty(&File {
         atc: atc_core::machine::CONTRACT,
-        extensions: records.to_vec(),
+        adapters: records.to_vec(),
     })
     .expect("registry serializes");
     body.push('\n');
@@ -220,7 +219,7 @@ fn write(file: &Path, records: &[Record]) -> Result<(), CliError> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct File {
     atc: u32,
-    extensions: Vec<Record>,
+    adapters: Vec<Record>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Record {
@@ -245,7 +244,7 @@ mod tests {
     }
     fn file() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("tower/extensions.json");
+        let file = dir.path().join("tower/adapters.json");
         (dir, file)
     }
     #[test]
@@ -298,8 +297,8 @@ mod tests {
         let mut data: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
         data["atc"] = 99.into();
-        data["extensions"][0]["manifest"]["contract"] = 99.into();
-        data["extensions"][0]["manifest"]["verbs"] = "a future shape".into();
+        data["adapters"][0]["manifest"]["contract"] = 99.into();
+        data["adapters"][0]["manifest"]["verbs"] = "a future shape".into();
         std::fs::write(&file, data.to_string()).unwrap();
         declare_into(&file, &shook("other")).unwrap();
         let registry = load(Some(&file));
@@ -311,13 +310,7 @@ mod tests {
     }
     #[test]
     fn corrupt_files_fail_closed_and_are_not_overwritten() {
-        for body in [
-            "",
-            "{",
-            "[]",
-            "{\"atc\":1}",
-            "{\"atc\":1,\"extensions\":{}}",
-        ] {
+        for body in ["", "{", "[]", "{\"atc\":1}", "{\"atc\":1,\"adapters\":{}}"] {
             let (_dir, file) = file();
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(&file, body).unwrap();
@@ -326,7 +319,7 @@ mod tests {
             assert!(registry.unreadable.is_some());
             assert_eq!(
                 declare_into(&file, &shook("probe")).unwrap_err().id(),
-                "extension/registry-unreadable"
+                "adapter/registry-unreadable"
             );
             assert_eq!(std::fs::read_to_string(&file).unwrap(), body);
         }
@@ -340,7 +333,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
         for field in ["name", "contract", "verbs"] {
             let mut data = original.clone();
-            data["extensions"][1]["manifest"]
+            data["adapters"][1]["manifest"]
                 .as_object_mut()
                 .unwrap()
                 .remove(field);

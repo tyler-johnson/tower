@@ -34,12 +34,12 @@ use serde::Serialize;
 
 use crate::error::CliError;
 
+mod adapter_skills;
 pub mod briefing;
 pub mod claude;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
-mod extension_skills;
 pub mod opencode;
 pub mod plugin;
 pub mod qwen;

@@ -99,7 +99,7 @@ pub fn text(ready: usize, filed: usize, on: &[String]) -> String {
 }
 
 /// One line per declaration, in registry order. The 240-character budget and one-second ask are fufu's.
-pub fn extension_lines(cwd: &Path, repo: Option<&Path>, session: Option<&str>) -> Vec<String> {
+pub fn adapter_lines(cwd: &Path, repo: Option<&Path>, session: Option<&str>) -> Vec<String> {
     use crate::manifest::Briefing;
     crate::registry::read()
         .declared()
@@ -107,7 +107,7 @@ pub fn extension_lines(cwd: &Path, repo: Option<&Path>, session: Option<&str>) -
         .filter_map(|entry| {
             let said = match &entry.manifest.briefing {
                 Some(Briefing::Line(line)) => line.clone(),
-                Some(Briefing::Ask(true)) => String::from_utf8(crate::ext::ask(
+                Some(Briefing::Ask(true)) => String::from_utf8(crate::adapter::ask(
                     entry.name(),
                     "briefing",
                     &[],
@@ -129,9 +129,9 @@ fn usable(said: &str) -> Option<String> {
         .then(|| line.to_string())
 }
 
-pub fn with_extensions(mut text: String, cwd: &Path, session: Option<&str>) -> String {
+pub fn with_adapters(mut text: String, cwd: &Path, session: Option<&str>) -> String {
     let repo = atc_core::lease::repo_root(cwd);
-    for line in extension_lines(cwd, repo.as_deref(), session) {
+    for line in adapter_lines(cwd, repo.as_deref(), session) {
         text.push('\n');
         text.push_str(&line);
     }

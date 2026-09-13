@@ -187,7 +187,7 @@ fn act(
 ) -> Result<(), CliError> {
     if !matches!(verb, Verb::Unhook) && targets.iter().any(|target| target.status().skill.is_some())
     {
-        super::extension_skills::prepare();
+        super::adapter_skills::prepare();
     }
     if targets.is_empty() {
         // `--all` over a machine with nothing on it. Saying so beats

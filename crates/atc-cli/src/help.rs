@@ -11,11 +11,11 @@
 //! pair — bare `atc` is the board, so `atc help board` prints
 //! the root page, fufu's bare-`ff`-and-`help map` precedent.
 
-pub const EXTENSION: &str = "\
+pub const ADAPTER: &str = "\
 Declare an adapter on this machine. Bare lists declarations; a name
 runs atc-<name> --atc-manifest and records its checked manifest;
 -d <name> forgets it. The registry lives under the user's config
-directory, in tower/extensions.json.
+directory, in tower/adapters.json.
 
 An undeclared atc-<name> already runs through atc <name>, with its
 arguments, stdio, and exit status preserved. Built-in verbs win.
@@ -23,11 +23,11 @@ Declaring adds atc help <name>, atc explain <name>/<id>, a budgeted
 line in the trigger notice, skills installed by atc hook, update
 recipes, and doctor diagnostics. atc hook -u refreshes manifests.";
 
-pub const EXTENSION_EXAMPLES: &str = "\
+pub const ADAPTER_EXAMPLES: &str = "\
 Examples:
-  atc extension
-  atc extension github
-  atc extension -d github";
+  atc adapter
+  atc adapter github
+  atc adapter -d github";
 
 pub const ROOT: &str = "\
 tower: the board over fufu
@@ -721,7 +721,7 @@ Then every declared adapter is visited in declaration order, using
 the update recipes in its manifest. Script recipes can run; other
 channels print instructions. -y continues past adapters it cannot
 update and reports failures at the end. A successful adapter update
-ends with atc hook -u. JSON includes an extensions list when declared
+ends with atc hook -u. JSON includes an adapters list when declared
 adapters are present. The background check also caches releases for
 official adapters whose recipes name a GitHub latest-release page.";
 
@@ -751,7 +751,7 @@ row, wired is ok, not wired is information, and skills an older
 tower wrote are a finding, because `atc hook -u` is the only thing
 that rewrites them. Declared adapters get rows for missing binaries,
 failed handshakes, incompatible contracts, and drift from the recorded
-manifest or PATH location. An unreadable extension registry is a finding.
+manifest or PATH location. An unreadable adapter registry is a finding.
 
 Rows come at three levels: ok counts nothing, info is news rather
 than a problem, WARN is a finding. Findings drive the exit — 0

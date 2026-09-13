@@ -8,6 +8,7 @@
 //! and the human render around one core call. What stays in this module
 //! is the CLI's own half: the repository handles and the echo tail.
 
+pub mod adapter;
 pub mod answer;
 pub mod assign;
 pub mod board;
@@ -21,7 +22,6 @@ pub mod doctor;
 pub mod done;
 pub mod edit;
 pub mod explain;
-pub mod extension;
 pub mod file;
 pub mod hold;
 pub mod link;

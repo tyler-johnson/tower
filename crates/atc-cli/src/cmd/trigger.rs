@@ -115,7 +115,7 @@ fn bare(json: bool, cmd: &str) -> Result<(), CliError> {
     let cwd = super::repo()?;
     let counts = briefing::counts(&cwd)?;
     let session = lease::session_key("");
-    let text = briefing::with_extensions(
+    let text = briefing::with_adapters(
         briefing::text(counts.ready, counts.filed, &counts.on),
         &cwd,
         session.as_deref(),
@@ -140,7 +140,7 @@ fn notice(
         return Ok(());
     };
     let session = lease::session_key(&payload.session_id);
-    let text = briefing::with_extensions(
+    let text = briefing::with_adapters(
         briefing::text(counts.ready, counts.filed, &counts.on),
         &payload.cwd(),
         session.as_deref(),

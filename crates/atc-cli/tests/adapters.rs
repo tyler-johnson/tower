@@ -86,7 +86,7 @@ esac
         );
     }
     fn declare(&self) {
-        self.ok(&["extension", "probe"]);
+        self.ok(&["adapter", "probe"]);
     }
 }
 fn text(out: &Output) -> String {
@@ -105,7 +105,7 @@ fn files(body: &str) -> Value {
 #[test]
 fn declaration_round_trip_and_help_explain_delegation() {
     let f = Fixture::new();
-    assert_eq!(data(&f.ok(&["extension", "--json"]))["declared"], json!([]));
+    assert_eq!(data(&f.ok(&["adapter", "--json"]))["declared"], json!([]));
     f.probe(manifest(), files("manual"));
     assert_eq!(
         f.run(&["probe", "go"]).status.code(),
@@ -114,7 +114,7 @@ fn declaration_round_trip_and_help_explain_delegation() {
     );
     assert!(!f.run(&["help", "probe"]).status.success());
     f.declare();
-    let list = data(&f.ok(&["extension", "--json"]));
+    let list = data(&f.ok(&["adapter", "--json"]));
     assert_eq!(list["declared"][0]["manifest"]["name"], "probe");
     assert_eq!(
         list["declared"][0]["resolved"],
@@ -128,15 +128,15 @@ fn declaration_round_trip_and_help_explain_delegation() {
     let mut next = manifest();
     next["version"] = json!("2.0.0");
     f.probe(next, files("manual"));
-    let updated = data(&f.ok(&["extension", "probe", "--json"]));
+    let updated = data(&f.ok(&["adapter", "probe", "--json"]));
     assert_eq!(updated["replaced"], "1.0.0");
-    f.ok(&["extension", "-d", "probe"]);
-    assert_eq!(data(&f.ok(&["extension", "--json"]))["declared"], json!([]));
+    f.ok(&["adapter", "-d", "probe"]);
+    assert_eq!(data(&f.ok(&["adapter", "--json"]))["declared"], json!([]));
     assert_eq!(f.run(&["probe"]).status.code(), Some(7));
-    let out = f.run(&["extension", "-d", "probe", "--json"]);
+    let out = f.run(&["adapter", "-d", "probe", "--json"]);
     assert_eq!(
         serde_json::from_slice::<Value>(&out.stdout).unwrap()["error"]["id"],
-        "extension/not-declared"
+        "adapter/not-declared"
     );
 }
 
@@ -201,20 +201,20 @@ fn handshake_refusals_do_not_replace_the_record() {
     let f = Fixture::new();
     f.probe(manifest(), files("manual"));
     f.declare();
-    let file = data(&f.ok(&["extension", "--json"]))["file"]
+    let file = data(&f.ok(&["adapter", "--json"]))["file"]
         .as_str()
         .unwrap()
         .to_string();
     let before = std::fs::read(&file).unwrap();
     for (field, value, id) in [
-        ("contract", json!(99), "extension/unsupported-contract"),
-        ("name", json!("other"), "extension/name-mismatch"),
-        ("verbs", json!([]), "extension/bad-manifest"),
+        ("contract", json!(99), "adapter/unsupported-contract"),
+        ("name", json!("other"), "adapter/name-mismatch"),
+        ("verbs", json!([]), "adapter/bad-manifest"),
     ] {
         let mut bad = manifest();
         bad[field] = value;
         f.probe(bad, files("manual"));
-        let out = f.run(&["extension", "probe", "--json"]);
+        let out = f.run(&["adapter", "probe", "--json"]);
         let err = serde_json::from_slice::<Value>(&out.stdout).unwrap()["error"].clone();
         assert_eq!(err["id"], id);
         if field == "contract" {
@@ -232,10 +232,10 @@ fn handshake_refusals_do_not_replace_the_record() {
         "printf '{\"atc\":1,\"error\":{\"id\":\"probe/x\"}}'",
     ] {
         f.script("probe", body);
-        let out = f.run(&["extension", "probe", "--json"]);
+        let out = f.run(&["adapter", "probe", "--json"]);
         assert_eq!(
             serde_json::from_slice::<Value>(&out.stdout).unwrap()["error"]["id"],
-            "extension/handshake-failed"
+            "adapter/handshake-failed"
         );
         assert_eq!(std::fs::read(&file).unwrap(), before);
     }
@@ -256,7 +256,7 @@ fn notice_lines_and_refresh_without_wired_clients() {
     f.probe(m, files("manual"));
     f.ok(&["hook", "-u", "--json"]);
     assert_eq!(
-        data(&f.ok(&["extension", "--json"]))["declared"][0]["manifest"]["version"],
+        data(&f.ok(&["adapter", "--json"]))["declared"][0]["manifest"]["version"],
         "2.0.0"
     );
     assert!(text(&f.ok(&["briefing"])).ends_with("probe dynamic notice\n"));
@@ -296,7 +296,7 @@ fn failed_and_hung_dynamic_queries_are_bounded_and_help_is_loud() {
     let out = f.run(&["--json", "help", "probe"]);
     assert_eq!(
         serde_json::from_slice::<Value>(&out.stdout).unwrap()["error"]["id"],
-        "extension/delegate-failed"
+        "adapter/delegate-failed"
     );
 }
 
@@ -337,7 +337,7 @@ fn skills_install_refresh_and_remove_across_client_roots() {
         );
         assert!(!root.join("probe/docs/old.md").exists());
     }
-    f.ok(&["extension", "-d", "probe"]);
+    f.ok(&["adapter", "-d", "probe"]);
     f.ok(&["hook", "-u"]);
     for root in &roots {
         assert!(!root.join("probe").exists());
@@ -351,7 +351,7 @@ fn skill_roots(home: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 walk(&path, roots);
-            } else if entry.file_name() == ".atc-extension-skills.json" {
+            } else if entry.file_name() == ".atc-adapter-skills.json" {
                 roots.push(dir.to_path_buf());
             }
         }
@@ -370,7 +370,7 @@ fn doctor_detects_manifest_and_path_drift() {
     let rows = data(&out)["rows"].as_array().unwrap().clone();
     assert!(
         rows.iter()
-            .any(|row| row["check"] == "extension/probe" && row["level"] == "ok"),
+            .any(|row| row["check"] == "adapter/probe" && row["level"] == "ok"),
         "{rows:?}"
     );
     let mut m = manifest();
@@ -383,7 +383,7 @@ fn doctor_detects_manifest_and_path_drift() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["check"] == "extension/probe"
+            .any(|row| row["check"] == "adapter/probe"
                 && row["message"].as_str().unwrap().contains("differs"))
     );
     std::fs::remove_file(f.bin.join("atc-probe")).unwrap();
@@ -416,7 +416,7 @@ fn bad_skills_preserve_installed_files_and_unhook_preserves_foreign_skills() {
         "good manual"
     );
     assert!(!root.join("escape").exists());
-    f.ok(&["extension", "-d", "probe"]);
+    f.ok(&["adapter", "-d", "probe"]);
     f.ok(&["unhook", "opencode"]);
     assert!(!root.join("probe").exists());
     assert_eq!(
@@ -435,7 +435,7 @@ fn install_does_not_overwrite_a_foreign_skill_of_the_same_name() {
     f.declare();
     f.ok(&["hook", "opencode"]);
     let root = skill_roots(f.home.path()).pop().unwrap();
-    std::fs::remove_file(root.join(".atc-extension-skills.json")).unwrap();
+    std::fs::remove_file(root.join(".atc-adapter-skills.json")).unwrap();
     std::fs::write(root.join("probe/SKILL.md"), "my own manual").unwrap();
     let out = f.ok(&["hook", "-u"]);
     assert!(String::from_utf8_lossy(&out.stderr).contains("was not installed by tower"));
@@ -457,7 +457,7 @@ fn update_walk_continues_past_source_tower_and_failed_adapter_then_refreshes() {
         "broken",
         &format!("printf '%s\\n' '{}'", json!({"atc":1,"data":broken})),
     );
-    f.ok(&["extension", "broken"]);
+    f.ok(&["adapter", "broken"]);
     f.probe(m, files("manual"));
     f.declare();
     let curl = f.bin.join("curl");
@@ -465,7 +465,7 @@ fn update_walk_continues_past_source_tower_and_failed_adapter_then_refreshes() {
     std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
     let marker = f.home.path().join("installed");
     let preview = data(&f.ok(&["update", "--json"]));
-    assert_eq!(preview["extensions"].as_array().unwrap().len(), 2);
+    assert_eq!(preview["adapters"].as_array().unwrap().len(), 2);
     assert!(
         !marker.exists(),
         "noninteractive update only prints recipes"

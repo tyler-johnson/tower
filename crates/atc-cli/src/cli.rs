@@ -103,8 +103,8 @@ pub struct BoardArgs {
 #[derive(Subcommand)]
 pub enum Command {
     /// Declare an adapter on this machine; bare lists declarations
-    #[command(long_about = help::EXTENSION, after_long_help = help::EXTENSION_EXAMPLES)]
-    Extension {
+    #[command(long_about = help::ADAPTER, after_long_help = help::ADAPTER_EXAMPLES)]
+    Adapter {
         /// The name in atc-<name> on PATH
         #[arg(conflicts_with = "delete")]
         name: Option<String>,
@@ -529,7 +529,7 @@ impl Command {
                 notice: false,
             },
             Command::Explain { .. }
-            | Command::Extension { .. }
+            | Command::Adapter { .. }
             | Command::Config { .. }
             | Command::Procedures { .. }
             | Command::Skills { .. }

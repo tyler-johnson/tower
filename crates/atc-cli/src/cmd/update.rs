@@ -48,12 +48,12 @@ pub fn run(json: bool, check: bool, yes: bool) -> Result<(), CliError> {
     if let Err(err) = &own {
         trouble.push(err.to_string());
     }
-    let mut extensions = Vec::new();
+    let mut adapters = Vec::new();
     let mut moved = false;
     for entry in declared {
-        let report = extension(entry, json, yes, &mut trouble)?;
+        let report = adapter(entry, json, yes, &mut trouble)?;
         moved |= report.status == "installed";
-        extensions.push(report);
+        adapters.push(report);
     }
     if moved {
         // The path from before installation still names the installed binary after its predecessor was replaced.
@@ -75,14 +75,14 @@ pub fn run(json: bool, check: bool, yes: bool) -> Result<(), CliError> {
     }
     if json {
         let mut data = serde_json::to_value(own.expect("no trouble")).expect("report serializes");
-        data["extensions"] = serde_json::to_value(extensions).expect("reports serialize");
+        data["adapters"] = serde_json::to_value(adapters).expect("reports serialize");
         println!("{}", machine::emit("update", &data));
     }
     Ok(())
 }
 
 #[derive(serde::Serialize)]
-struct ExtensionReport {
+struct AdapterReport {
     name: String,
     current: String,
     channel: Option<InstallKind>,
@@ -91,13 +91,13 @@ struct ExtensionReport {
     message: String,
 }
 
-fn extension(
+fn adapter(
     entry: &crate::registry::Declared,
     json: bool,
     yes: bool,
     trouble: &mut Vec<String>,
-) -> Result<ExtensionReport, CliError> {
-    let mut report = ExtensionReport {
+) -> Result<AdapterReport, CliError> {
+    let mut report = AdapterReport {
         name: entry.name().into(),
         current: entry.manifest.version.clone(),
         channel: None,
@@ -121,8 +121,8 @@ fn extension(
             entry.name()
         );
     } else if let Some(block) = &entry.manifest.update {
-        let bin = selfupdate::extension_bin_dir(block.bin.as_deref()).unwrap_or_default();
-        let kind = selfupdate::classify_extension_at(
+        let bin = selfupdate::adapter_bin_dir(block.bin.as_deref()).unwrap_or_default();
+        let kind = selfupdate::classify_adapter_at(
             path.as_deref().expect("resolved"),
             true,
             block.install.is_some(),
@@ -308,15 +308,11 @@ fn refresh_cache() -> Result<(), CliError> {
     })();
     // Every failure is silent
     let agent = selfupdate::github::agent();
-    selfupdate::notify::refresh_extensions(
-        &mut state,
-        crate::registry::read().declared(),
-        |repo| {
-            selfupdate::github::fetch_latest_of(&agent, "https://api.github.com", repo)
-                .ok()
-                .map(|release| release.tag_name)
-        },
-    );
+    selfupdate::notify::refresh_adapters(&mut state, crate::registry::read().declared(), |repo| {
+        selfupdate::github::fetch_latest_of(&agent, "https://api.github.com", repo)
+            .ok()
+            .map(|release| release.tag_name)
+    });
     let _ = selfupdate::notify::save_state(&path, &state);
     Ok(())
 }

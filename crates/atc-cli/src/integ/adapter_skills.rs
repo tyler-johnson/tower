@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
-const RECEIPT: &str = ".atc-extension-skills.json";
+const RECEIPT: &str = ".atc-adapter-skills.json";
 #[derive(Clone, Serialize, Deserialize)]
 struct Installed {
     owner: String,
@@ -26,7 +26,7 @@ pub fn prepare() {
                     .resolve()
                     .ok_or_else(|| {
                         CliError::coded(
-                            "extension/not-found",
+                            "adapter/not-found",
                             format!("atc-{} is not on PATH", entry.name()),
                             vec!["atc doctor".into()],
                         )
@@ -67,7 +67,7 @@ fn receipt(root: &Path) -> Result<Skills, CliError> {
     let skills: Skills =
         serde_json::from_slice(&body).map_err(|err| super::malformed(&path, err))?;
     for (name, skill) in &skills {
-        if !crate::ext::valid_name(&skill.owner)
+        if !crate::adapter::valid_name(&skill.owner)
             || !manifest::skill_name(&skill.owner, name)
             || super::skill::SKILLS.iter().any(|s| s.name == name)
         {

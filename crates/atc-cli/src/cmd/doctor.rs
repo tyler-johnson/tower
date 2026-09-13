@@ -52,7 +52,7 @@ pub fn run(json: bool) -> Result<i32, CliError> {
     // The update row: the passive lane's cache, whose own row is why
     // doctor suppresses the generic notice. Info level — never a finding.
     report.rows.push(update_row());
-    for row in extension_rows() {
+    for row in adapter_rows() {
         if row.level == Level::Warn {
             report.findings += 1;
         }
@@ -99,7 +99,7 @@ pub fn run(json: bool) -> Result<i32, CliError> {
     Ok(if report.findings == 0 { 0 } else { 1 })
 }
 
-fn extension_rows() -> Vec<DoctorRow> {
+fn adapter_rows() -> Vec<DoctorRow> {
     let registry = crate::registry::read();
     let mut rows = Vec::new();
     let mut row = |check: String, level, message| {
@@ -111,14 +111,14 @@ fn extension_rows() -> Vec<DoctorRow> {
     };
     if let Some(why) = &registry.unreadable {
         row(
-            "extension/registry".into(),
+            "adapter/registry".into(),
             Level::Warn,
-            format!("the extension registry does not read as one: {why}"),
+            format!("the adapter registry does not read as one: {why}"),
         );
     }
     for stale in &registry.stale {
         row(
-            format!("extension/{}", stale.name),
+            format!("adapter/{}", stale.name),
             Level::Warn,
             format!(
                 "{} is recorded with contract {}, which this tower does not speak — atc hook -u re-asks it",
@@ -127,7 +127,7 @@ fn extension_rows() -> Vec<DoctorRow> {
         );
     }
     for entry in registry.declared() {
-        let check = format!("extension/{}", entry.name());
+        let check = format!("adapter/{}", entry.name());
         let Some(path) = entry.resolve() else {
             row(
                 check,
