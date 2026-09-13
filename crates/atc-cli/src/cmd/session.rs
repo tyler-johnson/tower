@@ -7,7 +7,8 @@
 //! `leaseWindow` and `leaseExpiry` — and the compiled defaults
 //! otherwise. The `repos` column is where the session ran `atc` or
 //! fired a hook, basenames in order of last sight, the last most
-//! recent. The listing sweeps first: a lease past `leaseExpiry` is
+//! recent, the three most recent shown and the rest counted. The
+//! listing sweeps first: a lease past `leaseExpiry` is
 //! gone, a stale one inside it is listed stale and kept, and nothing
 //! here renews one. `--mint` prints a UUIDv7 and touches nothing, so the
 //! shells' rc lines can run it inside `$(…)` at every interactive start
@@ -34,14 +35,19 @@ pub fn run(json: bool, mint: bool) -> Result<(), CliError> {
     list(json)
 }
 
-/// The `repos` cell: the roots' basenames in stored order, joined by
-/// `, `, or `-` for a session seen in none. `atc whoami` renders its
-/// row the same way.
+/// How many roots the cell names before it counts the rest.
+const SHOWN: usize = 3;
+
+/// The `repos` cell: the basenames of the `SHOWN` most recent roots in
+/// stored order, joined by `, `, then `+N more` for the rest; `-` for a
+/// session seen in none. `--json` carries every root; `atc whoami`
+/// renders its row the same way.
 pub fn repos_cell(repos: &[String]) -> String {
     if repos.is_empty() {
         return "-".to_string();
     }
-    repos
+    let hidden = repos.len().saturating_sub(SHOWN);
+    let mut cell = repos[hidden..]
         .iter()
         .map(|root| {
             std::path::Path::new(root)
@@ -50,7 +56,11 @@ pub fn repos_cell(repos: &[String]) -> String {
                 .unwrap_or_else(|| root.clone())
         })
         .collect::<Vec<_>>()
-        .join(", ")
+        .join(", ");
+    if hidden > 0 {
+        cell.push_str(&format!(" +{hidden} more"));
+    }
+    cell
 }
 
 /// One session's row: the lease body, its state against the window,

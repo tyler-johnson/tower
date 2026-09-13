@@ -470,8 +470,10 @@ Examples:
 pub const SESSION: &str = "\
 Every session on this machine with a lease: the session id, the
 client it runs under, the callsign it holds or none, the
-repositories it was seen in — basenames, in order of last sight —
-the lease fresh or stale and by how much, the pid alive or dead when
+repositories it was seen in — basenames, in order of last sight,
+the three most recent named and the rest counted; the lease keeps
+the last 32 — the lease fresh or stale and by how much, the pid
+alive or dead when
 the lease holds one, and which row is this process's own. The \"who
 is flying here\" view, and what a pool manager reads. Sorted by
 session; a shell's id is a UUIDv7, so a terminal's sessions sort by

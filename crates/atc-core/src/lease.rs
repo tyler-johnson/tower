@@ -10,8 +10,9 @@
 //! body is JSON — the session, the client word, the pid with its start
 //! time when the client hands one down, and the callsign `atc callsign`
 //! fills in, empty until then. Beside those, the repositories the
-//! session was seen in — roots, in order of last sight — recorded where
-//! it ran `atc` or fired a hook, not every directory it changed into.
+//! session was seen in — roots, in order of last sight, the oldest
+//! dropped past [`MAX_REPOS`] — recorded where it ran `atc` or fired a
+//! hook, not every directory it changed into.
 //! The lease is the session's, not the callsign's: a session with no
 //! word is a live session holding nothing, and the hold is only ever
 //! about the word.
@@ -140,17 +141,28 @@ impl Lease {
         true
     }
 
-    /// Record a sighting: the root moves or appends to the end. Whether
-    /// the body changed — false when the root was already last.
+    /// Record a sighting: the root moves or appends to the end, and the
+    /// oldest goes once the list is past [`MAX_REPOS`]. Whether the
+    /// body changed — false when the root was already last.
     pub fn saw(&mut self, root: &str) -> bool {
         if self.repos.last().is_some_and(|last| last == root) {
             return false;
         }
         self.repos.retain(|seen| seen != root);
         self.repos.push(root.to_string());
+        if self.repos.len() > MAX_REPOS {
+            let extra = self.repos.len() - MAX_REPOS;
+            self.repos.drain(..extra);
+        }
         true
     }
 }
+
+/// How many roots a lease remembers: a bound on the body, so a session
+/// that runs `atc` in many places — a test process in its fixtures —
+/// keeps the most recent and the file stays small. The oldest sighting
+/// goes first.
+pub const MAX_REPOS: usize = 32;
 
 /// A process, identified exactly: the pid and the start time the kernel
 /// reports for it, so a pid the system reused after the session died
@@ -803,6 +815,29 @@ mod tests {
         lease.repos = vec!["a".to_string(), "b".to_string()];
         assert!(lease.saw("c"));
         assert_eq!(lease.repos, ["a", "b", "c"], "a new root appends");
+    }
+
+    /// Past the bound the oldest sighting goes, and a root seen again
+    /// is not counted twice against it.
+    #[test]
+    fn saw_keeps_the_most_recent_roots_under_the_bound() {
+        let mut lease = Lease::default();
+        for n in 0..MAX_REPOS {
+            assert!(lease.saw(&format!("r{n}")));
+        }
+        assert_eq!(lease.repos.len(), MAX_REPOS);
+        assert!(lease.saw("one-more"));
+        assert_eq!(lease.repos.len(), MAX_REPOS, "bounded");
+        assert_eq!(
+            lease.repos.first().map(String::as_str),
+            Some("r1"),
+            "the oldest went"
+        );
+        assert_eq!(lease.repos.last().map(String::as_str), Some("one-more"));
+        assert!(lease.saw("r1"), "an old root seen again moves to the end");
+        assert_eq!(lease.repos.len(), MAX_REPOS);
+        assert_eq!(lease.repos.first().map(String::as_str), Some("r2"));
+        assert_eq!(lease.repos.last().map(String::as_str), Some("r1"));
     }
 
     /// The first pid stands: an empty body takes one, a body with one

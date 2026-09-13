@@ -182,7 +182,7 @@ fn the_listing_is_every_lease_on_the_machine() {
         Some("claude"),
         None,
         alive,
-        &["/x/fufu", "/y/tower"],
+        &["/v/one", "/w/two", "/x/fufu", "/y/tower", "/z/atc"],
         3,
     );
     plant(home, "c-own", None, Some("gamma"), None, &[], 30);
@@ -204,8 +204,8 @@ fn the_listing_is_every_lease_on_the_machine() {
     let a = fields(lines[1]);
     assert_eq!(
         a[..4],
-        ["a-new", "claude", "-", "fufu, tower"],
-        "basenames in stored order: {text}"
+        ["a-new", "claude", "-", "fufu, tower, atc +2 more"],
+        "the three most recent by basename, the rest counted: {text}"
     );
     assert!(a[4].starts_with("fresh "), "{text}");
     match alive {
@@ -239,7 +239,7 @@ fn the_listing_is_every_lease_on_the_machine() {
     assert_eq!(sessions[0]["callsign"], serde_json::Value::Null);
     assert_eq!(
         sessions[0]["repos"],
-        serde_json::json!(["/x/fufu", "/y/tower"]),
+        serde_json::json!(["/v/one", "/w/two", "/x/fufu", "/y/tower", "/z/atc"]),
         "the full roots, in order"
     );
     assert_eq!(sessions[0]["lease"]["fresh"], true);
