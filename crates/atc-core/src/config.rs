@@ -240,19 +240,9 @@ pub fn registry() -> &'static [Setting] {
             kind: SettingKind::Cadence,
             desc: &[
                 "How often tower looks for a new release in the background. false",
-                "turns the whole machinery off (checks, notices, auto-install);",
+                "turns checks and notices off;",
                 "true means daily; durations work too (12h, 7d, 2w), floored at",
                 "one minute.",
-            ],
-        },
-        Setting {
-            name: "autoUpdate",
-            key: "tower.autoUpdate",
-            def: "true",
-            kind: SettingKind::Bool,
-            desc: &[
-                "Install new releases silently in the background. false prints a",
-                "one-line notice instead; updateCheck false disables both.",
             ],
         },
     ]
@@ -942,25 +932,18 @@ mod tests {
     }
 
     #[test]
-    fn read_cadence_and_read_bool_over_a_real_repository() {
+    fn read_cadence_over_a_real_repository() {
         let fixture = atc_testsupport::Repo::new();
         let config = Config::open(fixture.path()).expect("open");
         let update_check = lookup("updateCheck").expect("registered");
-        let auto_update = lookup("autoUpdate").expect("registered");
+        assert!(lookup("autoUpdate").is_err());
 
-        // Absent → 0, the default encoding, and bool absent → None.
+        // Absent → 0, the default encoding.
         assert_eq!(config.read_cadence(update_check), 0);
-        assert_eq!(config.read_bool(auto_update), None);
 
         fixture.git(&["config", "tower.updateCheck", "12h"]);
-        fixture.git(&["config", "tower.autoUpdate", "false"]);
         let config = Config::open(fixture.path()).expect("reopen");
         assert_eq!(config.read_cadence(update_check), 43_200);
-        assert_eq!(config.read_bool(auto_update), Some(false));
-
-        fixture.git(&["config", "tower.autoUpdate", "true"]);
-        let config = Config::open(fixture.path()).expect("reopen");
-        assert_eq!(config.read_bool(auto_update), Some(true));
 
         // Garbage falls back like every other reader: cadence → 0.
         fixture.git(&["config", "tower.updateCheck", "bogus"]);

@@ -76,8 +76,8 @@ fn list_shows_every_setting_with_defaults_and_the_trailer() {
     assert!(text.contains("leaseExpiry  24h"), "{text}");
     assert!(text.contains("leaseSweep  1h"), "{text}");
     assert!(text.contains("updateCheck  1d"), "{text}");
-    assert!(text.contains("autoUpdate  true"), "{text}");
-    assert_eq!(text.matches("(default)").count(), 8, "{text}");
+    assert!(!text.contains("autoUpdate"), "{text}");
+    assert_eq!(text.matches("(default)").count(), 7, "{text}");
     assert!(
         text.contains("Set with:     atc config <key> <value>   (--global: every repo)"),
         "{text}"
@@ -102,7 +102,7 @@ fn list_json_pins_the_registry() {
     let settings = envelope["data"]["settings"]
         .as_array()
         .expect("a settings array");
-    assert_eq!(settings.len(), 8, "{envelope}");
+    assert_eq!(settings.len(), 7, "{envelope}");
     let keys: Vec<&str> = settings
         .iter()
         .map(|entry| entry["key"].as_str().expect("a key"))
@@ -117,7 +117,6 @@ fn list_json_pins_the_registry() {
             "leaseExpiry",
             "leaseSweep",
             "updateCheck",
-            "autoUpdate"
         ]
     );
     let kinds: Vec<&str> = settings
@@ -127,7 +126,7 @@ fn list_json_pins_the_registry() {
     assert_eq!(
         kinds,
         [
-            "choice", "host", "port", "duration", "duration", "duration", "cadence", "bool"
+            "choice", "host", "port", "duration", "duration", "duration", "cadence"
         ]
     );
     let file_status = &settings[0];
@@ -257,11 +256,7 @@ fn invalid_values_exit_2_and_write_nothing() {
     );
 
     let out = atc(repo.path(), &["config", "--json", "autoUpdate", "maybe"]);
-    let envelope = refusal(&out, 2, "usage/bad-value");
-    assert_eq!(
-        envelope["error"]["message"],
-        serde_json::json!("invalid value for autoUpdate: want true or false")
-    );
+    refusal(&out, 2, "usage/unknown-key");
 
     // The choice kind: the refusal names the list itself.
     let out = atc(

@@ -64,7 +64,7 @@ Homebrew:
 brew install tyler-johnson/tap/atc
 ```
 
-Installed binaries keep themselves fresh: a passive lane checks for releases about daily and auto-installs (`atc config updateCheck false` turns it off, `autoUpdate false` downgrades it to a one-line notice), and `atc update` moves the binary by hand.
+Official builds check for releases about daily and announce each new release once (`atc config updateCheck false` turns checks and notices off). `atc update` names the command for this install: Cargo for source builds, Homebrew for brew installs, the installer for its default destination, or the releases page for other installs. Only the installer channel runs, after `-y` or a typed yes; without a terminal, the command is printed for you to run. Both installers refresh existing client wiring with `atc hook -u` after placing the new binary.
 
 ## Building
 

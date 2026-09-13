@@ -678,27 +678,26 @@ pub static ENTRIES: &[Entry] = &[
     Entry {
         id: "update/failed",
         summary: "the update did not complete",
-        detail: "Somewhere between the release check, the download, the checksum, and the \
-                 atomic swap, a step failed; the message says which. The binary you are running \
-                 is untouched — the swap is last and all-or-nothing — so trying again is always \
-                 safe.",
+        detail: "Locating the executable, checking the release, or running the installer failed; the message says which. The installer owns replacing the binary and reports its own download and verification failures.",
         exits: &["atc update"],
     },
     Entry {
         id: "update/source-build",
         summary: "this tower was built from source",
-        detail: "The self-updater swaps in release binaries, and a source build is not one — \
-                 replacing it would silently undo whatever local state made you build from \
-                 source. Rebuild through cargo instead, from the same repository.",
+        detail: "The -y flag asked tower to run an update, but Cargo owns this source build. Rebuild through cargo, from the same repository. Without -y, atc update prints the command and succeeds.",
         exits: &["cargo install --git https://github.com/tyler-johnson/tower atc-cli"],
     },
     Entry {
         id: "update/homebrew",
         summary: "this tower is Homebrew's to update",
-        detail: "The binary lives in a Homebrew cellar, and two updaters disagreeing about one \
-                 file is how installs corrupt — brew would overwrite the swap on its next \
-                 upgrade anyway. Let brew do it.",
+        detail: "The -y flag asked tower to run an update, but Homebrew owns this binary. Run brew upgrade atc. Without -y, atc update prints the command and succeeds.",
         exits: &["brew upgrade atc"],
+    },
+    Entry {
+        id: "update/unmanaged",
+        summary: "this tower belongs to another installer",
+        detail: "The executable is an official build outside Homebrew and the install script's default destination. Whatever placed it owns replacing it. The -y flag refuses; without it, atc update prints the releases page and succeeds.",
+        exits: &["https://github.com/tyler-johnson/tower/releases/latest"],
     },
     Entry {
         id: "identity/missing",
@@ -1081,6 +1080,10 @@ mod tests {
     /// the other tools an exit may legitimately name, and their surfaces
     /// are not ours to check.
     fn check_exit(exit: &str, whose: &str) {
+        // An unmanaged install has a releases page rather than a shell command. Admit only tower's own page.
+        if exit == crate::selfupdate::RELEASES_URL {
+            return;
+        }
         let tokens = argv(exit);
         let Some(first) = tokens.first() else {
             panic!("{whose}: an empty exit");

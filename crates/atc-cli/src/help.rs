@@ -636,14 +636,13 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: servePort, tower.servePort, and SERVEPORT all
 name one setting.
 
-Eight settings ship — defaultFileStatus, where a bare `atc file`
+Seven settings ship — defaultFileStatus, where a bare `atc file`
 lands; serveHost and servePort, the address and the port `atc serve`
 binds; leaseWindow, how long a session's lease stays fresh without a
 heartbeat when its client hands down no pid; leaseExpiry, the age
 past which a lease is dead whatever its pid says; leaseSweep, how
 often the heartbeat looks for dead leases; updateCheck, how often
-the background release check runs; autoUpdate, whether a new release
-installs itself silently. This verb opens no store and spawns no
+the background release check runs. This verb opens no store and spawns no
 fufu, so settings stay reachable on a half-configured machine, before
 an identity exists.";
 
@@ -654,7 +653,7 @@ Examples:
   atc config servePort 7777   set it, this repo
   atc config defaultFileStatus backlog   bare filings park for a person
   atc config leaseExpiry 12h   a shorter life for leases nothing ends
-  atc config --global autoUpdate false   set it, every repo
+  atc config --global updateCheck 12h   set it, every repo
   atc config --unset servePort   back to the default";
 
 pub const VERSION: &str = "\
@@ -682,23 +681,28 @@ Examples:
   atc version --json        the same, as fields";
 
 pub const UPDATE: &str = "\
-Move this binary to the latest release: pick this platform's asset,
-verify it against the release's checksums, and atomically rename it
-over the executable. Installs that are not tower's to touch are
-pointed at their own updater instead — Homebrew at brew upgrade, a
-source build at cargo install.
+Name the command that owns updating this install: cargo install for
+a source build, brew upgrade atc for Homebrew, the platform installer
+for its default destination, or the releases page for other installs.
+Symlinks are resolved before deciding the channel.
 
-Official builds also keep themselves fresh without being asked: a
-check runs at most once per tower.updateCheck (daily by default), and
-a newer release either installs itself silently in the background
-(tower.autoUpdate, on by default) or lands a one-line notice on
-stderr instead. --check is that background lane by hand: refresh the
-update cache, print nothing.";
+Only the installer channel runs, after -y or a typed yes. It checks
+for a newer release first; without a terminal it prints the command
+and stops. -y on any other channel refuses. The installer verifies
+the download, replaces the binary, and refreshes existing hooks.
+
+Official builds check at most once per tower.updateCheck (daily by
+default). Each newer release gets one stderr notice naming its update
+command. --check refreshes the cache and prints nothing.
+
+--json answers with channel, current, latest, command, and status
+(instructions, current, available, or installed). It never prompts;
+use -y to run a script install, with installer progress on stderr.";
 
 pub const UPDATE_EXAMPLES: &str = "\
 Examples:
-  atc update                update now
-  atc config autoUpdate false        keep checking, only notice
+  atc update                name the command and offer the installer
+  atc update -y             run the installer without asking
   atc config updateCheck false       turn the whole lane off
   atc version               is a newer release already cached?";
 

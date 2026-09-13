@@ -41,12 +41,31 @@ try {
 
     Expand-Archive -Path (Join-Path $tmp $archive) -DestinationPath $tmp -Force
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    Copy-Item (Join-Path $tmp 'atc.exe') (Join-Path $installDir 'atc.exe') -Force
+    # Windows permits renaming a running exe. Restore it if placing the replacement fails.
+    $target = Join-Path $installDir 'atc.exe'
+    $old = "$target.old"
+    Remove-Item $old -Force -ErrorAction SilentlyContinue
+    $moved = $false
+    if (Test-Path $target) {
+        Move-Item $target $old -Force
+        $moved = $true
+    }
+    try {
+        Copy-Item (Join-Path $tmp 'atc.exe') $target -Force
+    } catch {
+        if ($moved) { Move-Item $old $target -Force }
+        throw
+    }
+    # A running old binary may keep this file locked until the next install.
+    if ($moved) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
 Write-Host "installed tower $version to $installDir\atc.exe"
+
+# Refresh existing wiring through the binary just placed; a refresh failure must not fail the install.
+try { & (Join-Path $installDir 'atc.exe') hook -u } catch { }
 
 # Put the install directory on the user PATH so new terminals find atc.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -58,13 +77,8 @@ if (($env:Path -split ';') -notcontains $installDir) {
     $env:Path = "$env:Path;$installDir"
 }
 
-if (-not (Get-Command ff -ErrorAction SilentlyContinue)) {
-    Write-Host ''
-    Write-Host 'tower is reached through fufu (`atc`), and no `ff` is on your PATH.'
-    Write-Host 'install fufu first:'
-    Write-Host '  irm https://raw.githubusercontent.com/tyler-johnson/fufu/main/install.ps1 | iex'
-}
-
 Write-Host ''
 Write-Host 'next steps:'
+Write-Host '  atc hook       # report what is on this machine, then wire it'
+Write-Host '  atc hook -l    # just the report'
 Write-Host "  atc    # the board"

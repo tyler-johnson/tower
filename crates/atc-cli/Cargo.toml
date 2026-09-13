@@ -23,15 +23,12 @@ anstyle.workspace = true
 anstream.workspace = true
 ureq.workspace = true
 sha2.workspace = true
-tar.workspace = true
-flate2.workspace = true
 
 [dev-dependencies]
 atc-testsupport.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # The Documents known folder, for PowerShell's profile: `$PROFILE` follows
 # a OneDrive redirect, and only the shell API says where it went.
 windows-sys = { version = "0.61", features = [

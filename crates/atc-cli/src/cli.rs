@@ -372,12 +372,15 @@ pub enum Command {
     /// Which tower this is, and whether it is the current one.
     #[command(long_about = help::VERSION, after_long_help = help::VERSION_EXAMPLES)]
     Version,
-    /// Download the latest release and replace this binary.
+    /// Name the command that updates this install, and offer to run its script.
     #[command(long_about = help::UPDATE, after_long_help = help::UPDATE_EXAMPLES)]
     Update {
         /// Refresh the update cache only (used by the background check).
         #[arg(long)]
         check: bool,
+        /// Run the install script without asking; other install channels refuse.
+        #[arg(short = 'y', long, conflicts_with = "check")]
+        yes: bool,
     },
     /// The seam, the log, and the registries — doctor observes and
     /// complains, never enforces.
@@ -475,7 +478,7 @@ pub enum Command {
 /// voice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Lanes {
-    /// Refresh the update cache in the background, and let an auto-install fire.
+    /// Refresh the update cache in the background.
     pub update: bool,
     /// Print the "vX.Y.Z available" line on stderr when one is pending.
     pub notice: bool,

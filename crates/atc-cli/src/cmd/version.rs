@@ -10,8 +10,8 @@
 //!
 //! There is one answer now, and two ways to type it: `-v` is the verb,
 //! spelled as a flag. So the flag reads the update cache, prints the
-//! "available" line when there is one, rides the passive lane's
-//! auto-install, and takes `--json` for the same fields — the answer
+//! "available" line when there is one, rides the passive release
+//! check, and takes `--json` for the same fields — the answer
 //! never changes with the spelling.
 
 use crate::error::CliError;

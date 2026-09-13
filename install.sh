@@ -48,7 +48,7 @@ archive="atc_${version#v}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/$version"
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; rm -f "$INSTALL_DIR/atc.new"' EXIT
 
 echo "downloading tower $version ($os/$arch)…"
 fetch "$base/$archive" "$tmp/$archive"
@@ -71,25 +71,22 @@ fi
 
 tar -xzf "$tmp/$archive" -C "$tmp" atc
 mkdir -p "$INSTALL_DIR"
-if command -v install >/dev/null 2>&1; then
-  install -m 0755 "$tmp/atc" "$INSTALL_DIR/atc"
-else
-  cp "$tmp/atc" "$INSTALL_DIR/atc" && chmod 0755 "$INSTALL_DIR/atc"
-fi
+# Rename over the directory entry so an update can replace the binary that is running this installer.
+cp "$tmp/atc" "$INSTALL_DIR/atc.new"
+chmod 0755 "$INSTALL_DIR/atc.new"
+mv -f "$INSTALL_DIR/atc.new" "$INSTALL_DIR/atc"
 
 echo "installed tower $version to $INSTALL_DIR/atc"
+# Refresh existing wiring through the binary just placed, even when its directory is not on PATH yet.
+"$INSTALL_DIR/atc" hook -u </dev/null || true
 case ":$PATH:" in
   *:"$INSTALL_DIR":*) ;;
   *) echo ""
      echo "$INSTALL_DIR is not on your PATH — add it to your shell rc:"
      echo "  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
-if ! command -v ff >/dev/null 2>&1; then
-  echo ""
-  echo "tower is reached through fufu (\`atc\`), and no \`ff\` is on your PATH."
-  echo "install fufu first:"
-  echo "  curl -fsSL https://raw.githubusercontent.com/tyler-johnson/fufu/main/install.sh | sh"
-fi
 echo ""
 echo "next steps:"
+echo "  atc hook       # report what is on this machine, then wire it"
+echo "  atc hook -l    # just the report"
 echo "  atc    # the board"

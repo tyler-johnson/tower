@@ -292,7 +292,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
             global,
         }) => cmd::config::run(cli.json, key.as_deref(), value.clone(), *unset, *global)?,
         Some(Command::Version) => cmd::version::run(cli.json)?,
-        Some(Command::Update { check }) => cmd::update::run(cli.json, *check)?,
+        Some(Command::Update { check, yes }) => cmd::update::run(cli.json, *check, *yes)?,
         Some(Command::Doctor) => return cmd::doctor::run(cli.json),
         Some(Command::Serve { host, port }) => {
             cmd::serve::run(cli.json, host.as_deref(), port.as_deref())?
