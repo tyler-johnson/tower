@@ -48,6 +48,7 @@ fn atc_env(
         // developer's OpenCode, if any, is not on this machine either.
         .env("ATC_FF", "/nonexistent")
         .env("ATC_CODEX", "/nonexistent")
+        .env("ATC_COPILOT", "/nonexistent")
         .env("ATC_OPENCODE", "/nonexistent");
     // A test's own variables last, so one can open a seam the defaults
     // close.
@@ -102,11 +103,12 @@ fn home() -> tempfile::TempDir {
 
 /// Every slug, in the order the listing walks them: the clients, then
 /// the shells.
-const SLUGS: [&str; 8] = [
+const SLUGS: [&str; 9] = [
     "claude",
     "codex",
     "qwen",
     "opencode",
+    "copilot",
     "bash",
     "zsh",
     "fish",
@@ -168,7 +170,17 @@ fn the_list_reports_detected_clients_and_nothing_wired() {
     // with the OS.
     let lines: Vec<&str> = listing.lines().collect();
     assert_eq!(lines.len(), SLUGS.len(), "{listing:?}");
-    let present = [true, true, false, false, false, false, false, cfg!(windows)];
+    let present = [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        cfg!(windows),
+    ];
     for (line, present) in lines.iter().zip(present) {
         assert!(line.ends_with("not wired"), "{line:?}");
         assert_eq!(line.contains("not on this machine"), !present, "{line:?}");
@@ -207,6 +219,7 @@ fn bare_hook_acts_on_nothing_when_it_cannot_ask() {
         .env("LOCALAPPDATA", home.path().join("cache"))
         .env("ATC_FF", "/nonexistent")
         .env("ATC_CODEX", "/nonexistent")
+        .env("ATC_COPILOT", "/nonexistent")
         .env("ATC_OPENCODE", "/nonexistent")
         .env("ATC_NONINTERACTIVE", "1")
         .stdin(Stdio::null())
@@ -244,6 +257,245 @@ fn unknown_slugs_are_hard_errors() {
             );
         }
     }
+}
+
+// ---- the copilot plugin ----------------------------------------------------
+
+fn copilot_status(home: &Path) -> serde_json::Value {
+    let out = atc(home, home, &["hook", "-l", "--json"], None);
+    ok(&out);
+    envelope(&out)["data"]["integrations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["slug"] == "copilot")
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn the_copilot_plugin_round_trips_beside_codex_and_foreign_settings() {
+    let home = home();
+    let home = home.path();
+    let dir = home.join(".agents/plugins/copilot/tower");
+    let settings = home.join(".copilot/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let foreign = serde_json::json!({
+        "theme": "dark", "enabledPlugins": {"other@mine": true},
+        "extraKnownMarketplaces": {"mine": {"source": {"source": "directory", "path": "/mine"}}}
+    });
+    std::fs::write(&settings, foreign.to_string()).unwrap();
+    ok(&atc(home, home, &["hook", "codex"], None));
+    let codex_market = home.join(".agents/plugins/marketplace.json");
+    let codex_manifest = home.join(".agents/plugins/tower/.codex-plugin/plugin.json");
+    let codex_before = (
+        std::fs::read(&codex_market).unwrap(),
+        std::fs::read(&codex_manifest).unwrap(),
+    );
+
+    let out = atc(home, home, &["hook", "copilot", "--json"], None);
+    ok(&out);
+    assert_eq!(
+        envelope(&out)["data"]["changed"],
+        serde_json::json!(["copilot"])
+    );
+    let status = copilot_status(home);
+    assert_eq!(status["wiring"]["state"], "wired", "{status}");
+    assert_eq!(status["wiring"]["mechanism"], "plugin");
+    assert_eq!(status["skill"]["state"], "wired");
+    assert!(status.get("note").is_none(), "no trust step: {status}");
+    let manifest = json_at(&dir.join("plugin.json"));
+    assert_eq!(
+        manifest["$schema"],
+        "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+    );
+    assert_eq!(manifest["name"], "tower");
+    let version = manifest["version"].as_str().unwrap();
+    let (pkg, hash) = version.split_once("+atc.").unwrap();
+    assert_eq!(pkg, env!("CARGO_PKG_VERSION"));
+    assert_eq!(hash.len(), 8);
+    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(!dir.join(".codex-plugin").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("skills/tower/SKILL.md")).unwrap(),
+        compiled("tower")
+    );
+    let hooks = json_at(&dir.join("com.github.copilot/hooks/hooks.json"));
+    assert_eq!(hooks["version"], 1);
+    assert_eq!(hooks["hooks"].as_object().unwrap().len(), 5);
+    for event in [
+        "sessionStart",
+        "userPromptSubmitted",
+        "preToolUse",
+        "agentStop",
+        "sessionEnd",
+    ] {
+        let entries = hooks["hooks"][event].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["type"], "command");
+        assert!(
+            entries[0]["bash"]
+                .as_str()
+                .unwrap()
+                .ends_with("trigger copilot")
+        );
+        assert_eq!(entries[0]["env"]["ATC_HOOK_EVENT"], event);
+        assert_eq!(entries[0]["timeoutSec"], 30);
+        assert!(entries[0].get("hooks").is_none());
+    }
+    let market = json_at(&home.join(".agents/plugins/copilot/marketplace.json"));
+    assert_eq!(market["name"], "tower-atc");
+    assert_eq!(market["owner"]["name"], "tower");
+    assert_eq!(market["plugins"][0]["source"], "./tower");
+    let registration = json_at(&settings);
+    assert_eq!(registration["enabledPlugins"]["tower@tower-atc"], true);
+    assert_eq!(
+        registration["extraKnownMarketplaces"]["tower-atc"]["source"]["source"],
+        "directory"
+    );
+    assert_eq!(
+        registration["extraKnownMarketplaces"]["tower-atc"]["source"]["path"],
+        home.join(".agents/plugins/copilot").display().to_string()
+    );
+
+    let before = std::fs::metadata(&settings).unwrap().modified().unwrap();
+    let out = atc(home, home, &["hook", "copilot", "--json"], None);
+    ok(&out);
+    assert_eq!(envelope(&out)["data"]["changed"], serde_json::json!([]));
+    assert_eq!(
+        std::fs::metadata(&settings).unwrap().modified().unwrap(),
+        before
+    );
+    ok(&atc(home, home, &["unhook", "copilot"], None));
+    assert!(!dir.exists());
+    assert!(
+        !home
+            .join(".agents/plugins/copilot/marketplace.json")
+            .exists()
+    );
+    assert_eq!(json_at(&settings), foreign);
+    assert_eq!(std::fs::read(&codex_market).unwrap(), codex_before.0);
+    assert_eq!(std::fs::read(&codex_manifest).unwrap(), codex_before.1);
+    assert_eq!(copilot_status(home)["wiring"]["state"], "not-wired");
+    let out = atc(home, home, &["unhook", "copilot", "--json"], None);
+    ok(&out);
+    assert_eq!(envelope(&out)["data"]["changed"], serde_json::json!([]));
+}
+
+#[test]
+fn copilot_refuses_malformed_settings_before_writing_or_removing_files() {
+    for bad in [
+        "{ broken",
+        "[]",
+        r#"{"enabledPlugins":false}"#,
+        r#"{"extraKnownMarketplaces":[]}"#,
+    ] {
+        let home = home();
+        let home = home.path();
+        let settings = home.join(".copilot/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, bad).unwrap();
+        let out = atc(home, home, &["--json", "hook", "copilot"], None);
+        assert_eq!(out.status.code(), Some(1));
+        assert_eq!(envelope(&out)["error"]["id"], "hook/malformed");
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), bad);
+        assert!(!home.join(".agents/plugins/copilot").exists());
+
+        std::fs::write(&settings, "{}").unwrap();
+        ok(&atc(home, home, &["hook", "copilot"], None));
+        std::fs::write(&settings, bad).unwrap();
+        assert_eq!(copilot_status(home)["wiring"]["state"], "unavailable");
+        let out = atc(home, home, &["--json", "unhook", "copilot"], None);
+        assert_eq!(envelope(&out)["error"]["id"], "hook/malformed");
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), bad);
+        assert!(
+            home.join(".agents/plugins/copilot/tower/plugin.json")
+                .exists()
+        );
+    }
+}
+
+#[test]
+fn copilot_repairs_missing_events_manifest_registration_and_skill() {
+    let repo = Repo::new();
+    let home = repo.path().parent().unwrap();
+    let dir = home.join(".agents/plugins/copilot/tower");
+    ok(&atc(home, home, &["hook", "copilot"], None));
+    let path = dir.join("com.github.copilot/hooks/hooks.json");
+    let hooks = json_at(&path);
+    let doctor = || {
+        envelope(&atc(home, repo.path(), &["doctor", "--json"], None))["data"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["check"] == "hook/copilot")
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(doctor()["level"], "ok");
+    let mut old = hooks.clone();
+    old["hooks"].as_object_mut().unwrap().remove("preToolUse");
+    std::fs::write(&path, old.to_string()).unwrap();
+    let status = copilot_status(home);
+    assert_eq!(status["wiring"]["state"], "wired");
+    assert_eq!(status["stale"], true);
+    assert_eq!(doctor()["level"], "warn");
+    ok(&atc(home, home, &["hook", "-u"], None));
+    assert_eq!(json_at(&path), hooks);
+
+    for damage in ["event", "manifest", "marketplace", "registration", "skill"] {
+        match damage {
+            "event" => {
+                let mut wrong = hooks.clone();
+                wrong["hooks"]["sessionStart"][0]["env"]["ATC_HOOK_EVENT"] = "agentStop".into();
+                std::fs::write(&path, wrong.to_string()).unwrap();
+            }
+            "manifest" => std::fs::remove_file(dir.join("plugin.json")).unwrap(),
+            "marketplace" => {
+                std::fs::remove_file(home.join(".agents/plugins/copilot/marketplace.json")).unwrap()
+            }
+            "registration" => std::fs::write(
+                home.join(".copilot/settings.json"),
+                r#"{"enabledPlugins":{"tower@tower-atc":false}}"#,
+            )
+            .unwrap(),
+            "skill" => std::fs::write(dir.join("skills/tower/SKILL.md"), "old").unwrap(),
+            _ => unreachable!(),
+        }
+        let status = copilot_status(home);
+        if damage != "skill" {
+            assert_eq!(status["wiring"]["state"], "partial", "{damage}: {status}");
+        }
+        assert_eq!(doctor()["level"], "warn", "{damage}");
+        ok(&atc(home, home, &["hook", "-u"], None));
+        assert_eq!(doctor()["level"], "ok", "{damage}");
+    }
+}
+
+#[test]
+fn copilot_is_detected_by_directory_or_binary() {
+    let home = home();
+    let home = home.path();
+    assert_eq!(copilot_status(home)["presence"]["state"], "absent");
+    let binary = home.join("copilot");
+    std::fs::write(&binary, "fake").unwrap();
+    let out = atc_env(
+        home,
+        home,
+        &["hook", "-l", "--json"],
+        None,
+        &[("ATC_COPILOT", binary.to_str().unwrap())],
+    );
+    let value = envelope(&out);
+    let row = value["data"]["integrations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["slug"] == "copilot")
+        .unwrap();
+    assert_eq!(row["presence"]["state"], "present");
+    std::fs::create_dir(home.join(".copilot")).unwrap();
+    assert_eq!(copilot_status(home)["presence"]["state"], "present");
 }
 
 // ---- the claude plugin -----------------------------------------------------
@@ -1256,10 +1508,15 @@ fn the_bash_lines_round_trip_byte_for_byte() {
     assert!(row.contains(&rc.display().to_string()), "{row:?}");
     let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
     let rows = envelope(&out)["data"]["integrations"].clone();
-    assert_eq!(rows[4]["slug"], "bash");
-    assert_eq!(rows[4]["wiring"]["state"], "wired");
-    assert_eq!(rows[4]["wiring"]["mechanism"], "rc");
-    assert_eq!(rows[4]["presence"]["state"], "present");
+    let bash = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["slug"] == "bash")
+        .unwrap();
+    assert_eq!(bash["wiring"]["state"], "wired");
+    assert_eq!(bash["wiring"]["mechanism"], "rc");
+    assert_eq!(bash["presence"]["state"], "present");
 
     let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
     assert!(said.contains("already wired in"), "{said:?}");
@@ -1318,8 +1575,14 @@ fn a_hand_written_trigger_line_is_reported_and_left_alone() {
     assert!(row.contains("written by hand — left alone"), "{row:?}");
     let out = atc(home.path(), home.path(), &["--json", "hook", "-l"], None);
     let rows = envelope(&out)["data"]["integrations"].clone();
-    assert_eq!(rows[4]["wiring"]["state"], "hand-written");
-    assert_eq!(rows[4]["wiring"]["at"], rc.display().to_string());
+    let bash = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["slug"] == "bash")
+        .unwrap();
+    assert_eq!(bash["wiring"]["state"], "hand-written");
+    assert_eq!(bash["wiring"]["at"], rc.display().to_string());
 
     let said = ok(&atc(home.path(), home.path(), &["hook", "-u"], None));
     assert!(said.contains("nothing is wired"), "{said:?}");

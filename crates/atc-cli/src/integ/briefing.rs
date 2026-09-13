@@ -161,6 +161,7 @@ pub struct Payload {
     /// The lease's key when the environment does not carry one. Never
     /// the callsign: a session is one run, and the resume line is about
     /// the pilot across runs.
+    #[serde(alias = "sessionId")]
     pub session_id: String,
     /// The event, in the client's vocabulary; the source's table says
     /// what it means.

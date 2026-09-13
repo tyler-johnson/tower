@@ -65,6 +65,39 @@ fn own_pid() -> Option<u32> {
     cfg!(target_os = "linux").then(std::process::id)
 }
 
+/// Copilot's shell tool gets its session from the client, ahead of the inherited terminal's row, and no inherited pid.
+#[test]
+fn copilot_has_its_own_session_and_callsign_under_a_terminal() {
+    let repo = repo();
+    let out = atc(
+        repo.path(),
+        &[
+            ("COPILOT_CLI", "1"),
+            ("COPILOT_AGENT_SESSION_ID", "copilot-1"),
+            ("ATC_SHELL_SESSION", "terminal-1"),
+            ("ATC_SHELL_PID", "1"),
+        ],
+        &["whoami", "--json"],
+    );
+    stdout(&out);
+    let data = envelope(&out)["data"].clone();
+    assert_eq!(data["session"], "copilot-1");
+    assert_eq!(data["session_source"], "copilot");
+    assert_eq!(data["client"], "copilot");
+    assert_eq!(data["callsign"], "copilot");
+    assert_eq!(data["pid"], serde_json::Value::Null);
+    assert!(
+        root(repo.path())
+            .join(".local/state/atc/leases/copilot-1")
+            .exists()
+    );
+    assert!(
+        !root(repo.path())
+            .join(".local/state/atc/leases/terminal-1")
+            .exists()
+    );
+}
+
 /// Under the terminal's variables: source `shell`, the shell's pid, the
 /// login name as the callsign or none, the lease this call created, and
 /// the writer line last.

@@ -818,7 +818,7 @@ session, else the client it runs under, else the login name at a
 terminal — and a flight is In Progress under it, the line is the
 resume line instead: the flight you are on, and the brief to run.
 
-Named for a source — `atc trigger claude`, codex, qwen, opencode —
+Named for a source — `atc trigger claude`, codex, qwen, opencode, copilot —
 it is the command `atc hook` wrote into that client's config under
 every event in the client's table, and the payload on stdin says
 which one fired. At a
@@ -835,6 +835,13 @@ payload's session_id, and it holds the session's pid when the client
 hands one down and the word `atc callsign` gave it; renewing it opens
 no store, so the activity path costs a few milliseconds on every tool
 call.
+
+Copilot CLI sends sessionId and cwd on stdin and names the event in
+ATC_HOOK_EVENT, set by each plugin hook entry. Its sessionStart prints
+the notice as additionalContext JSON; userPromptSubmitted, preToolUse,
+and agentStop renew silently; sessionEnd releases the lease. Its shell
+tool carries COPILOT_AGENT_SESSION_ID, and COPILOT_CLI identifies the
+client as copilot.
 
 The `shell` source is what the rc lines `atc hook bash` (or zsh,
 fish, powershell) write call: `atc trigger shell` before every
@@ -893,7 +900,7 @@ wired and adds nothing: the install is re-run for every slug already
 wired, on whatever mechanism it is on, so an upgraded binary
 refreshes the machine. The names are flat:
 
-  claude  codex  qwen  opencode
+  claude  codex  qwen  opencode  copilot
   bash  zsh  fish  powershell
 
 What gets written is not a choice you make. Claude Code and Codex
@@ -920,6 +927,17 @@ every tool call; `atc unhook opencode` removes exactly those two
 paths. --settings is Claude Code's escape hatch: entries in
 ~/.claude/settings.json instead of the plugin, and no skills.
 
+Copilot CLI takes an Agent Plugins 1.0 plugin at
+~/.agents/plugins/copilot/tower, with its own marketplace.json beside
+it. This dedicated namespace keeps Copilot's formats separate from
+Codex's. tower owns those files and merges enabledPlugins and
+extraKnownMarketplaces into ~/.copilot/settings.json, preserving other
+settings and refusing malformed files. Copilot loads tower@tower-atc
+live from that marketplace, with no hook trust step. The plugin carries
+the tower skill and com.github.copilot/hooks/hooks.json; each command
+sets ATC_HOOK_EVENT because the payload names no event. Detection uses
+~/.copilot or copilot on PATH.
+
 A shell takes marked lines appended to its rc file — ~/.bashrc,
 $ZDOTDIR/.zshrc, fish's config.fish, PowerShell's profile — that
 mint a session id once per interactive shell and export it as
@@ -935,7 +953,7 @@ ATC_SHELL_SESSION. A line you wrote yourself that calls the trigger
 is reported and left alone; fufu's lines in the same file are fufu's
 and untouched.
 
-The three plugins carry the manual, `tower` — typed /tower:tower in
+The four plugins carry the manual, `tower` — typed /tower:tower in
 Claude Code and $tower in Codex and OpenCode; a skill an older tower
 shipped and this one does not is removed on the next write. Qwen
 reads no skills directory and gets the notice alone. Codex trusts a plugin's hook by
@@ -956,7 +974,8 @@ Examples:
 pub const UNHOOK: &str = "\
 Remove exactly what hook added: Claude Code's plugin directory, and
 the settings entries an older install left; Codex's plugin directory
-and its entry in the personal marketplace; Qwen's entries; OpenCode's
+and its entry in the personal marketplace; Copilot's plugin, dedicated
+marketplace file, and registration; Qwen's entries; OpenCode's
 plugin file and skill; a shell's marked rc lines. Anything else in a
 file is left as it was — an entry or a line you wrote yourself
 included, and fufu's lines beside tower's. Name clients or shells, or --all for everything

@@ -2,7 +2,7 @@
 //! machine, and how those clients then hear about the board.
 //!
 //! The slugs are what `atc hook` and `atc unhook` take — the clients,
-//! `claude`, `codex`, `qwen`, `opencode`, and the shells, `bash`, `zsh`,
+//! `claude`, `codex`, `qwen`, `opencode`, `copilot`, and the shells, `bash`, `zsh`,
 //! `fish`, `powershell`. They are flat and permanent, because they end up
 //! written inside config files tower does not own. The two verbs are
 //! for humans: an unknown slug is a real error, a failure is loud, and
@@ -38,6 +38,7 @@ use crate::error::CliError;
 pub mod briefing;
 pub mod claude;
 pub mod codex;
+pub mod copilot;
 pub mod opencode;
 pub mod plugin;
 pub mod qwen;
@@ -113,7 +114,9 @@ pub enum Wiring {
     },
     /// The wiring cannot be read at all: no HOME, or a file that is not
     /// valid JSON. Carries the complaint.
-    Unavailable(String),
+    Unavailable {
+        complaint: String,
+    },
 }
 
 impl Wiring {
@@ -130,7 +133,7 @@ impl Wiring {
             Wiring::Wired { mechanism, .. } => format!("wired ({})", mechanism.word()),
             Wiring::Partial { missing, .. } => format!("partial — {missing} missing"),
             Wiring::HandWritten { .. } => "written by hand — left alone".into(),
-            Wiring::Unavailable(complaint) => complaint.clone(),
+            Wiring::Unavailable { complaint } => complaint.clone(),
         }
     }
 
@@ -290,6 +293,7 @@ static CLAUDE: claude::Claude = claude::Claude;
 static CODEX: codex::Codex = codex::Codex;
 static QWEN: qwen::Qwen = qwen::Qwen;
 static OPENCODE: opencode::Opencode = opencode::Opencode;
+static COPILOT: copilot::Copilot = copilot::Copilot;
 static BASH: shell::Shell = shell::Shell { slug: "bash" };
 static ZSH: shell::Shell = shell::Shell { slug: "zsh" };
 static FISH: shell::Shell = shell::Shell { slug: "fish" };
@@ -297,12 +301,13 @@ static POWERSHELL: shell::Shell = shell::Shell { slug: "powershell" };
 
 /// Every slug, in the order `atc hook -l` and `atc hook --all` walk
 /// them: the clients, then the shells.
-pub fn all() -> [&'static dyn Integration; 8] {
+pub fn all() -> [&'static dyn Integration; 9] {
     [
         &CLAUDE,
         &CODEX,
         &QWEN,
         &OPENCODE,
+        &COPILOT,
         &BASH,
         &ZSH,
         &FISH,
@@ -494,7 +499,7 @@ mod tests {
             assert!(by_source(name).is_some(), "{name} answers the trigger");
             assert!(by_slug(name).is_none(), "{name} is not a slug");
         }
-        assert_eq!(all().len(), 8);
+        assert_eq!(all().len(), 9);
     }
 
     fn front_matter<'a>(name: &str, text: &'a str) -> Vec<&'a str> {

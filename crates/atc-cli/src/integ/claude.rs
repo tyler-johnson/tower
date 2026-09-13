@@ -216,7 +216,9 @@ impl Integration for Claude {
         let wiring = match plugin_wiring() {
             Wiring::NotWired => match spec() {
                 Ok(spec) => settings::wiring(&spec),
-                Err(err) => Wiring::Unavailable(err.to_string()),
+                Err(err) => Wiring::Unavailable {
+                    complaint: err.to_string(),
+                },
             },
             other => other,
         };

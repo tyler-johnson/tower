@@ -167,6 +167,75 @@ fn age(path: &Path) -> SystemTime {
 
 // ---- the dispatch ----------------------------------------------------------
 
+#[test]
+fn copilot_dispatches_the_environment_event_and_keys_the_camelcase_session() {
+    let repo = repo();
+    let home = root(repo.path());
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let payload =
+        serde_json::json!({"sessionId": "copilot-session", "cwd": repo.path(), "timestamp": 1})
+            .to_string();
+    let fire = |event: &str| {
+        trigger_env(
+            elsewhere.path(),
+            home,
+            "copilot",
+            None,
+            Some(&payload),
+            &[("ATC_HOOK_EVENT", event), ("COPILOT_CLI", "1")],
+        )
+    };
+    let out = fire("sessionStart");
+    let text = stdout(&out);
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        value["additionalContext"]
+            .as_str()
+            .unwrap()
+            .starts_with("tower (`atc`) keeps")
+    );
+    assert_eq!(value.as_object().unwrap().len(), 1);
+    let lease = lease(home, "copilot-session");
+    assert!(lease.is_file());
+    for event in ["userPromptSubmitted", "preToolUse", "agentStop"] {
+        let before = age(&lease);
+        silent(&fire(event), event);
+        assert!(mtime(&lease) > before, "{event} renews the payload session");
+    }
+    let before = age(&lease);
+    silent(&fire("unknown"), "unknown Copilot event");
+    assert_eq!(mtime(&lease), before);
+    silent(&fire("sessionEnd"), "Copilot end");
+    assert!(!lease.exists());
+    silent(&fire("sessionEnd"), "Copilot end again");
+
+    // The environment mechanism cannot turn another client's tool activity into a boundary.
+    let activity =
+        serde_json::json!({"cwd": repo.path(), "hook_event_name": "PreToolUse"}).to_string();
+    silent(
+        &trigger_env(
+            repo.path(),
+            home,
+            "claude",
+            None,
+            Some(&activity),
+            &[("ATC_HOOK_EVENT", "sessionStart")],
+        ),
+        "Copilot env under Claude",
+    );
+    silent(
+        &trigger_env(
+            elsewhere.path(),
+            home,
+            "copilot",
+            None,
+            Some("{bad"),
+            &[("ATC_HOOK_EVENT", "sessionStart")],
+        ),
+        "malformed payload outside a repo",
+    );
+}
+
 /// A boundary prints the notice in the client's envelope and creates
 /// the lease; activity renews it silently; the end removes it; a name
 /// outside the table does nothing.

@@ -469,6 +469,11 @@ pub const SESSION_VARS: &[SessionVar] = &[
         source: "opencode",
     },
     SessionVar {
+        var: "COPILOT_AGENT_SESSION_ID",
+        pid_var: None,
+        source: "copilot",
+    },
+    SessionVar {
         var: "ATC_SHELL_SESSION",
         pid_var: Some("ATC_SHELL_PID"),
         source: "shell",
@@ -747,6 +752,7 @@ pub const CLIENT_MARKERS: &[(&str, &str)] = &[
     ("CODEX_SANDBOX", "codex"),
     ("OPENCODE", "opencode"),
     ("OPENCODE_SESSION_ID", "opencode"),
+    ("COPILOT_CLI", "copilot"),
 ];
 
 /// The one rule a callsign is held to, at every boundary that takes one:

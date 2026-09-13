@@ -108,7 +108,9 @@ pub fn wiring(
         return Wiring::NotWired;
     };
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
-        return Wiring::Unavailable(format!("{}: not valid JSON", hooks_path.display()));
+        return Wiring::Unavailable {
+            complaint: format!("{}: not valid JSON", hooks_path.display()),
+        };
     };
     let missing = missing(&value, events, is_ours);
     if missing.len() == events.len() {
@@ -244,7 +246,7 @@ mod tests {
         std::fs::write(&hooks, "{ not json").unwrap();
         assert!(matches!(
             wiring(&hooks, tmp.path(), &EVENTS, ours),
-            Wiring::Unavailable(_)
+            Wiring::Unavailable { .. }
         ));
         assert!(!stale(&hooks, &EVENTS, ours, |_| false));
     }

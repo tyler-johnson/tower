@@ -277,7 +277,7 @@ fn hook_rows() -> Vec<DoctorRow> {
                     at.display()
                 ),
             ),
-            Wiring::Unavailable(complaint) => row(Level::Info, format!("{slug}: {complaint}")),
+            Wiring::Unavailable { complaint } => row(Level::Info, format!("{slug}: {complaint}")),
         });
     }
     rows

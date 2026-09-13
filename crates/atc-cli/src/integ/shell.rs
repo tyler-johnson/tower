@@ -316,7 +316,9 @@ impl Shell {
 
     fn wiring(&self) -> Wiring {
         let Ok(rc) = self.rc() else {
-            return Wiring::Unavailable("HOME is not set".into());
+            return Wiring::Unavailable {
+                complaint: "HOME is not set".into(),
+            };
         };
         let contents = std::fs::read_to_string(&rc).unwrap_or_default();
         wiring(&contents, &rc)

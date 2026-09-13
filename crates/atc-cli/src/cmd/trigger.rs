@@ -58,10 +58,14 @@ pub fn run(json: bool, source: Option<&str>, end: bool) -> Result<(), CliError> 
     let session = lease::session_key(&payload.session_id);
     // `--end` names the event where the source has no payload to; a
     // client source given it classes to nothing and stays silent.
+    // Copilot sends no event name in its payload. Its hook entry carries the event in the environment; other clients keep their payload dispatch.
+    let copilot_event = (source == "copilot")
+        .then(|| std::env::var("ATC_HOOK_EVENT").ok())
+        .flatten();
     let name = if end {
         "end"
     } else {
-        payload.hook_event_name.as_str()
+        copilot_event.as_deref().unwrap_or(&payload.hook_event_name)
     };
     let root = lease::repo_root(&payload.cwd());
     match integration.class_of(Some(name)) {
