@@ -99,6 +99,20 @@ fn repo() -> Repo {
     repo
 }
 
+/// The repository layer's directory as the verb reports it: the main
+/// worktree gix discovers from the working directory, which on macOS
+/// is the tempdir behind its `/var` link to `/private/var`. Windows
+/// hands the directory back as it was entered, 8.3 aliases and all, so
+/// only unix resolves.
+fn repo_layer(repo: &Path) -> PathBuf {
+    let root = if cfg!(unix) {
+        std::fs::canonicalize(repo).expect("the repository resolves")
+    } else {
+        repo.to_path_buf()
+    };
+    root.join(".tower").join("procedures")
+}
+
 /// A repository with both example shapes in its own layer.
 fn stocked() -> Repo {
     let repo = repo();
@@ -119,11 +133,7 @@ fn an_empty_registry_says_so_and_where_a_definition_goes() {
             "no procedures installed\n\
              author: {} · {}\n\
              examples: docs/procedures/ in the tower repository\n",
-            repo.path()
-                .join(".tower")
-                .join("procedures")
-                .join("<name>.toml")
-                .display(),
+            repo_layer(repo.path()).join("<name>.toml").display(),
             xdg(repo.path())
                 .join("tower")
                 .join("procedures")
@@ -183,11 +193,7 @@ fn the_detail_carries_the_flights_the_inert_rule_and_the_file() {
     assert!(
         out.contains(&format!(
             "file: {}\n",
-            repo.path()
-                .join(".tower")
-                .join("procedures")
-                .join("review.toml")
-                .display()
+            repo_layer(repo.path()).join("review.toml").display()
         )),
         "{out}"
     );
@@ -207,11 +213,7 @@ fn the_json_form_is_the_registry_as_data() {
         procedures[0]["source"],
         serde_json::json!({
             "layer": "repo",
-            "path": repo
-                .path()
-                .join(".tower")
-                .join("procedures")
-                .join("review.toml")
+            "path": repo_layer(repo.path()).join("review.toml")
                 .display()
                 .to_string(),
         })
@@ -254,11 +256,7 @@ fn the_json_form_is_the_registry_as_data() {
 #[test]
 fn a_flight_with_an_unfileable_status_is_refused_naming_the_file_and_the_flight() {
     let repo = repo();
-    let at = repo
-        .path()
-        .join(".tower")
-        .join("procedures")
-        .join("parked.toml");
+    let at = repo_layer(repo.path()).join("parked.toml");
     repo.write(
         ".tower/procedures/parked.toml",
         "name = \"parked\"\n\n[[flight]]\nid       = \"wait\"\nassignee = \"me\"\nstatus   = \"held\"\n",
@@ -317,11 +315,7 @@ fn a_repo_definition_overrides_the_user_layers_and_says_so() {
     assert!(
         detail.contains(&format!(
             "file: {}\n",
-            repo.path()
-                .join(".tower")
-                .join("procedures")
-                .join("review.toml")
-                .display()
+            repo_layer(repo.path()).join("review.toml").display()
         )),
         "{detail}"
     );

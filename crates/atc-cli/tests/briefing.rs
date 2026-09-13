@@ -163,7 +163,13 @@ fn a_callsign_on_a_flight_gets_the_resume_line() {
         .stdin
         .take()
         .expect("piped stdin")
-        .write_all(format!(r#"{{"cwd":"{}"}}"#, repo.path().display()).as_bytes())
+        .write_all(
+            format!(
+                r#"{{"cwd":{}}}"#,
+                serde_json::Value::String(repo.path().display().to_string())
+            )
+            .as_bytes(),
+        )
         .expect("write stdin");
     let out = child.wait_with_output().expect("wait for atc");
     let text = stdout(&out);
