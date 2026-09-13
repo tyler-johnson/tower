@@ -24,7 +24,11 @@
 //! out), cannot desynchronize a counter that does not exist. The marker
 //! is `"cmd":"whoami"` — the head of `atc whoami --json`'s envelope,
 //! which is only in a body once the tool ran — matched in the escaped
-//! form a JSON string carries as well as bare.
+//! form a JSON string carries as well as bare. A body carrying three
+//! tool outputs and still no envelope gets the text too: the command
+//! is failing in the client's shell, and a turn that ends lets the
+//! suite's assertions say so, where one more tool call would loop
+//! until the deadline.
 //!
 //! Dependency-free like the rest of the crate: `std::net` on a thread,
 //! JSON as string literals, and one escaper for the command, whose
@@ -59,6 +63,17 @@ pub struct MockModel {
 /// client today carries a tool result, and bare, for one that nests the
 /// output as an object.
 const MARKERS: [&str; 2] = [r#"\"cmd\":\"whoami\""#, r#""cmd":"whoami""#];
+
+/// A tool output in each dialect's body: the Responses item, the
+/// Anthropic block, the chat message role.
+const TOOL_OUTPUTS: [&str; 3] = [
+    r#""type":"function_call_output""#,
+    r#""type":"tool_result""#,
+    r#""role":"tool""#,
+];
+
+/// How many failed attempts end the turn without the envelope.
+const ATTEMPTS: usize = 3;
 
 impl MockModel {
     /// Bind `127.0.0.1:0` and serve until dropped. `command` is the shell
@@ -153,7 +168,11 @@ impl Script {
     /// The answer for one POST: the body and its content type, or
     /// `None` for a path no dialect claims.
     fn answer(&self, path: &str, body: &str) -> Option<(&str, &str)> {
-        let done = MARKERS.iter().any(|marker| body.contains(marker));
+        let outputs: usize = TOOL_OUTPUTS
+            .iter()
+            .map(|marker| body.matches(marker).count())
+            .sum();
+        let done = MARKERS.iter().any(|marker| body.contains(marker)) || outputs >= ATTEMPTS;
         let path = path.split('?').next().unwrap_or(path);
         if path.ends_with("/responses") {
             return Some((
@@ -527,6 +546,23 @@ mod tests {
         assert_eq!(bodies, ["first", "second", "third"]);
         assert_eq!(recorded[1].path, "/v1/models");
         assert!(recorded[0].headers.contains("Content-Length: 5"));
+    }
+
+    #[test]
+    fn a_command_that_keeps_failing_ends_the_turn() {
+        let model = MockModel::start("atc whoami --json");
+        let failed =
+            r#"{"type":"function_call_output","call_id":"call_1","output":"bwrap: no permission"}"#;
+        let two = format!(r#"{{"input":[{failed},{failed}]}}"#);
+        let (_, _, body) = post(&model, "/v1/responses", &two);
+        assert!(
+            body.contains("exec_command"),
+            "two failures try again: {body}"
+        );
+        let three = format!(r#"{{"input":[{failed},{failed},{failed}]}}"#);
+        let (_, _, body) = post(&model, "/v1/responses", &three);
+        assert!(!body.contains("exec_command"), "three end the turn: {body}");
+        assert!(body.contains(r#""text":"done""#), "{body}");
     }
 
     #[test]

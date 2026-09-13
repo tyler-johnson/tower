@@ -397,6 +397,7 @@ impl Sse {
 
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 /// The head of the notice `atc trigger` answers a SessionStart with —
 /// the prose is `integ/briefing.rs::NOTICE`, and this is the substring
@@ -509,18 +510,30 @@ pub fn atc_bin() -> &'static str {
 
 /// Run a spawn to completion within `timeout`, stdout captured and
 /// stderr inherited so a client's warnings are in the log under
-/// `--nocapture`. Killed and failed on the deadline: a client that
-/// hangs on a prompt is a finding, not a stall.
+/// `--nocapture`. Killed and failed on the deadline, with what it said
+/// so far in the panic: a client that hangs on a prompt is a finding,
+/// not a stall. The reader thread is never joined on that path — a
+/// killed client's own children can hold the pipe open past it, and a
+/// join would wait on them.
 pub fn run_within(command: &mut Command, timeout: Duration) -> Output {
     command.stdout(Stdio::piped()).stderr(Stdio::inherit());
     let mut child = command.spawn().expect("spawn the client");
     let mut stdout = child.stdout.take().expect("piped stdout");
-    // Drained on its own thread: a client that fills the pipe would
-    // block behind a waiting parent.
+    // Drained on its own thread into a shared buffer: a client that
+    // fills the pipe would block behind a waiting parent.
+    let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&buffer);
     let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stdout.read_to_end(&mut bytes);
-        bytes
+        let mut chunk = [0u8; 8192];
+        loop {
+            match stdout.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => sink
+                    .lock()
+                    .expect("the buffer")
+                    .extend_from_slice(&chunk[..n]),
+            }
+        }
     });
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -530,16 +543,17 @@ pub fn run_within(command: &mut Command, timeout: Duration) -> Output {
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            let stdout = reader.join().expect("the reader");
+            let so_far = buffer.lock().expect("the buffer").clone();
             panic!(
                 "the client ran past {}s\nstdout so far: {}",
                 timeout.as_secs(),
-                String::from_utf8_lossy(&stdout)
+                String::from_utf8_lossy(&so_far)
             );
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    let stdout = reader.join().expect("the reader");
+    let _ = reader.join();
+    let stdout = std::mem::take(&mut *buffer.lock().expect("the buffer"));
     Output {
         status,
         stdout,

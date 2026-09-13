@@ -168,4 +168,9 @@ jobs:
         run: |
           npm i -g ${{ matrix.package }}
           ${{ matrix.client }} --version
+      # Codex runs the shell tool under bubblewrap, which needs an
+      # unprivileged user namespace; Ubuntu 24.04 gates those behind
+      # AppArmor, and the runner image ships the gate closed.
+      - if: matrix.client == 'codex'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: cargo test -p atc-cli --test live_${{ matrix.client }} -- --nocapture
