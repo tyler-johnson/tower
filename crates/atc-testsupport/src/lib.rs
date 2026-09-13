@@ -12,6 +12,8 @@
 //! produce on demand: a contract from the future, a held exit, output that
 //! is not an envelope.
 
+pub mod mock_model;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

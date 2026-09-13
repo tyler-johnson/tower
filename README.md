@@ -74,6 +74,8 @@ $ make test         # the suite
 $ make release      # the honest fat-LTO build
 ```
 
+The suite includes a live test per wired agent client (`crates/atc-cli/tests/live_<client>.rs`) that runs the real client binary against a scripted mock model when it is on PATH and skips otherwise; `ATC_LIVE=1` makes a skip a failure, which is how CI runs them.
+
 `make` is the whole install: fufu's `ff-<name>` dispatch searches PATH, and with cargo's target dir shared machine-wide and its dogfood/ on PATH, `atc` is live the moment a build links — no reinstall step between editing and running.
 
 Building needs Node and pnpm: cargo's build script runs the web build itself and embeds the output, so `cargo build` alone yields the full binary with the board inside. They are build dependencies only — fufu stays a runtime dependency rather than a build one: tower spawns `ff`, so running tower needs `ff` on PATH and nothing else.

@@ -11,6 +11,10 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # The fufu commit the seam is built against.
+  FUFU_REV: 0c4ab63f
+
 jobs:
   licenses:
     runs-on: ubuntu-latest
@@ -30,9 +34,6 @@ jobs:
           - { os: windows-latest, name: windows }
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    env:
-      # The fufu commit the seam is built against.
-      FUFU_REV: 0c4ab63f
     steps:
       - uses: actions/checkout@v7
 
@@ -109,3 +110,62 @@ jobs:
           $errs = $null
           [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errs)
           if ($errs) { $errs; exit 1 }
+
+  # One job per agent client tower wires, running that client's live suite
+  # against the real binary: `tests/live_<client>.rs`, which asks the
+  # client what it loaded after `atc hook` and runs a headless session
+  # against the scripted mock model. Linux only — the client is the
+  # variable, not the OS. Each client is pinned so a bump is a deliberate
+  # commit and the matrix names what it broke. `ATC_LIVE` turns a missing
+  # binary from a skip into a failure, so an install that failed cannot
+  # pass by skipping; `--nocapture` puts the client's own output in the
+  # log when it fails. The `test` job still compiles these suites and
+  # skips them: no binary, no `ATC_LIVE`. Copilot, Cursor, and OpenCode
+  # rows come with #157, #158, and #150.
+  live:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { client: codex, package: "@openai/codex@0.154.0" }
+          - { client: claude, package: "@anthropic-ai/claude-code@2.1.270" }
+          - { client: qwen, package: "@qwen-code/qwen-code@0.23.3" }
+    name: live (${{ matrix.client }})
+    runs-on: ubuntu-latest
+    env:
+      ATC_LIVE: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      # The three rows build the same target directory; one saves it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: live
+          save-if: ${{ matrix.client == 'codex' }}
+      - name: cache fufu
+        id: fufu
+        uses: actions/cache@v6
+        with:
+          # The same paths as `test`'s, so the two jobs share the entry.
+          path: |
+            ~/.cargo/bin/ff
+            ~/.cargo/bin/ff.exe
+          key: fufu-${{ runner.os }}-${{ env.FUFU_REV }}
+      - name: install fufu
+        if: steps.fufu.outputs.cache-hit != 'true'
+        run: |
+          cargo install --git https://github.com/tyler-johnson/fufu --rev "$FUFU_REV" --locked ff-cli
+          ff --version
+      - name: install ${{ matrix.client }}
+        run: |
+          npm i -g ${{ matrix.package }}
+          ${{ matrix.client }} --version
+      - run: cargo test -p atc-cli --test live_${{ matrix.client }} -- --nocapture

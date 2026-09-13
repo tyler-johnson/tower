@@ -1,5 +1,6 @@
 //! The serve suites' shared harness: a spawned binary, a server child
-//! that does not exit, and a raw one-request HTTP client.
+//! that does not exit, and a raw one-request HTTP client — and the live
+//! suites' harness for a real agent client in a scratch HOME.
 //!
 //! A directory module rather than a file so it is not itself a test
 //! crate; each suite that says `mod support;` compiles its own copy, and
@@ -11,7 +12,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 
-use atc_testsupport::scrub;
+use atc_testsupport::{Repo, scrub};
 use std::time::{Duration, Instant};
 
 /// The binary, addressed at a fixture: the current directory is the
@@ -384,5 +385,211 @@ impl Sse {
                 data.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
             }
         }
+    }
+}
+
+// ---- live: a real client in a scratch HOME ---------------------------------
+//
+// The `live_<client>.rs` suites wire a real client binary with `atc hook`
+// and then ask the client what it loaded, or run one headless session
+// against `atc_testsupport::mock_model`. Everything here is the harness
+// they share; each suite keeps its own client's spelling.
+
+use std::path::PathBuf;
+use std::sync::mpsc;
+
+/// The head of the notice `atc trigger` answers a SessionStart with —
+/// the prose is `integ/briefing.rs::NOTICE`, and this is the substring
+/// the suites look for in a client's request body.
+pub const NOTICE_HEAD: &str = "tower (`atc`) keeps this repository's board";
+
+/// The client binary on `PATH`, or the reason the suite is not running.
+/// Absent and `ATC_LIVE` unset, the suite skips with a line on stderr;
+/// absent and `ATC_LIVE` set, it panics — a CI job whose install failed
+/// must not pass by skipping.
+pub fn live_client(name: &str) -> Option<PathBuf> {
+    let found = std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            [
+                name.to_string(),
+                format!("{name}.exe"),
+                format!("{name}.cmd"),
+            ]
+            .into_iter()
+            .map(|file| dir.join(file))
+            .find(|candidate| candidate.is_file())
+        })
+    });
+    if found.is_none() {
+        assert!(
+            std::env::var_os("ATC_LIVE").is_none(),
+            "ATC_LIVE is set and {name} is not on PATH"
+        );
+        eprintln!("skipping: {name} is not on PATH");
+    }
+    found
+}
+
+/// The suite's `HOME`: `home/` beside the fixture's `repo/`, with the
+/// client's config directory already there so `atc hook` sees the
+/// client as present, and the XDG roots beside it.
+pub fn scratch_home(repo: &Repo, client_dir: &str) -> PathBuf {
+    let home = root(repo.path()).join("home");
+    for dir in [client_dir, "xdg", "cache"] {
+        std::fs::create_dir_all(home.join(dir)).expect("mkdir under the scratch home");
+    }
+    home
+}
+
+/// Address a spawn — the client's or `atc`'s — at the scratch home:
+/// `HOME` and its Windows twin, the XDG roots and the update cache under
+/// it, the developer's git config and client overrides out of reach,
+/// the agent variables scrubbed, this build's `atc` first on `PATH`
+/// (Qwen's settings name the bare `atc`), the working directory set,
+/// and stdin closed so nothing can wait on a terminal.
+pub fn client_env(command: &mut Command, home: &Path, cwd: &Path) {
+    command
+        .current_dir(cwd)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", home.join("xdg"))
+        .env("XDG_CACHE_HOME", home.join("cache"))
+        .env("LOCALAPPDATA", home.join("cache"))
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("CLAUDE_CODE_EXECPATH")
+        .env_remove("CODEX_HOME")
+        .env_remove("ATC_CODEX")
+        .env_remove("ATC_FF")
+        .stdin(Stdio::null());
+    for (name, _) in std::env::vars_os() {
+        let name = name.to_string_lossy();
+        if name.starts_with("ANTHROPIC_") || name.starts_with("OPENAI_") {
+            command.env_remove(&*name);
+        }
+    }
+    scrub(command);
+    let bin = Path::new(env!("CARGO_BIN_EXE_atc"))
+        .parent()
+        .expect("the binary has a directory")
+        .to_path_buf();
+    let mut paths = vec![bin];
+    if let Some(inherited) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&inherited));
+    }
+    command.env(
+        "PATH",
+        std::env::join_paths(paths).expect("a joinable PATH"),
+    );
+}
+
+/// `atc hook <slug>` into the scratch home from the fixture repository,
+/// the real client on `PATH` — for Codex, the real `codex plugin add`
+/// runs. Both streams are in the panic when it fails.
+pub fn hook(home: &Path, repo: &Path, slug: &str) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    client_env(&mut command, home, repo);
+    let out = command
+        .args(["hook", slug])
+        .output()
+        .expect("spawn atc hook");
+    assert!(
+        out.status.success(),
+        "`atc hook {slug}` exited {:?}\nstdout: {}\nstderr: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+/// This build's `atc`, as the absolute path a client's tool runs.
+pub fn atc_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_atc")
+}
+
+/// Run a spawn to completion within `timeout`, stdout captured and
+/// stderr inherited so a client's warnings are in the log under
+/// `--nocapture`. Killed and failed on the deadline: a client that
+/// hangs on a prompt is a finding, not a stall.
+pub fn run_within(command: &mut Command, timeout: Duration) -> Output {
+    command.stdout(Stdio::piped()).stderr(Stdio::inherit());
+    let mut child = command.spawn().expect("spawn the client");
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    // Drained on its own thread: a client that fills the pipe would
+    // block behind a waiting parent.
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        bytes
+    });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll the client") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let stdout = reader.join().expect("the reader");
+            panic!(
+                "the client ran past {}s\nstdout so far: {}",
+                timeout.as_secs(),
+                String::from_utf8_lossy(&stdout)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let stdout = reader.join().expect("the reader");
+    Output {
+        status,
+        stdout,
+        stderr: Vec::new(),
+    }
+}
+
+/// The `whoami --json` envelope out of a tool result: the clients wrap
+/// tool output differently (Codex leads with a chunk id and `Output:`),
+/// so the envelope is found by its head and parsed from there.
+pub fn whoami_from(text: &str) -> serde_json::Value {
+    const HEAD: &str = r#"{"atc":1,"cmd":"whoami""#;
+    let start = text
+        .find(HEAD)
+        .unwrap_or_else(|| panic!("no whoami envelope in the tool output: {text}"));
+    let mut stream = serde_json::Deserializer::from_str(&text[start..]).into_iter();
+    stream
+        .next()
+        .expect("an envelope")
+        .unwrap_or_else(|err| panic!("the envelope does not parse: {err}\n{text}"))
+}
+
+/// A line reader on a child's stdout, with a deadline: lines arrive on
+/// a channel from a thread, so a client that goes quiet ends the wait
+/// rather than the test.
+pub struct Lines {
+    receiver: mpsc::Receiver<String>,
+}
+
+impl Lines {
+    pub fn of(stdout: impl Read + Send + 'static) -> Lines {
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Lines { receiver }
+    }
+
+    /// The next line before `deadline`, or `None` at EOF or on the
+    /// deadline.
+    pub fn next_before(&self, deadline: Instant) -> Option<String> {
+        let now = Instant::now();
+        if now >= deadline {
+            return None;
+        }
+        self.receiver.recv_timeout(deadline - now).ok()
     }
 }
