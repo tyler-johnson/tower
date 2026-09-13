@@ -142,6 +142,9 @@ pub enum Command {
         /// The flight to brief — a number, `writer#n`, or the event id.
         #[arg(value_name = "flight")]
         flight: String,
+        /// Print each parent's body under its row.
+        #[arg(short = 'x', long)]
+        expand: bool,
     },
     /// File a flight onto the board — bare, or under a procedure.
     #[command(long_about = help::FILE, after_long_help = help::FILE_EXAMPLES)]

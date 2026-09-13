@@ -215,7 +215,7 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
                 *peek,
             );
         }
-        Some(Command::Brief { flight }) => cmd::brief::run(cli.json, flight)?,
+        Some(Command::Brief { flight, expand }) => cmd::brief::run(cli.json, flight, *expand)?,
         Some(Command::File {
             first,
             second,

@@ -16,7 +16,7 @@ use crate::error::CliError;
 use crate::{machine, render};
 use atc_core::board::{self, Brief, Detail, Fold, Moment, Standing};
 
-pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
+pub fn run(json: bool, flight: &str, expand: bool) -> Result<(), CliError> {
     super::parse_ref(flight)?;
 
     let store = super::store()?;
@@ -27,10 +27,12 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
     let now = board::now();
     let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
 
+    // The envelope is the whole record, parents' bodies included, so the
+    // flag has nothing to add to it.
     if json {
         println!("{}", machine::emit("brief", &brief));
     } else {
-        print!("{}", page(&fold, &brief, now, render::colored()));
+        print!("{}", page(&fold, &brief, now, render::colored(), expand));
     }
     Ok(())
 }
@@ -39,7 +41,7 @@ pub fn run(json: bool, flight: &str) -> Result<(), CliError> {
 /// verbatim, the family, the pinned handoff, the comments in reading
 /// order, and the history last — the record before the log of how it
 /// got that way.
-fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
+fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool, expand: bool) -> String {
     let shown = |text: &str| {
         board::project(text, |id| {
             fold.flights
@@ -80,8 +82,11 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
     // a parent edge, so `blocks` is this flight's parents and
     // `depends_on` is its children — the same two lists the fold already
     // keeps, named for what they mean rather than for the edge direction.
-    // A parent's body prints under its row: a sub-flight's real context
-    // is the parent's, one level up and no further. Then the backlinks:
+    // The parents rows are link rows; each parent's body prints under
+    // its row only under `--expand`, one level up and no further.
+    // `blocks` is every dependent, so a sequencing edge reads as a
+    // parent too, and the body is one flag away rather than on by
+    // default. Then the backlinks:
     // the flights whose prose names this one. The outgoing list gets no
     // section — the prose above already shows it.
     let row = |flight: &str, subject: &str, status: &str, closed: bool| {
@@ -109,8 +114,10 @@ fn page(fold: &Fold, brief: &Brief, now: i64, colored: bool) -> String {
                 &parent.status,
                 parent.closed,
             ));
-            for line in shown(&parent.body).lines() {
-                out.push_str(&format!("  {line}\n"));
+            if expand {
+                for line in shown(&parent.body).lines() {
+                    out.push_str(&format!("  {line}\n"));
+                }
             }
         }
     }

@@ -205,9 +205,7 @@
   <!--
 		The family, parents up and children down: every depends-on edge is
 		a parent edge, so `blocks` is this flight's parents and
-		`depends_on` is its children. A parent's body reads under its row:
-		a sub-flight's real context is the parent's, one level up and no
-		further.
+		`depends_on` is its children.
 	-->
   {#if brief.parents.length > 0}
     <section class="flex flex-col gap-1">
@@ -223,11 +221,6 @@
           <span class="status {statusDot(parent.status)}" title={parent.status}></span>
           <span class="flex-1 truncate">{parent.subject}</span>
         </a>
-        {#if parent.body}
-          <div class="prose border-base-300 max-w-none border-l pl-3">
-            {@html shown(parent.body)}
-          </div>
-        {/if}
       {/each}
     </section>
   {/if}

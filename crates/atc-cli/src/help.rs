@@ -111,9 +111,10 @@ pub const BRIEF: &str = "\
 Everything the log and the repository know about one flight, in one
 read: subject and body, every stored field, the newest handoff pinned
 above the comments, the comments in reading order, each link with the
-linked flight's subject and status, a parent's body under its row —
-one level up, so a sub-flight reads whole — the flights whose prose
-names this one under `referenced by`, and the open question.
+linked flight's subject and status, each parent as a link row — with
+`--expand` printing its body under it, one level up and no further —
+the flights whose prose names this one under `referenced by`, and the
+open question.
 The history lists every gesture on the record in log
 order, and each row carries the words the verb took: the status word,
 the lane, the fields an edit touched, the other end of the edge.
@@ -128,6 +129,7 @@ Examples:
   atc brief 17              one flight, in full
   atc show 17               the same, spelled the way fufu reads one thing
   atc brief pi-8c2e#3       another writer's, named exactly
+  atc brief 17 -x           with each parent's body under its row
   atc brief 17 --json       the record as fields
   atc next                  where the flight id came from";
 

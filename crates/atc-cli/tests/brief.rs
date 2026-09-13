@@ -452,15 +452,13 @@ fn a_brief_with_no_handoff_has_null_and_no_section() {
 }
 
 #[test]
-fn a_sub_flights_brief_carries_the_parents_body_one_level_up() {
+fn a_sub_flights_brief_lists_its_parent_and_keeps_the_body_off_the_page() {
     let repo = repo_with_a_record();
     stdout(&atc(repo.path(), &["decompose", "1", "part one"]));
 
     let text = stdout(&atc(repo.path(), &["brief", "3"]));
-    assert!(
-        text.contains("parents\n· #1  the dependent\n  the body of the work\n"),
-        "{text}"
-    );
+    assert!(text.contains("parents\n· #1  the dependent\n"), "{text}");
+    assert!(!text.contains("  the body of the work\n"), "{text}");
     let data = envelope(&atc(repo.path(), &["brief", "3", "--json"]))["data"].clone();
     assert_eq!(data["parents"][0]["flight"], serde_json::json!("pi.1"));
     assert_eq!(data["parents"][0]["number"], serde_json::json!(1));
@@ -485,6 +483,27 @@ fn a_sub_flights_brief_carries_the_parents_body_one_level_up() {
         text.contains("children\n· #2  the dependency\n· #3  part one"),
         "{text}"
     );
+}
+
+#[test]
+fn expand_prints_each_parents_body_under_its_row() {
+    let repo = repo_with_a_record();
+    stdout(&atc(repo.path(), &["decompose", "1", "part one"]));
+
+    for flag in ["-x", "--expand"] {
+        let text = stdout(&atc(repo.path(), &["brief", "3", flag]));
+        assert!(
+            text.contains("parents\n· #1  the dependent\n  the body of the work\n"),
+            "{text}"
+        );
+    }
+
+    // The envelope is the whole record either way.
+    let bare = envelope(&atc(repo.path(), &["brief", "3", "--json"]))["data"]["parents"].clone();
+    let expanded =
+        envelope(&atc(repo.path(), &["brief", "3", "--json", "-x"]))["data"]["parents"].clone();
+    assert_eq!(bare, expanded);
+    assert_eq!(bare[0]["body"], serde_json::json!("the body of the work"));
 }
 
 #[test]
