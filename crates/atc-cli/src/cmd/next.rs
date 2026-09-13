@@ -1,11 +1,14 @@
 //! `atc next [<lane>...] [--assignee <lane>] [-n <k>] [--peek]` — pull
 //! the next Ready flight from the lanes named, or the next `k` in filed
-//! order. The walk is the lanes in the order given, each in filed
-//! order, then the unassigned lane in filed order unless `none` was
-//! named, in which case it walks where it was named: `me` — your own
-//! queue, the literal `me` lane and your callsign's — when nothing is
-//! said, `agent` for the shared pool, `none` for the unassigned lane,
-//! or a callsign for one pilot's queue. A lane named twice walks once.
+//! order. The walk is exactly the lanes in the order given, each by
+//! priority then filed order: `me` — your own queue, the literal `me`
+//! lane and your callsign's — `agent` for the shared pool, `none` for
+//! the unassigned lane, or a callsign for one pilot's queue. A lane
+//! named twice walks once, and nothing is appended. Nothing said is
+//! the caller's default, read off the store's identity: under a client
+//! mark, `me`, the client's lane, `agent`, `none` — the client's lane
+//! dropped when the callsign already is the client word; under no mark,
+//! `me` then `none`.
 //! The pull is the Ready check and the In Progress move in one command:
 //! unless `--peek` the picked set becomes one In Progress `status`
 //! event per flight in a single append, the store's callsign the
@@ -44,7 +47,8 @@ struct Data<'a> {
     /// Which of the three things happened; the exit code is its
     /// rendering.
     outcome: Outcome,
-    /// The walk performed, in order — the overflow `none` included.
+    /// The walk performed, in order — the caller's default expanded
+    /// when no lane was named.
     lanes: Vec<String>,
     /// The lane each pick lands in, as the log stores it — `null` for
     /// the unassigned lane. Said even under `--peek`, when nothing
@@ -90,16 +94,18 @@ pub fn run(
     }
 
     // Every lane word before the read, so a typo refuses before the
-    // fold. The walk defaults to `me`; the re-lane defaults to `me` too,
-    // and resolves the way `file` stores it, so it writes the callsign.
+    // fold. The re-lane defaults to `me` and resolves the way `file`
+    // stores it, so it writes the callsign.
     let named = lanes
         .iter()
         .map(|word| verb::lane_word(word).map(Lane::from_word))
         .collect::<Result<Vec<Lane>, _>>()?;
-    let lanes = board::walk(&named);
     let assignee = verb::lane_word(assignee.unwrap_or("me"))?;
 
+    // The default walk is the caller's, so it waits for the store's
+    // identity: the client mark and the resolved callsign.
     let store = super::store()?;
+    let lanes = board::walk(&named, store.identity().client, store.callsign());
     let assignee = verb::stored_lane(assignee, store.callsign());
     let events = store.read_all()?;
     let fold = board::fold(&events);

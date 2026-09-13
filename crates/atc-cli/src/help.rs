@@ -65,27 +65,31 @@ Examples:
 pub const NEXT: &str = "\
 Pull the next Ready flight from the lanes named, or with -n <k> the
 next k. The lanes are the arguments, walked in the order given: me,
-agent, none, or a callsign, and your own queue — me — when unsaid. me
-is the literal me lane and your callsign's; agent is the shared pool
-alone; none is the unassigned lane; a callsign is that pilot's queue.
-Each lane walks by priority, then filed order — an urgent flight
-filed late leads its lane, never an earlier one — and the unassigned
-lane walks last unless you named it, in which case it walks where you
-named it — so everyone falls through to none once their own lanes are
-drained, and none walks once. A lane named twice walks once. The pull
-is the Ready check and the move in one command: each picked flight is
-set In Progress with your callsign as the pilot — the byline, and the
-session underneath it — and lands in your own queue, the pull being
-yours by default. --assignee <lane> says where it lands instead, with
-file's words: agent keeps a pick in the pool, none clears its lane, a
-callsign hands it to that pilot. The re-lane rides the same append,
-and only when the lane changes — a pull from your own queue is one
-moment on the record. --peek is the same computation with nothing
-written, and the envelope says which happened either way. Your
-callsign is ATC_CALLSIGN when set, else the word you gave
-`atc callsign` this session, else the client you are running under,
-else the login name at a terminal, else none — and with none, me is
-the literal lane alone.
+agent, none, or a callsign. me is the literal me lane and your
+callsign's; agent is the shared pool alone; none is the unassigned
+lane; a callsign is that pilot's queue. Each lane walks by priority,
+then filed order — an urgent flight filed late leads its lane, never
+an earlier one. The walk is exactly the lanes you named, each once,
+nothing appended: `atc next agent` walks the pool alone, and Ready
+work in the unassigned lane is elsewhere. Nothing named is your own
+default. Under a client — Claude Code, Codex, Cursor, Qwen Code,
+OpenCode — that is me, your client's lane, agent, none: your own
+queue, the lane every session of your client draws from, the pool,
+then the unassigned lane, and the client's lane is left out when your
+callsign already is the client word. At a shell with no client it is
+me, none. The pull is the Ready check and the move in one command:
+each picked flight is set In Progress with your callsign as the pilot
+— the byline, and the session underneath it — and lands in your own
+queue, the pull being yours by default. --assignee <lane> says where
+it lands instead, with file's words: agent keeps a pick in the pool,
+none clears its lane, a callsign hands it to that pilot. The re-lane
+rides the same append, and only when the lane changes — a pull from
+your own queue is one moment on the record. --peek is the same
+computation with nothing written, and the envelope says which
+happened either way. Your callsign is ATC_CALLSIGN when set, else the
+word you gave `atc callsign` this session, else the client you are
+running under, else the login name at a terminal, else none — and
+with none, me is the literal lane alone.
 
 An empty pick exits 1 with a full data envelope, and `outcome` on it
 says which of `drained` and `elsewhere` it was: `drained` is a board
@@ -98,9 +102,10 @@ reaches the pick.";
 
 pub const NEXT_EXAMPLES: &str = "\
 Examples:
-  atc next                  pull the next Ready flight from your own queue
-  atc next agent            the shared pool, then the unassigned lane
-  atc next me agent         your queue, then the pool, then the overflow
+  atc next                  the next Ready flight, walking your own default
+  atc next agent            the shared pool alone
+  atc next me agent         your queue, then the pool, nothing else
+  atc next me agent none    your queue, the pool, then the unassigned lane
   atc next -n 4             the next four, by priority then filed order
   atc next --peek           the same computation, nothing written
   atc next agent --assignee agent    pull and leave it in the pool
@@ -344,10 +349,10 @@ it, or a callsign. The lane is the routing decision — whose queue
 this is in. agent is the shared pool, which `atc next agent` draws
 from; a callsign is one pilot's own queue, which that pilot's bare
 `atc next` draws from, and where a pull lands the flight; none is the
-unassigned lane, everyone's overflow; me stores your own callsign when you have one, and the
-literal word when you do not, and either way the flight is yours on
-the board. A callsign is one word, no spaces,
-and needs nothing to be a lane. Which pilot flies a flight is the
+unassigned lane, where every default walk ends; me stores your own
+callsign when you have one, and the literal word when you do not, and
+either way the flight is yours on the board. A callsign is one word,
+no spaces, and needs nothing to be a lane. Which pilot flies a flight is the
 callsign on the event: every event carries the callsign of whoever
 wrote it, with the session and the author underneath, so the history
 shows the pilot.

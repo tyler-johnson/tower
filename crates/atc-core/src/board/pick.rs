@@ -7,13 +7,13 @@
 //! The walk is a list of lanes. Each named [`Lane`] — the caller's own
 //! queue, the literal `agent` lane, the unassigned lane, or one pilot's
 //! callsign — walks in the order given, each by priority and then
-//! filed order, and the unassigned lane walks last unless it was
-//! named, in which case it
-//! walks where it was named: everyone falls through to `none` once
-//! their own lanes are drained, and `none` walks once wherever it
-//! lands. [`walk`] builds that list from the words; an empty list is
-//! `me` alone. A flight in two named lanes — the literal `me` and the
-//! caller's callsign, say — is picked once, in the first lane that
+//! filed order, and nothing is appended: the walk is exactly the lanes
+//! named, each once. [`walk`] builds that list from the words, and an
+//! empty list is the caller's default — a caller under a client mark
+//! walks its own queue, its client's lane, the shared pool, then the
+//! unassigned lane; a caller with no mark walks its own queue, then the
+//! unassigned lane. A flight in two named lanes — the literal `me` and
+//! the caller's callsign, say — is picked once, in the first lane that
 //! admits it. Within a lane the order is the board's — `rank`'s
 //! ladder, then filed order — so an urgent flight filed late leads its
 //! lane, and never an earlier lane: lanes fill in the order named
@@ -48,8 +48,8 @@ pub enum Lane {
     Me,
     /// The literal `agent` lane alone — the shared pool.
     Agent,
-    /// The unassigned lane — everyone's overflow, or the walk itself
-    /// when named outright.
+    /// The unassigned lane — the last lane of every default walk, or
+    /// the walk itself when named outright.
     None,
     /// One pilot's own queue.
     Callsign(String),
@@ -137,29 +137,38 @@ pub struct Pick {
     pub assignee: Option<String>,
 }
 
-/// The walk for the lanes named: each once, in the order given, with
-/// the unassigned lane appended unless it was named. No lane named is
-/// the caller's own queue, then the overflow.
-pub fn walk(named: &[Lane]) -> Vec<Lane> {
-    let mut lanes: Vec<Lane> = Vec::with_capacity(named.len() + 1);
+/// The walk for the lanes named: each once, in the order given, and
+/// nothing appended. No lane named is the caller's default, read off
+/// the client mark and the resolved callsign: under a client, `me`,
+/// the client's lane, `agent`, `none` — the client's lane omitted when
+/// the callsign already is the client word, since `me` admits it then;
+/// under no client, `me` then `none`. Pure — the caller reads its
+/// environment, so a server derives the same walk from the same words.
+pub fn walk(named: &[Lane], client: Option<&str>, callsign: Option<&str>) -> Vec<Lane> {
     if named.is_empty() {
-        lanes.push(Lane::Me);
+        let mut lanes = vec![Lane::Me];
+        if let Some(client) = client {
+            if callsign != Some(client) {
+                lanes.push(Lane::Callsign(client.to_string()));
+            }
+            lanes.push(Lane::Agent);
+        }
+        lanes.push(Lane::None);
+        return lanes;
     }
+    let mut lanes: Vec<Lane> = Vec::with_capacity(named.len());
     for lane in named {
         if !lanes.contains(lane) {
             lanes.push(lane.clone());
         }
     }
-    if !lanes.contains(&Lane::None) {
-        lanes.push(Lane::None);
-    }
     lanes
 }
 
 /// Walk `lanes` in order, each by priority and then filed order, and
-/// pick the first `want` of them. The list is walked exactly as given — [`walk`] is where the
-/// overflow is appended. `caller` is the puller's callsign, which only
-/// `Lane::Me` reads.
+/// pick the first `want` of them. The list is walked exactly as given —
+/// [`walk`] is where the default is expanded. `caller` is the puller's
+/// callsign, which only `Lane::Me` reads.
 pub fn pick(fold: &Fold, want: usize, lanes: &[Lane], caller: Option<&str>) -> Picks {
     // A candidate: live, unheld, Ready. The first lane admitting it
     // decides which pass it joins, and a candidate in none is elsewhere.
@@ -430,7 +439,7 @@ mod tests {
         assert_eq!(
             ids(&picks),
             ["pi.4", "pi.1"],
-            "the agent lane, then the unassigned overflow"
+            "the agent lane, then the unassigned lane"
         );
         assert_eq!(
             picks.elsewhere, 2,
@@ -558,7 +567,7 @@ mod tests {
 
     #[test]
     fn an_empty_fold_picks_nothing() {
-        let picks = pick(&fold(&[]), 1, &walk(&[]), None);
+        let picks = pick(&fold(&[]), 1, &walk(&[], None, None), None);
         assert!(picks.picked.is_empty());
         assert_eq!(picks.outcome(), Outcome::Drained);
     }
@@ -612,10 +621,20 @@ mod tests {
             prioritized("pi.1", 10, "ready", "low", Some("agent")),
             prioritized("pi.2", 20, "ready", "urgent", None),
         ];
-        let picks = pick(&fold(&events), 2, &walk(&[Lane::Agent]), None);
+        let picks = pick(
+            &fold(&events),
+            2,
+            &walk(&[Lane::Agent, Lane::None], None, None),
+            None,
+        );
         assert_eq!(ids(&picks), ["pi.1", "pi.2"]);
 
-        let reversed = pick(&fold(&events), 2, &walk(&[Lane::None, Lane::Agent]), None);
+        let reversed = pick(
+            &fold(&events),
+            2,
+            &walk(&[Lane::None, Lane::Agent], None, None),
+            None,
+        );
         assert_eq!(ids(&reversed), ["pi.2", "pi.1"]);
     }
 
@@ -640,10 +659,10 @@ mod tests {
     }
 
     #[test]
-    fn the_lanes_walk_in_order_and_none_is_the_overflow() {
-        // Each lane in filed order, lanes in the order given, then the
-        // unassigned in filed order — never interleaved, whatever the
-        // filing times say.
+    fn the_lanes_walk_in_order_and_only_where_named() {
+        // Each lane in filed order, lanes in the order given, and only
+        // the lanes named — never interleaved, whatever the filing times
+        // say, and the unassigned lane is elsewhere until it is named.
         let events = [
             stored("pi.1", 10, "ready", None),
             stored("pi.2", 20, "ready", Some("qwen-review")),
@@ -653,50 +672,104 @@ mod tests {
             stored("pi.6", 60, "ready", Some("agent")),
         ];
         let qwen = Lane::Callsign("qwen-review".to_string());
-        let one = pick(&fold(&events), 6, &walk(std::slice::from_ref(&qwen)), None);
-        assert_eq!(ids(&one), ["pi.2", "pi.4", "pi.1", "pi.3"]);
+        let one = pick(
+            &fold(&events),
+            6,
+            &walk(std::slice::from_ref(&qwen), None, None),
+            None,
+        );
+        assert_eq!(ids(&one), ["pi.2", "pi.4"]);
         assert_eq!(
-            one.elsewhere, 2,
-            "claude's queue and the pool are elsewhere"
+            one.elsewhere, 4,
+            "the unassigned lane, claude's queue, and the pool are elsewhere"
         );
         assert_eq!(
             one.picked[0].assignee.as_deref(),
             Some("qwen-review"),
             "the pick carries the lane it was found in"
         );
-        assert_eq!(one.picked[2].assignee, None);
 
-        let two = pick(&fold(&events), 6, &walk(&[qwen.clone(), Lane::Agent]), None);
-        assert_eq!(ids(&two), ["pi.2", "pi.4", "pi.6", "pi.1", "pi.3"]);
-        assert_eq!(two.elsewhere, 1);
+        let two = pick(
+            &fold(&events),
+            6,
+            &walk(&[qwen.clone(), Lane::Agent], None, None),
+            None,
+        );
+        assert_eq!(ids(&two), ["pi.2", "pi.4", "pi.6"]);
+        assert_eq!(two.elsewhere, 3);
 
-        let reversed = pick(&fold(&events), 6, &walk(&[Lane::Agent, qwen.clone()]), None);
-        assert_eq!(ids(&reversed), ["pi.6", "pi.2", "pi.4", "pi.1", "pi.3"]);
+        let reversed = pick(
+            &fold(&events),
+            6,
+            &walk(&[Lane::Agent, qwen.clone()], None, None),
+            None,
+        );
+        assert_eq!(ids(&reversed), ["pi.6", "pi.2", "pi.4"]);
+
+        // The unassigned lane walks when named, where named.
+        let with_none = pick(
+            &fold(&events),
+            6,
+            &walk(&[qwen.clone(), Lane::None], None, None),
+            None,
+        );
+        assert_eq!(ids(&with_none), ["pi.2", "pi.4", "pi.1", "pi.3"]);
+        assert_eq!(with_none.elsewhere, 2);
+        assert_eq!(with_none.picked[2].assignee, None);
 
         // `want` counts across the walk: the first lane fills first.
-        let three = pick(&fold(&events), 3, &walk(&[qwen]), None);
+        let three = pick(
+            &fold(&events),
+            3,
+            &walk(&[qwen, Lane::None], None, None),
+            None,
+        );
         assert_eq!(ids(&three), ["pi.2", "pi.4", "pi.1"]);
     }
 
     #[test]
-    fn walk_dedupes_and_appends_none_once() {
-        assert_eq!(walk(&[Lane::Agent]), [Lane::Agent, Lane::None]);
+    fn walk_dedupes_and_appends_nothing() {
+        assert_eq!(walk(&[Lane::Agent], None, None), [Lane::Agent]);
         assert_eq!(
-            walk(&[Lane::Me, Lane::Me, Lane::Agent, Lane::Me]),
-            [Lane::Me, Lane::Agent, Lane::None],
+            walk(&[Lane::Me, Lane::Me, Lane::Agent, Lane::Me], None, None),
+            [Lane::Me, Lane::Agent],
             "a lane named twice walks once, where first named"
         );
         assert_eq!(
-            walk(&[Lane::None, Lane::Agent, Lane::None]),
+            walk(&[Lane::None, Lane::Agent, Lane::None], None, None),
             [Lane::None, Lane::Agent],
-            "`none` named walks where named and is not appended again"
+            "`none` named walks where named, once"
         );
-        assert_eq!(walk(&[Lane::None]), [Lane::None]);
+        assert_eq!(walk(&[Lane::None], None, None), [Lane::None]);
+        assert_eq!(
+            walk(&[Lane::Agent], Some("claude"), Some("qwen-review")),
+            [Lane::Agent],
+            "a named walk ignores the caller"
+        );
     }
 
     #[test]
-    fn an_empty_walk_defaults_to_me() {
-        assert_eq!(walk(&[]), [Lane::Me, Lane::None]);
+    fn an_empty_walk_is_the_callers_default() {
+        assert_eq!(
+            walk(&[], None, None),
+            [Lane::Me, Lane::None],
+            "no client mark: a person's own queue, then the unassigned lane"
+        );
+        assert_eq!(
+            walk(&[], Some("claude"), Some("qwen-review")),
+            [
+                Lane::Me,
+                Lane::Callsign("claude".to_string()),
+                Lane::Agent,
+                Lane::None
+            ],
+            "a named session under a client still draws from the client's lane"
+        );
+        assert_eq!(
+            walk(&[], Some("claude"), Some("claude")),
+            [Lane::Me, Lane::Agent, Lane::None],
+            "the client lane is dropped when `me` already is it"
+        );
     }
 
     #[test]
@@ -710,7 +783,7 @@ mod tests {
         let picks = pick(
             &fold(&events),
             4,
-            &walk(&[Lane::Agent, Lane::None, Lane::Me]),
+            &walk(&[Lane::Agent, Lane::None, Lane::Me], None, None),
             Some("claude"),
         );
         assert_eq!(ids(&picks), ["pi.2", "pi.1", "pi.4", "pi.3"]);
@@ -730,7 +803,7 @@ mod tests {
         let me_first = pick(
             &fold(&events),
             5,
-            &walk(&[Lane::Me, qwen.clone()]),
+            &walk(&[Lane::Me, qwen.clone(), Lane::None], None, None),
             Some("qwen-review"),
         );
         assert_eq!(ids(&me_first), ["pi.1", "pi.2", "pi.3"]);
@@ -739,13 +812,13 @@ mod tests {
         let callsign_first = pick(
             &fold(&events),
             5,
-            &walk(&[qwen, Lane::Me]),
+            &walk(&[qwen, Lane::Me, Lane::None], None, None),
             Some("qwen-review"),
         );
         assert_eq!(
             ids(&callsign_first),
             ["pi.1", "pi.2", "pi.3"],
-            "the callsign bucket takes pi.1, the `me` bucket pi.2, the overflow pi.3"
+            "the callsign bucket takes pi.1, the `me` bucket pi.2, the unassigned pi.3"
         );
     }
 
@@ -760,19 +833,34 @@ mod tests {
             stored("pi.4", 40, "ready", Some("agent")),
             stored("pi.5", 50, "ready", None),
         ];
-        let qwen = pick(&fold(&events), 5, &walk(&[Lane::Me]), Some("qwen-review"));
+        let qwen = pick(
+            &fold(&events),
+            5,
+            &walk(&[Lane::Me, Lane::None], None, None),
+            Some("qwen-review"),
+        );
         assert_eq!(
             ids(&qwen),
             ["pi.1", "pi.2", "pi.5"],
-            "own queue and the literal, then the overflow; never agent"
+            "own queue and the literal, then the unassigned; never agent"
         );
         assert_eq!(qwen.elsewhere, 2, "claude's queue and the agent lane");
 
-        let claude = pick(&fold(&events), 5, &walk(&[Lane::Me]), Some("claude"));
+        let claude = pick(
+            &fold(&events),
+            5,
+            &walk(&[Lane::Me, Lane::None], None, None),
+            Some("claude"),
+        );
         assert_eq!(ids(&claude), ["pi.2", "pi.3", "pi.5"]);
         assert_eq!(claude.elsewhere, 2);
 
-        let nobody = pick(&fold(&events), 5, &walk(&[Lane::Me]), None);
+        let nobody = pick(
+            &fold(&events),
+            5,
+            &walk(&[Lane::Me, Lane::None], None, None),
+            None,
+        );
         assert_eq!(
             ids(&nobody),
             ["pi.2", "pi.5"],
@@ -791,9 +879,17 @@ mod tests {
             stored("pi.3", 30, "ready", Some("agent")),
             stored("pi.4", 40, "ready", None),
         ];
-        let picks = pick(&fold(&events), 4, &walk(&[Lane::Agent]), Some("claude"));
-        assert_eq!(ids(&picks), ["pi.3", "pi.4"]);
-        assert_eq!(picks.elsewhere, 2);
+        let picks = pick(
+            &fold(&events),
+            4,
+            &walk(&[Lane::Agent], None, None),
+            Some("claude"),
+        );
+        assert_eq!(ids(&picks), ["pi.3"]);
+        assert_eq!(
+            picks.elsewhere, 3,
+            "the unassigned lane is not walked unnamed"
+        );
     }
 
     #[test]
@@ -804,7 +900,12 @@ mod tests {
             stored("pi.3", 30, "ready", Some("me")),
             stored("pi.4", 40, "ready", None),
         ];
-        let picks = pick(&fold(&events), 4, &walk(&[Lane::None]), Some("claude"));
+        let picks = pick(
+            &fold(&events),
+            4,
+            &walk(&[Lane::None], None, None),
+            Some("claude"),
+        );
         assert_eq!(ids(&picks), ["pi.2", "pi.4"], "once, not twice");
         assert_eq!(picks.elsewhere, 2);
     }
@@ -815,7 +916,12 @@ mod tests {
             stored("pi.1", 10, "ready", Some("agent")),
             stored("pi.2", 20, "backlog", None),
         ];
-        let picks = pick(&fold(&events), 1, &walk(&[Lane::Me]), Some("claude"));
+        let picks = pick(
+            &fold(&events),
+            1,
+            &walk(&[Lane::Me], None, None),
+            Some("claude"),
+        );
         assert!(picks.picked.is_empty());
         assert_eq!(picks.elsewhere, 1);
         assert_eq!(picks.outcome(), Outcome::Elsewhere);

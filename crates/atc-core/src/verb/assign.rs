@@ -2,7 +2,7 @@
 //!
 //! Four shapes: `me`, `agent`, `none` to clear the lane, or a callsign.
 //! The stored field is the whole gate — the lane is what `next <lane>`
-//! walks, and the unassigned lane is everyone's overflow, so assigning
+//! walks, and the unassigned lane ends every default walk, so assigning
 //! is what moves a flight from one walk to another. `me` stores the
 //! caller's callsign when there is one. A
 //! malformed word refuses at this boundary; the wire itself stays a

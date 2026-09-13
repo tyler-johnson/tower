@@ -112,9 +112,9 @@ pub enum Command {
     // agent notice quotes this: `atc next`
     #[command(long_about = help::NEXT, after_long_help = help::NEXT_EXAMPLES)]
     Next {
-        /// The lanes to walk, in order — me, agent, none, or a callsign;
-        /// your own queue when unsaid. The unassigned lane walks last
-        /// unless named.
+        /// The lanes to walk, in order — me, agent, none, or a callsign.
+        /// Unsaid: your own queue, your client's lane, the pool, and the
+        /// unassigned lane; a person's own queue and the unassigned lane.
         #[arg(value_name = "lane")]
         lanes: Vec<String>,
         /// Where each pick lands as it is claimed — me, agent, none, or

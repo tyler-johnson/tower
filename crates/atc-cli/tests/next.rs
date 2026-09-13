@@ -1,19 +1,21 @@
-//! `atc next` against real repositories: the lane walk, the `none`
-//! overflow, the peek, the re-lane, the outcomes — work, drained,
+//! `atc next` against real repositories: the lane walk, the caller's
+//! default, the peek, the re-lane, the outcomes — work, drained,
 //! elsewhere — and the exit, 0 on a pick and 1 otherwise.
 //!
-//! The walk is the lanes named in order then the unassigned lane, and
-//! `me` when unsaid — the harness scrubs the callsign, so bare `next`
-//! here walks the literal `me` lane and then `none`, and a pull lands
-//! in the literal `me` lane. Bare filings are born Ready
-//! and laned to no one, so they are the overflow of every walk. The
-//! agent fixtures file under a two-flight repo-layer procedure whose
-//! `pass` is agent-assigned and born Ready; `next agent` hands that one
-//! out, and the parent and `verdict` fold Waiting by their edges. The
-//! fold derives the release, so a Waiting flight whose dependencies
-//! close reads Ready on the following invocation — `verdict` in the
-//! `me` lane, `elsewhere` to the agent walk, and the parent unassigned,
-//! the overflow of any walk.
+//! The walk is exactly the lanes named in order, and the caller's
+//! default when unsaid — the harness scrubs the callsign and the client
+//! marks, so bare `next` here is a person's: the literal `me` lane and
+//! then `none`, with a pull landing in the literal `me` lane. A test
+//! that wants the client default sets the mark through `atc_marked`.
+//! Bare filings are born Ready and laned to no one, so they are in the
+//! default walks and elsewhere to a named walk that leaves `none` out.
+//! The agent fixtures file under a two-flight repo-layer procedure
+//! whose `pass` is agent-assigned and born Ready; `next agent` hands
+//! that one out, and the parent and `verdict` fold Waiting by their
+//! edges. The fold derives the release, so a Waiting flight whose
+//! dependencies close reads Ready on the following invocation —
+//! `verdict` in the `me` lane, `elsewhere` to the agent walk, and the
+//! parent unassigned, in the bare walk.
 //!
 //! A pull writes to tower's log and nothing to the repository: no
 //! branch, no worktree, no op row. The picked row is the flight, its
@@ -74,6 +76,23 @@ fn atc_as(repo: &Path, args: &[&str], callsign: &str) -> Output {
         .env("ATC_CALLSIGN", callsign)
         .output()
         .expect("spawn atc")
+}
+
+/// The spawn under a client's mark, the way the client's own shell
+/// carries it — set after the scrub, so the developer's own session
+/// never leaks in. `CLAUDECODE` alone names no session, so no lease is
+/// written anywhere.
+fn atc_marked(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atc"));
+    scrub(&mut command);
+    command
+        .args(args)
+        .current_dir(repo)
+        .env("XDG_CONFIG_HOME", xdg(repo));
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    command.output().expect("spawn atc")
 }
 
 fn repo() -> Repo {
@@ -257,11 +276,16 @@ fn the_fold_releases_a_satisfied_waiter_into_its_lane() {
 
     // Every child closed releases the parent the same way — Ready, not
     // finished: whether the broad task is over stays a judgment. It is
-    // laned to no one, so it is the overflow of every walk.
+    // laned to no one: elsewhere to the agent walk, in the bare one.
     let envelope = self::envelope(&atc(repo.path(), &["next", "agent", "--peek", "--json"]));
-    assert_eq!(picked(&envelope), ["pi.1"], "the unassigned overflow");
+    assert_eq!(envelope["data"]["outcome"], serde_json::json!("elsewhere"));
+    assert_eq!(picked(&envelope), Vec::<&str>::new(), "the pool alone");
     let envelope = self::envelope(&atc(repo.path(), &["next", "--peek", "--json"]));
-    assert_eq!(picked(&envelope), ["pi.1"]);
+    assert_eq!(
+        picked(&envelope),
+        ["pi.1"],
+        "the unassigned lane is in the bare walk"
+    );
 
     // The two empty picks share the code; the word is what diverges.
     stdout(&atc(repo.path(), &["done", "1"]));
@@ -411,10 +435,7 @@ fn a_count_picks_in_filed_order_and_the_envelope_has_no_passed_key() {
     assert_eq!(out.status.code(), Some(0));
     let envelope = envelope(&out);
     assert_eq!(envelope["data"]["outcome"], serde_json::json!("work"));
-    assert_eq!(
-        envelope["data"]["lanes"],
-        serde_json::json!(["agent", "none"])
-    );
+    assert_eq!(envelope["data"]["lanes"], serde_json::json!(["agent"]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
     assert_eq!(picked(&envelope), ["pi.2", "pi.8"]);
     assert_eq!(
@@ -556,9 +577,10 @@ fn a_flight_naming_no_skill_omits_the_field() {
 
 #[test]
 fn the_default_pull_is_me_then_none() {
-    // Bare `next` walks the `me` lane first — ahead of an earlier bare
-    // filing — then the unassigned lane, and never the agent lane. No
-    // callsign under the harness, so `me` is the literal lane.
+    // Bare `next` under no client mark is a person's: the `me` lane
+    // first — ahead of an earlier bare filing — then the unassigned
+    // lane, and never the agent lane. No callsign under the harness, so
+    // `me` is the literal lane.
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "nobody's"]));
     stdout(&atc(repo.path(), &["file", "mine", "--assignee", "me"]));
@@ -593,7 +615,8 @@ fn a_callsign_pulls_its_own_queue_the_literal_me_and_then_none() {
         &["file", "claude's", "--assignee", "claude"],
     ));
 
-    // Filed order within the lane, then the overflow; claude's queue is
+    // A variable in a bare shell is still a person's default: filed
+    // order within the lane, then the unassigned lane; claude's queue is
     // elsewhere.
     let envelope = envelope(&atc_as(
         repo.path(),
@@ -606,9 +629,9 @@ fn a_callsign_pulls_its_own_queue_the_literal_me_and_then_none() {
 }
 
 #[test]
-fn agent_pulls_the_literal_lane_and_then_none() {
-    // The lane is the argument: the caller's own queue is not in the
-    // agent walk, whatever the callsign.
+fn agent_pulls_the_literal_lane_alone() {
+    // The lane is the argument: neither the caller's own queue nor the
+    // unassigned lane is in the agent walk, whatever the callsign.
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "nobody's"]));
     stdout(&atc(
@@ -625,12 +648,61 @@ fn agent_pulls_the_literal_lane_and_then_none() {
         &["next", "agent", "-n", "3", "--json"],
         "claude",
     ));
+    assert_eq!(envelope["data"]["lanes"], serde_json::json!(["agent"]));
+    assert_eq!(picked(&envelope), ["pi.3"]);
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(2));
+}
+
+#[test]
+fn a_client_pulls_its_own_queue_its_client_lane_the_pool_then_none() {
+    // The mark, not the callsign, carries the client lane: an unnamed
+    // Claude Code session walks me, agent, none — its callsign is the
+    // client word, so `me` already covers the lane and the envelope
+    // does not list it twice — and a named session under the same mark
+    // walks its own queue, then claude's lane, then the pool, then the
+    // unassigned lane.
+    let repo = repo();
+    stdout(&atc(repo.path(), &["file", "nobody's"]));
+    stdout(&atc(
+        repo.path(),
+        &["file", "claude's", "--assignee", "claude"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &["file", "pooled", "--assignee", "agent"],
+    ));
+    stdout(&atc(
+        repo.path(),
+        &["file", "qwen's", "--assignee", "qwen-review"],
+    ));
+
+    let envelope = envelope(&atc_marked(
+        repo.path(),
+        &["next", "-n", "4", "--peek", "--json"],
+        &[("CLAUDECODE", "1")],
+    ));
     assert_eq!(
         envelope["data"]["lanes"],
-        serde_json::json!(["agent", "none"])
+        serde_json::json!(["me", "agent", "none"])
     );
-    assert_eq!(picked(&envelope), ["pi.3", "pi.1"]);
-    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
+    assert_eq!(picked(&envelope), ["pi.2", "pi.3", "pi.1"]);
+    assert_eq!(
+        envelope["data"]["elsewhere"],
+        serde_json::json!(1),
+        "qwen-review's queue"
+    );
+
+    let envelope = self::envelope(&atc_marked(
+        repo.path(),
+        &["next", "-n", "4", "--peek", "--json"],
+        &[("CLAUDECODE", "1"), ("ATC_CALLSIGN", "qwen-review")],
+    ));
+    assert_eq!(
+        envelope["data"]["lanes"],
+        serde_json::json!(["me", "claude", "agent", "none"])
+    );
+    assert_eq!(picked(&envelope), ["pi.4", "pi.2", "pi.3", "pi.1"]);
+    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(0));
 }
 
 #[test]
@@ -775,7 +847,7 @@ fn a_pick_already_in_the_lane_writes_no_assigned_event() {
 }
 
 #[test]
-fn lanes_walk_in_the_order_given_and_none_once() {
+fn lanes_walk_in_the_order_given_and_nothing_more() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "nobody's"]));
     stdout(&atc(
@@ -790,10 +862,14 @@ fn lanes_walk_in_the_order_given_and_none_once() {
     ));
     assert_eq!(
         envelope["data"]["lanes"],
-        serde_json::json!(["agent", "me", "none"])
+        serde_json::json!(["agent", "me"])
     );
-    assert_eq!(picked(&envelope), ["pi.2", "pi.3", "pi.1"]);
-    assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(0));
+    assert_eq!(picked(&envelope), ["pi.2", "pi.3"]);
+    assert_eq!(
+        envelope["data"]["elsewhere"],
+        serde_json::json!(1),
+        "the unassigned lane is not walked unnamed"
+    );
 
     let envelope = self::envelope(&atc(
         repo.path(),
@@ -802,7 +878,7 @@ fn lanes_walk_in_the_order_given_and_none_once() {
     assert_eq!(
         envelope["data"]["lanes"],
         serde_json::json!(["none", "agent"]),
-        "`none` walks where named and is not appended again"
+        "`none` walks where named"
     );
     assert_eq!(picked(&envelope), ["pi.1", "pi.2"]);
     assert_eq!(
@@ -817,10 +893,10 @@ fn lanes_walk_in_the_order_given_and_none_once() {
     ));
     assert_eq!(
         envelope["data"]["lanes"],
-        serde_json::json!(["me", "agent", "none"]),
+        serde_json::json!(["me", "agent"]),
         "a lane named twice walks once"
     );
-    assert_eq!(picked(&envelope), ["pi.3", "pi.2", "pi.1"]);
+    assert_eq!(picked(&envelope), ["pi.3", "pi.2"]);
 }
 
 #[test]
@@ -838,7 +914,7 @@ fn a_callsign_and_me_named_together_pick_the_flight_once() {
     ));
     assert_eq!(
         envelope["data"]["lanes"],
-        serde_json::json!(["me", "qwen-review", "none"])
+        serde_json::json!(["me", "qwen-review"])
     );
     assert_eq!(picked(&envelope), ["pi.1"], "once, in the first lane");
     assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(0));
@@ -933,7 +1009,7 @@ fn a_callsign_pulls_its_own_queue_and_never_the_pool() {
     stdout(&atc(repo.path(), &["assign", "5", "claude"]));
 
     // The agent lane's `pass` is elsewhere to a bare pull, and the
-    // pipeline's parent is Waiting, so nothing overflows.
+    // pipeline's parent is Waiting, so the unassigned lane is empty.
     let json = envelope(&atc_as(
         repo.path(),
         &["next", "-n", "3", "--json"],
