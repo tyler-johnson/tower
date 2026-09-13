@@ -922,9 +922,9 @@ fn the_migration_strips_the_old_codex_wiring() {
 #[test]
 fn the_opencode_plugin_round_trips() {
     let home = home();
-    let config = home.path().join("xdg/opencode");
-    let plugin = config.join("plugins/tower.js");
-    let skill = config.join("skills/tower/SKILL.md");
+    let config = home.path().join("xdg").join("opencode");
+    let plugin = config.join("plugins").join("tower.js");
+    let skill = config.join("skills").join("tower").join("SKILL.md");
 
     let said = ok(&atc(home.path(), home.path(), &["hook", "opencode"], None));
     assert!(said.contains("plugin written to"), "{said:?}");
@@ -1068,7 +1068,7 @@ fn the_opencode_plugin_round_trips() {
     assert!(
         said.contains(&format!(
             "removed {}",
-            config.join("skills/tower").display()
+            config.join("skills").join("tower").display()
         )),
         "{said:?}"
     );
@@ -1120,7 +1120,7 @@ fn opencode_is_detected_by_its_directory_or_its_binary() {
     assert_eq!(rows[3]["presence"]["state"], "present", "{rows}");
     assert_eq!(
         rows[3]["presence"]["evidence"],
-        home.path().join("xdg/opencode").to_str().unwrap(),
+        home.path().join("xdg").join("opencode").to_str().unwrap(),
         "the directory is the evidence when it is there: {rows}"
     );
 }
@@ -1877,7 +1877,11 @@ fn doctor_reads_the_opencode_plugin() {
     let repo = Repo::new();
     repo.pin_writer("pi");
     let home = repo.path().parent().unwrap();
-    let plugin = home.join("xdg/opencode/plugins/tower.js");
+    let plugin = home
+        .join("xdg")
+        .join("opencode")
+        .join("plugins")
+        .join("tower.js");
     std::fs::create_dir_all(home.join("xdg/opencode")).unwrap();
     let row = |home: &Path| -> serde_json::Value {
         let out = atc(home, repo.path(), &["doctor", "--json"], None);
