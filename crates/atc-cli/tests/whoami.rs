@@ -233,7 +233,8 @@ fn a_qwen_session_is_its_own_row() {
 /// OpenCode's session variable is a row of its own: tower's plugin sets
 /// `OPENCODE_SESSION_ID` on every shell command, and that one variable
 /// is the session row and a marker — source `opencode`, client
-/// `opencode`, no pid. The shell tool's own `OPENCODE=1` is the marker
+/// `opencode`, and the pid from `OPENCODE_PID`, the shell tool's own,
+/// when it is there. The shell tool's own `OPENCODE=1` is the marker
 /// without a session.
 #[test]
 fn an_opencode_session_is_its_own_row() {
@@ -258,6 +259,25 @@ fn an_opencode_session_is_its_own_row() {
     assert_eq!(data["callsign_source"], "client");
     assert_eq!(data["pid"], serde_json::Value::Null, "{data}");
     assert!(root(path).join(".local/state/atc/leases/o1").is_file());
+
+    let pid = std::process::id().to_string();
+    let out = atc(
+        path,
+        &[
+            ("OPENCODE_SESSION_ID", "o2"),
+            ("OPENCODE_PID", &pid),
+            ("OPENCODE", "1"),
+        ],
+        &["whoami", "--json"],
+    );
+    let data = envelope(&out)["data"].clone();
+    assert_eq!(data["session"], "o2", "{data}");
+    assert_eq!(
+        data["pid"],
+        serde_json::json!(own_pid()),
+        "OPENCODE_PID: {data}"
+    );
+    assert_eq!(data["lease"]["pid_alive"], true, "{data}");
 }
 
 /// Bare `atc callsign` prints what `atc whoami` prints, under its own

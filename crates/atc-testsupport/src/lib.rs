@@ -33,6 +33,7 @@ pub const AGENT_ENV: &[&str] = &[
     "CODEX_SESSION_ID",
     "QWEN_CODE_SESSION_ID",
     "OPENCODE_SESSION_ID",
+    "OPENCODE_PID",
     "ATC_SHELL_SESSION",
     "ATC_SHELL_PID",
     "ATC_CALLSIGN",

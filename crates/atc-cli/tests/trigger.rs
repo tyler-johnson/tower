@@ -467,6 +467,73 @@ fn the_opencode_boundary_and_activity_payloads() {
     assert_eq!(lease_names(home).len(), 1, "no session, no new lease");
 }
 
+/// A lease created by a process with no pid adopts the first one its
+/// row hands down: OpenCode's plugin spawns the notice's trigger without
+/// `OPENCODE_PID`, and its shell tool runs the next heartbeat with it.
+/// The first pid stands after that.
+#[test]
+fn a_lease_created_without_a_pid_adopts_the_rows_own() {
+    let repo = repo();
+    let home = root(repo.path());
+    let own = std::process::id().to_string();
+    let session = [("OPENCODE_SESSION_ID", "o3")];
+    let with_pid = [
+        ("OPENCODE_SESSION_ID", "o3"),
+        ("OPENCODE_PID", own.as_str()),
+    ];
+
+    let boundary = payload(repo.path(), Some("SessionStart"), None);
+    stdout(&trigger_env(
+        repo.path(),
+        home,
+        "opencode",
+        None,
+        Some(&boundary),
+        &session,
+    ));
+    let body = |home: &Path| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(lease(home, "o3")).unwrap()).unwrap()
+    };
+    assert_eq!(
+        body(home)["pid"],
+        serde_json::Value::Null,
+        "no pid handed down"
+    );
+
+    let activity = payload(repo.path(), Some("PreToolUse"), None);
+    silent(
+        &trigger_env(
+            repo.path(),
+            home,
+            "opencode",
+            None,
+            Some(&activity),
+            &with_pid,
+        ),
+        "activity with the pid",
+    );
+    if cfg!(target_os = "linux") {
+        assert_eq!(body(home)["pid"], own.parse::<u64>().unwrap(), "adopted");
+        assert!(body(home)["pid_start"].is_u64());
+    } else {
+        assert_eq!(body(home)["pid"], serde_json::Value::Null, "no reader");
+    }
+
+    // The first stands: a later heartbeat naming another pid moves nothing.
+    let other = [("OPENCODE_SESSION_ID", "o3"), ("OPENCODE_PID", "1")];
+    silent(
+        &trigger_env(repo.path(), home, "opencode", None, Some(&activity), &other),
+        "activity with another pid",
+    );
+    if cfg!(target_os = "linux") {
+        assert_eq!(
+            body(home)["pid"],
+            own.parse::<u64>().unwrap(),
+            "the first stands"
+        );
+    }
+}
+
 /// The heartbeat sweeps once per `leaseSweep`, through the marker: the
 /// first activity under a session removes an expired lease and writes
 /// the marker an hour out; the next leaves an expired lease alone while

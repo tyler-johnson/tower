@@ -19,8 +19,10 @@
 //! sets `OPENCODE_SESSION_ID` on every shell command — the bash tool's
 //! and the TUI's `!` shell — and that one variable is both the session
 //! tag and a client marker beside the `OPENCODE=1` the shell tool sets
-//! on its own (1.18.30 also sets `OPENCODE_PID` and `AGENT=1`, and no
-//! session variable).
+//! on its own; the shell tool also sets `OPENCODE_PID` to the client's
+//! own pid, which the session row reads, so the lease is held by the
+//! process's liveness the way Claude's is (1.18.30 sets `AGENT=1` too,
+//! and no session variable of its own).
 //! `tool.execute.before` renews the lease on every tool call with a
 //! `PreToolUse` payload and prints nothing.
 //!
@@ -28,8 +30,8 @@
 //! writes is wired; tower's header with other bytes — a moved binary, an
 //! older tower — is wired and stale, the repair `atc hook -u` makes; a
 //! `tower.js` without the header is someone else's and is left alone.
-//! The lease has no release under OpenCode and expires by `leaseExpiry`
-//! like any pidless lease.
+//! The lease has no release under OpenCode: it frees when the pid dies,
+//! and expires by `leaseExpiry` regardless.
 //!
 //! The config directory is the client's own rule: `$XDG_CONFIG_HOME/opencode`
 //! when set, else `~/.config/opencode`, on every OS. `OPENCODE_CONFIG_DIR`

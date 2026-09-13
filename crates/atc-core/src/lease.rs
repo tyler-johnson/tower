@@ -126,6 +126,20 @@ impl Lease {
         }
     }
 
+    /// Adopt a pid the body lacks: a lease created by a process the
+    /// client handed no pid — OpenCode's plugin spawns the trigger
+    /// without `OPENCODE_PID`, and its shell tool has it — takes the
+    /// first one its own row hands down. Whether the body changed —
+    /// false when a pid is already there, since the first one stands.
+    pub fn adopt(&mut self, pid: Pid) -> bool {
+        if self.pid.is_some() {
+            return false;
+        }
+        self.pid = Some(pid.pid);
+        self.pid_start = Some(pid.start);
+        true
+    }
+
     /// Record a sighting: the root moves or appends to the end. Whether
     /// the body changed — false when the root was already last.
     pub fn saw(&mut self, root: &str) -> bool {
@@ -435,8 +449,9 @@ pub fn update(session: &str, f: impl FnOnce(&mut Lease) -> bool) -> io::Result<(
 
 /// The heartbeat: create the lease if it is not there — the body from
 /// the environment, once, the root in it — and move its mtime to now.
-/// A root the body does not end with is a sighting to record, and that
-/// rewrite goes through [`update`]; otherwise the heartbeat never
+/// A root the body does not end with is a sighting to record, and a
+/// pid the body lacks while the row hands one down is adopted; either
+/// rewrite goes through [`update`]. Otherwise the heartbeat never
 /// truncates and needs no lock, so the word `atc callsign` wrote
 /// survives it.
 pub fn renew(session: &str, root: Option<&Path>) -> io::Result<()> {
@@ -446,13 +461,26 @@ pub fn renew(session: &str, root: Option<&Path>) -> io::Result<()> {
         return Ok(());
     };
     let root = root.map(root_string);
-    // A root not yet last in the body is a rewrite, under the lock; a
-    // lease that is not there yet is created below, the root in it.
-    if let Some(root) = &root
-        && let Some((held, _)) = read(session)
-        && held.repos.last() != Some(root)
-    {
-        return update(session, |lease| lease.saw(root));
+    // A root not yet last in the body, or a pid it lacks, is a rewrite
+    // under the lock; a lease that is not there yet is created below,
+    // the root and the pid in it.
+    if let Some((held, _)) = read(session) {
+        let sighting = root
+            .as_ref()
+            .is_some_and(|root| held.repos.last() != Some(root));
+        let pid = held.pid.is_none().then(Pid::current).flatten();
+        if sighting || pid.is_some() {
+            return update(session, |lease| {
+                let mut changed = false;
+                if let Some(root) = &root {
+                    changed |= lease.saw(root);
+                }
+                if let Some(pid) = pid {
+                    changed |= lease.adopt(pid);
+                }
+                changed
+            });
+        }
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -775,6 +803,18 @@ mod tests {
         lease.repos = vec!["a".to_string(), "b".to_string()];
         assert!(lease.saw("c"));
         assert_eq!(lease.repos, ["a", "b", "c"], "a new root appends");
+    }
+
+    /// The first pid stands: an empty body takes one, a body with one
+    /// keeps it.
+    #[test]
+    fn adopt_takes_a_pid_once() {
+        let mut lease = Lease::default();
+        let first = Pid { pid: 7, start: 1 };
+        assert!(lease.adopt(first));
+        assert_eq!(lease.pid(), Some(first));
+        assert!(!lease.adopt(Pid { pid: 8, start: 2 }), "already held");
+        assert_eq!(lease.pid(), Some(first));
     }
 
     /// The root is the nearest ancestor holding a `.git`, directory or

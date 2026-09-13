@@ -383,8 +383,9 @@ launcher's environment is the way to name it.
 No two live sessions on a machine hold one word. A lease is fresh
 while its mtime is inside leaseWindow — two minutes unless
 `atc config leaseWindow` says otherwise — or its pid is alive, when
-the client hands one down (ATC_PID, CLAUDE_PID, ATC_SHELL_PID, read
-from the row that named the session and never an inherited one).
+the client hands one down (ATC_PID, CLAUDE_PID, OPENCODE_PID,
+ATC_SHELL_PID, read from the row that named the session and never an
+inherited one).
 Another session holding the word on a fresh lease or a live pid
 refuses and names it; a stale lease with a dead or absent pid is
 removed and the word taken, and a lease past leaseExpiry is swept

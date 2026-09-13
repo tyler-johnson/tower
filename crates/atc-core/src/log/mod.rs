@@ -433,7 +433,8 @@ pub struct SessionVar {
 /// person's orchestrator, and beats the client's; the clients' own
 /// follow — Claude Code's on every process it spawns, Codex's, Qwen
 /// Code's on hooks and shell tools alike, and the one tower's OpenCode
-/// plugin sets; `ATC_SHELL_SESSION` is a
+/// plugin sets, with `OPENCODE_PID` beside it, which OpenCode's shell
+/// tool sets to its own pid; `ATC_SHELL_SESSION` is a
 /// terminal's, minted by its rc lines, and last on purpose: a
 /// terminal's variables are inherited by every agent launched from it,
 /// and the agent's own row must win. A pid is read from the row that
@@ -464,7 +465,7 @@ pub const SESSION_VARS: &[SessionVar] = &[
     },
     SessionVar {
         var: "OPENCODE_SESSION_ID",
-        pid_var: None,
+        pid_var: Some("OPENCODE_PID"),
         source: "opencode",
     },
     SessionVar {

@@ -7,8 +7,8 @@
 //! `opencode run` against `atc_testsupport::mock_model` through a custom
 //! provider in `opencode.json`: the standing notice in the first
 //! request's system prompt, the `whoami` output carried back on the
-//! next turn with `opencode` on every axis, and the lease under the
-//! session OpenCode named. No model judges anything.
+//! next turn with `opencode` on every axis and the client's pid, and
+//! the lease under the session OpenCode named. No model judges anything.
 //!
 //! Needs `opencode` on `PATH`. Skips with a line when it is absent, and
 //! fails instead under `ATC_LIVE=1`, which is how CI runs it. The first
@@ -114,6 +114,9 @@ fn an_opencode_session_carries_the_notice_and_the_shell_knows_its_pilot() {
     assert_eq!(seen["data"]["session_source"], "opencode", "{seen}");
     assert_eq!(seen["data"]["callsign"], "opencode", "{seen}");
     assert_eq!(seen["data"]["session"], session_id, "{seen}");
+    // The shell tool hands the client's own pid down as `OPENCODE_PID`,
+    // and the row reads it.
+    assert!(seen["data"]["pid"].is_u64(), "OPENCODE_PID: {seen}");
 
     // The standing notice is in the first request's system prompt, and
     // a later request carries the tool's output.
@@ -142,10 +145,12 @@ fn an_opencode_session_carries_the_notice_and_the_shell_knows_its_pilot() {
     });
     assert!(carried, "a later request carries the tool's output");
 
-    assert!(
-        home.join(".local/state/atc/leases")
-            .join(&session_id)
-            .is_file(),
-        "the lease is keyed by the session OpenCode named"
-    );
+    // The lease is keyed by the session OpenCode named, and holds the
+    // pid: the plugin's trigger spawn created it without one, and the
+    // shell's heartbeat — the whoami itself — adopted it.
+    let lease = home.join(".local/state/atc/leases").join(&session_id);
+    let body: Value = serde_json::from_str(&std::fs::read_to_string(&lease).unwrap())
+        .expect("the lease body parses");
+    assert_eq!(body["client"], "opencode", "{body}");
+    assert_eq!(body["pid"], seen["data"]["pid"], "adopted: {body}");
 }
