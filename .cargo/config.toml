@@ -1,0 +1,9 @@
+# The leases a test process writes land under target/, never under the
+# developer's ~/.local/state: the in-process suites in atc-core and
+# atc-serve open stores in fixture repositories under the developer's
+# own environment, and each open is a heartbeat that would otherwise
+# record every fixture root on the developer's real lease. The spawned
+# suites set their own HOME and drop this variable; cargo sets it for
+# every process it runs, so nothing reaches the machine's state.
+[env]
+XDG_STATE_HOME = { value = "target/test-state", relative = true }
