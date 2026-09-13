@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use atc_testsupport::{Repo, scrub};
+use atc_testsupport::{Repo, as_reported, scrub};
 
 fn root(repo: &Path) -> &Path {
     repo.parent().expect("the fixture nests the repository")
@@ -88,6 +88,12 @@ fn a_terminal_is_a_session_with_source_shell() {
         Some(pid) => assert!(lease.ends_with(&format!(", pid {pid} alive")), "{lease}"),
         None => assert!(lease.ends_with(", no pid"), "{lease}"),
     }
+    let basename = path.file_name().unwrap().to_string_lossy();
+    assert_eq!(
+        lines.next(),
+        Some(format!("repos {basename}").as_str()),
+        "the repository this read ran in, by basename"
+    );
     assert_eq!(lines.next(), Some("writer pi · author tests@tower.invalid"));
     assert_eq!(lines.next(), None);
 
@@ -102,6 +108,11 @@ fn a_terminal_is_a_session_with_source_shell() {
     assert_eq!(data["session_source"], "shell");
     assert_eq!(data["lease"]["fresh"], true);
     assert_eq!(data["pid"], serde_json::json!(own_pid()));
+    assert_eq!(
+        data["repos"],
+        serde_json::json!([as_reported(path).display().to_string()]),
+        "the full root: {data}"
+    );
     let mut keys: Vec<&str> = data
         .as_object()
         .unwrap()
@@ -118,6 +129,7 @@ fn a_terminal_is_a_session_with_source_shell() {
             "client",
             "lease",
             "pid",
+            "repos",
             "session",
             "session_source",
             "writer"

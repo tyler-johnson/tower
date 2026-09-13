@@ -72,8 +72,9 @@ impl Fixture {
         let mut names: Vec<String> = entries
             .flatten()
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            // The heartbeat's sweep marker is not a lease.
-            .filter(|name| name != "sweep")
+            // The heartbeat's sweep marker is not a lease, and neither
+            // is a `.lock` sidecar.
+            .filter(|name| name != "sweep" && !name.ends_with(".lock"))
             .collect();
         names.sort();
         names

@@ -214,8 +214,8 @@ fufu's rule that every verb must earn its existence carries over, and the one it
 | `atc status <flight> <status>` | move a flight; the lifecycle verbs below are this verb carrying a payload | either |
 | `atc assign <flight> <me\|agent\|none\|callsign>` | route the flight's queue; `me` stores your callsign | either |
 | `atc callsign [<name>] [--force]` | name this session's pilot: the word is held on the session's lease, no two live sessions on a machine hold one, and the open flights this session laned under its old word follow it; `--force` takes the word from a stale holder inside the window, never from a live pid; bare, what `atc whoami` prints | either |
-| `atc whoami` | who you are: the writer, the author, the client, the session and where it came from — a launcher's `ATC_SESSION`, a client's own, a terminal's `ATC_SHELL_SESSION`, the login name — the callsign and its source, the lease, the pid | either |
-| `atc session [--mint]` | every session on this machine with a lease — client, callsign, fresh or stale, pid — yours marked, leases past `leaseExpiry` swept first; `--mint` prints a fresh id and touches nothing | either |
+| `atc whoami` | who you are: the writer, the author, the client, the session and where it came from — a launcher's `ATC_SESSION`, a client's own, a terminal's `ATC_SHELL_SESSION`, the login name — the callsign and its source, the lease, the pid, the repositories the session was seen in | either |
+| `atc session [--mint]` | every session on this machine with a lease — client, callsign, the repositories it was seen in, fresh or stale, pid — yours marked, leases past `leaseExpiry` swept first; `--mint` prints a fresh id and touches nothing | either |
 | `atc hold <flight> -m <question>` | stop with a blocking question — exit 3 | an agent |
 | `atc answer <flight> -m <answer>` | answer the question and release the flight | you |
 | `atc done <flight>` | finish it — off the board, on the record | either |

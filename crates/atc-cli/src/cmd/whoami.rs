@@ -5,10 +5,12 @@
 //! mark; the session and which variable it came from — `launcher`,
 //! `claude`, `codex`, `opencode`, `shell`, or the login name; the
 //! callsign and its source — `env`, `session`, `client`, `login`; the
-//! lease fresh or stale and by how much, and the pid when the session's
-//! row hands one down. Bare `atc callsign` prints the same text under
-//! its own `cmd`, so an agent that types the one it remembers gets the
-//! answer; the render lives here and that verb calls it.
+//! lease fresh or stale and by how much, the pid when the session's
+//! row hands one down, and the repositories the session was seen in,
+//! rendered as `atc session` renders them. Bare `atc callsign` prints
+//! the same text under its own `cmd`, so an agent that types the one
+//! it remembers gets the answer; the render lives here and that verb
+//! calls it.
 
 use crate::error::CliError;
 use crate::{machine, render};
@@ -22,7 +24,7 @@ pub fn run(json: bool) -> Result<(), CliError> {
 
 /// The render, under the envelope `cmd` the caller names. `--json`
 /// carries `writer`, `author`, `client`, `session`, `session_source`,
-/// `callsign`, `callsign_source`, `lease`, and `pid`.
+/// `callsign`, `callsign_source`, `lease`, `repos`, and `pid`.
 pub fn print(json: bool, store: &Store, cmd: &str) -> Result<(), CliError> {
     let identity = store.identity();
     if json {
@@ -39,6 +41,7 @@ pub fn print(json: bool, store: &Store, cmd: &str) -> Result<(), CliError> {
                     "callsign": identity.callsign,
                     "callsign_source": identity.callsign_source,
                     "lease": identity.lease,
+                    "repos": identity.repos,
                     "pid": identity.pid.map(|pid| pid.pid),
                 })
             )
@@ -69,6 +72,7 @@ pub fn print(json: bool, store: &Store, cmd: &str) -> Result<(), CliError> {
             (None, None) => lease.push_str(", no pid"),
         }
         println!("{lease}");
+        println!("repos {}", super::session::repos_cell(&identity.repos));
     }
     // The provenance stamps: the writer is `none` before the first
     // append mints one.

@@ -113,15 +113,14 @@ pub fn callsign(store: &Store, name: &str, force: bool) -> Result<Callsign, Erro
     let previous = identity.callsign.clone();
     let renewed = identity.callsign_source == Some("session") && previous.as_deref() == Some(&word);
     let pid = identity.pid;
-    let mut own = lease::read(session)
-        .map(|(lease, _)| lease)
-        .unwrap_or_default();
-    own.session = session.to_string();
-    own.client = identity.client.map(str::to_string);
-    own.pid = pid.map(|pid| pid.pid);
-    own.pid_start = pid.map(|pid| pid.start);
-    own.callsign = Some(word.clone());
-    lease::write(&own).map_err(|err| Error::CallsignLease {
+    lease::update(session, |own| {
+        own.client = identity.client.map(str::to_string);
+        own.pid = pid.map(|pid| pid.pid);
+        own.pid_start = pid.map(|pid| pid.start);
+        own.callsign = Some(word.clone());
+        true
+    })
+    .map_err(|err| Error::CallsignLease {
         detail: err.to_string(),
     })?;
     store.adopt_callsign(word.clone());

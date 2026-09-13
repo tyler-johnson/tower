@@ -431,8 +431,8 @@ Who you are, on every axis tower stamps: the writer chain this
 machine appends to, the author from git, the client detected from
 the mark it leaves — CLAUDECODE, QWEN_CODE, CURSOR_AGENT,
 CODEX_SANDBOX — the session and where it came from, the callsign and
-where it came from, the lease, and the pid when the session's row
-hands one down.
+where it came from, the lease, the pid when the session's row hands
+one down, and the repositories the session was seen in.
 
 The session is the first session variable set: ATC_SESSION, a
 launcher's, reported as `launcher`; CLAUDE_CODE_SESSION_ID,
@@ -454,8 +454,8 @@ or its pid is alive; this read is itself a heartbeat, so the age
 shown is the one before it.
 
 --json carries writer, author, client, session, session_source,
-callsign, callsign_source, lease — fresh, age, pid_alive — and pid.
-Bare `atc callsign` prints the same text.";
+callsign, callsign_source, lease — fresh, age, pid_alive — repos,
+and pid. Bare `atc callsign` prints the same text.";
 
 pub const WHOAMI_EXAMPLES: &str = "\
 Examples:
@@ -466,11 +466,14 @@ Examples:
 
 pub const SESSION: &str = "\
 Every session on this machine with a lease: the session id, the
-client it runs under, the callsign it holds or none, the lease fresh
-or stale and by how much, the pid alive or dead when the lease holds
-one, and which row is this process's own. The \"who is flying here\"
-view, and what a pool manager reads. Sorted by session; a shell's
-id is a UUIDv7, so a terminal's sessions sort by birth.
+client it runs under, the callsign it holds or none, the
+repositories it was seen in — basenames, in order of last sight —
+the lease fresh or stale and by how much, the pid alive or dead when
+the lease holds one, and which row is this process's own. The \"who
+is flying here\" view, and what a pool manager reads. Sorted by
+session; a shell's id is a UUIDv7, so a terminal's sessions sort by
+birth. Recorded where the session ran atc or fired a hook, not every
+directory it changed into.
 
 Leases are per machine — one file per session under the machine's
 state directory — so this opens no store and needs no repository;
@@ -488,7 +491,8 @@ ATC_SESSION to one instead, and never ATC_SHELL_SESSION, which is
 the terminal's own and ranks last.
 
 --json carries sessions, one object each: session, client, callsign,
-lease — fresh, age, pid_alive — pid, and this.";
+repos — the full roots in order — lease — fresh, age, pid_alive —
+pid, and this.";
 
 pub const SESSION_EXAMPLES: &str = "\
 Examples:

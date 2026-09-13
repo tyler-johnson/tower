@@ -5,7 +5,9 @@
 //! `lease::all()`, marks this process's own row, and takes the window
 //! and the expiry from the repository's config when there is one —
 //! `leaseWindow` and `leaseExpiry` — and the compiled defaults
-//! otherwise. The listing sweeps first: a lease past `leaseExpiry` is
+//! otherwise. The `repos` column is where the session ran `atc` or
+//! fired a hook, basenames in order of last sight, the last most
+//! recent. The listing sweeps first: a lease past `leaseExpiry` is
 //! gone, a stale one inside it is listed stale and kept, and nothing
 //! here renews one. `--mint` prints a UUIDv7 and touches nothing, so the
 //! shells' rc lines can run it inside `$(…)` at every interactive start
@@ -30,6 +32,25 @@ pub fn run(json: bool, mint: bool) -> Result<(), CliError> {
         return Ok(());
     }
     list(json)
+}
+
+/// The `repos` cell: the roots' basenames in stored order, joined by
+/// `, `, or `-` for a session seen in none. `atc whoami` renders its
+/// row the same way.
+pub fn repos_cell(repos: &[String]) -> String {
+    if repos.is_empty() {
+        return "-".to_string();
+    }
+    repos
+        .iter()
+        .map(|root| {
+            std::path::Path::new(root)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root.clone())
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// One session's row: the lease body, its state against the window,
@@ -71,6 +92,7 @@ fn list(json: bool) -> Result<(), CliError> {
                     "session": row.lease.session,
                     "client": row.lease.client,
                     "callsign": row.lease.callsign,
+                    "repos": row.lease.repos,
                     "lease": row.state,
                     "pid": row.lease.pid,
                     "this": row.this,
@@ -89,7 +111,7 @@ fn list(json: bool) -> Result<(), CliError> {
         println!("no sessions on this machine");
         return Ok(());
     }
-    let cells: Vec<[String; 5]> = rows
+    let cells: Vec<[String; 6]> = rows
         .iter()
         .map(|row| {
             let dash = || "-".to_string();
@@ -107,13 +129,14 @@ fn list(json: bool) -> Result<(), CliError> {
                 row.lease.session.clone(),
                 row.lease.client.clone().unwrap_or_else(dash),
                 row.lease.callsign.clone().unwrap_or_else(dash),
+                repos_cell(&row.lease.repos),
                 lease,
                 pid,
             ]
         })
         .collect();
-    let header = ["session", "client", "callsign", "lease", "pid"];
-    let widths: Vec<usize> = (0..5)
+    let header = ["session", "client", "callsign", "repos", "lease", "pid"];
+    let widths: Vec<usize> = (0..6)
         .map(|column| {
             cells
                 .iter()

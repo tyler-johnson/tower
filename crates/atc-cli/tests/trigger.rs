@@ -130,14 +130,14 @@ fn lease(home: &Path, session: &str) -> PathBuf {
 }
 
 /// Every lease name in the state directory, the heartbeat's `sweep`
-/// marker left out: it is not a session.
+/// marker and the `.lock` sidecars left out: neither is a session.
 fn lease_names(home: &Path) -> Vec<std::ffi::OsString> {
     let Ok(entries) = std::fs::read_dir(home.join(".local/state/atc/leases")) else {
         return Vec::new();
     };
     entries
         .map(|entry| entry.unwrap().file_name())
-        .filter(|name| name != "sweep")
+        .filter(|name| name != "sweep" && !name.to_string_lossy().ends_with(".lock"))
         .collect()
 }
 
@@ -597,8 +597,8 @@ fn the_launcher_row_beats_the_client_row_and_the_pid_is_the_rows_own() {
         "the pid is the launcher row's own, never Claude's: {stored}"
     );
 
-    // The heartbeat never rewrites a body: the pid stored at creation
-    // stays through a renewal under another.
+    // The heartbeat never rewrites a body under one root: the pid
+    // stored at creation stays through a renewal under another.
     let before = age(&lease(home, "c1"));
     run(&[
         ("CLAUDE_CODE_SESSION_ID", "c1".to_string()),
@@ -608,6 +608,119 @@ fn the_launcher_row_beats_the_client_row_and_the_pid_is_the_rows_own() {
     if cfg!(target_os = "linux") {
         assert_eq!(body("c1")["pid"], std::process::id());
     }
+}
+
+/// The heartbeat records the payload's repository on the lease: a cwd
+/// below a root resolves to it; the same root again moves the mtime
+/// and leaves the body byte-identical; another root appends; an
+/// earlier one moves to the end; a callsign written between two
+/// heartbeats survives them, and the store's root and the trigger's
+/// agree on one spelling; a cwd with no repository above it records
+/// nothing; the end takes the lock sidecar with the lease.
+#[test]
+fn the_heartbeat_records_the_repository() {
+    use atc_testsupport::as_reported;
+
+    let repo_a = repo();
+    let home = root(repo_a.path());
+    let repo_b = Repo::new();
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let a = as_reported(repo_a.path()).display().to_string();
+    let b = as_reported(repo_b.path()).display().to_string();
+    let lease_path = lease(home, "c1");
+    let body = || -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(&lease_path).unwrap()).unwrap()
+    };
+    let repos = || body()["repos"].clone();
+    let activity = |cwd: &Path| {
+        let activity = payload(cwd, Some("PreToolUse"), None);
+        silent(
+            &trigger(
+                elsewhere.path(),
+                home,
+                "claude",
+                Some("c1"),
+                Some(&activity),
+            ),
+            "activity",
+        );
+    };
+
+    let sub = repo_a.path().join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    activity(&sub);
+    assert_eq!(
+        repos(),
+        serde_json::json!([a]),
+        "a cwd below the root resolves to it"
+    );
+
+    // The same root again: the mtime moves, the bytes do not.
+    let before = age(&lease_path);
+    let bytes = std::fs::read(&lease_path).unwrap();
+    activity(&sub);
+    assert!(
+        mtime(&lease_path) > before,
+        "a heartbeat under the last root still renews"
+    );
+    assert_eq!(
+        std::fs::read(&lease_path).unwrap(),
+        bytes,
+        "and never rewrites"
+    );
+
+    activity(repo_b.path());
+    assert_eq!(repos(), serde_json::json!([a, b]), "another root appends");
+    activity(repo_a.path());
+    assert_eq!(
+        repos(),
+        serde_json::json!([b, a]),
+        "an earlier root moves to the end"
+    );
+
+    // A word written between two heartbeats survives the rewrite the
+    // second one makes, and the store's root is the trigger's spelling.
+    stdout(
+        &command(repo_a.path(), home, &["callsign", "alpha"])
+            .env("CLAUDE_CODE_SESSION_ID", "c1")
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(body()["callsign"], "alpha");
+    assert_eq!(
+        repos(),
+        serde_json::json!([b, a]),
+        "the store's root is the same entry"
+    );
+    assert!(
+        lease(home, "c1.lock").is_file(),
+        "the callsign wrote under the sidecar"
+    );
+    activity(repo_b.path());
+    assert_eq!(
+        body()["callsign"],
+        "alpha",
+        "the word survives the heartbeat's rewrite"
+    );
+    assert_eq!(repos(), serde_json::json!([a, b]));
+
+    // No repository above the cwd: nothing recorded, still a heartbeat.
+    let before = age(&lease_path);
+    activity(elsewhere.path());
+    assert!(mtime(&lease_path) > before);
+    assert_eq!(
+        repos(),
+        serde_json::json!([a, b]),
+        "a bare cwd records nothing"
+    );
+
+    let end = payload(repo_a.path(), Some("SessionEnd"), None);
+    silent(
+        &trigger(elsewhere.path(), home, "claude", Some("c1"), Some(&end)),
+        "the end",
+    );
+    assert!(!lease_path.exists(), "the end releases the lease");
+    assert!(!lease(home, "c1.lock").exists(), "and its sidecar");
 }
 
 // ---- the shell source ------------------------------------------------------

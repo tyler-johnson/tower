@@ -329,6 +329,8 @@ fn bare_callsign_reports_the_identity() {
         ),
         None => assert!(lease_line.ends_with(", no pid"), "{lease_line}"),
     }
+    let basename = path.file_name().unwrap().to_string_lossy();
+    assert_eq!(lines.next(), Some(format!("repos {basename}").as_str()));
     assert_eq!(lines.next(), Some("writer pi · author tests@tower.invalid"));
     assert_eq!(lines.next(), None);
 
@@ -737,12 +739,12 @@ fn every_verb_under_a_session_is_a_heartbeat() {
     assert_eq!(lease_body(path, "s9")["callsign"], serde_json::Value::Null);
 
     stdout(&atc(path, None, None, &["brief", "1"]));
-    // The store's heartbeat wrote the sweep marker beside the lease; it
-    // is not a session.
+    // The store's heartbeat wrote the sweep marker beside the lease, and
+    // the callsign its lock sidecar; neither is a session.
     let leases: Vec<_> = std::fs::read_dir(root(path).join(".local/state/atc/leases"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
-        .filter(|name| name != "sweep")
+        .filter(|name| name != "sweep" && !name.to_string_lossy().ends_with(".lock"))
         .collect();
     assert_eq!(leases.len(), 1, "no session, no lease: {leases:?}");
 }

@@ -1,5 +1,6 @@
 //! The session lease: one file per session under the machine's state
-//! directory, its mtime the renewal and its body the session's identity.
+//! directory, its mtime the renewal and its body the session's identity
+//! and where it has been.
 //!
 //! A lease is what one machine knows about its own sessions, and it
 //! stays there: `$XDG_STATE_HOME/atc/leases/<session>`, defaulting to
@@ -8,9 +9,12 @@
 //! trigger sees renews it; the trigger's end event releases it. The
 //! body is JSON — the session, the client word, the pid with its start
 //! time when the client hands one down, and the callsign `atc callsign`
-//! fills in, empty until then. The lease is the session's, not the
-//! callsign's: a session with no word is a live session holding
-//! nothing, and the hold is only ever about the word.
+//! fills in, empty until then. Beside those, the repositories the
+//! session was seen in — roots, in order of last sight — recorded where
+//! it ran `atc` or fired a hook, not every directory it changed into.
+//! The lease is the session's, not the callsign's: a session with no
+//! word is a live session holding nothing, and the hold is only ever
+//! about the word.
 //!
 //! A lease is fresh while its mtime is inside the window — `leaseWindow`
 //! in `atc config` — or its pid is alive. The pid is stored with the
@@ -35,8 +39,12 @@
 //! [`renew`] and [`release`] open no store and touch no repository — a
 //! touch and an unlink, the `atc config` class of work, since one of
 //! them runs on every tool call. Renew writes the body once, when the
-//! file is empty, and never truncates after: a heartbeat is an fstat and
-//! a `set_modified`.
+//! file is empty, and never truncates after: a heartbeat under the root
+//! the body already ends with is an fstat and a `set_modified`. Every
+//! rewrite of a body — a new root, the word `atc callsign` writes —
+//! goes through [`update`], under an exclusive lock on the
+//! `<session>.lock` sidecar beside the lease; the heartbeat's touch is
+//! outside it, since it never rewrites.
 //!
 //! The session is keyed by the first [`crate::log::SESSION_VARS`] row
 //! set in the environment, else by the `session_id` a client's payload
@@ -87,6 +95,11 @@ pub struct Lease {
     /// The word `atc callsign` wrote; empty until it did.
     #[serde(default)]
     pub callsign: Option<String>,
+    /// The repositories this session was seen in — roots, in order of
+    /// last sight, the last entry the most recent. Where the session ran
+    /// `atc` or fired a hook, not every directory it changed into.
+    #[serde(default)]
+    pub repos: Vec<String>,
 }
 
 impl Lease {
@@ -99,8 +112,9 @@ impl Lease {
     }
 
     /// The body written on creation: the session, the client detected
-    /// from its mark, the pid the session's own row hands down, no word.
-    fn fresh(session: &str) -> Lease {
+    /// from its mark, the pid the session's own row hands down, the root
+    /// it was seen in when there is one, no word.
+    fn fresh(session: &str, root: Option<&str>) -> Lease {
         let pid = Pid::current();
         Lease {
             session: session.to_string(),
@@ -108,7 +122,19 @@ impl Lease {
             pid: pid.map(|pid| pid.pid),
             pid_start: pid.map(|pid| pid.start),
             callsign: None,
+            repos: root.map(|root| vec![root.to_string()]).unwrap_or_default(),
         }
+    }
+
+    /// Record a sighting: the root moves or appends to the end. Whether
+    /// the body changed — false when the root was already last.
+    pub fn saw(&mut self, root: &str) -> bool {
+        if self.repos.last().is_some_and(|last| last == root) {
+            return false;
+        }
+        self.repos.retain(|seen| seen != root);
+        self.repos.push(root.to_string());
+        true
     }
 }
 
@@ -307,6 +333,40 @@ pub fn path(session: &str) -> Option<PathBuf> {
     dir().map(|dir| dir.join(session))
 }
 
+/// The lock sidecar beside a lease: the lease path with `.lock` on the
+/// end of the file name — pushed, not `with_extension`, since a session
+/// id may hold a dot.
+fn lock_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().map(OsString::from).unwrap_or_default();
+    name.push(".lock");
+    path.with_file_name(name)
+}
+
+/// The repository root above `cwd`: the nearest ancestor holding a
+/// `.git` — a directory, or the file a linked worktree keeps. No store
+/// open, no gix: a stat per ancestor, the trigger's budget.
+pub fn repo_root(cwd: &Path) -> Option<PathBuf> {
+    cwd.ancestors()
+        .find(|dir| dir.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
+/// A root as the body spells it: resolved on unix, so the payload's
+/// `/var/…` and the store's `/private/var/…` are one entry; as given on
+/// Windows, where canonicalize would add the `\\?\` prefix; either way
+/// without a trailing separator.
+pub fn root_string(root: &Path) -> String {
+    let root = if cfg!(unix) {
+        std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
+    } else {
+        root.to_path_buf()
+    };
+    root.components()
+        .collect::<PathBuf>()
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// One session's lease and its mtime, when the file is there. A body
 /// that will not parse — the empty file an older trigger left, a hand
 /// edit — reads as an empty lease with its mtime, never as no lease.
@@ -343,32 +403,83 @@ pub fn write(lease: &Lease) -> io::Result<()> {
     })
 }
 
-/// The heartbeat: create the lease if it is not there — the body from
-/// the environment, once — and move its mtime to now. Never truncates,
-/// so the word `atc callsign` wrote survives every heartbeat.
-pub fn renew(session: &str) -> io::Result<()> {
-    use std::io::Write as _;
-
+/// Rewrite a lease under its lock: every writer that rewrites a body
+/// goes through here, so a heartbeat recording a root and `atc
+/// callsign` writing a word never race. The lock is an exclusive
+/// `File::lock` on the `<session>.lock` sidecar and not on the lease
+/// itself — a rename replaces the inode, so a lock on the old one
+/// guards nothing after the swap. The body read under the lock is the
+/// file's, or a fresh one when there is none; `f` returns whether it
+/// changed anything, and only then is it written through [`write`].
+pub fn update(session: &str, f: impl FnOnce(&mut Lease) -> bool) -> io::Result<()> {
     let Some(path) = path(session) else {
         return Ok(());
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let guard = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path(&path))?;
+    guard.lock()?;
+    let mut lease = read(session)
+        .map(|(lease, _)| lease)
+        .unwrap_or_else(|| Lease::fresh(session, None));
+    let result = if f(&mut lease) { write(&lease) } else { Ok(()) };
+    let _ = guard.unlock();
+    result
+}
+
+/// The heartbeat: create the lease if it is not there — the body from
+/// the environment, once, the root in it — and move its mtime to now.
+/// A root the body does not end with is a sighting to record, and that
+/// rewrite goes through [`update`]; otherwise the heartbeat never
+/// truncates and needs no lock, so the word `atc callsign` wrote
+/// survives it.
+pub fn renew(session: &str, root: Option<&Path>) -> io::Result<()> {
+    use std::io::Write as _;
+
+    let Some(path) = path(session) else {
+        return Ok(());
+    };
+    let root = root.map(root_string);
+    // A root not yet last in the body is a rewrite, under the lock; a
+    // lease that is not there yet is created below, the root in it.
+    if let Some(root) = &root
+        && let Some((held, _)) = read(session)
+        && held.repos.last() != Some(root)
+    {
+        return update(session, |lease| lease.saw(root));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let mut file = OpenOptions::new().append(true).create(true).open(&path)?;
     if file.metadata()?.len() == 0 {
-        let body = serde_json::to_vec(&Lease::fresh(session)).map_err(io::Error::other)?;
+        let body = serde_json::to_vec(&Lease::fresh(session, root.as_deref()))
+            .map_err(io::Error::other)?;
         file.write_all(&body)?;
     }
     file.set_modified(SystemTime::now())
 }
 
-/// The session's end: the lease goes. A lease already gone is fine.
+/// The session's end: the lease goes, its lock sidecar first — a crash
+/// between the two leaves a lease without a sidecar, which the next
+/// [`update`] recreates, never a sidecar without a lease. Either
+/// already gone is fine.
 pub fn release(session: &str) -> io::Result<()> {
     let Some(path) = path(session) else {
         return Ok(());
     };
-    match std::fs::remove_file(&path) {
+    remove_if_there(&lock_path(&path))?;
+    remove_if_there(&path)
+}
+
+fn remove_if_there(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }
@@ -426,9 +537,10 @@ pub fn mint() -> String {
 }
 
 /// Whether a file in the lease directory is a lease: a temporary file
-/// mid-write is not a session, and neither is the sweep marker.
+/// mid-write is not a session, and neither is a lock sidecar or the
+/// sweep marker.
 fn is_lease_name(name: &str) -> bool {
-    !name.contains(".tmp.") && name != SWEEP_MARKER
+    !name.contains(".tmp.") && !name.ends_with(".lock") && name != SWEEP_MARKER
 }
 
 /// Remove every lease whose mtime is older than `expiry`, whatever its
@@ -455,6 +567,10 @@ fn sweep_in(dir: &Path, now: SystemTime, expiry: Duration) {
         };
         if now.duration_since(mtime).unwrap_or(Duration::ZERO) > expiry {
             let _ = std::fs::remove_file(entry.path());
+            // The sidecar goes with its lease. No pass for orphans: a
+            // sidecar with no lease may be one `update` is holding
+            // while it creates the lease.
+            let _ = std::fs::remove_file(lock_path(&entry.path()));
         }
     }
 }
@@ -627,6 +743,7 @@ mod tests {
             pid: Some(42),
             pid_start: Some(9),
             callsign: Some("alpha".to_string()),
+            repos: vec!["/a".to_string()],
         };
         let json = serde_json::to_string(&lease).unwrap();
         assert_eq!(serde_json::from_str::<Lease>(&json).unwrap(), lease);
@@ -635,8 +752,70 @@ mod tests {
         let partial: Lease = serde_json::from_str(r#"{"session":"s2"}"#).unwrap();
         assert_eq!(partial.session, "s2");
         assert!(partial.pid().is_none() && partial.callsign.is_none());
+        assert!(
+            partial.repos.is_empty(),
+            "a body from before repos reads empty"
+        );
         let half: Lease = serde_json::from_str(r#"{"session":"s3","pid":5}"#).unwrap();
         assert!(half.pid().is_none(), "a pid without its start is no pid");
+    }
+
+    /// A sighting moves the root to the end or appends it, and says
+    /// whether the body changed: a root already last changes nothing.
+    #[test]
+    fn saw_moves_a_root_to_the_end() {
+        let mut lease = Lease::default();
+        assert!(lease.saw("a"));
+        assert_eq!(lease.repos, ["a"]);
+        assert!(!lease.saw("a"), "already last: unchanged");
+        assert_eq!(lease.repos, ["a"]);
+        lease.repos = vec!["a".to_string(), "b".to_string()];
+        assert!(lease.saw("a"));
+        assert_eq!(lease.repos, ["b", "a"], "an earlier root moves to the end");
+        lease.repos = vec!["a".to_string(), "b".to_string()];
+        assert!(lease.saw("c"));
+        assert_eq!(lease.repos, ["a", "b", "c"], "a new root appends");
+    }
+
+    /// The root is the nearest ancestor holding a `.git`, directory or
+    /// file; a directory with none above it has no root; the root is
+    /// its own.
+    #[test]
+    fn repo_root_walks_up_to_a_dot_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r = tmp.path().join("r");
+        std::fs::create_dir_all(r.join(".git")).unwrap();
+        std::fs::create_dir_all(r.join("a/b")).unwrap();
+        assert_eq!(repo_root(&r.join("a/b")), Some(r.clone()));
+        assert_eq!(repo_root(&r), Some(r.clone()), "the root is its own");
+
+        let w = tmp.path().join("w");
+        std::fs::create_dir_all(w.join("x")).unwrap();
+        std::fs::write(w.join(".git"), "gitdir: elsewhere").unwrap();
+        assert_eq!(
+            repo_root(&w.join("x")),
+            Some(w),
+            "a linked worktree's `.git` file counts"
+        );
+
+        let bare = tempfile::tempdir().unwrap();
+        assert_eq!(repo_root(bare.path()), None);
+    }
+
+    /// One repository is one string however the path was spelled: a
+    /// trailing separator or a `.` step drops.
+    #[test]
+    fn root_string_drops_the_trailing_separator() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plain = root_string(tmp.path());
+        assert!(!plain.ends_with(std::path::MAIN_SEPARATOR), "{plain}");
+        let trailing = PathBuf::from(format!(
+            "{}{}",
+            tmp.path().display(),
+            std::path::MAIN_SEPARATOR
+        ));
+        assert_eq!(root_string(&trailing), plain);
+        assert_eq!(root_string(&tmp.path().join(".")), plain);
     }
 
     /// A mint is a UUIDv7: the shape, the version and variant bits, the
@@ -733,10 +912,14 @@ mod tests {
         let young = plant(dir, "young", 3);
         let tmp_file = plant(dir, "x.tmp.1", 25 * 3_600);
         let marker = plant(dir, SWEEP_MARKER, 25 * 3_600);
+        let dead_lock = plant(dir, "dead.lock", 3);
+        let old_lock = plant(dir, "old.lock", 3);
 
         sweep_in(dir, SystemTime::now(), DEFAULT_EXPIRY);
         assert!(!dead.exists(), "pidless past the expiry goes");
+        assert!(!dead_lock.exists(), "the sidecar goes with its lease");
         assert!(old.exists(), "pidless inside the expiry stays");
+        assert!(old_lock.exists(), "the sidecar stays with its lease");
         assert!(
             !ghost.exists(),
             "a live pid past the expiry goes all the same"
@@ -822,7 +1005,9 @@ mod tests {
     fn all_ignores_the_marker() {
         assert!(!is_lease_name("sweep"));
         assert!(!is_lease_name("a.tmp.1"));
+        assert!(!is_lease_name("s1.lock"));
         assert!(is_lease_name("s1"));
+        assert_eq!(lock_path(Path::new("s.1")), PathBuf::from("s.1.lock"));
     }
 
     /// A pid variable that is unset or not a number is no pid; this

@@ -67,13 +67,15 @@ fn leases(home: &Path) -> PathBuf {
 }
 
 /// Write a lease by hand: the client, the word, an optional pid with a
-/// start time, and an mtime `age` seconds into the past.
+/// start time, the roots it was seen in, and an mtime `age` seconds
+/// into the past.
 fn plant(
     home: &Path,
     session: &str,
     client: Option<&str>,
     word: Option<&str>,
     pid: Option<(u32, u64)>,
+    repos: &[&str],
     age: u64,
 ) {
     let path = leases(home).join(session);
@@ -84,6 +86,7 @@ fn plant(
         "pid": pid.map(|(pid, _)| pid),
         "pid_start": pid.map(|(_, start)| start),
         "callsign": word,
+        "repos": repos,
     });
     std::fs::write(&path, body.to_string()).unwrap();
     let then = SystemTime::now() - Duration::from_secs(age);
@@ -164,16 +167,32 @@ fn the_listing_is_every_lease_on_the_machine() {
     assert_eq!(v["data"]["sessions"], serde_json::json!([]));
 
     let alive = own_start().map(|start| (std::process::id(), start));
-    plant(home, "b-old", None, Some("beta"), Some((4_000_000, 1)), 400);
-    plant(home, "a-new", Some("claude"), None, alive, 3);
-    plant(home, "c-own", None, Some("gamma"), None, 30);
+    plant(
+        home,
+        "b-old",
+        None,
+        Some("beta"),
+        Some((4_000_000, 1)),
+        &[],
+        400,
+    );
+    plant(
+        home,
+        "a-new",
+        Some("claude"),
+        None,
+        alive,
+        &["/x/fufu", "/y/tower"],
+        3,
+    );
+    plant(home, "c-own", None, Some("gamma"), None, &[], 30);
 
     let text = stdout(&atc(path, &[("ATC_SHELL_SESSION", "c-own")], &["session"]));
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 4, "{text}");
     assert_eq!(
         lines[0].split_whitespace().collect::<Vec<_>>(),
-        ["session", "client", "callsign", "lease", "pid"]
+        ["session", "client", "callsign", "repos", "lease", "pid"]
     );
     let fields = |line: &str| -> Vec<String> {
         line.split("  ")
@@ -183,20 +202,24 @@ fn the_listing_is_every_lease_on_the_machine() {
             .collect()
     };
     let a = fields(lines[1]);
-    assert_eq!(a[..3], ["a-new", "claude", "-"], "{text}");
-    assert!(a[3].starts_with("fresh "), "{text}");
+    assert_eq!(
+        a[..4],
+        ["a-new", "claude", "-", "fufu, tower"],
+        "basenames in stored order: {text}"
+    );
+    assert!(a[4].starts_with("fresh "), "{text}");
     match alive {
-        Some((pid, _)) => assert_eq!(a[4], format!("{pid} alive"), "{text}"),
-        None => assert_eq!(a[4], "-", "{text}"),
+        Some((pid, _)) => assert_eq!(a[5], format!("{pid} alive"), "{text}"),
+        None => assert_eq!(a[5], "-", "{text}"),
     }
     let b = fields(lines[2]);
-    assert_eq!(b[..3], ["b-old", "-", "beta"], "{text}");
-    assert!(b[3].starts_with("stale 6m"), "{text}");
-    assert_eq!(b[4], "4000000 dead", "{text}");
+    assert_eq!(b[..4], ["b-old", "-", "beta", "-"], "{text}");
+    assert!(b[4].starts_with("stale 6m"), "{text}");
+    assert_eq!(b[5], "4000000 dead", "{text}");
     let c = fields(lines[3]);
     assert_eq!(
         c,
-        ["c-own", "-", "gamma", "fresh 30s", "-", "this session"],
+        ["c-own", "-", "gamma", "-", "fresh 30s", "-", "this session"],
         "{text}"
     );
     assert!(
@@ -214,6 +237,11 @@ fn the_listing_is_every_lease_on_the_machine() {
     assert_eq!(sessions[0]["session"], "a-new");
     assert_eq!(sessions[0]["client"], "claude");
     assert_eq!(sessions[0]["callsign"], serde_json::Value::Null);
+    assert_eq!(
+        sessions[0]["repos"],
+        serde_json::json!(["/x/fufu", "/y/tower"]),
+        "the full roots, in order"
+    );
     assert_eq!(sessions[0]["lease"]["fresh"], true);
     assert_eq!(sessions[0]["this"], false);
     assert_eq!(sessions[1]["lease"]["fresh"], false);
@@ -221,6 +249,7 @@ fn the_listing_is_every_lease_on_the_machine() {
     assert_eq!(sessions[1]["pid"], 4_000_000);
     assert_eq!(sessions[2]["this"], true);
     assert_eq!(sessions[2]["pid"], serde_json::Value::Null);
+    assert_eq!(sessions[2]["repos"], serde_json::json!([]));
     let mut keys: Vec<&str> = sessions[2]
         .as_object()
         .unwrap()
@@ -230,7 +259,9 @@ fn the_listing_is_every_lease_on_the_machine() {
     keys.sort_unstable();
     assert_eq!(
         keys,
-        ["callsign", "client", "lease", "pid", "session", "this"]
+        [
+            "callsign", "client", "lease", "pid", "repos", "session", "this"
+        ]
     );
 
     // Not a heartbeat, and inside the expiry not a sweep either: the
@@ -250,10 +281,11 @@ fn a_lease_past_the_expiry_is_gone_after_the_listing() {
     let path = repo.path();
     let home = root(path);
     let alive = own_start().map(|start| (std::process::id(), start));
-    plant(home, "dead", None, None, None, 90_000);
-    plant(home, "old", None, None, None, 400);
-    plant(home, "ghost", None, None, alive, 90_000);
-    plant(home, "young", None, None, None, 3);
+    plant(home, "dead", None, None, None, &[], 90_000);
+    std::fs::write(leases(home).join("dead.lock"), "").unwrap();
+    plant(home, "old", None, None, None, &[], 400);
+    plant(home, "ghost", None, None, alive, &[], 90_000);
+    plant(home, "young", None, None, None, &[], 3);
 
     let v = envelope(&atc(path, &[], &["session", "--json"]));
     let sessions = v["data"]["sessions"].as_array().unwrap();
@@ -266,6 +298,10 @@ fn a_lease_past_the_expiry_is_gone_after_the_listing() {
     assert_eq!(sessions[1]["lease"]["fresh"], true);
     assert!(!leases(home).join("dead").exists(), "past the expiry, gone");
     assert!(
+        !leases(home).join("dead.lock").exists(),
+        "its lock sidecar went with it"
+    );
+    assert!(
         !leases(home).join("ghost").exists(),
         "a live pid past the expiry is gone all the same"
     );
@@ -273,29 +309,31 @@ fn a_lease_past_the_expiry_is_gone_after_the_listing() {
     assert!(leases(home).join("young").is_file());
 
     repo.git(&["config", "tower.leaseExpiry", "1h"]);
-    plant(home, "hour", None, None, None, 4_000);
+    plant(home, "hour", None, None, None, &[], 4_000);
     let text = stdout(&atc(path, &[], &["session"]));
     assert!(!text.contains("hour"), "{text}");
     assert!(!leases(home).join("hour").exists(), "past a shorter expiry");
     assert!(leases(home).join("old").is_file(), "inside it, kept");
 }
 
-/// The heartbeat's `sweep` marker lives in the lease directory and is
-/// not a session: the listing never names it.
+/// The heartbeat's `sweep` marker and a lease's `.lock` sidecar live in
+/// the lease directory and are not sessions: the listing never names
+/// them.
 #[test]
 fn the_marker_is_not_a_session() {
     let repo = repo();
     let path = repo.path();
     let home = root(path);
-    plant(home, "s1", None, None, None, 3);
+    plant(home, "s1", None, None, None, &[], 3);
     std::fs::write(leases(home).join("sweep"), "0").unwrap();
+    std::fs::write(leases(home).join("s1.lock"), "").unwrap();
 
     let v = envelope(&atc(path, &[], &["session", "--json"]));
     let sessions = v["data"]["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 1, "{v}");
     assert_eq!(sessions[0]["session"], "s1");
     let text = stdout(&atc(path, &[], &["session"]));
-    assert!(!text.contains("sweep"), "{text}");
+    assert!(!text.contains("sweep") && !text.contains(".lock"), "{text}");
 }
 
 /// `leaseWindow` from the repository you are in decides fresh: a 45s
@@ -306,7 +344,7 @@ fn the_window_is_the_repositorys_setting() {
     let repo = repo();
     let path = repo.path();
     let home = root(path);
-    plant(home, "s1", None, None, None, 45);
+    plant(home, "s1", None, None, None, &[], 45);
 
     let text = stdout(&atc(path, &[], &["session"]));
     assert!(text.contains("fresh 45s"), "{text}");

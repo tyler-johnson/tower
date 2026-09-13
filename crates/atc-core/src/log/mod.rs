@@ -61,9 +61,10 @@ impl Store {
     ///
     /// Opening resolves the identity, and that is the one write an open
     /// makes: the session's lease is renewed — created on the first
-    /// call, its body rewritten when the pid changed — so every `atc`
-    /// call under a session is a heartbeat. A lease that will not write
-    /// is not the verb's problem.
+    /// call, its body rewritten when the pid changed or when this
+    /// repository is not the last it was seen in — so every `atc` call
+    /// under a session is a heartbeat. A lease that will not write is
+    /// not the verb's problem.
     pub fn open(path: &Path) -> Result<Store> {
         let repo = gix::discover(path).map_err(Error::repo)?;
         let author = resolve_author(&repo)?;
@@ -511,6 +512,9 @@ pub struct Identity {
     pub client: Option<&'static str>,
     /// The lease's state as read at open, before this call renewed it.
     pub lease: Option<lease::State>,
+    /// The roots this session was seen in, this one last; empty with no
+    /// lease.
+    pub repos: Vec<String>,
     /// The one line the CLI prints on stderr: the word this session
     /// held was taken while it was idle.
     pub notice: Option<String>,
@@ -566,14 +570,15 @@ fn identity_from_environment(repo: &gix::Repository) -> Identity {
             env_word.is_none(),
             || lease_window_of(repo),
             fallback.as_deref().unwrap_or("nobody"),
+            repo.workdir(),
         )
     });
     if leased.is_some() {
         lease::sweep_if_due(|| Some(Config::from_repo(repo.clone())));
     }
-    let (lease_word, lease_state, notice) = match own {
-        Some(own) => (own.word, Some(own.state), own.notice),
-        None => (None, None, None),
+    let (lease_word, lease_state, repos, notice) = match own {
+        Some(own) => (own.word, Some(own.state), own.repos, own.notice),
+        None => (None, None, Vec::new(), None),
     };
 
     let (callsign, callsign_source) = match resolve_callsign(
@@ -594,6 +599,7 @@ fn identity_from_environment(repo: &gix::Repository) -> Identity {
         callsign_source,
         client,
         lease: lease_state,
+        repos,
         notice,
     }
 }
@@ -607,6 +613,7 @@ fn lease_window_of(repo: &gix::Repository) -> std::time::Duration {
 struct OwnLease {
     word: Option<String>,
     state: lease::State,
+    repos: Vec<String>,
     notice: Option<String>,
 }
 
@@ -623,22 +630,27 @@ struct OwnLease {
 /// keeping it.
 ///
 /// The renewal rewrites the body when the pid differs from what the
-/// file holds — a resumed session, a new process — and touches
-/// otherwise. The state reported is the lease's as found, before this
-/// renewal. Beside it the heartbeat sweeps dead leases once per
-/// `leaseSweep`, through the marker [`lease::sweep_if_due`] reads.
+/// file holds — a resumed session, a new process — or when `root`, the
+/// repository this store opened on, is not the last the session was
+/// seen in; and touches otherwise. The state reported is the lease's as
+/// found, before this renewal; the repos are as written. Beside it the
+/// heartbeat sweeps dead leases once per `leaseSweep`, through the
+/// marker [`lease::sweep_if_due`] reads.
 fn own_lease(
     session: &str,
     pid: Option<lease::Pid>,
     check_word: bool,
     window: impl FnOnce() -> std::time::Duration,
     fallback: &str,
+    root: Option<&Path>,
 ) -> OwnLease {
+    let root_str = root.map(lease::root_string);
     let Some((mut held, mtime)) = lease::read(session) else {
-        let _ = lease::renew(session);
+        let _ = lease::renew(session, root);
         return OwnLease {
             word: None,
             state: lease::state(SystemTime::now(), pid, lease::DEFAULT_WINDOW),
+            repos: root_str.map(|root| vec![root]).unwrap_or_default(),
             notice: None,
         };
     };
@@ -662,18 +674,35 @@ fn own_lease(
         ));
     }
     if held.pid() != pid || notice.is_some() {
-        held.pid = pid.map(|pid| pid.pid);
-        held.pid_start = pid.map(|pid| pid.start);
-        if held.client.is_none() {
-            held.client = lease::client_word().map(str::to_string);
-        }
-        let _ = lease::write(&held);
+        // The rewrite under the lock, and the same edits on the local
+        // copy, so what is returned is what was written.
+        let dropped = notice.is_some();
+        let edit = |held: &mut lease::Lease| {
+            held.pid = pid.map(|pid| pid.pid);
+            held.pid_start = pid.map(|pid| pid.start);
+            if held.client.is_none() {
+                held.client = lease::client_word().map(str::to_string);
+            }
+            if dropped {
+                held.callsign = None;
+            }
+            if let Some(root) = &root_str {
+                held.saw(root);
+            }
+            true
+        };
+        let _ = lease::update(session, edit);
+        edit(&mut held);
     } else {
-        let _ = lease::renew(session);
+        let _ = lease::renew(session, root);
+        if let Some(root) = &root_str {
+            held.saw(root);
+        }
     }
     OwnLease {
         word: held.callsign,
         state,
+        repos: held.repos,
         notice,
     }
 }
