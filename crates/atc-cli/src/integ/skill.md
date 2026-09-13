@@ -1,13 +1,32 @@
 ---
 name: tower
-description: Advanced use of tower (atc), the board over fufu. Use when driving tower from a script or a loop, reading its JSON envelope and exit codes, naming a flight by number or wire id, holding a flight on a question or answering one, claiming work with next, filing under a procedure or decomposing a flight, or whenever the board says something a verb refuses to change.
+description: Advanced use of tower (atc), a repository-local board for people and agents. Use when driving tower from a script or a loop, reading its JSON envelope and exit codes, naming a flight by number or wire id, holding a flight on a question or answering one, claiming work with next, filing under a procedure or decomposing a flight, or whenever the board says something a verb refuses to change.
 ---
 
 # tower
 
-`atc` is the board over fufu. Work is filed as flights, every verb appends one event to a log kept as ordinary git refs in the repository, and every render folds that log fresh. Nothing is entered twice, and nothing tower stores needs tower to read back: the refs are plain git objects beside history.
+`atc` is a repository-local board for people and agents. Work is filed as flights, mutations append events to a log kept as ordinary git refs in the repository, and every render folds that log fresh. Nothing is entered twice, and nothing tower stores needs tower to read back: the refs are plain git objects beside history. The binary runs directly; fufu is optional.
 
-tower is called and never calls. It runs no dispatch and no loop; the harness a session runs in is the scheduler, and tower is the queue and the record. The once-per-session briefing already gave the agent bare `atc` and the loop's four gestures. This is the rest. Both reach a client through `atc hook`: Claude Code through its own plugin, Codex through a plugin at `~/.agents/plugins/tower` reached by the personal marketplace beside it, Qwen Code through its settings file, and OpenCode through a plugin module at `~/.config/opencode/plugins/tower.js`.
+tower is called and never calls agents. It runs no agent dispatch and no loop; the harness a session runs in is the scheduler, and tower is the queue and the record. The wired notice introduces bare `atc` and the loop's four gestures. This manual supplies the model and machine contract.
+
+## Hook and unhook
+
+`atc hook` reports detected clients and shells, then asks which to wire. Name them to wire exactly those, as in `atc hook claude codex`; `atc hook --all` wires everything detected without asking, and `atc hook -l` only reports. The client names are `claude`, `codex`, `qwen`, `opencode`, `copilot`, and `cursor`; the shell names are `bash`, `zsh`, `fish`, and `powershell`.
+
+| client | wiring |
+| --- | --- |
+| Claude Code | its own plugin at `~/.claude/skills/tower`; `atc hook claude --settings` instead merges hooks into `~/.claude/settings.json` and installs no skills |
+| Codex | a plugin at `~/.agents/plugins/tower`, reached through the personal marketplace beside it; hook runs client registration when Codex is available and otherwise names the command; review the hook through `/hooks` in Codex before it can run |
+| Qwen Code | entries merged into `~/.qwen/settings.json`; the notice alone, because Qwen reads no skills directory |
+| OpenCode | `~/.config/opencode/plugins/tower.js` and the manual at `~/.config/opencode/skills/tower`; the module sets `OPENCODE_SESSION_ID` on shell commands |
+| Copilot CLI | an Agent Plugins 1.0 plugin at `~/.agents/plugins/copilot/tower`, a dedicated marketplace beside it, and `tower@tower-atc` registration in `~/.copilot/settings.json` |
+| Cursor CLI | a native plugin at `~/.cursor/plugins/local/tower`, discovered on a new session |
+
+The five plugins carry this manual and skills from declared adapters. The trigger has three event classes: a context boundary prints the notice and renews the session's lease, activity renews it silently, and the session's end releases it. Each client wires the events it supports; ending a turn is activity. OpenCode's notice is standing in the system prompt on every model call, so it survives compaction. Unknown events and trigger failures exit 0 without output. Shell wiring installs marked rc lines for a session heartbeat at each prompt and a release at exit, with no notice.
+
+`atc hook -u` re-asks every declared adapter's manifest, even when no client is wired, then repairs existing client and shell installs without adding unwired ones. It refreshes the binary path, hook entries, manual, and adapter skills. Failed skill replies preserve older installed copies; retired skills are removed on repair.
+
+`atc unhook claude` takes back exactly tower's wiring for that client; other names and `atc unhook --all` work the same way. Tower-owned plugin directories and OpenCode's module are removed whole, together with the skills tower installed. Shared settings and marketplaces lose only tower's entries, and shell rc files lose only tower's marked lines; other entries and manually authored trigger lines remain. Copilot's dedicated marketplace and registration are removed with its plugin. Codex's plugin and marketplace entry are removed, and the report names a separate command to clear its client cache. Board records and workflow shelves are independent of wiring.
 
 ## The model
 
@@ -29,7 +48,7 @@ Every read folds the log fresh and never blocks on the network.
 - `atc brief <flight>` (alias `show`) — the whole record: every field, the newest handoff pinned above the comments, the comments with any question and answer among them, the links with each linked flight's subject and status, each parent as a link row, with `-x`/`--expand` printing its body under it, one level up and no further, the flights whose prose names this one under `referenced by`, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
 - `atc procedures` and `atc skills` — the store's two shelves, what is installed on this machine and in this repository. Neither is the binary's; see Landmines.
 - `atc explain <id>` — the prose behind a refusal; `atc explain --list` is the whole catalog. A pure lookup, no repository needed.
-- `atc config` — every setting with its value and default; `atc version`; `atc doctor`, which exits 1 on findings so a script can gate on it; `atc trigger`, the notice a wired client shows a new session.
+- `atc config` — every setting with its value and default; `atc version`; `atc doctor`, which exits 1 on findings so a script can gate on it; `atc trigger`, the notice delivered at a client's context boundary or standing in OpenCode's prompt.
 - `atc whoami` — who you are: the session and where it came from, the callsign and its source, the lease, the pid, the writer and the author; bare `atc callsign` prints the same. `atc session` — every session on this machine with a lease, yours marked, the repositories each was seen in, dead leases swept first. A terminal wired by `atc hook bash` (or zsh, fish, powershell) is a session of its own, minted once per interactive shell into `ATC_SHELL_SESSION`; an agent launched from it is still its own session, because the client's variable ranks ahead of the terminal's. A launcher that wants a worker tracked sets `ATC_SESSION`, never `ATC_SHELL_SESSION`; `atc session --mint` prints an id for it.
 
 ## Filing and shaping
