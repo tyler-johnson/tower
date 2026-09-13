@@ -52,6 +52,12 @@ pub fn run(json: bool) -> Result<i32, CliError> {
     // The update row: the passive lane's cache, whose own row is why
     // doctor suppresses the generic notice. Info level — never a finding.
     report.rows.push(update_row());
+    for row in extension_rows() {
+        if row.level == Level::Warn {
+            report.findings += 1;
+        }
+        report.rows.push(row);
+    }
     // One row per agent client `atc hook` knows, from the same derivation
     // `atc hook -l` renders. Nothing here captures, so nothing wired is
     // not a finding; only wiring an older tower wrote is one.
@@ -91,6 +97,80 @@ pub fn run(json: bool) -> Result<i32, CliError> {
         }
     }
     Ok(if report.findings == 0 { 0 } else { 1 })
+}
+
+fn extension_rows() -> Vec<DoctorRow> {
+    let registry = crate::registry::read();
+    let mut rows = Vec::new();
+    let mut row = |check: String, level, message| {
+        rows.push(DoctorRow {
+            check,
+            level,
+            message,
+        })
+    };
+    if let Some(why) = &registry.unreadable {
+        row(
+            "extension/registry".into(),
+            Level::Warn,
+            format!("the extension registry does not read as one: {why}"),
+        );
+    }
+    for stale in &registry.stale {
+        row(
+            format!("extension/{}", stale.name),
+            Level::Warn,
+            format!(
+                "{} is recorded with contract {}, which this tower does not speak — atc hook -u re-asks it",
+                stale.name, stale.contract
+            ),
+        );
+    }
+    for entry in registry.declared() {
+        let check = format!("extension/{}", entry.name());
+        let Some(path) = entry.resolve() else {
+            row(
+                check,
+                Level::Warn,
+                format!(
+                    "atc-{} is not on PATH any more; recorded at {}",
+                    entry.name(),
+                    entry.path.display()
+                ),
+            );
+            continue;
+        };
+        match crate::manifest::ask(&path, entry.name()) {
+            Err(err) => row(check, Level::Warn, err.to_string()),
+            Ok(live) => {
+                let drift = path != entry.path
+                    || serde_json::to_value(&live).ok()
+                        != serde_json::to_value(&entry.manifest).ok();
+                row(
+                    check,
+                    if drift { Level::Warn } else { Level::Ok },
+                    if drift {
+                        format!(
+                            "atc-{} {} at {} differs from its declaration ({} at {}); atc hook -u refreshes it",
+                            entry.name(),
+                            live.version,
+                            path.display(),
+                            entry.manifest.version,
+                            entry.path.display()
+                        )
+                    } else {
+                        format!(
+                            "atc-{} {} · contract {}",
+                            entry.name(),
+                            live.version,
+                            live.contract
+                        )
+                    },
+                );
+            }
+        }
+    }
+    rows
 }
 
 /// The registry rows: principle 5's half of the skill seam, and

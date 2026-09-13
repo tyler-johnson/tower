@@ -23,6 +23,71 @@ pub struct UpdateState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notified: Option<String>,
     pub interval_secs: i64,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub extensions: std::collections::BTreeMap<String, ExtensionState>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtensionState {
+    pub repo: String,
+    pub latest: String,
+    pub notified: Option<String>,
+}
+
+pub fn refresh_extensions(
+    state: &mut UpdateState,
+    declared: &[crate::registry::Declared],
+    mut fetch: impl FnMut(&str) -> Option<String>,
+) {
+    let eligible: std::collections::BTreeMap<_, _> = declared
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                entry.name(),
+                crate::selfupdate::release_repo(&entry.manifest)?,
+            ))
+        })
+        .collect();
+    state.extensions.retain(|name, cached| {
+        eligible
+            .get(name.as_str())
+            .is_some_and(|repo| repo == &cached.repo)
+    });
+    for (name, repo) in eligible {
+        if let Some(latest) = fetch(&repo)
+            && crate::selfupdate::parse_tag(&latest).is_some()
+        {
+            let cached = state.extensions.entry(name.into()).or_default();
+            cached.repo = repo;
+            cached.latest = latest;
+        }
+    }
+}
+
+fn extension_notices(state: &UpdateState) -> Vec<String> {
+    crate::registry::read()
+        .declared()
+        .iter()
+        .filter_map(|entry| {
+            let cached = state.extensions.get(entry.name())?;
+            if cached.repo != crate::selfupdate::release_repo(&entry.manifest)?
+                || cached.notified.as_deref() == Some(&cached.latest)
+            {
+                return None;
+            }
+            let current =
+                crate::selfupdate::parse_semver(entry.manifest.version.trim_start_matches('v'))?;
+            if crate::selfupdate::parse_tag(&cached.latest)? <= current {
+                return None;
+            }
+            Some(format!(
+                "atc-{}: {} is available (running {}) — atc update",
+                entry.name(),
+                cached.latest,
+                entry.manifest.version
+            ))
+        })
+        .collect()
 }
 
 /// Resolve the platform cache root using a pure env-lookup closure.
@@ -275,7 +340,14 @@ pub fn pending(repo: &std::path::Path, current_version: &str, want_notice: bool)
     let tty = std::io::stderr().is_terminal();
 
     let current = crate::selfupdate::parse_semver(current_version)?;
-    let due = compute_due(&state, current, tty)?;
+    if !tty {
+        return None;
+    }
+    let due = compute_due(&state, current, tty);
+    let mut extensions = extension_notices(&state);
+    if due.is_none() && extensions.is_empty() {
+        return None;
+    }
 
     // Something is due — NOW open live config.
     let live = Config::open(repo).ok()?;
@@ -285,7 +357,10 @@ pub fn pending(repo: &std::path::Path, current_version: &str, want_notice: bool)
 
     let exe = crate::selfupdate::resolve_exe().ok()?;
     let kind = crate::selfupdate::classify_install(&exe, true);
-    notice_for(&due, want_notice, current_version, kind)
+    if let Some(own) = due.and_then(|due| notice_for(&due, want_notice, current_version, kind)) {
+        extensions.insert(0, own);
+    }
+    Some(extensions.join("\n"))
 }
 
 /// Mark the current latest as notified — a release announces at most once, ever.
@@ -295,6 +370,11 @@ pub fn mark_notified() {
     };
     let mut state = load_state(&path);
     state.notified = state.latest.clone();
+    for entry in crate::registry::read().declared() {
+        if let Some(cached) = state.extensions.get_mut(entry.name()) {
+            cached.notified = Some(cached.latest.clone());
+        }
+    }
     let _ = save_state(&path, &state);
 }
 
@@ -313,6 +393,39 @@ pub fn sync_interval(encoded: i64) {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[test]
+    fn extension_cache_keeps_offline_answers_and_drops_retired_or_reaimed_recipes() {
+        let declared = |name: &str, repo: &str| {
+            crate::registry::Declared {
+            path: format!("/bin/atc-{name}").into(), declared_at: 1,
+            manifest: crate::manifest::parse(serde_json::json!({"name":name,"version":"1.0.0","contract":1,"verbs":[{"name":"go","read_only":true}],"undoable":false,"update":{"releases":format!("https://github.com/owner/{repo}/releases/latest")}})).unwrap(),
+        }
+        };
+        let mut state = UpdateState::default();
+        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| {
+            Some("v2.0.0".into())
+        });
+        assert_eq!(state.extensions["probe"].latest, "v2.0.0");
+        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| None);
+        assert_eq!(state.extensions["probe"].latest, "v2.0.0");
+        refresh_extensions(&mut state, &[declared("probe", "new")], |_| None);
+        assert!(state.extensions.is_empty());
+        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| {
+            Some("bad tag".into())
+        });
+        assert!(state.extensions.is_empty());
+        let mut source = declared("probe", "probe");
+        source.manifest.build = Some(crate::manifest::Build::Source);
+        refresh_extensions(&mut state, &[source], |_| {
+            panic!("a source build has no release check")
+        });
+        refresh_extensions(&mut state, &[declared("probe", "probe")], |_| {
+            Some("v3.0.0".into())
+        });
+        refresh_extensions(&mut state, &[], |_| panic!("no declarations"));
+        assert!(state.extensions.is_empty());
+    }
 
     #[test]
     fn cache_root_from_linux() {
@@ -415,6 +528,7 @@ mod tests {
             latest: Some("v0.2.0".into()),
             notified: Some("v0.2.0".into()),
             interval_secs: 86_400,
+            extensions: std::collections::BTreeMap::new(),
         };
         save_state(&path, &state).unwrap();
         assert_eq!(load_state(&path), state);

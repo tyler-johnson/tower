@@ -35,7 +35,15 @@ pub fn get(agent: &ureq::Agent, url: &str) -> Result<ureq::http::Response<ureq::
 }
 
 pub fn fetch_latest(agent: &ureq::Agent, api_base: &str) -> Result<Release, CliError> {
-    let url = format!("{api_base}/repos/tyler-johnson/tower/releases/latest");
+    fetch_latest_of(agent, api_base, "tyler-johnson/tower")
+}
+
+pub fn fetch_latest_of(
+    agent: &ureq::Agent,
+    api_base: &str,
+    repo: &str,
+) -> Result<Release, CliError> {
+    let url = format!("{api_base}/repos/{repo}/releases/latest");
     let mut resp = get(agent, &url)?;
 
     let status = resp.status().as_u16();

@@ -98,6 +98,46 @@ pub fn text(ready: usize, filed: usize, on: &[String]) -> String {
     format!("{NOTICE}\n{}", status_line(ready, filed, on))
 }
 
+/// One line per declaration, in registry order. The 240-character budget and one-second ask are fufu's.
+pub fn extension_lines(cwd: &Path, repo: Option<&Path>, session: Option<&str>) -> Vec<String> {
+    use crate::manifest::Briefing;
+    crate::registry::read()
+        .declared()
+        .iter()
+        .filter_map(|entry| {
+            let said = match &entry.manifest.briefing {
+                Some(Briefing::Line(line)) => line.clone(),
+                Some(Briefing::Ask(true)) => String::from_utf8(crate::ext::ask(
+                    entry.name(),
+                    "briefing",
+                    &[],
+                    cwd,
+                    repo,
+                    session,
+                )?)
+                .ok()?,
+                Some(Briefing::Ask(false)) | None => return None,
+            };
+            usable(&said)
+        })
+        .collect()
+}
+
+fn usable(said: &str) -> Option<String> {
+    let line = said.trim();
+    (!line.is_empty() && !line.contains('\n') && line.chars().count() <= 240)
+        .then(|| line.to_string())
+}
+
+pub fn with_extensions(mut text: String, cwd: &Path, session: Option<&str>) -> String {
+    let repo = atc_core::lease::repo_root(cwd);
+    for line in extension_lines(cwd, repo.as_deref(), session) {
+        text.push('\n');
+        text.push_str(&line);
+    }
+    text
+}
+
 /// What the status line is made of, folded from the store the directory
 /// belongs to: the two counts, the caller's callsign, and the flights In
 /// Progress under it.

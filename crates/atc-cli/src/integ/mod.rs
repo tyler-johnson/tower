@@ -39,6 +39,7 @@ pub mod claude;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
+mod extension_skills;
 pub mod opencode;
 pub mod plugin;
 pub mod qwen;

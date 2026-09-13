@@ -22,6 +22,72 @@ pub struct Entry {
 
 pub static ENTRIES: &[Entry] = &[
     Entry {
+        id: "extension/not-found",
+        summary: "the adapter binary is not on PATH",
+        detail: "An adapter is resolved as atc-<name> on PATH each time it runs. Install the binary or restore its PATH entry before declaring it or requesting its skills.",
+        exits: &["atc extension", "atc doctor"],
+    },
+    Entry {
+        id: "extension/not-declared",
+        summary: "that adapter has no declaration on this machine",
+        detail: "Removing a declaration requires its recorded name. The binary may still run from PATH without a declaration; atc extension lists the names the registry holds.",
+        exits: &["atc extension"],
+    },
+    Entry {
+        id: "extension/handshake-failed",
+        summary: "the adapter did not answer with a manifest envelope",
+        detail: "The --atc-manifest handshake requires exit zero and one atc envelope on one line, carrying data. A banner, malformed JSON, error envelope, or nonzero exit refuses the declaration before the registry changes.",
+        exits: &["atc doctor"],
+    },
+    Entry {
+        id: "extension/bad-manifest",
+        summary: "the adapter's manifest does not satisfy the declared contract",
+        detail: "The manifest requires a valid name, a nonempty version and verb list, a contract number, and undoable. Optional skills must use the adapter's namespace, and update recipes must name usable channels. The refusal identifies the field.",
+        exits: &[],
+    },
+    Entry {
+        id: "extension/unsupported-contract",
+        summary: "the adapter and tower speak different contracts",
+        detail: "The adapter's manifest contract must equal tower's machine contract. Update whichever binary is behind, then declare again. An incompatible record remains on disk but is excluded from the declarations tower describes.",
+        exits: &["atc extension", "atc doctor"],
+    },
+    Entry {
+        id: "extension/name-mismatch",
+        summary: "the manifest names a different adapter",
+        detail: "The name in the manifest must match the name in atc-<name> resolved from PATH. Fix the binary or its manifest; tower records neither half of a mismatched declaration.",
+        exits: &["atc doctor"],
+    },
+    Entry {
+        id: "extension/registry-unreadable",
+        summary: "the declaration registry cannot be read",
+        detail: "The per-machine extensions.json is malformed or cannot be opened. Readers describe no adapters and doctor reports the problem. Writers refuse to overwrite it so the existing declarations can be repaired.",
+        exits: &["atc doctor"],
+    },
+    Entry {
+        id: "extension/registry-unwritable",
+        summary: "the declaration registry cannot be written",
+        detail: "The environment names no config directory, or creating or replacing extensions.json failed. The refusal names the path and IO error when one exists. Correct the directory or permissions and repeat the declaration.",
+        exits: &["atc doctor"],
+    },
+    Entry {
+        id: "extension/delegate-failed",
+        summary: "the declared adapter did not answer help or explain",
+        detail: "The binary left PATH, could not start, exited nonzero, or exceeded the one-second question budget. A person requested this answer, so tower reports the failure instead of printing an empty page.",
+        exits: &["atc doctor", "atc extension"],
+    },
+    Entry {
+        id: "extension/skill-failed",
+        summary: "the adapter did not answer with the requested skill",
+        detail: "The --atc-skill handshake requires one atc envelope carrying the skill's files. Hook reports the failed skill and continues installing the others; an existing copy remains until a successful refresh.",
+        exits: &["atc doctor"],
+    },
+    Entry {
+        id: "extension/bad-skill",
+        summary: "the produced skill is not a valid file bundle",
+        detail: "A skill needs SKILL.md at its root, unique relative file paths with no parent traversal, and text totaling at most eight MiB. Invalid bundles are refused whole before files are written.",
+        exits: &[],
+    },
+    Entry {
         id: "usage/bad-flags",
         summary: "the command line does not combine into one command",
         detail: "The line was answerable but not runnable: `-V` where tower's version flag is \

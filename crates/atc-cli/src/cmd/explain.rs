@@ -61,6 +61,22 @@ pub fn run(json: bool, id: Option<&str>, list: bool) -> Result<(), CliError> {
         ));
     };
 
+    if explain::find(id).is_none()
+        && let Some((name, local)) = id.split_once('/')
+        && crate::registry::read().get(name).is_some()
+    {
+        let rest = if json {
+            vec![local, "--json"]
+        } else {
+            vec![local]
+        };
+        let bytes = crate::ext::delegate(name, "explain", &rest)?;
+        use std::io::Write;
+        std::io::stdout()
+            .write_all(&bytes)
+            .map_err(|err| CliError::coded("extension/delegate-failed", err.to_string(), vec![]))?;
+        return Ok(());
+    }
     let entry = explain::find(id).ok_or_else(|| explain::unknown_id(id))?;
     if json {
         println!("{}", machine::emit("explain", &Wire::from(entry)));

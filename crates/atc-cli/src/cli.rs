@@ -102,6 +102,16 @@ pub struct BoardArgs {
 // be wrong.
 #[derive(Subcommand)]
 pub enum Command {
+    /// Declare an adapter on this machine; bare lists declarations
+    #[command(long_about = help::EXTENSION, after_long_help = help::EXTENSION_EXAMPLES)]
+    Extension {
+        /// The name in atc-<name> on PATH
+        #[arg(conflicts_with = "delete")]
+        name: Option<String>,
+        /// Forget a declaration
+        #[arg(short = 'd', value_name = "name")]
+        delete: Option<String>,
+    },
     /// The board — what is filed, what is moving, what is stuck.
     #[command(long_about = help::ROOT, after_long_help = help::ROOT_EXAMPLES)]
     Board {
@@ -519,6 +529,7 @@ impl Command {
                 notice: false,
             },
             Command::Explain { .. }
+            | Command::Extension { .. }
             | Command::Config { .. }
             | Command::Procedures { .. }
             | Command::Skills { .. }

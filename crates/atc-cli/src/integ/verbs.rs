@@ -60,6 +60,7 @@ impl Verb {
 /// it is on. An upgraded binary refreshes the machine this way, without a
 /// person having to remember which verb does.
 fn refresh(json: bool) -> Result<(), CliError> {
+    refresh_manifests();
     // Wired is what tower wrote, whole or in part. A hand-written line is
     // never tower's to rewrite, and a slug that is not wired is exactly
     // what this verb must not add.
@@ -184,6 +185,10 @@ fn act(
     opts: &InstallOptions,
     verb: Verb,
 ) -> Result<(), CliError> {
+    if !matches!(verb, Verb::Unhook) && targets.iter().any(|target| target.status().skill.is_some())
+    {
+        super::extension_skills::prepare();
+    }
     if targets.is_empty() {
         // `--all` over a machine with nothing on it. Saying so beats
         // exiting silently, which reads as having done something.
@@ -232,6 +237,26 @@ fn act(
         return report(json, verb.word(), &super::statuses(), &acted);
     }
     Ok(())
+}
+
+/// Re-record successful replies before installation reads the registry. Stale contracts are asked too, so an upgraded adapter can recover.
+fn refresh_manifests() {
+    let registry = crate::registry::read();
+    let names = registry
+        .declared()
+        .iter()
+        .map(|entry| entry.name())
+        .chain(registry.stale.iter().map(|entry| entry.name.as_str()));
+    for name in names {
+        if let Err(err) =
+            crate::manifest::handshake(name).and_then(|shook| crate::registry::declare(&shook))
+        {
+            eprintln!("atc: refreshing {name}: {err}");
+        }
+    }
+    if let Some(why) = &registry.unreadable {
+        eprintln!("atc: the registry does not read as one: {why}");
+    }
 }
 
 // ---- the report ------------------------------------------------------------

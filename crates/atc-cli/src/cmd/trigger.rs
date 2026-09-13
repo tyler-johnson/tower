@@ -112,8 +112,14 @@ pub fn run_briefing(json: bool, client: Option<&str>) -> Result<(), CliError> {
 
 /// The notice for the repository you are in, as a person reads it.
 fn bare(json: bool, cmd: &str) -> Result<(), CliError> {
-    let counts = briefing::counts(&super::repo()?)?;
-    let text = briefing::text(counts.ready, counts.filed, &counts.on);
+    let cwd = super::repo()?;
+    let counts = briefing::counts(&cwd)?;
+    let session = lease::session_key("");
+    let text = briefing::with_extensions(
+        briefing::text(counts.ready, counts.filed, &counts.on),
+        &cwd,
+        session.as_deref(),
+    );
     if json {
         println!("{}", envelope(cmd, &text, &counts));
     } else {
@@ -133,7 +139,12 @@ fn notice(
     let Ok(counts) = briefing::counts(&payload.cwd()) else {
         return Ok(());
     };
-    let text = briefing::text(counts.ready, counts.filed, &counts.on);
+    let session = lease::session_key(&payload.session_id);
+    let text = briefing::with_extensions(
+        briefing::text(counts.ready, counts.filed, &counts.on),
+        &payload.cwd(),
+        session.as_deref(),
+    );
     if json {
         println!("{}", envelope("trigger", &text, &counts));
     } else {

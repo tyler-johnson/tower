@@ -121,18 +121,82 @@ fn on_path(name: &str) -> bool {
 }
 
 pub fn install_command() -> String {
+    install_command_for(INSTALL_URL)
+}
+
+pub fn install_command_for(url: &str) -> String {
     #[cfg(windows)]
     {
-        format!("irm {INSTALL_URL} | iex")
+        format!("irm {url} | iex")
     }
     #[cfg(not(windows))]
     {
         if !on_path("curl") && on_path("wget") {
-            format!("wget -qO- {INSTALL_URL} | sh")
+            format!("wget -qO- {url} | sh")
         } else {
-            format!("curl -fsSL {INSTALL_URL} | sh")
+            format!("curl -fsSL {url} | sh")
         }
     }
+}
+
+pub fn extension_bin_dir(bin: Option<&str>) -> Option<PathBuf> {
+    let path = match bin {
+        Some("~") => crate::integ::home().ok()?,
+        Some(bin) if bin.starts_with("~/") => crate::integ::home().ok()?.join(&bin[2..]),
+        Some(bin) => PathBuf::from(bin),
+        None => script_install_path()?.parent()?.to_path_buf(),
+    };
+    Some(path.canonicalize().unwrap_or(path))
+}
+
+pub fn classify_extension_at(
+    path: &Path,
+    official: bool,
+    install: bool,
+    bin: &Path,
+) -> InstallKind {
+    let own = classify_install_at(path, official, Path::new(""));
+    if own != InstallKind::Unmanaged {
+        return own;
+    }
+    if install && !bin.as_os_str().is_empty() && path.parent() == Some(bin) {
+        InstallKind::Script
+    } else {
+        InstallKind::Unmanaged
+    }
+}
+
+pub fn recipe_for(block: &crate::manifest::Update, kind: InstallKind) -> Option<String> {
+    match kind {
+        InstallKind::Source => None,
+        InstallKind::Homebrew => block
+            .brew
+            .as_ref()
+            .map(|formula| format!("brew upgrade {formula}")),
+        InstallKind::Script => block.install.as_deref().map(install_command_for),
+        InstallKind::Unmanaged => block.releases.clone(),
+    }
+}
+
+pub fn release_repo(manifest: &crate::manifest::Manifest) -> Option<String> {
+    if manifest.build() == crate::manifest::Build::Source {
+        return None;
+    }
+    let url = manifest.update.as_ref()?.releases.as_deref()?;
+    let path = url.strip_prefix("https://github.com/")?;
+    let parts: Vec<_> = path.trim_end_matches('/').split('/').collect();
+    let [owner, repo, "releases", "latest"] = parts.as_slice() else {
+        return None;
+    };
+    if [owner, repo].iter().any(|s| {
+        s.is_empty()
+            || !s
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    }) {
+        return None;
+    }
+    Some(format!("{owner}/{repo}"))
 }
 
 /// Shared by the explicit verb and the passive notice.
@@ -181,6 +245,46 @@ pub fn run_installer(cmd: &str, json: bool) -> Result<(), CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_channels_and_recipes_follow_the_owners_directory() {
+        let bin = Path::new("/home/u/.local/bin");
+        let block = crate::manifest::Update {
+            brew: Some("owner/tap/probe".into()),
+            install: Some("https://example.com/install.sh".into()),
+            bin: None,
+            releases: Some("https://example.com/releases".into()),
+        };
+        for (path, kind) in [
+            ("/home/u/.local/bin/atc-probe", InstallKind::Script),
+            ("/home/u/.local/bin/sub/atc-probe", InstallKind::Unmanaged),
+            ("/opt/homebrew/bin/atc-probe", InstallKind::Homebrew),
+        ] {
+            assert_eq!(
+                classify_extension_at(Path::new(path), true, true, bin),
+                kind
+            );
+            assert_eq!(
+                classify_extension_at(Path::new(path), false, true, bin),
+                InstallKind::Source
+            );
+        }
+        assert_eq!(
+            classify_extension_at(&bin.join("atc-probe"), true, false, bin),
+            InstallKind::Unmanaged
+        );
+        assert_eq!(
+            recipe_for(&block, InstallKind::Homebrew).as_deref(),
+            Some("brew upgrade owner/tap/probe")
+        );
+        assert!(
+            recipe_for(&block, InstallKind::Script)
+                .unwrap()
+                .contains("https://example.com/install.sh")
+        );
+        assert_eq!(recipe_for(&block, InstallKind::Unmanaged), block.releases);
+        assert_eq!(recipe_for(&block, InstallKind::Source), None);
+    }
 
     #[test]
     fn versions_are_strict_and_compare_numerically() {

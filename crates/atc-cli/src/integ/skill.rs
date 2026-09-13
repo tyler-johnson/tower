@@ -103,6 +103,7 @@ fn stale(root: &Path) -> Vec<PathBuf> {
 /// `root/<name>/SKILL.md` for each shipped skill, after any retired one
 /// goes.
 pub fn write_all(root: &Path) -> Result<(), CliError> {
+    super::extension_skills::write(root)?;
     for dir in stale(root) {
         std::fs::remove_dir_all(&dir).map_err(|err| super::failed(&dir, err))?;
     }
@@ -119,7 +120,7 @@ pub fn write_all(root: &Path) -> Result<(), CliError> {
 /// whether there was anything to remove, so a caller can report honestly
 /// instead of claiming a change it did not make.
 pub fn remove_all(root: &Path) -> Result<bool, CliError> {
-    let mut removed = false;
+    let mut removed = super::extension_skills::remove(root)?;
     let shipped = SKILLS.iter().map(|skill| root.join(skill.name));
     for dir in shipped.chain(stale(root)) {
         if !dir.exists() {
@@ -153,7 +154,8 @@ pub fn wiring(root: &Path) -> Wiring {
     }
     if present == 0 && stale.is_empty() {
         Wiring::NotWired
-    } else if current == SKILLS.len() && stale.is_empty() {
+    } else if current == SKILLS.len() && stale.is_empty() && super::extension_skills::current(root)
+    {
         Wiring::Wired {
             mechanism: Mechanism::Plugin,
             at: root.to_path_buf(),

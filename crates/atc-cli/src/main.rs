@@ -19,9 +19,12 @@ mod cli;
 mod cmd;
 mod error;
 mod explain;
+mod ext;
 mod help;
 mod integ;
 mod machine;
+mod manifest;
+mod registry;
 mod render;
 mod selfupdate;
 
@@ -32,6 +35,7 @@ use cli::{BoardArgs, Cli, Command};
 use error::CliError;
 
 fn main() {
+    extension_dispatch();
     let cli = Cli::parse();
     // `-V` is the version flag every other tool has; here it is lowercase.
     // Answered rather than parsed, so the person who typed the habit is
@@ -181,6 +185,7 @@ fn verb(command: &Option<Command>, version: bool) -> &'static str {
         Some(Command::Answer { .. }) => "answer",
         Some(Command::Done { .. }) => "done",
         Some(Command::Explain { .. }) => "explain",
+        Some(Command::Extension { .. }) => "extension",
         Some(Command::Config { .. }) => "config",
         Some(Command::Version) => "version",
         Some(Command::Update { .. }) => "update",
@@ -285,6 +290,9 @@ fn run(cli: &Cli) -> Result<i32, CliError> {
         }
         Some(Command::Done { flight }) => cmd::done::run(cli.json, flight)?,
         Some(Command::Explain { id, list }) => cmd::explain::run(cli.json, id.as_deref(), *list)?,
+        Some(Command::Extension { name, delete }) => {
+            cmd::extension::run(cli.json, name.as_deref(), delete.as_deref())?
+        }
         Some(Command::Config {
             key,
             value,
@@ -335,4 +343,53 @@ fn report(json: bool, cmd: &str, err: &CliError) -> ! {
         }
     }
     std::process::exit(err.exit_code())
+}
+
+/// Only an unknown top-level word dispatches. Parse the prefix separately so invalid tower flags cannot launch a child.
+fn extension_dispatch() {
+    use clap::CommandFactory;
+    let argv: Vec<_> = std::env::args_os().collect();
+    let root = Cli::command();
+    for (at, word) in argv.iter().enumerate().skip(1) {
+        let Some(name) = word.to_str() else {
+            continue;
+        };
+        if name.starts_with('-') {
+            continue;
+        }
+        let Ok(prefix) = Cli::try_parse_from(&argv[..at]) else {
+            continue;
+        };
+        if at > 1 && argv[at - 1] == "--closed" {
+            continue;
+        }
+        if prefix.version || prefix.version_shouted || prefix.board.closed.is_some() {
+            return;
+        }
+        if name == "help" {
+            if let Some(target) = argv.get(at + 1).and_then(|s| s.to_str())
+                && argv.len() == at + 2
+                && root.find_subcommand(target).is_none()
+                && registry::read().get(target).is_some()
+            {
+                let rest = if prefix.json { vec!["--json"] } else { vec![] };
+                match ext::delegate(target, "help", &rest) {
+                    Ok(bytes) => {
+                        use std::io::Write;
+                        let _ = std::io::stdout().write_all(&bytes);
+                        std::process::exit(0);
+                    }
+                    Err(err) => report(argv[..at].iter().any(|a| a == "--json"), "help", &err),
+                }
+            }
+            return;
+        }
+        if root.find_subcommand(name).is_some() {
+            return;
+        }
+        if let Some(path) = ext::resolve(name) {
+            ext::dispatch(&path, &argv[at + 1..]);
+        }
+        return;
+    }
 }

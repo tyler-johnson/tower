@@ -21,6 +21,7 @@ pub mod doctor;
 pub mod done;
 pub mod edit;
 pub mod explain;
+pub mod extension;
 pub mod file;
 pub mod hold;
 pub mod link;

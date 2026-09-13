@@ -11,7 +11,7 @@ pub fn run(json: bool, check: bool, yes: bool) -> Result<(), CliError> {
     }
 
     let exe = selfupdate::resolve_exe()?;
-    let report = dispatch(
+    let own = dispatch(
         selfupdate::classify_install(&exe, selfupdate::OFFICIAL),
         env!("CARGO_PKG_VERSION"),
         yes,
@@ -31,11 +31,140 @@ pub fn run(json: bool, check: bool, yes: bool) -> Result<(), CliError> {
             confirm()
         },
         |cmd| selfupdate::run_installer(cmd, json),
-    )?;
+    );
+    let registry = crate::registry::read();
+    if let Some(why) = &registry.unreadable {
+        eprintln!("atc: the registry does not read as one: {why}");
+    }
+    let declared = registry.declared();
+    if declared.is_empty() {
+        let report = own?;
+        if json {
+            println!("{}", machine::emit("update", &report));
+        }
+        return Ok(());
+    }
+    let mut trouble = Vec::new();
+    if let Err(err) = &own {
+        trouble.push(err.to_string());
+    }
+    let mut extensions = Vec::new();
+    let mut moved = false;
+    for entry in declared {
+        let report = extension(entry, json, yes, &mut trouble)?;
+        moved |= report.status == "installed";
+        extensions.push(report);
+    }
+    if moved {
+        // The path from before installation still names the installed binary after its predecessor was replaced.
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.args(["hook", "-u"]);
+        if json {
+            cmd.stdout(std::io::stderr());
+        }
+        match cmd.status() {
+            Ok(status) if status.success() => {}
+            result => trouble.push(format!("atc hook -u did not finish: {result:?}")),
+        }
+    }
+    if !trouble.is_empty() {
+        return Err(selfupdate::failed(format!(
+            "not everything moved:\n  {}",
+            trouble.join("\n  ")
+        )));
+    }
     if json {
-        println!("{}", machine::emit("update", &report));
+        let mut data = serde_json::to_value(own.expect("no trouble")).expect("report serializes");
+        data["extensions"] = serde_json::to_value(extensions).expect("reports serialize");
+        println!("{}", machine::emit("update", &data));
     }
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct ExtensionReport {
+    name: String,
+    current: String,
+    channel: Option<InstallKind>,
+    command: Option<String>,
+    status: &'static str,
+    message: String,
+}
+
+fn extension(
+    entry: &crate::registry::Declared,
+    json: bool,
+    yes: bool,
+    trouble: &mut Vec<String>,
+) -> Result<ExtensionReport, CliError> {
+    let mut report = ExtensionReport {
+        name: entry.name().into(),
+        current: entry.manifest.version.clone(),
+        channel: None,
+        command: None,
+        status: "instructions",
+        message: String::new(),
+    };
+    let path = entry
+        .resolve()
+        .map(|path| path.canonicalize().unwrap_or(path));
+    if path.is_none() {
+        report.message = format!(
+            "atc-{} is not on PATH any more; recorded at {}",
+            entry.name(),
+            entry.path.display()
+        );
+    } else if entry.manifest.build() == crate::manifest::Build::Source {
+        report.channel = Some(InstallKind::Source);
+        report.message = format!(
+            "atc-{} was built from source — rebuild it the way you built it",
+            entry.name()
+        );
+    } else if let Some(block) = &entry.manifest.update {
+        let bin = selfupdate::extension_bin_dir(block.bin.as_deref()).unwrap_or_default();
+        let kind = selfupdate::classify_extension_at(
+            path.as_deref().expect("resolved"),
+            true,
+            block.install.is_some(),
+            &bin,
+        );
+        report.channel = Some(kind);
+        report.command = selfupdate::recipe_for(block, kind);
+        report.message = if report.command.is_some() {
+            format!("atc-{} {}", entry.name(), entry.manifest.version)
+        } else {
+            format!(
+                "atc-{} has no recipe for its {kind:?} channel",
+                entry.name()
+            )
+        };
+    } else {
+        report.message = format!(
+            "atc-{} is one tower cannot move: its manifest carries no update recipes",
+            entry.name()
+        );
+    }
+    if !json {
+        println!("\n{}.", report.message);
+        if let Some(command) = &report.command {
+            println!("update with:\n  {command}");
+        }
+    }
+    let runnable = report.channel == Some(InstallKind::Script) && report.command.is_some();
+    if runnable {
+        if yes || (!json && machine::interactive() && confirm()?) {
+            match selfupdate::run_installer(report.command.as_deref().expect("recipe"), json) {
+                Ok(()) => report.status = "installed",
+                Err(err) => {
+                    report.status = "failed";
+                    trouble.push(format!("atc-{}: {err}", entry.name()));
+                }
+            }
+        }
+    } else if yes {
+        trouble.push(report.message.clone());
+    }
+    Ok(report)
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -178,6 +307,17 @@ fn refresh_cache() -> Result<(), CliError> {
         Ok(())
     })();
     // Every failure is silent
+    let agent = selfupdate::github::agent();
+    selfupdate::notify::refresh_extensions(
+        &mut state,
+        crate::registry::read().declared(),
+        |repo| {
+            selfupdate::github::fetch_latest_of(&agent, "https://api.github.com", repo)
+                .ok()
+                .map(|release| release.tag_name)
+        },
+    );
+    let _ = selfupdate::notify::save_state(&path, &state);
     Ok(())
 }
 

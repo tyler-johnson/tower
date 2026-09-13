@@ -11,6 +11,24 @@
 //! pair — bare `atc` is the board, so `atc help board` prints
 //! the root page, fufu's bare-`ff`-and-`help map` precedent.
 
+pub const EXTENSION: &str = "\
+Declare an adapter on this machine. Bare lists declarations; a name
+runs atc-<name> --atc-manifest and records its checked manifest;
+-d <name> forgets it. The registry lives under the user's config
+directory, in tower/extensions.json.
+
+An undeclared atc-<name> already runs through atc <name>, with its
+arguments, stdio, and exit status preserved. Built-in verbs win.
+Declaring adds atc help <name>, atc explain <name>/<id>, a budgeted
+line in the trigger notice, skills installed by atc hook, update
+recipes, and doctor diagnostics. atc hook -u refreshes manifests.";
+
+pub const EXTENSION_EXAMPLES: &str = "\
+Examples:
+  atc extension
+  atc extension github
+  atc extension -d github";
+
 pub const ROOT: &str = "\
 tower: the board over fufu
 
@@ -697,7 +715,15 @@ command. --check refreshes the cache and prints nothing.
 
 --json answers with channel, current, latest, command, and status
 (instructions, current, available, or installed). It never prompts;
-use -y to run a script install, with installer progress on stderr.";
+use -y to run a script install, with installer progress on stderr.
+
+Then every declared adapter is visited in declaration order, using
+the update recipes in its manifest. Script recipes can run; other
+channels print instructions. -y continues past adapters it cannot
+update and reports failures at the end. A successful adapter update
+ends with atc hook -u. JSON includes an extensions list when declared
+adapters are present. The background check also caches releases for
+official adapters whose recipes name a GitHub latest-release page.";
 
 pub const UPDATE_EXAMPLES: &str = "\
 Examples:
@@ -723,7 +749,9 @@ procedures and skills, and the update lane's cache. Then one row per
 agent client `atc hook` knows: a client not on this machine earns no
 row, wired is ok, not wired is information, and skills an older
 tower wrote are a finding, because `atc hook -u` is the only thing
-that rewrites them.
+that rewrites them. Declared adapters get rows for missing binaries,
+failed handshakes, incompatible contracts, and drift from the recorded
+manifest or PATH location. An unreadable extension registry is a finding.
 
 Rows come at three levels: ok counts nothing, info is news rather
 than a problem, WARN is a finding. Findings drive the exit — 0
@@ -982,7 +1010,15 @@ Claude Code and $tower in Codex and OpenCode; a skill an older tower
 shipped and this one does not is removed on the next write. Qwen
 reads no skills directory and gets the notice alone. Codex trusts a plugin's hook by
 its hash, so after wiring it review the hook with /hooks there, or
-it is skipped.";
+it is skipped.
+
+Declared adapters contribute skills through --atc-skill <name>.
+Each successful reply installs beside tower's manual in the client's
+plugin or skills root. Failed replies are reported and keep an older
+installed copy. -u first re-asks every declared manifest, including
+when no client is wired, then repairs the existing client installs.
+Retired adapter skills are removed on repair; unhook removes the
+adapter skills tower installed along with its own.";
 
 pub const HOOK_EXAMPLES: &str = "\
 Examples:
