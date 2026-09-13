@@ -1268,12 +1268,15 @@ fn doctor_has_a_row_per_client() {
             value["data"]["findings"].as_u64().unwrap(),
         )
     };
+    // PowerShell's row is set aside on Windows, where the shell is
+    // present unconditionally: 5.1 ships with the OS, and there is no
+    // `$SHELL` to scrub.
     let hook_rows = |rows: &[serde_json::Value]| -> Vec<serde_json::Value> {
         rows.iter()
             .filter(|row| {
-                row["check"]
-                    .as_str()
-                    .is_some_and(|check| check.starts_with("hook/"))
+                row["check"].as_str().is_some_and(|check| {
+                    check.starts_with("hook/") && !(cfg!(windows) && check == "hook/powershell")
+                })
             })
             .cloned()
             .collect()
@@ -1372,7 +1375,7 @@ fn doctor_reads_the_codex_plugin() {
         found["message"],
         format!(
             "codex: plugin wired in {}",
-            home.join(".agents/plugins/tower").display()
+            home.join(".agents").join("plugins").join("tower").display()
         ),
         "{found}"
     );

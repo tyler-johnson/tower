@@ -148,7 +148,7 @@ fn config_dir() -> Result<PathBuf, CliError> {
 }
 
 fn plugins_root() -> Result<PathBuf, CliError> {
-    Ok(super::home()?.join(".agents/plugins"))
+    Ok(super::home()?.join(".agents").join("plugins"))
 }
 
 fn plugin_dir() -> Result<PathBuf, CliError> {
@@ -157,11 +157,11 @@ fn plugin_dir() -> Result<PathBuf, CliError> {
 
 /// The legacy manifest, the one Codex loads hooks from.
 fn manifest_path() -> Result<PathBuf, CliError> {
-    Ok(plugin_dir()?.join(".codex-plugin/plugin.json"))
+    Ok(plugin_dir()?.join(".codex-plugin").join("plugin.json"))
 }
 
 fn hooks_path() -> Result<PathBuf, CliError> {
-    Ok(plugin_dir()?.join("hooks/hooks.json"))
+    Ok(plugin_dir()?.join("hooks").join("hooks.json"))
 }
 
 /// Where the plugin's skills live: `skills/<name>/`, `$<name>` in a

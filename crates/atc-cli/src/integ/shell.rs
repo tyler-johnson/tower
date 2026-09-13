@@ -170,7 +170,7 @@ fn rc_file(shell: &str) -> Result<PathBuf, CliError> {
                 Some(xdg) => xdg,
                 None => super::home()?.join(".config"),
             };
-            config.join("fish/config.fish")
+            config.join("fish").join("config.fish")
         }
         "powershell" => powershell_profile(
             cfg!(windows),

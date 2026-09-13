@@ -90,15 +90,15 @@ fn config_dir() -> Result<PathBuf, CliError> {
 }
 
 fn plugin_dir() -> Result<PathBuf, CliError> {
-    Ok(config_dir()?.join("skills/tower"))
+    Ok(config_dir()?.join("skills").join("tower"))
 }
 
 fn manifest_path() -> Result<PathBuf, CliError> {
-    Ok(plugin_dir()?.join(".claude-plugin/plugin.json"))
+    Ok(plugin_dir()?.join(".claude-plugin").join("plugin.json"))
 }
 
 fn hooks_path() -> Result<PathBuf, CliError> {
-    Ok(plugin_dir()?.join("hooks/hooks.json"))
+    Ok(plugin_dir()?.join("hooks").join("hooks.json"))
 }
 
 /// Where the plugin's skills live, which is where Claude Code looks for
