@@ -5,12 +5,12 @@ use atc_core::{
 };
 use atc_testsupport::Repo;
 
+// The allocation budget stays at the product default. A one-second budget is not enough on the Windows runner, where a fetch and push against the bare fixture spawn enough git processes to cross the deadline and file provisionally. Tests that measure the deadline set a one-second budget themselves.
 fn remote(repo: &Repo, path: &std::path::Path, writer: &str) {
     repo.pin_writer(writer);
     repo.git(&["remote", "add", "shared", path.to_str().expect("path")]);
     repo.git(&["config", "tower.remote", "shared"]);
     repo.git(&["config", "tower.syncInterval", "1s"]);
-    repo.git(&["config", "tower.numberTimeout", "1s"]);
 }
 
 fn file(store: &Store, subject: &str) -> (String, String) {
@@ -104,7 +104,6 @@ fn concurrent_single_and_range_claims_do_not_overlap() {
         .map(|n| {
             let fixture = Repo::new();
             remote(&fixture, &bare, &format!("writer{n}"));
-            fixture.git(&["config", "tower.numberTimeout", "10s"]);
             fixture
         })
         .collect();
@@ -223,6 +222,7 @@ fn offline_attempts_observe_cadence_but_filing_uses_its_own_deadline() {
         "offline",
     );
     fixture.git(&["config", "tower.syncInterval", "30s"]);
+    fixture.git(&["config", "tower.numberTimeout", "1s"]);
     let store = Store::open(fixture.path()).unwrap();
     store.touch(Touch::Ordinary).unwrap();
     let attempted = store.sync_state().unwrap().attempted;
@@ -245,6 +245,7 @@ fn allocation_lock_timeout_does_not_start_a_second_render_budget() {
         std::path::Path::new("/missing-tower-test-remote"),
         "local",
     );
+    fixture.git(&["config", "tower.numberTimeout", "1s"]);
     let store = Store::open(fixture.path()).unwrap();
     let held = store
         .coordinate(Instant::now() + Duration::from_secs(1))
