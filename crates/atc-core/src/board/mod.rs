@@ -56,6 +56,24 @@ pub use view::{View, views};
 
 use crate::log::Event;
 
+/// Fold with the locally observed counter. This context is never stored in the event log.
+pub fn fold_numbered(events: &[Event], counter: u64) -> Fold {
+    let mut folded = fold(events);
+    folded.counter = Some(counter);
+    let mut order: Vec<_> = (0..folded.flights.len()).collect();
+    order.sort_by_key(|&at| folded.flights[at].id.seq);
+    let mut per_writer = std::collections::HashMap::<String, u64>::new();
+    for at in order {
+        let flight = &mut folded.flights[at];
+        if flight.global_number.is_none() {
+            let ahead = per_writer.entry(flight.id.writer.clone()).or_default();
+            flight.provisional_number = counter.checked_add(*ahead).and_then(|n| n.checked_add(1));
+            *ahead += 1;
+        }
+    }
+    folded
+}
+
 /// One board: fold the log, enrich.
 ///
 /// `now`, `closed`, and `viewer` ride in from the caller — the board

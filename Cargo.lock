@@ -104,11 +104,13 @@ version = "0.1.0"
 dependencies = [
  "atc-testsupport",
  "gix",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

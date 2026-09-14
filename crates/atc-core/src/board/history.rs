@@ -50,6 +50,9 @@ pub struct Moment {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum Detail {
+    Numbered {
+        number: u64,
+    },
     /// The word the person used, verbatim: `ready`, `in_progress`,
     /// `done`, `canceled`; the fold decides where it lands. `reason` is a
     /// cancel's `-m`, which no other surface carries.
@@ -59,7 +62,9 @@ pub enum Detail {
         reason: Option<String>,
     },
     /// The lane; `None` (JSON `null`) is the clearing.
-    Assigned { assignee: Option<String> },
+    Assigned {
+        assignee: Option<String>,
+    },
     /// The wire names of the fields the edit touched, in the enum's
     /// order: subject, body, priority, labels, skill. `comment` is
     /// the comment's event id when the target was a comment rather than
@@ -71,12 +76,19 @@ pub enum Detail {
     },
     /// Both ends, wire ids, `from` depends on `to`; the same shape under
     /// `linked` and `unlinked`.
-    Edge { from: String, to: String },
+    Edge {
+        from: String,
+        to: String,
+    },
     /// The question a hold stopped on — its only home once the hold is
     /// answered and the brief's flat `question` is gone.
-    Held { question: String },
+    Held {
+        question: String,
+    },
     /// The words that closed the hold, which nothing else carries.
-    Answered { answer: String },
+    Answered {
+        answer: String,
+    },
     /// Which procedure and rule fired, and the render-ready `because`,
     /// which the brief does not carry. `rule` and `because` may be `""`
     /// on historic events; skipped when empty.
@@ -122,6 +134,7 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
             // A filing mints the flight: the event's own id is the name.
             Kind::Filed { .. } => &event.id == flight,
             Kind::Status { flight: on, .. }
+            | Kind::Numbered { flight: on, .. }
             | Kind::Assigned { flight: on, .. }
             | Kind::Commented { flight: on, .. }
             | Kind::Held { flight: on, .. }
@@ -167,6 +180,7 @@ pub fn history(events: &[Event], flight: &EventId) -> Vec<Moment> {
 /// words are unknowable.
 fn detail(kind: &Kind, comments: &[&EventId]) -> Option<Detail> {
     match kind {
+        Kind::Numbered { number, .. } => Some(Detail::Numbered { number: *number }),
         Kind::Status { status, reason, .. } => Some(Detail::Status {
             status: status.clone(),
             reason: reason.clone(),

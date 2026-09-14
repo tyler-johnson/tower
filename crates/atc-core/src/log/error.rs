@@ -13,6 +13,19 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("tower transport failed: {detail}")]
+    Transport { detail: String },
+    #[error("tower synchronization refused: {detail}")]
+    Sync { detail: String },
+    #[error(
+        "joining this shared board will renumber {count} local flights; confirm with `atc config remote {remote} --renumber`"
+    )]
+    Enrollment { count: usize, remote: String },
+    #[error("tower coordination deadline expired")]
+    Deadline,
+
+    #[error("invalid tower counter: {detail}")]
+    Counter { detail: String },
     /// No `user.email` to file events under. Fatal by design, the same
     /// stance as fufu's `identity/missing`: tower's own machinery signs as
     /// `tower <tower@local>`, but events belong to a person.
@@ -60,6 +73,11 @@ impl Error {
     /// names so the two cannot drift apart.
     pub fn id(&self) -> &'static str {
         match self {
+            Error::Transport { .. } => "sync/transport",
+            Error::Sync { .. } => "sync/refused",
+            Error::Enrollment { .. } => "sync/renumber-required",
+            Error::Deadline => "sync/timeout",
+            Error::Counter { .. } => "sync/counter-invalid",
             Error::Identity => "identity/missing",
             Error::Contended { .. } => "ref/contended",
             Error::RefName { .. } => "log/ref-name",

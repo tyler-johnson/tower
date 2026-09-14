@@ -9,12 +9,12 @@
 use crate::board::{Flight, Fold};
 use crate::log::EventId;
 
-/// A flight reference as typed: a bare number, a `writer#n` pair, or the
-/// full wire form `<writer>.<seq>`.
+/// A global number, writer-local ordinal, provisional guess, or permanent wire ID.
 #[derive(Debug)]
 pub enum FlightRef {
     Number(u64),
     WriterNumber(String, u64),
+    Provisional(Option<String>, u64),
     Full(EventId),
 }
 
@@ -25,7 +25,9 @@ pub enum FlightRef {
 pub enum ResolveError {
     /// Text that is no reference at all — refused before any store is
     /// opened.
-    #[error("`{text}` is not a flight — `<n>`, `<writer>#<n>`, or `<writer>.<seq>`")]
+    #[error(
+        "`{text}` is not a flight — `<n>`, `<writer>#<n>`, `~<n>`, `<writer>~<n>`, or `<writer>.<seq>`"
+    )]
     BadRef { text: String },
 
     /// The reference parsed, and nothing filed matches it.
@@ -65,6 +67,15 @@ impl ResolveError {
 /// still parses: the split is at the last `#`).
 pub fn parse_ref(text: &str) -> Result<FlightRef, ResolveError> {
     let bare = text.strip_prefix('#').unwrap_or(text);
+    if let Some((writer, digits)) = bare.rsplit_once('~')
+        && let Ok(number) = digits.parse::<u64>()
+        && !writer.contains(['~', '#'])
+    {
+        return Ok(FlightRef::Provisional(
+            (!writer.is_empty()).then(|| writer.to_string()),
+            number,
+        ));
+    }
     if let Ok(number) = bare.parse::<u64>() {
         return Ok(FlightRef::Number(number));
     }
@@ -81,10 +92,7 @@ pub fn parse_ref(text: &str) -> Result<FlightRef, ResolveError> {
     })
 }
 
-/// Resolve a reference against the fold's filed flights. A bare number
-/// must match exactly one flight across writers; the refusals quote the
-/// reference as the user typed it, and an ambiguity names every candidate
-/// in `writer#n` form.
+/// Resolve against this snapshot. Numbered folds use bare numbers for global claims and tilde forms for currently provisional flights. Legacy folds retain writer-local bare numbers until migration supplies counter context. Refusals quote the input and identify each ambiguous candidate.
 pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, ResolveError> {
     let not_found = || ResolveError::NotFound {
         text: text.to_string(),
@@ -107,7 +115,12 @@ pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, ResolveError> {
             let candidates: Vec<&Flight> = fold
                 .flights
                 .iter()
-                .filter(|flight| flight.number == number)
+                .filter(|flight| {
+                    flight.global_number == Some(number)
+                        || (fold.counter.is_none()
+                            && flight.global_number.is_none()
+                            && flight.number == number)
+                })
                 .collect();
             match candidates.as_slice() {
                 [] => Err(not_found()),
@@ -117,6 +130,29 @@ pub fn resolve(fold: &Fold, text: &str) -> Result<EventId, ResolveError> {
                     candidates: many
                         .iter()
                         .map(|flight| format!("`{}#{}`", flight.id.writer, flight.number))
+                        .collect(),
+                }),
+            }
+        }
+        FlightRef::Provisional(writer, number) => {
+            let candidates: Vec<_> = fold
+                .flights
+                .iter()
+                .filter(|flight| {
+                    writer
+                        .as_ref()
+                        .is_none_or(|writer| &flight.id.writer == writer)
+                        && flight.provisional_number == Some(number)
+                })
+                .collect();
+            match candidates.as_slice() {
+                [] => Err(not_found()),
+                [flight] => Ok(flight.id.clone()),
+                many => Err(ResolveError::Ambiguous {
+                    text: text.to_string(),
+                    candidates: many
+                        .iter()
+                        .map(|flight| format!("`{}~{number}`", flight.id.writer))
                         .collect(),
                 }),
             }
@@ -133,14 +169,27 @@ pub fn flight<'a>(fold: &'a Fold, id: &EventId) -> &'a Flight {
         .expect("resolved to a filed flight")
 }
 
-/// A resolved id in the board's display form — `#n`, or `writer#n` when
-/// the fold's filed flights span more than one writer. The long form
-/// takes no leading `#` — the interior `#` is the marker, and it binds a
-/// writer to a flight number the way `.` binds one to an event seq, so
-/// the two names cannot be confused. Infallible after `resolve`: the
-/// number lives on the fold's flight, so the flight must be present —
-/// `file` re-folds after its append for exactly this.
+/// The sole display rule: a confirmed global claim prints `#n`; a provisional guess prints `~n`, writer-qualified when ambiguous. Folds without counter context retain the legacy ordinal display until migration. The ID must name a flight in this fold.
 pub fn display(fold: &Fold, id: &EventId) -> String {
+    let selected = flight(fold, id);
+    if let Some(number) = selected.global_number {
+        return format!("#{number}");
+    }
+    if let Some(number) = selected.provisional_number {
+        let ambiguous = fold
+            .flights
+            .iter()
+            .any(|other| other.id != *id && other.provisional_number == Some(number));
+        return if ambiguous {
+            format!("{}~{number}", id.writer)
+        } else {
+            format!("~{number}")
+        };
+    }
+    if fold.counter.is_some() {
+        // Counter exhaustion has no representable guess; the permanent wire name remains usable.
+        return id.to_string();
+    }
     let short = fold
         .flights
         .iter()
@@ -223,7 +272,7 @@ mod tests {
         assert_eq!(err.id(), "usage/bad-flight");
         assert_eq!(
             err.to_string(),
-            "`banana` is not a flight — `<n>`, `<writer>#<n>`, or `<writer>.<seq>`"
+            "`banana` is not a flight — `<n>`, `<writer>#<n>`, `~<n>`, `<writer>~<n>`, or `<writer>.<seq>`"
         );
         assert_eq!(err.exits(), ["atc"]);
     }
@@ -253,5 +302,102 @@ mod tests {
             resolve(&fold, "qi#1").expect("exact"),
             "qi.1".parse().expect("id")
         );
+    }
+
+    #[test]
+    fn global_claims_and_writer_aliases_are_independent() {
+        let mut events = vec![filed("pi.1", 10, "pi"), filed("qi.1", 20, "qi")];
+        let mut claim = filed("pi.2", 30, "unused");
+        claim.kind = Kind::Numbered {
+            flight: "pi.1".parse().expect("id"),
+            number: 7,
+            reservation: None,
+        };
+        events.push(claim.clone());
+        claim.id = "pi.3".parse().expect("id");
+        claim.kind = Kind::Numbered {
+            flight: "qi.1".parse().expect("id"),
+            number: 8,
+            reservation: None,
+        };
+        events.push(claim);
+        let fold = crate::board::fold_numbered(&events, 8);
+        for (reference, id) in [
+            ("7", "pi.1"),
+            ("#8", "qi.1"),
+            ("pi#1", "pi.1"),
+            ("qi#1", "qi.1"),
+            ("pi.1", "pi.1"),
+        ] {
+            assert_eq!(resolve(&fold, reference).expect("resolve").to_string(), id);
+        }
+        assert_eq!(display(&fold, &"pi.1".parse().expect("id")), "#7");
+        assert_eq!(display(&fold, &"qi.1".parse().expect("id")), "#8");
+        assert!(resolve(&fold, "1").is_err());
+        assert!(resolve(&fold, "~7").is_err());
+    }
+
+    #[test]
+    fn provisional_guesses_use_counter_and_per_writer_filed_order() {
+        // Union order can differ from a writer's filing order.
+        let events = vec![
+            filed("pi.9", 10, "later"),
+            filed("qi.1", 20, "other"),
+            filed("pi.1", 30, "first"),
+        ];
+        let fold = crate::board::fold_numbered(&events, 4);
+        let id = |text: &str| text.parse::<EventId>().expect("id");
+        assert_eq!(display(&fold, &id("pi.1")), "pi~5");
+        assert_eq!(display(&fold, &id("qi.1")), "qi~5");
+        assert_eq!(display(&fold, &id("pi.9")), "~6");
+        assert!(matches!(
+            resolve(&fold, "~5"),
+            Err(ResolveError::Ambiguous { .. })
+        ));
+        assert_eq!(resolve(&fold, "pi~5").expect("qualified"), id("pi.1"));
+        assert_eq!(resolve(&fold, "~6").expect("unique"), id("pi.9"));
+        assert!(resolve(&fold, "5").is_err());
+        assert_eq!(
+            crate::board::rewrite(&fold, "after pi~5 and ~6.").expect("rewrite"),
+            "after #pi.1 and #pi.9."
+        );
+        let advanced = crate::board::fold_numbered(&events, 10);
+        assert!(resolve(&advanced, "pi~5").is_err());
+        assert_eq!(resolve(&advanced, "pi~11").expect("new guess"), id("pi.1"));
+    }
+
+    #[test]
+    fn latest_claim_wins_without_changing_the_writer_alias() {
+        let mut events = vec![filed("pi.1", 10, "one")];
+        for (seq, number) in [(2, 1), (3, 42)] {
+            let mut claim = filed(&format!("pi.{seq}"), 20 + seq, "unused");
+            claim.kind = Kind::Numbered {
+                flight: "pi.1".parse().expect("id"),
+                number,
+                reservation: None,
+            };
+            events.push(claim);
+        }
+        let fold = crate::board::fold_numbered(&events, 42);
+        assert_eq!(
+            resolve(&fold, "42").expect("latest"),
+            resolve(&fold, "pi#1").expect("ordinal")
+        );
+        assert!(resolve(&fold, "1").is_err());
+        assert!(resolve(&fold, "~1").is_err());
+        assert_eq!(fold.flights[0].global_number, Some(42));
+        assert!(fold.unrouted.is_empty());
+        let history = crate::board::history(&events, &fold.flights[0].id);
+        assert!(matches!(
+            history.last().expect("history").detail,
+            Some(crate::board::Detail::Numbered { number: 42 })
+        ));
+    }
+
+    #[test]
+    fn an_exhausted_counter_keeps_wire_names_usable() {
+        let fold = crate::board::fold_numbered(&[filed("pi.1", 10, "one")], u64::MAX);
+        assert_eq!(display(&fold, &"pi.1".parse().expect("id")), "pi.1");
+        assert!(resolve(&fold, "pi.1").is_ok());
     }
 }

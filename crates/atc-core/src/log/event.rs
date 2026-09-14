@@ -86,6 +86,13 @@ impl<'de> Deserialize<'de> for EventId {
 /// closed.
 #[derive(Debug, Clone)]
 pub enum Kind {
+    /// A confirmed counter reservation, recorded on the reserving writer's chain.
+    Numbered {
+        flight: EventId,
+        number: u64,
+        /// Reservation identity makes recovery idempotent across numbering domains.
+        reservation: Option<String>,
+    },
     /// Mints a flight; the flight's id is this event's id. Every stored
     /// field is seeded here — the status word included, so a filing
     /// says outright which facts the flight was born with.
@@ -225,6 +232,7 @@ impl Kind {
     /// The wire name.
     pub fn name(&self) -> &str {
         match self {
+            Kind::Numbered { .. } => "numbered",
             Kind::Filed { .. } => "filed",
             Kind::Status { .. } => "status",
             Kind::Assigned { .. } => "assigned",
@@ -329,6 +337,14 @@ struct StatusBody {
     status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct NumberedBody {
+    flight: EventId,
+    number: std::num::NonZeroU64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reservation: Option<String>,
 }
 
 /// `assignee` skipped when absent — absent on the wire is the cleared
@@ -439,6 +455,16 @@ struct RoutedBody {
 impl Serialize for Event {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let body = match &self.kind {
+            Kind::Numbered {
+                flight,
+                number,
+                reservation,
+            } => serde_json::value::to_raw_value(&NumberedBody {
+                flight: flight.clone(),
+                reservation: reservation.clone(),
+                number: std::num::NonZeroU64::new(*number)
+                    .ok_or_else(|| serde::ser::Error::custom("a flight number must be positive"))?,
+            }),
             Kind::Filed {
                 procedure,
                 subject,
@@ -619,6 +645,17 @@ impl<'de> Deserialize<'de> for Event {
                 done,
                 branch,
             }
+        } else if kind == "numbered" {
+            let NumberedBody {
+                flight,
+                number,
+                reservation,
+            } = serde_json::from_str(body.get()).map_err(serde::de::Error::custom)?;
+            Kind::Numbered {
+                flight,
+                number: number.get(),
+                reservation,
+            }
         } else if kind == "status" {
             let StatusBody {
                 flight,
@@ -771,6 +808,24 @@ mod tests {
         assert!("pi".parse::<EventId>().is_err());
         assert!(".17".parse::<EventId>().is_err());
         assert!("pi.x".parse::<EventId>().is_err());
+    }
+
+    #[test]
+    fn numbered_events_round_trip_and_zero_is_malformed() {
+        let wire = r#"{"id":"pi.2","author":"a@b.c","writer":"pi","time":7,"kind":"numbered","body":{"flight":"pi.1","number":42}}"#;
+        let event: Event = serde_json::from_str(wire).expect("numbered");
+        assert!(matches!(event.kind, Kind::Numbered { number: 42, .. }));
+        assert_eq!(serde_json::to_string(&event).expect("serialize"), wire);
+        assert!(serde_json::from_str::<Event>(&wire.replace("42", "0")).is_err());
+        let event = Event {
+            kind: Kind::Numbered {
+                flight: "pi.1".parse().expect("id"),
+                number: 0,
+                reservation: None,
+            },
+            ..event
+        };
+        assert!(serde_json::to_string(&event).is_err());
     }
 
     #[test]

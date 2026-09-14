@@ -12,7 +12,7 @@
 //! alphanumeric or one of `# ~ . _ -`; each maximal run splits into a
 //! head — the run with its trailing non-alphanumeric chars removed — and
 //! that tail, the sentence's own `.` or `-`. A run is a candidate when
-//! its head contains `#` or starts with `~`, and every candidate goes to
+//! its head contains `#` or `~`, and every candidate goes to
 //! `parse_ref`, so the reference grammar stays in one place and a form
 //! it gains later is scanned for free. Everything else, tails included,
 //! is copied verbatim.
@@ -59,7 +59,7 @@ fn pieces(text: &str) -> Vec<Piece<'_>> {
 
 /// Whether a head is worth handing to the reference grammar.
 fn candidate(head: &str) -> bool {
-    head.contains('#') || head.starts_with('~')
+    head.contains(['#', '~'])
 }
 
 /// The wire id a head spells, when it is the `#<writer>.<seq>` shape.
@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tilde_is_not_a_reference_today() {
+    fn a_legacy_fold_has_no_provisional_references() {
         let fold = one_writer();
         assert_eq!(rewrite(&fold, "see ~3").expect("ok"), "see ~3");
     }

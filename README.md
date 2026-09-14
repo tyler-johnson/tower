@@ -13,7 +13,15 @@ Intent is stored; the board is derived.*
 
 > [DESIGN.md](DESIGN.md) is the design and the thing to read; the flights on the board are what stands built so far.
 
-The model is the one every tracker uses, on purpose: a flight is an issue with a status, an assignee, a priority, labels, and links, recognizable in one glance to anyone who has used Linear. What is different is where it lives. Every verb appends an event to a log kept as ordinary git refs in the repository, the board is a fold over that log, and sync is one refspec — nothing tower stores needs tower to read back, and a render never blocks on the network. The word a row shows is the word someone set, attributed, and tower checks it against nothing.
+The model is the one every tracker uses, on purpose: a flight is an issue with a status, an assignee, a priority, labels, and links. Every mutation appends an event to ordinary Git refs in the repository, and the board folds those local logs. Optional shared-board synchronization runs synchronously under a deadline; the fold itself performs no networking.
+
+## Sharing a board
+
+Set `atc config remote origin` in each clone to share through an existing Git remote. Tower fetches writer chains and publishes its own chain on ordinary board touches and the server's cadence. Leave `tower.remote` unset for local-only operation. Each clone mints its own writer ID; do not copy `tower.writer` between machines.
+
+Claimed flights have the same `#n` on every synchronized board. Offline filings show `~n`, or `writer~n` when guesses overlap, and a later touch claims them. Wire IDs and `writer#n` ordinal aliases remain stable. Joining an established remote reports how many local flights must move; confirm with `atc config remote origin --renumber`. References stored in prose keep naming the same flights.
+
+Ordinary sync defaults to a 30-second cadence and a 3-second total deadline. Every filing and decomposition uses a 10-second allocation budget, independent of cadence, and returns confirmed numbers when allocation succeeds. Configure these with `syncInterval`, `syncTimeout`, and `numberTimeout`. No detached board sync continues after return. `atc doctor` reports sync and enrollment problems; `git log refs/tower/seq` reads the counter.
 
 **tower is a thing agents call. It never calls agents.** There is no dispatch and no iteration verb: the harness loops and calls `atc next`, which hands back the next ready work — the harness is the scheduler, tower is only the queue. tower ships the manual and the mechanism and no workflow: one skill, `tower`, installed by `atc hook`; a `skill` field on a flight, a shelf it names into, and `atc skills <name>` to print one raw. No built-in procedures, no built-in loop, no default opinions about how work should flow. Structure and judgment are files their owner authors; the documentation teaches by example, and [`docs/`](docs/) carries the worked ones to copy in.
 

@@ -81,6 +81,7 @@ impl Error {
 /// needs — kinds earn existence like verbs.
 #[derive(Debug)]
 pub enum SettingKind {
+    Remote,
     Cadence,
     Bool,
     Port,
@@ -97,6 +98,7 @@ impl SettingKind {
     /// The wire name, lowercased, for the machine envelope.
     pub fn name(&self) -> &'static str {
         match self {
+            SettingKind::Remote => "remote",
             SettingKind::Cadence => "cadence",
             SettingKind::Bool => "bool",
             SettingKind::Port => "port",
@@ -160,6 +162,38 @@ pub const DEFAULT_LEASE_SWEEP: &str = "1h";
 /// setting it to another machine's id forks that writer's chain.
 pub fn registry() -> &'static [Setting] {
     &[
+        Setting {
+            name: "remote",
+            key: "tower.remote",
+            def: "",
+            kind: SettingKind::Remote,
+            desc: &[
+                "Git remote for the shared board. Unset keeps the board local. Joining an established board can require --renumber.",
+            ],
+        },
+        Setting {
+            name: "syncInterval",
+            key: "tower.syncInterval",
+            def: "30s",
+            kind: SettingKind::Duration,
+            desc: &["Cadence for synchronous board synchronization, including failed attempts."],
+        },
+        Setting {
+            name: "syncTimeout",
+            key: "tower.syncTimeout",
+            def: "3s",
+            kind: SettingKind::Duration,
+            desc: &["Total deadline for ordinary synchronous board synchronization."],
+        },
+        Setting {
+            name: "numberTimeout",
+            key: "tower.numberTimeout",
+            def: "10s",
+            kind: SettingKind::Duration,
+            desc: &[
+                "Total allocation deadline for every filing and decomposition, independent of cadence.",
+            ],
+        },
         Setting {
             name: "defaultFileStatus",
             key: "tower.defaultFileStatus",
@@ -313,6 +347,14 @@ pub fn lookup(input: &str) -> Result<&'static Setting> {
 /// parser that reader runs, before anything touches disk.
 pub fn validate(setting: &Setting, value: &str) -> Result<()> {
     let (ok, want) = match setting.kind {
+        SettingKind::Remote => (
+            !value.is_empty()
+                && !value.starts_with('-')
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')),
+            "want a configured git remote name",
+        ),
         SettingKind::Cadence => (
             parse_cadence(value).is_some(),
             "want true, false, or a duration like 12h or 7d",
@@ -724,6 +766,7 @@ mod tests {
                 SettingKind::Host => "localhost",
                 SettingKind::Choice(_) => "nope",
                 SettingKind::Duration => "xyz",
+                SettingKind::Remote => "-bad",
             };
             let err = validate(setting, bad).expect_err("a bad value refuses");
             assert_eq!(err.id(), "usage/bad-value");

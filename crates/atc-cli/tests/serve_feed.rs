@@ -97,6 +97,49 @@ fn an_out_of_process_write_reaches_the_feed() {
 }
 
 #[test]
+fn a_counter_only_change_advances_provisional_names_on_the_feed() {
+    use std::time::{Duration, Instant};
+    let repo = Repo::new();
+    repo.pin_writer("pi");
+    repo.git(&["remote", "add", "shared", "/missing-tower-test-remote"]);
+    repo.git(&["config", "tower.remote", "shared"]);
+    repo.git(&["config", "tower.numberTimeout", "1s"]);
+    file(repo.path(), "provisional");
+    let server = Server::start(repo.path(), &["--port", "0"], &[]);
+    let mut feed = sse(&server.addr, "/api/feed");
+    let first = feed.next_data();
+    assert!(first.contains("\"display\":\"~1\""), "{first}");
+    let store = Store::open(repo.path()).unwrap();
+    let held = store
+        .coordinate(Instant::now() + Duration::from_secs(1))
+        .unwrap();
+    let counter = store.counter().unwrap().unwrap();
+    let reservation = held
+        .prepare(&counter, &["elsewhere.1".parse().unwrap()])
+        .unwrap();
+    let before = store.read_all().unwrap().len();
+    repo.git(&[
+        "update-ref",
+        "refs/tower/seq",
+        &reservation.tip.to_string(),
+        &counter.tip.to_string(),
+    ]);
+    drop(held);
+    for _ in 0..10 {
+        let next = feed.next_data();
+        if next.contains("\"display\":\"~2\"") {
+            assert_eq!(
+                store.read_all().unwrap().len(),
+                before,
+                "only the counter moved"
+            );
+            return;
+        }
+    }
+    panic!("counter-only change never reached the feed");
+}
+
+#[test]
 fn a_post_verb_rides_the_same_loop() {
     let (_repo, server) = served();
     let mut feed = sse(&server.addr, "/api/feed");

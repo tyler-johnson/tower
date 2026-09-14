@@ -110,12 +110,12 @@ fn a_routed_filing_lands_in_one_commit_as_one_filed_plus_one_routed() {
     let store = Store::open(repo.path()).expect("open");
 
     let outcome = verb::file(&store, "sweep the logs", labeled("chore"), None).expect("files");
-    assert_eq!(commits(&repo), 1, "one commit on a fresh chain");
+    assert_eq!(commits(&repo), 2, "atomic filing, then its number claim");
     assert!(outcome.payload.routed.is_some());
 
     let events = store.read_all().expect("read");
     let kinds: Vec<&str> = events.iter().map(|event| event.kind.name()).collect();
-    assert_eq!(kinds, ["filed", "routed"]);
+    assert_eq!(kinds, ["filed", "routed", "numbered"]);
     let fold = board::fold(&events);
     let flight = &fold.flights[0];
     assert_eq!(flight.status, "ready", "the collapse is born Ready");
@@ -139,12 +139,16 @@ fn a_multi_flight_rule_mints_the_family_and_the_routing_in_one_commit() {
 
     let outcome = verb::file(&store, "feather", labeled("review"), None).expect("files");
     assert_eq!(outcome.payload.parts.len(), 2);
-    assert_eq!(commits(&repo), 1, "the family lands atomically");
+    assert_eq!(
+        commits(&repo),
+        2,
+        "the family lands atomically, then its range is recorded"
+    );
 
     // The parent, two children, the parent's two edges, the after edge,
     // and the routing on the tail.
     let events = store.read_all().expect("read");
-    assert_eq!(events.len(), 7);
+    assert_eq!(events.len(), 10);
     let fold = board::fold(&events);
     let parent = &fold.flights[0];
     assert_eq!(parent.status, "waiting", "the parent waits on them all");
@@ -162,7 +166,10 @@ fn a_multi_flight_rule_mints_the_family_and_the_routing_in_one_commit() {
     assert!(fold.unrouted.is_empty());
 
     // The routing names the parent and carries which rule fired.
-    let routed: &Event = events.last().expect("the routing");
+    let routed: &Event = events
+        .iter()
+        .find(|e| matches!(e.kind, Kind::Routed { .. }))
+        .expect("the routing");
     let Kind::Routed {
         flight,
         rule,
@@ -187,7 +194,7 @@ fn a_filing_no_rule_covers_is_one_plain_filed() {
     let outcome = verb::file(&store, "unmatched", labeled("ops"), None).expect("files");
     assert!(outcome.payload.routed.is_none());
     let events = store.read_all().expect("read");
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 2);
     let fold = board::fold(&events);
     assert!(fold.flights[0].procedure.is_none());
     assert_eq!(fold.flights[0].status, "ready");
@@ -204,7 +211,7 @@ fn a_named_procedure_is_never_re_matched() {
     let outcome = verb::file(&store, "typed", labeled("chore"), Some("ticket")).expect("files");
     assert!(outcome.payload.routed.is_none(), "the name was typed");
     let events = store.read_all().expect("read");
-    assert_eq!(events.len(), 1, "one filing, no routing");
+    assert_eq!(events.len(), 2, "one filing and its number, no routing");
     let fold = board::fold(&events);
     assert_eq!(fold.flights[0].procedure.as_deref(), Some("ticket"));
     assert_eq!(fold.flights[0].labels, ["chore"]);

@@ -70,8 +70,8 @@ pub(crate) fn start(
 ) -> Result<(), notify::Error> {
     let dirty = Arc::new(Notify::new());
     let watcher = fs_watcher(&paths, Arc::clone(&dirty))?;
-    tokio::spawn(watch_child(repo, Arc::clone(&dirty)));
-    tokio::spawn(refold_loop(tx, dirty, watcher));
+    tokio::spawn(watch_child(repo.clone(), Arc::clone(&dirty)));
+    tokio::spawn(refold_loop(repo, tx, dirty, watcher));
     Ok(())
 }
 
@@ -95,6 +95,8 @@ fn fs_watcher(
     // matches, and the filesystem lane silently covers nothing.
     let log = paths.log.clone();
     let resolved = resolve(&paths.log);
+    let seq = paths.seq.clone();
+    let resolved_seq = resolve(&seq);
     let mut watcher =
         notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
             let Ok(event) = event else { return };
@@ -103,6 +105,8 @@ fn fs_watcher(
             }
             let moved = event.paths.iter().any(|path| {
                 path.starts_with(&log)
+                    || path == &seq
+                    || path == &resolved_seq
                     || path.starts_with(&resolved)
                     || path
                         .file_name()
@@ -191,14 +195,27 @@ async fn watch_child(repo: PathBuf, dirty: Arc<Notify>) {
 /// the loop does — seeds the channel with the first stamp, and then
 /// alternates settling and stamping forever.
 async fn refold_loop(
+    repo: PathBuf,
     tx: Arc<watch::Sender<Latest>>,
     dirty: Arc<Notify>,
     watcher: notify::RecommendedWatcher,
 ) {
     let _watcher = watcher;
+    let mut last_error = None;
     stamp(&tx);
     loop {
-        settle(&dirty).await;
+        tokio::select! {
+            _ = settle(&dirty) => {},
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                // The same bounded synchronous operation as a CLI touch. No detached sync worker survives this call.
+                let error = atc_core::log::Store::open(&repo)
+                    .and_then(|store| store.touch(atc_core::log::sync::Touch::Ordinary))
+                    .err().map(|err| err.to_string());
+                if error != last_error && let Some(err) = &error { eprintln!("tower sync: {err}"); }
+                last_error = error;
+                continue;
+            }
+        }
         stamp(&tx);
     }
 }

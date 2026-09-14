@@ -71,7 +71,7 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
     }
     board::parse_ref(target)?;
 
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let target = resolve_edit_target(&fold, target)?;
     let fields_ride = subject.is_some()
         || overlay.priority.is_some()
@@ -89,7 +89,7 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
         EditTarget::Flight(flight) => (flight.clone(), flight.clone()),
         EditTarget::Comment { flight, comment } => (comment.clone(), flight.clone()),
     };
-    let ids = store.append(vec![Kind::Edited {
+    let ids = store.append_synced(vec![Kind::Edited {
         target: edited,
         subject,
         body,
@@ -105,7 +105,7 @@ pub fn edit(store: &Store, target: &str, overlay: Overlay) -> Result<Edit, Error
             edited: appended(store, &id)?,
         },
         target,
-        display: display(&fold, &flight),
+        display: display(&store.current()?, &flight),
     })
 }
 

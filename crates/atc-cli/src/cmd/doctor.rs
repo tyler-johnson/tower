@@ -35,8 +35,32 @@ pub fn run(json: bool) -> Result<i32, CliError> {
     };
 
     let store = Store::open(ff.repo())?;
+    let sync_error = store.touch(atc_core::log::sync::Touch::Ordinary).err();
     let fold = board::fold(&store.read_all()?);
     let mut report = board::doctor(&fold, &seam);
+    if store.remote().is_some() || sync_error.is_some() {
+        let state = store.sync_state();
+        let message = sync_error
+            .map(|err| err.to_string())
+            .or_else(|| match state {
+                Ok(state) => state.result.filter(|result| result != "ok"),
+                Err(err) => Some(err.to_string()),
+            });
+        if message.is_some() {
+            report.findings += 1;
+        }
+        report.rows.push(DoctorRow {
+            check: "sync".to_string(),
+            level: if message.is_some() {
+                Level::Warn
+            } else {
+                Level::Ok
+            },
+            message: message.unwrap_or_else(|| {
+                format!("shared board via {}", store.remote().unwrap_or_default())
+            }),
+        });
+    }
     // The registries read files, never the seam.
     let root = store.main_worktree();
     for row in registry_rows(root.as_deref()) {

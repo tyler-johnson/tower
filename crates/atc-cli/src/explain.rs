@@ -787,6 +787,36 @@ pub static ENTRIES: &[Entry] = &[
         exits: &[],
     },
     Entry {
+        id: "sync/timeout",
+        summary: "the tower coordination deadline expired",
+        detail: "Another operation held the repository's counter coordination lock until this operation's deadline. The lock is shared across writers and linked worktrees and is released when its owner exits. A later attempt can acquire it without resetting the counter or discarding local work.",
+        exits: &[],
+    },
+    Entry {
+        id: "sync/transport",
+        summary: "the board remote could not complete a transfer",
+        detail: "The bounded Git transport failed. Local filings and confirmed reservations remain recorded. Check the configured remote and retry a board touch; an unconfirmed filing remains provisional until allocation is confirmed.",
+        exits: &["atc"],
+    },
+    Entry {
+        id: "sync/refused",
+        summary: "shared-board state requires attention",
+        detail: "Synchronization found a divergent writer chain, malformed state, or a pending reservation belonging to another remote. Canonical local chains are preserved. The message identifies the state that prevented synchronization.",
+        exits: &["atc doctor"],
+    },
+    Entry {
+        id: "sync/renumber-required",
+        summary: "joining this numbering domain needs confirmation",
+        detail: "The remote already has a counter from another numbering domain. Tower reports the number of local flights that will move before publishing their chains. Confirm with atc config remote <remote> --renumber. Wire IDs and writer-local aliases survive the move.",
+        exits: &["atc config"],
+    },
+    Entry {
+        id: "sync/counter-invalid",
+        summary: "the tower counter or reservation failed validation",
+        detail: "The counter must be a tower commit chain rooted at zero, with each successor increasing by its reservation's length. The message names the invalid state. Inspect refs/tower/seq and any pending reservation with git; resetting a counter can reuse numbers already reserved elsewhere.",
+        exits: &[],
+    },
+    Entry {
         id: "log/ref-name",
         summary: "that name cannot be a log ref",
         detail: "Chains live under `refs/tower/log/<author>/<writer>`, and the author or writer \

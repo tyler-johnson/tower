@@ -378,6 +378,9 @@ pub enum Command {
         /// The global git config — every repo — instead of this one.
         #[arg(long)]
         global: bool,
+        /// Confirm moving local flight numbers when joining an established shared board.
+        #[arg(long, requires = "value", conflicts_with_all = ["global", "unset"])]
+        renumber: bool,
     },
     /// Which tower this is, and whether it is the current one.
     #[command(long_about = help::VERSION, after_long_help = help::VERSION_EXAMPLES)]

@@ -34,12 +34,12 @@ pub struct Assign {
 pub fn assign(store: &Store, flight: &str, lane: &str) -> Result<Assign, Error> {
     let assignee = stored_lane(lane_word(lane)?, store.callsign());
     board::parse_ref(flight)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let flight = board::resolve(&fold, flight)?;
     let filed = ensure_active(&fold, &flight)?;
     let subject = filed.subject.clone();
 
-    let ids = store.append(vec![Kind::Assigned {
+    let ids = store.append_synced(vec![Kind::Assigned {
         flight: flight.clone(),
         assignee: assignee.clone(),
     }])?;
@@ -49,7 +49,7 @@ pub fn assign(store: &Store, flight: &str, lane: &str) -> Result<Assign, Error> 
         payload: Assigned {
             assigned: appended(store, &id)?,
         },
-        display: display(&fold, &flight),
+        display: display(&store.current()?, &flight),
         subject,
         lane: assignee.unwrap_or_else(|| "none".to_string()),
     })

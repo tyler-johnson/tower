@@ -52,7 +52,11 @@ A terminal is a session too. `atc hook bash` (or zsh, fish, powershell) writes m
 
 ## A procedure should end with you
 
-The boundary where work becomes visible to the team is a human gesture. `atc procedures` and `atc doctor` warn — by name and by flight — when every terminal flight of a definition is agent-assigned. It is a warning and not a refusal, because the file is yours and the boundary that actually holds is `never auto-outward`: whatever an agent finishes, nothing leaves the machine without a person's verb.
+`atc procedures` and `atc doctor` warn when every terminal flight of a definition is agent-assigned. A shape of work normally ends with human review. Configuring `tower.remote` authorizes shared-board synchronization; publishing work to an upstream tracker remains a separate human gesture.
+
+## Shared boards
+
+In each clone, run `atc config remote origin` to exchange the board through the configured Git remote. An empty remote adopts local numbering. Joining an established board reports the number of local flights that must move and requires `atc config remote origin --renumber`. Use emitted wire IDs in scripts, and print the supplied `display` field. An offline filing can return `~n` while retaining the same permanent wire ID it will have after claiming. See the [protocol](shared-board-protocol.md) for counter and recovery details.
 
 ## Extensions
 

@@ -28,7 +28,8 @@ pub struct Views {
 }
 
 pub fn views(store: &Store) -> Result<Views, Error> {
-    let fold = board::fold(&store.read_all()?);
+    store.touch(crate::log::sync::Touch::Ordinary)?;
+    let fold = store.current()?;
     Ok(Views {
         views: board::views(&fold, store.author()),
     })
@@ -50,7 +51,7 @@ pub struct Save {
 /// query is parsed and stored canonical.
 pub fn save(store: &Store, name: &str, query: &str, shared: bool) -> Result<Save, Error> {
     let (name, query) = validate(name, query)?;
-    let ids = store.append(vec![Kind::ViewSaved {
+    let ids = store.append_synced(vec![Kind::ViewSaved {
         view: None,
         name,
         query,
@@ -73,12 +74,12 @@ pub fn edit(
     if name.is_none() && query.is_none() && shared.is_none() {
         return Err(Error::NeedsViewEdit);
     }
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let standing = resolve(&fold, store.author(), view)?;
     let name = name.unwrap_or_else(|| standing.name.clone());
     let query = query.unwrap_or_else(|| standing.query.clone());
     let (name, query) = validate(&name, &query)?;
-    let ids = store.append(vec![Kind::ViewSaved {
+    let ids = store.append_synced(vec![Kind::ViewSaved {
         view: Some(standing.id.clone()),
         name,
         query,
@@ -104,9 +105,9 @@ pub struct Delete {
 /// `view delete` — remove a view. Final: the fold folds a later save
 /// naming it as nothing.
 pub fn delete(store: &Store, view: &str) -> Result<Delete, Error> {
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let standing = resolve(&fold, store.author(), view)?;
-    let ids = store.append(vec![Kind::ViewDeleted {
+    let ids = store.append_synced(vec![Kind::ViewDeleted {
         view: standing.id.clone(),
     }])?;
     let id = ids.into_iter().next().expect("one view_deleted event");
@@ -145,7 +146,7 @@ fn resolve(fold: &Fold, viewer: &str, text: &str) -> Result<View, Error> {
 /// Re-fold and return the view by id, so the payload is what the log
 /// holds — the store-assigned time included — and not a reconstruction.
 fn folded(store: &Store, id: &EventId) -> Result<Save, Error> {
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.current()?;
     let view = fold
         .views
         .into_iter()

@@ -193,8 +193,9 @@ fn reply(status: StatusCode, line: String) -> Reply {
 /// gave the process.
 pub(crate) fn board_envelope(repo: &Path, query: &Query) -> Result<String, ApiError> {
     let store = Store::open(repo)?;
-    let events = store.read_all()?;
-    let folded = board::answer(&events, board::now(), query, store.callsign());
+    store.touch(atc_core::log::sync::Touch::Ordinary)?;
+    let rows = board::rows(store.current()?, store.callsign());
+    let folded = query.fold(rows.flights, board::now());
     Ok(machine::emit("board", &folded))
 }
 
@@ -292,9 +293,11 @@ async fn brief(State(state): State<Arc<AppState>>, RoutePath(flight): RoutePath<
         // it.
         board::parse_ref(&flight)?;
         let store = Store::open(repo)?;
-        let events = store.read_all()?;
-        let fold = board::fold(&events);
+        let fold = store.snapshot()?;
         let id = board::resolve(&fold, &flight)?;
+        store.touch(atc_core::log::sync::Touch::Ordinary)?;
+        let events = store.read_all()?;
+        let fold = store.current()?;
         let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
         Ok(machine::emit("brief", &brief))
     })

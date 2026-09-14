@@ -292,19 +292,23 @@ fn a_reference_naming_nothing_is_404_and_the_verbs_envelope() {
 }
 
 #[test]
-fn a_bare_number_two_writers_hold_is_404_ambiguous() {
+fn legacy_writers_migrate_to_distinct_numbers_over_http() {
     let repo = repo_with_a_filing();
     repo.pin_writer("qi");
     file(repo.path(), "from the qi");
     let server = Server::start(repo.path(), &["--port", &free_port().to_string()], &[]);
-    error_parity(
-        &server,
-        repo.path(),
-        "/api/brief/1",
-        404,
-        &["brief", "1", "--json"],
-        "flight/ambiguous",
-    );
+    for n in [1, 2] {
+        let (status, _, body) = http(&server.addr, &format!("/api/brief/{n}"));
+        assert_eq!(status, 200, "{body}");
+        let data: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(data["data"]["display"], format!("#{n}"));
+        let cli: serde_json::Value = serde_json::from_str(&stdout(&atc(
+            repo.path(),
+            &["brief", &n.to_string(), "--json"],
+        )))
+        .unwrap();
+        assert_eq!(data["data"], cli["data"]);
+    }
 }
 
 #[test]

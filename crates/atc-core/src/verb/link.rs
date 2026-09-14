@@ -33,7 +33,7 @@ pub struct Link {
 pub fn link(store: &Store, a: &str, b: &str) -> Result<Link, Error> {
     board::parse_ref(a)?;
     board::parse_ref(b)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let from = board::resolve(&fold, a)?;
     let to = board::resolve(&fold, b)?;
     // Self-link fires on the resolved ids — `link 3 pi.3` naming one
@@ -50,11 +50,12 @@ pub fn link(store: &Store, a: &str, b: &str) -> Result<Link, Error> {
         });
     }
 
-    let ids = store.append(vec![Kind::Linked {
+    let ids = store.append_synced(vec![Kind::Linked {
         from: from.clone(),
         to: to.clone(),
     }])?;
     let id = ids.into_iter().next().expect("one linked event");
+    let fold = store.current()?;
 
     Ok(Link {
         payload: Linked {
@@ -81,7 +82,7 @@ pub struct Unlink {
 pub fn unlink(store: &Store, a: &str, b: &str) -> Result<Unlink, Error> {
     board::parse_ref(a)?;
     board::parse_ref(b)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let from = board::resolve(&fold, a)?;
     let to = board::resolve(&fold, b)?;
     // No self-link check: a self-edge can never be on the record, so
@@ -93,11 +94,12 @@ pub fn unlink(store: &Store, a: &str, b: &str) -> Result<Unlink, Error> {
         });
     }
 
-    let ids = store.append(vec![Kind::Unlinked {
+    let ids = store.append_synced(vec![Kind::Unlinked {
         from: from.clone(),
         to: to.clone(),
     }])?;
     let id = ids.into_iter().next().expect("one unlinked event");
+    let fold = store.current()?;
 
     Ok(Unlink {
         payload: Unlinked {

@@ -210,6 +210,7 @@ fn log_rows(fold: &Fold) -> Vec<DoctorRow> {
 fn named(kind: &Kind) -> Vec<&EventId> {
     match kind {
         Kind::Status { flight, .. }
+        | Kind::Numbered { flight, .. }
         | Kind::Assigned { flight, .. }
         | Kind::Commented { flight, .. }
         | Kind::Held { flight, .. }

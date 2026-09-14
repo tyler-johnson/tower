@@ -98,7 +98,7 @@ pub fn file(
     // in it is stored as its wire id before the filing is appended.
     let message = match fields.message {
         Some(message) => {
-            let fold = board::fold(&store.read_all()?);
+            let fold = store.snapshot()?;
             Some(board::rewrite(&fold, &message)?)
         }
         None => None,
@@ -120,6 +120,7 @@ pub fn file(
         }
         // The bare filing: no rule covers it, one flight, the setting's
         // word unless `--status` said one.
+        store.prepare_filing()?;
         let ids = store.append(vec![Kind::Filed {
             procedure: None,
             subject: subject.to_string(),
@@ -171,6 +172,7 @@ fn minted(
     default: &str,
     rule: Option<&Match>,
 ) -> Result<File, Error> {
+    store.prepare_filing()?;
     let ids = store.append_with(|mint| {
         // `me` resolves after the mint, never before the match: a rule
         // saying `assignee = "me"` matched the literal word above.

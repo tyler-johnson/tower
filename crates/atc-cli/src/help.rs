@@ -34,8 +34,8 @@ tower: the board over fufu
 
 Work is filed as flights on a board, and the board is derived: every
 verb appends an event to a log kept as ordinary git refs in the
-repository, and every render folds that log fresh. Nothing is entered
-twice, and a render never blocks on the network.
+repository, and every render folds that log fresh. With tower.remote set,
+commands synchronize under a deadline; the fold remains local.
 
 Bare `atc` is the board. What needs a person is pinned on top —
 questions an agent stopped on, and your own Ready flights — and under
@@ -50,16 +50,14 @@ Type it often; it is the fastest way to learn what to do next.
 `board` is the same render made explicit, so this page is also
 `atc help board`.
 
-A flight has two names, human against wire. The board prints #3 for
-a single-writer fold, or writer#3 when the complete fold has several
-writers, including flights outside the closed window. JSON rows carry
+A flight has a permanent wire ID and a writer#n ordinal alias. The board
+prints global #n, or provisional ~n (writer~n when ambiguous). JSON rows carry
 id (the filing event's wire name, <writer>.<seq>), writer, and display
 (the pasteable name). Clients print display without reconstructing it.
 Any verb taking a flight
-accepts <n>, <writer>#<n>, or <writer>.<seq> — a bare number resolves
-against the board's filed flights, and an ambiguous one refuses with
-the full forms — and a leading # is stripped, so what tower prints
-pastes back in.
+accepts <n>, <writer>#<n>, ~<n>, <writer>~<n>, or <writer>.<seq>.
+Bare numbers mean global claims; tilde inputs name currently provisional
+flights. A leading # is stripped for paste tolerance.
 
 --json swaps the human render for the machine envelope: one line of
 JSON keyed atc with the contract number, cmd naming the bare verb,
@@ -672,19 +670,25 @@ through the readers' own parsers before anything touches disk.
 Spelling is forgiving: servePort, tower.servePort, and SERVEPORT all
 name one setting.
 
-Seven settings ship — defaultFileStatus, where a bare `atc file`
+Settings include defaultFileStatus, where a bare `atc file`
 lands; serveHost and servePort, the address and the port `atc serve`
 binds; leaseWindow, how long a session's lease stays fresh without a
 heartbeat when its client hands down no pid; leaseExpiry, the age
 past which a lease is dead whatever its pid says; leaseSweep, how
 often the heartbeat looks for dead leases; updateCheck, how often
-the background release check runs. This verb opens no store and spawns no
-fufu, so settings stay reachable on a half-configured machine, before
-an identity exists.";
+the background release check runs. Shared boards add remote (unset by
+default), syncInterval (30s), syncTimeout (3s), and numberTimeout (10s).
+Ordinary sync is cadence-gated; every file/decompose gets its allocation
+budget independently. Synchronization is synchronous, including cleanup.
+Setting remote contacts that board. Joining an established numbering
+domain reports the count of local flights that must move and requires
+--renumber. Other settings stay reachable before identity exists.";
 
 pub const CONFIG_EXAMPLES: &str = "\
 Examples:
   atc config                every setting, defaults marked
+  atc config remote origin   share through an existing Git remote
+  atc config remote origin --renumber   confirm moving local numbers
   atc config servePort      what port serve binds
   atc config servePort 7777   set it, this repo
   atc config defaultFileStatus backlog   bare filings park for a person

@@ -36,7 +36,7 @@ pub fn answer(store: &Store, flight: &str, message: Option<String>) -> Result<An
         return Err(Error::NeedsAnswer);
     };
     board::parse_ref(flight)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let flight = board::resolve(&fold, flight)?;
     let closed_over = board::flight(&fold, &flight);
     if closed_over.closed() && closed_over.abandoned.is_some() {
@@ -52,11 +52,12 @@ pub fn answer(store: &Store, flight: &str, message: Option<String>) -> Result<An
     }
 
     let answer = board::rewrite(&fold, &answer)?;
-    let ids = store.append(vec![Kind::Answered {
+    let ids = store.append_synced(vec![Kind::Answered {
         flight: flight.clone(),
         answer: answer.clone(),
     }])?;
     let id = ids.into_iter().next().expect("one answered event");
+    let fold = store.current()?;
 
     Ok(Answer {
         payload: Answered {

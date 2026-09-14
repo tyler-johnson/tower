@@ -56,7 +56,7 @@ pub fn status(
         });
     };
     board::parse_ref(flight)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let flight = board::resolve(&fold, flight)?;
     let filed = ensure_active(&fold, &flight)?;
     match target {
@@ -90,7 +90,7 @@ pub fn status(
 /// bar: abandoning it is deliberate when the flight itself is over.
 pub fn done(store: &Store, flight: &str) -> Result<Move, Error> {
     board::parse_ref(flight)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let flight = board::resolve(&fold, flight)?;
     let filed = board::flight(&fold, &flight);
     if filed.closed() {
@@ -106,7 +106,7 @@ pub fn done(store: &Store, flight: &str) -> Result<Move, Error> {
 /// reason rides the move.
 pub fn cancel(store: &Store, flight: &str, message: Option<String>) -> Result<Move, Error> {
     board::parse_ref(flight)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let flight = board::resolve(&fold, flight)?;
     let filed = ensure_active(&fold, &flight)?;
     let subject = filed.subject.clone();
@@ -126,7 +126,7 @@ fn append(
     let reason = reason
         .map(|reason| board::rewrite(fold, &reason))
         .transpose()?;
-    let ids = store.append(vec![Kind::Status {
+    let ids = store.append_synced(vec![Kind::Status {
         flight: flight.clone(),
         status: target.name().to_string(),
         reason,
@@ -135,7 +135,7 @@ fn append(
 
     // Re-fold to read where the word landed: the fold derives the
     // status, and the echo must say what the board will.
-    let after = board::fold(&store.read_all()?);
+    let after = store.current()?;
     let landed = board::flight(&after, &flight);
     let waiting_on = if landed.status == "waiting" {
         landed
@@ -151,7 +151,7 @@ fn append(
         payload: Moved {
             status: appended(store, &id)?,
         },
-        display: display(fold, &flight),
+        display: display(&after, &flight),
         subject,
         status: target.name(),
         landed: landed.status.clone(),

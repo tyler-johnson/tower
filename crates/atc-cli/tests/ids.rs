@@ -2,6 +2,7 @@
 //! wire id, and every spelling a verb accepts.
 
 use std::path::Path;
+mod support;
 use std::process::{Command, Output};
 
 use atc_testsupport::{Repo, scrub};
@@ -86,7 +87,7 @@ fn the_flight_number_is_dense_while_the_event_seq_is_not() {
     // The split, visible on one view: flight #2 rides event pi.3.
     let board = envelope(&atc(repo.path(), &["--json"]));
     let second = &board["data"]["ready"][1];
-    assert_eq!(second["id"], serde_json::json!("pi.3"));
+    assert_eq!(second["id"], support::flight(repo.path(), 2));
     assert_eq!(second["display"], serde_json::json!("#2"));
     assert_eq!(second["writer"], serde_json::json!("pi"));
     assert!(second.get("number").is_none());
@@ -95,13 +96,10 @@ fn the_flight_number_is_dense_while_the_event_seq_is_not() {
 #[test]
 fn both_names_brief_the_same_flight() {
     let repo = repo_with_a_seq_gap();
-    for reference in ["2", "pi.3"] {
+    let wire = support::flight(repo.path(), 2);
+    for reference in ["2", "pi#2", wire.as_str()] {
         let brief = envelope(&atc(repo.path(), &["brief", reference, "--json"]));
-        assert_eq!(
-            brief["data"]["id"],
-            serde_json::json!("pi.3"),
-            "`{reference}`"
-        );
+        assert_eq!(brief["data"]["id"], wire, "`{reference}`");
         assert_eq!(
             brief["data"]["display"],
             serde_json::json!("#2"),
@@ -123,22 +121,23 @@ fn done_by_number_finishes_the_second_filed_flight_not_event_two() {
 }
 
 #[test]
-fn two_writers_bind_with_hash_and_a_bare_number_is_ambiguous() {
+fn two_writers_have_distinct_global_numbers_and_keep_ordinal_aliases() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "from the pi"]));
     repo.pin_writer("qi");
     stdout(&atc(repo.path(), &["file", "from the qi"]));
 
     let out = stdout(&atc(repo.path(), &[]));
-    assert!(out.contains("pi#1"), "long form binds with `#`: {out}");
-    assert!(out.contains("qi#1"), "long form binds with `#`: {out}");
+    assert!(out.contains("#1"), "global name: {out}");
+    assert!(out.contains("#2"), "global name: {out}");
     assert!(!out.contains("pi.1"), "the wire form never renders: {out}");
 
     let out = atc(repo.path(), &["comment", "1", "-m", "x", "--json"]);
-    let refused = refusal(&out, 1, "flight/ambiguous");
-    let message = refused["error"]["message"].as_str().expect("a message");
-    assert!(message.contains("`pi#1`"), "got {message:?}");
-    assert!(message.contains("`qi#1`"), "got {message:?}");
+    assert_eq!(
+        envelope(&out)["data"]["commented"]["body"]["flight"],
+        "pi.1"
+    );
+    stdout(&out);
 
     // `writer#n` resolves exactly; the pasted `#`-prefixed form too.
     stdout(&atc(repo.path(), &["comment", "qi#1", "-m", "one"]));
@@ -167,17 +166,17 @@ fn display_names_include_writers_hidden_by_the_closed_window() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], "pi.1");
     assert_eq!(rows[0]["writer"], "pi");
-    assert_eq!(rows[0]["display"], "pi#1");
+    assert_eq!(rows[0]["display"], "#1");
     assert!(rows[0].get("number").is_none());
     let rendered = stdout(&atc(repo.path(), &["--closed", "none"]));
-    assert!(rendered.contains("pi#1"), "{rendered}");
+    assert!(rendered.contains("#1"), "{rendered}");
     assert!(
         !rendered.contains("qi#1"),
         "the other writer is hidden: {rendered}"
     );
-    for reference in ["pi#1", "qi#1"] {
+    for (reference, display) in [("pi#1", "#1"), ("qi#1", "#2")] {
         let brief = envelope(&atc(repo.path(), &["brief", reference, "--json"]));
-        assert_eq!(brief["data"]["display"], reference);
+        assert_eq!(brief["data"]["display"], display);
         assert!(brief["data"].get("number").is_none());
         let text = stdout(&atc(repo.path(), &["brief", reference]));
         let wire = brief["data"]["id"].as_str().unwrap();
@@ -191,46 +190,48 @@ fn display_names_include_writers_hidden_by_the_closed_window() {
     assert!(pick.get("number").is_none());
     let out = atc(repo.path(), &["file", "another", "--json"]);
     let filed = envelope(&out);
-    assert_eq!(filed["data"]["flights"][0]["display"], "qi#2");
+    assert_eq!(filed["data"]["flights"][0]["display"], "#3");
 }
 
 #[test]
-fn a_bare_number_in_prose_two_writers_hold_is_refused_the_same_way() {
+fn global_numbers_in_prose_resolve_across_writers() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "from the pi"]));
     repo.pin_writer("qi");
     stdout(&atc(repo.path(), &["file", "from the qi"]));
 
     let out = atc(repo.path(), &["comment", "pi#1", "-m", "see #1", "--json"]);
-    let refused = refusal(&out, 1, "flight/ambiguous");
-    let message = refused["error"]["message"].as_str().expect("a message");
-    assert_eq!(message, "`#1` names two flights: `pi#1`, `qi#1`");
+    stdout(&out);
+    assert_eq!(
+        envelope(&out)["data"]["commented"]["body"]["text"],
+        "see #pi.1"
+    );
 
     // The exact form is stored by wire id and printed long, like a row.
     stdout(&atc(repo.path(), &["comment", "pi#1", "-m", "see qi#1"]));
     let brief = envelope(&atc(repo.path(), &["brief", "pi#1", "--json"]));
     assert_eq!(
-        brief["data"]["comments"][0]["text"],
+        brief["data"]["comments"][1]["text"],
         serde_json::json!("see #qi.1")
     );
     let text = stdout(&atc(repo.path(), &["brief", "pi#1"]));
-    assert!(text.contains("see qi#1"), "{text}");
+    assert!(text.contains("see #2"), "{text}");
     let text = stdout(&atc(repo.path(), &["brief", "qi#1"]));
     assert!(
-        text.contains("referenced by\n· pi#1  from the pi\n"),
+        text.contains("referenced by\n· #1  from the pi\n"),
         "{text}"
     );
 }
 
 #[test]
-fn a_bad_reference_names_the_three_spellings() {
+fn a_bad_reference_names_the_reference_spellings() {
     let repo = repo();
     let out = atc(repo.path(), &["comment", "not-an-id", "-m", "x", "--json"]);
     let envelope = refusal(&out, 2, "usage/bad-flight");
     assert_eq!(
         envelope["error"]["message"],
         serde_json::json!(
-            "`not-an-id` is not a flight — `<n>`, `<writer>#<n>`, or `<writer>.<seq>`"
+            "`not-an-id` is not a flight — `<n>`, `<writer>#<n>`, `~<n>`, `<writer>~<n>`, or `<writer>.<seq>`"
         )
     );
 }

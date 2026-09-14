@@ -123,7 +123,8 @@ pub(crate) fn minted_rows(
     parent: &EventId,
     parts: &[EventId],
 ) -> Result<Vec<crate::board::FlightView>, log::Error> {
-    let fold = crate::board::fold(&store.read_all()?);
+    store.touch(crate::log::sync::Touch::Number)?;
+    let fold = store.current()?;
     let rows = crate::board::rows(fold, store.callsign());
     let mut by_id: std::collections::HashMap<_, _> = rows
         .flights

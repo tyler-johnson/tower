@@ -42,7 +42,7 @@ pub fn hold(store: &Store, flight: &str, message: Option<String>) -> Result<Hold
         return Err(Error::NeedsQuestion);
     };
     board::parse_ref(flight)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let flight = board::resolve(&fold, flight)?;
     let filed = ensure_active(&fold, &flight)?;
     if let Some(open) = &filed.question {
@@ -53,11 +53,12 @@ pub fn hold(store: &Store, flight: &str, message: Option<String>) -> Result<Hold
     }
 
     let question = board::rewrite(&fold, &question)?;
-    let ids = store.append(vec![Kind::Held {
+    let ids = store.append_synced(vec![Kind::Held {
         flight: flight.clone(),
         question: question.clone(),
     }])?;
     let id = ids.into_iter().next().expect("one held event");
+    let fold = store.current()?;
 
     Ok(Hold {
         payload: Held {

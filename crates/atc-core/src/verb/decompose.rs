@@ -52,7 +52,7 @@ pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decomp
         return Err(Error::EmptySubject);
     }
 
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let parent = board::resolve(&fold, flight)?;
     let parent_row = ensure_active(&fold, &parent)?;
     let procedure = parent_row.procedure.clone();
@@ -68,6 +68,7 @@ pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decomp
     if let [name] = subjects.as_slice()
         && let Some(definition) = installed.get(name)
     {
+        store.prepare_filing()?;
         let ids = store.append_with(|mint| {
             resolve_me(
                 classify(
@@ -91,6 +92,7 @@ pub fn decompose(store: &Store, flight: &str, parts: &[String]) -> Result<Decomp
     // The by-hand form: the filings first, then one edge per sub-flight
     // naming the id its filing is about to take — which is why this is
     // `append_with` and not a batch built ahead of it.
+    store.prepare_filing()?;
     let ids = store.append_with(|mint| {
         let mut kinds: Vec<Kind> = subjects
             .iter()

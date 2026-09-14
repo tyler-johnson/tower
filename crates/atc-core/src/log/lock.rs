@@ -42,11 +42,26 @@ pub(crate) struct Guard(#[allow(dead_code)] gix::lock::Marker);
 /// that expires is contention, reported as such: unlike fufu's captures,
 /// tower has no caller for whom giving up silently is the right answer.
 pub(crate) fn acquire(repo: &gix::Repository, writer: &str) -> Result<Guard> {
+    acquire_for(repo, writer, APPEND_WAIT)
+}
+
+pub(crate) fn acquire_until(
+    repo: &gix::Repository,
+    writer: &str,
+    deadline: std::time::Instant,
+) -> Result<Guard> {
+    let wait = deadline
+        .checked_duration_since(std::time::Instant::now())
+        .ok_or(Error::Deadline)?;
+    acquire_for(repo, writer, wait.min(APPEND_WAIT))
+}
+
+fn acquire_for(repo: &gix::Repository, writer: &str, wait: Duration) -> Result<Guard> {
     let dir = repo.common_dir().join("tower");
     let name = format!("log-{writer}");
     match gix::lock::Marker::acquire_to_hold_resource(
         dir.join(name),
-        gix::lock::acquire::Fail::AfterDurationWithBackoff(APPEND_WAIT),
+        gix::lock::acquire::Fail::AfterDurationWithBackoff(wait),
         Some(dir),
     ) {
         Ok(marker) => Ok(Guard(marker)),

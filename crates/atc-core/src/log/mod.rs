@@ -23,9 +23,11 @@
 //! `seq`.
 
 mod chain;
+pub mod counter;
 mod error;
 mod event;
 mod lock;
+pub mod sync;
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -54,6 +56,7 @@ pub struct Store {
     /// carries the new byline.
     adopted: std::cell::OnceCell<String>,
     writer: std::cell::OnceCell<String>,
+    allocation_deadline: std::cell::Cell<Option<std::time::Instant>>,
 }
 
 impl Store {
@@ -80,6 +83,7 @@ impl Store {
             identity,
             adopted: std::cell::OnceCell::new(),
             writer,
+            allocation_deadline: std::cell::Cell::new(None),
         })
     }
 
@@ -169,6 +173,7 @@ impl Store {
             refs: common.join("refs"),
             log: common.join(chain::LOG_PREFIX.trim_end_matches('/')),
             packed_refs: common.join("packed-refs"),
+            seq: common.join("refs/tower/seq"),
         }
     }
 
@@ -196,6 +201,15 @@ impl Store {
         &self,
         plan: impl Fn(&dyn Fn(usize) -> EventId) -> Vec<Kind>,
     ) -> Result<Vec<EventId>> {
+        self.append_with_deadline(plan, None)
+    }
+
+    pub(crate) fn append_with_deadline(
+        &self,
+        plan: impl Fn(&dyn Fn(usize) -> EventId) -> Vec<Kind>,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Vec<EventId>> {
+        let deadline = deadline.or(self.allocation_deadline.get());
         let writer = self.writer_or_mint()?;
         let name = chain::log_ref(&self.author, &writer);
 
@@ -204,7 +218,10 @@ impl Store {
         // against a value it read before locking, so the CAS alone would
         // let a second writer overwrite an append that already reported
         // success. See `log/lock.rs`.
-        let _held = lock::acquire(&self.repo, &writer)?;
+        let _held = match deadline {
+            Some(deadline) => lock::acquire_until(&self.repo, &writer, deadline)?,
+            None => lock::acquire(&self.repo, &writer)?,
+        };
 
         // A lost CAS under the lock means a foreign mover — a push landing
         // here, a hand-moved ref. Retrying is always safe: the same events
@@ -220,7 +237,7 @@ impl Store {
             };
             // Clamped to the tip so one writer's events stay monotonic in
             // the sort key no matter what the clock does.
-            let now = wall_clock().max(tip_time);
+            let mut now = wall_clock().max(tip_time);
 
             let kinds = plan(&|offset| EventId {
                 writer: writer.clone(),
@@ -228,6 +245,18 @@ impl Store {
             });
             if kinds.is_empty() {
                 return Ok(Vec::new());
+            }
+            // A deliberate renumber can replace another writer's claim during enrollment. Clamp to that observed claim so clock skew cannot keep the superseded number standing. No clock is derived from the counter.
+            if kinds
+                .iter()
+                .any(|kind| matches!(kind, Kind::Numbered { .. }))
+            {
+                for event in self.read_all()? {
+                    if let Kind::Numbered { flight: previous, .. } = event.kind
+                        && kinds.iter().any(|kind| matches!(kind, Kind::Numbered { flight, .. } if flight == &previous)) {
+                        now = now.max(event.time.saturating_add(1));
+                    }
+                }
             }
 
             let events: Vec<Event> = kinds
@@ -320,6 +349,7 @@ impl Store {
 /// under `log`, `git pack-refs` moves tips into `packed_refs`, and
 /// `refs` is the directory that exists before either does.
 pub struct WatchPaths {
+    pub seq: PathBuf,
     /// `<common>/refs` — always present, the root a recursive watch
     /// installs on so it sees `refs/tower/log` born.
     pub refs: PathBuf,

@@ -45,16 +45,17 @@ pub fn comment(
         return Err(Error::NeedsNote);
     };
     board::parse_ref(flight)?;
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let flight = board::resolve(&fold, flight)?;
     let text = board::rewrite(&fold, &text)?;
 
-    let ids = store.append(vec![Kind::Commented {
+    let ids = store.append_synced(vec![Kind::Commented {
         flight: flight.clone(),
         text,
         handoff,
     }])?;
     let id = ids.into_iter().next().expect("one commented event");
+    let fold = store.current()?;
 
     Ok(Comment {
         payload: Commented {

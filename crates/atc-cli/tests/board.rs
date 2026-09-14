@@ -1,6 +1,7 @@
 //! The binary, spawned the way a person runs it: in the repository, argv
 //! carrying the verb — the production door, not a test-only one.
 
+mod support;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -239,9 +240,12 @@ fn the_groups_are_the_derived_statuses_in_lifecycle_order() {
     let envelope = envelope(&atc(repo.path(), &["--json"]));
     let data = &envelope["data"];
     assert_eq!(data["backlog"][0]["id"], serde_json::json!("pi.1"));
-    assert_eq!(data["waiting"][0]["id"], serde_json::json!("pi.2"));
-    assert_eq!(data["ready"][0]["id"], serde_json::json!("pi.3"));
-    assert_eq!(data["in_progress"][0]["id"], serde_json::json!("pi.4"));
+    assert_eq!(data["waiting"][0]["id"], support::flight(repo.path(), 2));
+    assert_eq!(data["ready"][0]["id"], support::flight(repo.path(), 3));
+    assert_eq!(
+        data["in_progress"][0]["id"],
+        support::flight(repo.path(), 4)
+    );
 }
 
 #[test]
@@ -271,7 +275,7 @@ fn a_closed_flight_lands_in_the_closed_group_and_out_of_the_count() {
     );
     assert_eq!(
         envelope["data"]["ready"][0]["id"],
-        serde_json::json!("pi.2")
+        support::flight(repo.path(), 2)
     );
 }
 

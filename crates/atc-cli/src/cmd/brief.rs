@@ -20,9 +20,11 @@ pub fn run(json: bool, flight: &str, expand: bool) -> Result<(), CliError> {
     super::parse_ref(flight)?;
 
     let store = super::store()?;
-    let events = store.read_all()?;
-    let fold = board::fold(&events);
+    let fold = store.snapshot()?;
     let id = super::resolve(&fold, flight)?;
+    store.touch(atc_core::log::sync::Touch::Ordinary)?;
+    let events = store.read_all()?;
+    let fold = store.current()?;
 
     let now = board::now();
     let brief = board::brief(&fold, &events, &id).expect("resolved to a filed flight");
@@ -327,6 +329,7 @@ fn note(brief: &Brief, now: i64, colored: bool, shown: &dyn Fn(&str) -> String) 
 /// because.
 fn phrase<'a>(fold: &Fold, brief_id: &str, moment: &'a Moment) -> (String, Option<&'a str>) {
     match &moment.detail {
+        Some(Detail::Numbered { number }) => (format!(" #{number}"), None),
         Some(Detail::Status { status, reason }) => (format!(" {status}"), reason.as_deref()),
         Some(Detail::Assigned { assignee }) => {
             (format!(" {}", assignee.as_deref().unwrap_or("none")), None)

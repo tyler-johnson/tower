@@ -6,6 +6,9 @@
 //! crate; each suite that says `mod support;` compiles its own copy, and
 //! the allow below is for the helpers that copy does not reach.
 #![allow(dead_code)]
+mod numbering;
+#[allow(unused_imports)]
+pub use numbering::{event, flight, flights, gestures};
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};

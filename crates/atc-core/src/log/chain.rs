@@ -84,6 +84,9 @@ pub(crate) fn decode(repo: &gix::Repository, id: gix::ObjectId) -> Result<Decode
             .filter(|obj| obj.kind == gix::objs::Kind::Commit)
             .ok_or_else(refused)?;
         let commit = gix::objs::CommitRef::from_bytes(&obj.data).map_err(Error::repo)?;
+        if commit.parents().count() > 1 {
+            return Err(refused());
+        }
         if !is_tower_commit(&commit) {
             return Err(refused());
         }
@@ -125,6 +128,13 @@ pub(crate) fn decode(repo: &gix::Repository, id: gix::ObjectId) -> Result<Decode
         .filter(|obj| obj.kind == gix::objs::Kind::Blob)
         .ok_or_else(refused)?;
     let events: Vec<Event> = serde_json::from_slice(&obj.data).map_err(|_| refused())?;
+    if next_seq == 0
+        || events
+            .last()
+            .is_some_and(|event| event.id.seq.checked_add(1) != Some(next_seq))
+    {
+        return Err(refused());
+    }
 
     Ok(Decoded {
         parent,

@@ -10,6 +10,7 @@
 //! agent flights are `pi.2` (#2) and `pi.8` (#5).
 
 use std::path::Path;
+mod support;
 use std::process::{Command, Output};
 
 use atc_core::log::{Kind, Store};
@@ -151,7 +152,13 @@ fn brief_renders_the_full_record_both_link_directions() {
     assert!(text.contains("comments\n"), "{text}");
     // The header leads with the comment's wire id — its only name, and
     // what `edit` takes.
-    assert!(text.contains("pi.4 · tests@tower.invalid · "), "{text}");
+    assert!(
+        text.contains(&format!(
+            "{} · tests@tower.invalid · ",
+            support::event(repo.path(), "commented", 0)
+        )),
+        "{text}"
+    );
     assert!(text.contains("a note on the record"), "{text}");
     assert!(text.contains("filed "), "{text}");
     assert!(text.contains("board: atc"), "{text}");
@@ -175,9 +182,12 @@ fn a_flight_named_in_a_comment_is_stored_by_wire_id_and_printed_by_number() {
     let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
     assert_eq!(
         brief["comments"][1]["text"],
-        serde_json::json!("blocked on #pi.2.")
+        format!("blocked on #{}.", support::flight(repo.path(), 2))
     );
-    assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.2"));
+    assert_eq!(
+        brief["references"][0]["flight"],
+        support::flight(repo.path(), 2)
+    );
     assert_eq!(brief["references"][0]["display"], serde_json::json!("#2"));
     assert_eq!(brief["referenced_by"], serde_json::json!([]));
 
@@ -290,7 +300,7 @@ fn a_hold_and_an_answer_store_the_wire_id_and_echo_the_number() {
     assert!(!out.contains("pi.1"), "{out}");
     let brief = envelope(&atc(repo.path(), &["brief", "2", "--json"]))["data"].clone();
     assert_eq!(
-        brief["history"][3]["answer"],
+        support::gestures(&brief)[3]["answer"],
         serde_json::json!("no, unlike #pi.1")
     );
     assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.1"));
@@ -301,7 +311,10 @@ fn a_cancel_reason_naming_a_flight_projects_on_the_board_and_the_brief() {
     let repo = repo_with_a_record();
     stdout(&atc(repo.path(), &["cancel", "1", "-m", "dup of #2"]));
     let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
-    assert_eq!(brief["closed_reason"], serde_json::json!("dup of #pi.2"));
+    assert_eq!(
+        brief["closed_reason"],
+        format!("dup of #{}", support::flight(repo.path(), 2))
+    );
     let text = stdout(&atc(repo.path(), &["brief", "1"]));
     assert!(text.contains("dup of #2"), "{text}");
     assert!(!text.contains("#pi.2"), "{text}");
@@ -319,14 +332,25 @@ fn an_edit_over_stored_text_keeps_its_references_and_takes_new_ones() {
     // stored like any other, indexed as none.
     stdout(&atc(
         repo.path(),
-        &["edit", "pi.5", "-m", "see #pi.2, and now #1 too"],
+        &[
+            "edit",
+            &support::event(repo.path(), "commented", 1),
+            "-m",
+            &format!("see #{}, and now #1 too", support::flight(repo.path(), 2)),
+        ],
     ));
     let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
     assert_eq!(
         brief["comments"][1]["text"],
-        serde_json::json!("see #pi.2, and now #pi.1 too")
+        format!(
+            "see #{}, and now #pi.1 too",
+            support::flight(repo.path(), 2)
+        )
     );
-    assert_eq!(brief["references"][0]["flight"], serde_json::json!("pi.2"));
+    assert_eq!(
+        brief["references"][0]["flight"],
+        support::flight(repo.path(), 2)
+    );
     assert_eq!(brief["references"].as_array().expect("rows").len(), 1);
 }
 
@@ -369,7 +393,10 @@ fn json_round_trips_the_brief() {
         data["comments"][0]["text"],
         serde_json::json!("a note on the record")
     );
-    assert_eq!(data["depends_on"][0]["flight"], serde_json::json!("pi.2"));
+    assert_eq!(
+        data["depends_on"][0]["flight"],
+        support::flight(repo.path(), 2)
+    );
     assert_eq!(
         data["depends_on"][0]["subject"],
         serde_json::json!("the dependency")
@@ -408,7 +435,10 @@ fn the_newest_handoff_pins_above_the_stream_and_the_prior_one_stays_in_it() {
     let comments = text.find("comments\n").expect("a comments section");
     assert!(handoff < comments, "the pin precedes the stream: {text}");
     assert!(
-        text.contains("handoff\n  pi.6 · tests@tower.invalid · "),
+        text.contains(&format!(
+            "handoff\n  {} · tests@tower.invalid · ",
+            support::event(repo.path(), "commented", 2)
+        )),
         "{text}"
     );
     let pinned = &text[handoff..comments];
@@ -433,7 +463,10 @@ fn the_newest_handoff_pins_above_the_stream_and_the_prior_one_stays_in_it() {
     );
 
     let data = envelope(&atc(repo.path(), &["brief", "1", "--json"]))["data"].clone();
-    assert_eq!(data["handoff"]["id"], serde_json::json!("pi.6"));
+    assert_eq!(
+        data["handoff"]["id"],
+        support::event(repo.path(), "commented", 2)
+    );
     assert_eq!(
         data["handoff"]["text"],
         serde_json::json!("done through step 3, next is the parser")
@@ -574,7 +607,13 @@ fn a_cancel_over_a_question_briefs_the_reason_and_keeps_the_hold_in_history() {
     assert!(!note.contains("which color?"), "{note}");
     assert!(!note.contains("asked "), "{note}");
     // The hold is still a moment of the record.
-    assert!(text.contains("pi.2 · held · "), "{text}");
+    assert!(
+        text.contains(&format!(
+            "{} · held · ",
+            support::event(repo.path(), "held", 0)
+        )),
+        "{text}"
+    );
 
     let out = atc(repo.path(), &["brief", "1", "--json"]);
     let data = &envelope(&out)["data"];
@@ -583,7 +622,7 @@ fn a_cancel_over_a_question_briefs_the_reason_and_keeps_the_hold_in_history() {
     assert!(data["asked_at"].is_null(), "{data}");
     assert_eq!(data["closed_reason"], serde_json::json!("superseded"));
     assert_eq!(data["status"], serde_json::json!("canceled"));
-    let history = data["history"].as_array().expect("a history");
+    let history = support::gestures(data);
     assert!(
         history
             .iter()
@@ -648,7 +687,7 @@ fn the_byline_carries_the_session() {
     assert_eq!(data["filed_session"], serde_json::json!(uuid));
     assert_eq!(data["status_by"], serde_json::json!("tests@tower.invalid"));
     assert_eq!(data["status_session"], serde_json::json!("hand-typed"));
-    let history = data["history"].as_array().expect("a history");
+    let history = support::gestures(data);
     assert_eq!(history[0]["session"], serde_json::json!(uuid));
     assert_eq!(history[1]["session"], serde_json::json!("hand-typed"));
     assert!(history[2]["session"].is_null(), "{data}");
@@ -665,11 +704,17 @@ fn the_byline_carries_the_session() {
         "{text}"
     );
     assert!(
-        text.contains("pi.2 · status in_progress · hand-typed · "),
+        text.contains(&format!(
+            "{} · status in_progress · hand-typed · ",
+            support::event(repo.path(), "status", 0)
+        )),
         "{text}"
     );
     assert!(
-        text.contains("pi.3 · commented · tests@tower.invalid · "),
+        text.contains(&format!(
+            "{} · commented · tests@tower.invalid · ",
+            support::event(repo.path(), "commented", 0)
+        )),
         "{text}"
     );
 
@@ -718,7 +763,7 @@ fn the_byline_is_the_callsign_and_the_session_follows_under_it() {
     assert_eq!(data["status_session"], serde_json::json!(uuid));
     assert_eq!(data["status_by"], serde_json::json!("tests@tower.invalid"));
     assert_eq!(data["comments"][0]["callsign"], serde_json::json!("tyler"));
-    let history = data["history"].as_array().expect("a history");
+    let history = support::gestures(data);
     assert!(history[0]["callsign"].is_null(), "{data}");
     assert_eq!(history[1]["callsign"], serde_json::json!("claude"));
     assert_eq!(history[1]["session"], serde_json::json!(uuid));
@@ -727,14 +772,23 @@ fn the_byline_is_the_callsign_and_the_session_follows_under_it() {
     let text = stdout(&atc(repo.path(), &["brief", "1"]));
     assert!(text.contains("in progress — claude "), "{text}");
     assert!(
-        text.contains("pi.2 · status in_progress · claude · "),
+        text.contains(&format!(
+            "{} · status in_progress · claude · ",
+            support::event(repo.path(), "status", 0)
+        )),
         "{text}"
     );
     assert!(
         text.contains("\n    session [95b36d9d]\n"),
         "the session follows the entry: {text}"
     );
-    assert!(text.contains("pi.3 · commented · tyler · "), "{text}");
+    assert!(
+        text.contains(&format!(
+            "{} · commented · tyler · ",
+            support::event(repo.path(), "commented", 0)
+        )),
+        "{text}"
+    );
     assert!(
         !text.contains("session tyler"),
         "no session, no follow line: {text}"
@@ -760,7 +814,15 @@ fn the_history_lists_every_gesture_in_log_order() {
     stdout(&atc(repo.path(), &["edit", "1", "-s", "the reworded work"]));
     // A reword of the comment, targeting its event id rather than the
     // flight's — a gesture on this flight all the same.
-    stdout(&atc(repo.path(), &["edit", "pi.2", "-m", "a fuller note"]));
+    stdout(&atc(
+        repo.path(),
+        &[
+            "edit",
+            &support::event(repo.path(), "commented", 0),
+            "-m",
+            "a fuller note",
+        ],
+    ));
 
     let text = stdout(&atc(repo.path(), &["brief", "1"]));
     // The filing leads, and each row is the wire id, the kind's own
@@ -770,21 +832,31 @@ fn the_history_lists_every_gesture_in_log_order() {
         "{text}"
     );
     assert!(
-        text.contains("pi.3 · status in_progress · tests@tower.invalid · "),
+        text.contains(&format!(
+            "{} · status in_progress · tests@tower.invalid · ",
+            support::event(repo.path(), "status", 0)
+        )),
         "{text}"
     );
     assert!(
-        text.contains("pi.6 · edited subject · tests@tower.invalid · "),
+        text.contains(&format!(
+            "{} · edited subject · tests@tower.invalid · ",
+            support::event(repo.path(), "edited", 0)
+        )),
         "{text}"
     );
     assert!(
-        text.contains("pi.7 · edited comment pi.2 · tests@tower.invalid · "),
+        text.contains(&format!(
+            "{} · edited comment {} · tests@tower.invalid · ",
+            support::event(repo.path(), "edited", 1),
+            support::event(repo.path(), "commented", 0)
+        )),
         "{text}"
     );
 
     let out = atc(repo.path(), &["brief", "1", "--json"]);
     let data = &envelope(&out)["data"];
-    let history = data["history"].as_array().expect("a history");
+    let history = support::gestures(data);
     let what: Vec<&str> = history
         .iter()
         .map(|moment| moment["what"].as_str().expect("a kind name"))
@@ -813,7 +885,10 @@ fn the_history_lists_every_gesture_in_log_order() {
     assert_eq!(history[2]["status"], serde_json::json!("in_progress"));
     assert_eq!(history[5]["fields"], serde_json::json!(["subject"]));
     assert_eq!(history[6]["fields"], serde_json::json!(["body"]));
-    assert_eq!(history[6]["comment"], serde_json::json!("pi.2"));
+    assert_eq!(
+        history[6]["comment"],
+        support::event(repo.path(), "commented", 0)
+    );
     let filing = history[0].as_object().expect("an object");
     for key in ["status", "fields", "from"] {
         assert!(!filing.contains_key(key), "a filing carries no `{key}`");
@@ -831,20 +906,47 @@ fn the_history_says_the_lane_and_the_edge() {
     stdout(&atc(repo.path(), &["unlink", "1", "2"]));
 
     let text = stdout(&atc(repo.path(), &["brief", "1"]));
-    assert!(text.contains("pi.3 · assigned agent · "), "{text}");
-    assert!(text.contains("pi.4 · assigned none · "), "{text}");
-    assert!(text.contains("pi.5 · linked depends on #2 · "), "{text}");
-    assert!(text.contains("pi.6 · unlinked depends on #2 · "), "{text}");
+    assert!(
+        text.contains(&format!(
+            "{} · assigned agent · ",
+            support::event(repo.path(), "assigned", 0)
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "{} · assigned none · ",
+            support::event(repo.path(), "assigned", 1)
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "{} · linked depends on #2 · ",
+            support::event(repo.path(), "linked", 0)
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "{} · unlinked depends on #2 · ",
+            support::event(repo.path(), "unlinked", 0)
+        )),
+        "{text}"
+    );
 
     // The same edge, read from the other end.
     let text = stdout(&atc(repo.path(), &["brief", "2"]));
-    assert!(text.contains("pi.5 · linked blocks #1 · "), "{text}");
+    assert!(
+        text.contains(&format!(
+            "{} · linked blocks #1 · ",
+            support::event(repo.path(), "linked", 0)
+        )),
+        "{text}"
+    );
 
     let out = atc(repo.path(), &["brief", "1", "--json"]);
-    let history = envelope(&out)["data"]["history"]
-        .as_array()
-        .expect("a history")
-        .clone();
+    let history = support::gestures(&envelope(&out)["data"]);
     // The second filing is not on this flight's record, so the rows are
     // the filing, the two lanes, the link, and the unlink.
     assert_eq!(history.len(), 5);
@@ -853,9 +955,9 @@ fn the_history_says_the_lane_and_the_edge() {
     assert!(cleared.contains_key("assignee"), "{}", history[2]);
     assert!(cleared["assignee"].is_null(), "{}", history[2]);
     assert_eq!(history[3]["from"], serde_json::json!("pi.1"));
-    assert_eq!(history[3]["to"], serde_json::json!("pi.2"));
+    assert_eq!(history[3]["to"], support::flight(repo.path(), 2));
     assert_eq!(history[4]["from"], serde_json::json!("pi.1"));
-    assert_eq!(history[4]["to"], serde_json::json!("pi.2"));
+    assert_eq!(history[4]["to"], support::flight(repo.path(), 2));
 }
 
 #[test]
@@ -866,23 +968,34 @@ fn a_cancel_reason_rides_its_moment() {
     stdout(&atc(repo.path(), &["cancel", "1", "-m", "superseded"]));
 
     let text = stdout(&atc(repo.path(), &["brief", "1"]));
-    assert!(text.contains("pi.2 · status in_progress · "), "{text}");
     assert!(
-        text.contains("pi.3 · status canceled · tests@tower.invalid · "),
+        text.contains(&format!(
+            "{} · status in_progress · ",
+            support::event(repo.path(), "status", 0)
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "{} · status canceled · tests@tower.invalid · ",
+            support::event(repo.path(), "status", 1)
+        )),
         "{text}"
     );
     // The reason follows on its own indented line, the comments' grammar.
     let row = text
         .lines()
-        .position(|line| line.starts_with("  pi.3 · status canceled"))
+        .position(|line| {
+            line.starts_with(&format!(
+                "  {} · status canceled",
+                support::event(repo.path(), "status", 1)
+            ))
+        })
         .expect("the cancel row");
     assert_eq!(text.lines().nth(row + 1), Some("    superseded"), "{text}");
 
     let out = atc(repo.path(), &["brief", "1", "--json"]);
-    let history = envelope(&out)["data"]["history"]
-        .as_array()
-        .expect("a history")
-        .clone();
+    let history = support::gestures(&envelope(&out)["data"]);
     assert_eq!(history[2]["status"], serde_json::json!("canceled"));
     assert_eq!(history[2]["reason"], serde_json::json!("superseded"));
     let plain = history[1].as_object().expect("an object");
@@ -910,13 +1023,16 @@ fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
         .expect("append");
 
     let text = stdout(&atc(repo.path(), &["brief", "1"]));
-    assert!(text.contains("pi.2 · promoted · "), "{text}");
+    assert!(
+        text.contains(&format!(
+            "{} · promoted · ",
+            support::event(repo.path(), "promoted", 0)
+        )),
+        "{text}"
+    );
 
     let out = atc(repo.path(), &["brief", "1", "--json"]);
-    let history = envelope(&out)["data"]["history"]
-        .as_array()
-        .expect("a history")
-        .clone();
+    let history = support::gestures(&envelope(&out)["data"]);
     assert_eq!(history.len(), 2);
     assert_eq!(history[1]["what"], serde_json::json!("promoted"));
     // Its words are unknowable, so the row is the six keys alone.
@@ -939,10 +1055,7 @@ fn an_unknown_kind_naming_the_flight_lands_under_its_own_name() {
         }])
         .expect("append");
     let out = atc(repo.path(), &["brief", "1", "--json"]);
-    let history = envelope(&out)["data"]["history"]
-        .as_array()
-        .expect("a history")
-        .clone();
+    let history = support::gestures(&envelope(&out)["data"]);
     assert_eq!(history.len(), 2);
 }
 
@@ -1020,7 +1133,7 @@ fn the_json_pins_the_merged_envelope() {
     assert_eq!(envelope["atc"], serde_json::json!(1));
     assert_eq!(envelope["cmd"], serde_json::json!("brief"));
     let data = &envelope["data"];
-    assert_eq!(data["id"], serde_json::json!("pi.8"));
+    assert_eq!(data["id"], support::flight(repo.path(), 5));
     assert_eq!(data["display"], serde_json::json!("#5"));
     assert_eq!(data["standing"], serde_json::json!("ready"));
     assert_eq!(data["procedure"], serde_json::json!("pipeline"));

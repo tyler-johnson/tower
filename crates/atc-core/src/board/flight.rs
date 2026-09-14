@@ -42,6 +42,10 @@ pub struct Flight {
     /// never stored; the log is append-only and per-writer seqs are
     /// monotonic, so a new filing can never renumber an earlier one.
     pub number: u64,
+    /// The latest confirmed global claim, independent of the writer-local ordinal.
+    pub global_number: Option<u64>,
+    /// A machine-local guess supplied by the numbered fold; never written to the log.
+    pub provisional_number: Option<u64>,
     /// Provenance only: the procedure the filing was minted under — or
     /// a match rule chose at file time. Nothing derives from it.
     pub procedure: Option<String>,
@@ -253,6 +257,8 @@ pub struct Comment {
 /// route, split by whether anything can be done about it.
 #[derive(Debug)]
 pub struct Fold {
+    /// Explicit machine-local counter context; absent only for the legacy fold during migration.
+    pub counter: Option<u64>,
     /// Filed order.
     pub flights: Vec<Flight>,
     /// The saved views in minting order, deleted ones gone. Every
@@ -321,6 +327,8 @@ pub fn fold(events: &[Event]) -> Fold {
                 flights.push(Flight {
                     id: event.id.clone(),
                     number: 0,
+                    global_number: None,
+                    provisional_number: None,
                     procedure: procedure.clone(),
                     subject: subject.clone(),
                     body: body.clone(),
@@ -404,6 +412,10 @@ pub fn fold(events: &[Event]) -> Fold {
     for (order, event) in events.iter().enumerate() {
         match &event.kind {
             Kind::Filed { .. } => {}
+            Kind::Numbered { flight, number, .. } => match by_id.get(flight) {
+                Some(&at) if *number > 0 => flights[at].global_number = Some(*number),
+                _ => unrouted.push(event.clone()),
+            },
             // Held for pass 3: pass 2 attaches comments in union order,
             // so clock skew could sort an edit before the comment it
             // names — the same skew pass 1 absorbs for flights.
@@ -758,6 +770,7 @@ pub fn fold(events: &[Event]) -> Fold {
         .collect();
 
     Fold {
+        counter: None,
         flights,
         views,
         unrouted,

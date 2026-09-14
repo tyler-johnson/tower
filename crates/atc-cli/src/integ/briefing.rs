@@ -158,7 +158,8 @@ pub struct Counts {
 /// this callsign is already flying.
 pub fn counts(cwd: &Path) -> Result<Counts, CliError> {
     let store = Store::open(cwd)?;
-    let fold = board::fold(&store.read_all()?);
+    store.touch(atc_core::log::sync::Touch::Ordinary)?;
+    let fold = store.current()?;
     let callsign = store.callsign().map(str::to_string);
     let on = fold
         .flights

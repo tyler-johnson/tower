@@ -6,6 +6,7 @@
 //! tempdir.
 
 use std::path::Path;
+mod support;
 use std::process::{Command, Output};
 
 use atc_testsupport::{Repo, scrub};
@@ -595,7 +596,7 @@ fn the_setting_parks_a_bare_filing_and_the_flag_beats_it() {
     assert_eq!(board["data"]["backlog"][0]["id"], serde_json::json!("pi.1"));
     assert_eq!(
         board["data"]["in_progress"][0]["id"],
-        serde_json::json!("pi.2")
+        support::flight(repo.path(), 2)
     );
     assert_eq!(board["data"]["ready"], serde_json::json!([]));
 
@@ -606,7 +607,10 @@ fn the_setting_parks_a_bare_filing_and_the_flag_beats_it() {
     ));
     stdout(&atc(repo.path(), &["file", "cleared"]));
     let board = envelope(&atc(repo.path(), &["--json"]));
-    assert_eq!(board["data"]["ready"][0]["id"], serde_json::json!("pi.3"));
+    assert_eq!(
+        board["data"]["ready"][0]["id"],
+        support::flight(repo.path(), 3)
+    );
 }
 
 #[test]
@@ -682,7 +686,7 @@ fn comment_json_carries_the_appended_event() {
     assert!(out.status.success(), "exit {:?}", out.status.code());
     assert_eq!(envelope["cmd"], serde_json::json!("comment"));
     let commented = &envelope["data"]["commented"];
-    assert_eq!(commented["id"], serde_json::json!("pi.2"));
+    assert_eq!(commented["id"], support::event(repo.path(), "commented", 0));
     assert_eq!(commented["body"]["flight"], serde_json::json!("pi.1"));
     assert_eq!(commented["body"]["text"], serde_json::json!("a note"));
     assert!(
@@ -757,14 +761,17 @@ fn link_declares_the_edge_both_ways() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "the dependency"]));
     stdout(&atc(repo.path(), &["file", "the dependent"]));
-    let out = stdout(&atc(repo.path(), &["link", "pi.2", "pi.1"]));
+    let out = stdout(&atc(
+        repo.path(),
+        &["link", &support::flight(repo.path(), 2), "pi.1"],
+    ));
     assert_eq!(out, "linked #2: depends on #1\nboard: atc\n");
 
+    assert_eq!(family(&brief_of(repo.path(), "2"), "depends_on"), ["pi.1"]);
     assert_eq!(
-        family(&brief_of(repo.path(), "pi.2"), "depends_on"),
-        ["pi.1"]
+        family(&brief_of(repo.path(), "pi.1"), "blocks"),
+        support::flights(repo.path(), &[2])
     );
-    assert_eq!(family(&brief_of(repo.path(), "pi.1"), "blocks"), ["pi.2"]);
 }
 
 #[test]
@@ -792,8 +799,14 @@ fn the_same_edge_twice_is_refused() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "the dependency"]));
     stdout(&atc(repo.path(), &["file", "the dependent"]));
-    stdout(&atc(repo.path(), &["link", "pi.2", "pi.1"]));
-    let out = atc(repo.path(), &["link", "pi.2", "pi.1", "--json"]);
+    stdout(&atc(
+        repo.path(),
+        &["link", &support::flight(repo.path(), 2), "pi.1"],
+    ));
+    let out = atc(
+        repo.path(),
+        &["link", &support::flight(repo.path(), 2), "pi.1", "--json"],
+    );
     refusal(&out, 1, "link/exists");
 }
 
@@ -802,12 +815,15 @@ fn unlink_drops_the_edge_both_ways() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "the dependency"]));
     stdout(&atc(repo.path(), &["file", "the dependent"]));
-    stdout(&atc(repo.path(), &["link", "pi.2", "pi.1"]));
+    stdout(&atc(
+        repo.path(),
+        &["link", &support::flight(repo.path(), 2), "pi.1"],
+    ));
     // Bare seqs, so the wire form is covered too.
     let out = stdout(&atc(repo.path(), &["unlink", "2", "1"]));
     assert_eq!(out, "unlinked #2: no longer depends on #1\nboard: atc\n");
 
-    let dependent = brief_of(repo.path(), "pi.2");
+    let dependent = brief_of(repo.path(), "2");
     let dependency = brief_of(repo.path(), "pi.1");
     assert!(family(&dependent, "depends_on").is_empty());
     assert!(family(&dependency, "blocks").is_empty());
@@ -825,7 +841,10 @@ fn an_unlink_of_no_edge_is_refused() {
     let repo = repo();
     stdout(&atc(repo.path(), &["file", "the dependency"]));
     stdout(&atc(repo.path(), &["file", "the dependent"]));
-    let out = atc(repo.path(), &["unlink", "pi.2", "pi.1", "--json"]);
+    let out = atc(
+        repo.path(),
+        &["unlink", &support::flight(repo.path(), 2), "pi.1", "--json"],
+    );
     let envelope = refusal(&out, 1, "link/missing");
     assert_eq!(
         envelope["error"]["message"],
@@ -948,7 +967,7 @@ fn a_bare_seq_links_and_the_wire_stays_full() {
     let open = board["data"]["waiting"].as_array().expect("waiting");
     let dependent = open
         .iter()
-        .find(|view| view["id"] == serde_json::json!("pi.2"))
+        .find(|view| view["id"] == support::flight(repo.path(), 2))
         .expect("pi.2 in waiting");
     assert_eq!(dependent["depends_on"], serde_json::json!(["pi.1"]));
 }
@@ -1026,7 +1045,7 @@ fn status_json_carries_the_appended_move() {
     assert!(out.status.success(), "exit {:?}", out.status.code());
     assert_eq!(envelope["cmd"], serde_json::json!("status"));
     let moved = &envelope["data"]["status"];
-    assert_eq!(moved["id"], serde_json::json!("pi.2"));
+    assert_eq!(moved["id"], support::event(repo.path(), "status", 0));
     assert_eq!(moved["kind"], serde_json::json!("status"));
     assert_eq!(moved["body"]["flight"], serde_json::json!("pi.1"));
     assert_eq!(moved["body"]["status"], serde_json::json!("ready"));
@@ -1110,14 +1129,20 @@ fn ready_on_a_gated_flight_lands_waiting_and_the_echo_says_so() {
     assert_eq!(released["id"], serde_json::json!("pi.1"));
     assert_eq!(
         released["status_reason"],
-        serde_json::json!("dependency pi.2 canceled")
+        format!("dependency {} canceled", support::flight(repo.path(), 2))
     );
     let text = stdout(&atc(repo.path(), &["brief", "1"]));
     assert!(
         text.contains("ready — tests@tower.invalid"),
         "the closer's mark: {text}"
     );
-    assert!(text.contains(" · dependency pi.2 canceled · "), "{text}");
+    assert!(
+        text.contains(&format!(
+            " · dependency {} canceled · ",
+            support::flight(repo.path(), 2)
+        )),
+        "{text}"
+    );
 
     // And the word itself, once the flight is unblocked, lands where it
     // says.
@@ -1245,7 +1270,7 @@ fn me_stores_the_callers_callsign_and_stays_yours() {
     );
     assert_eq!(
         board["data"]["waiting_on_you"]["yours"][0]["id"],
-        serde_json::json!("pi.3")
+        support::flight(repo.path(), 2)
     );
 }
 
@@ -1660,10 +1685,16 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
     let data = &decomposed["data"];
     assert_eq!(data["parent"], serde_json::json!("pi.1"));
     let rows = data["flights"].as_array().expect("rows");
-    assert_eq!(row_ids(&data["flights"]), ["pi.1", "pi.2", "pi.3"]);
+    assert_eq!(
+        row_ids(&data["flights"]),
+        support::flights(repo.path(), &[1, 2, 3])
+    );
     assert_eq!(rows[0]["status"], "waiting");
     assert_eq!(rows[0]["progress"], serde_json::json!([0, 2]));
-    assert_eq!(rows[0]["depends_on"], serde_json::json!(["pi.2", "pi.3"]));
+    assert_eq!(
+        rows[0]["depends_on"],
+        serde_json::json!(support::flights(repo.path(), &[2, 3]))
+    );
     for (row, name) in rows.iter().zip(["#1", "#2", "#3"]) {
         assert_eq!(row["display"], name);
         assert!(row.get("number").is_none());
@@ -1685,12 +1716,12 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
         assert_eq!(event["body"]["status"], serde_json::json!("ready"));
         assert!(event["body"]["assignee"].is_null());
     }
-    assert_eq!(filed[0]["id"], serde_json::json!("pi.2"));
-    assert_eq!(filed[1]["id"], serde_json::json!("pi.3"));
+    assert_eq!(filed[0]["id"], support::flight(repo.path(), 2));
+    assert_eq!(filed[1]["id"], support::flight(repo.path(), 3));
 
     let linked = data["linked"].as_array().expect("linked");
     assert_eq!(linked.len(), 2);
-    for (event, child) in linked.iter().zip(["pi.2", "pi.3"]) {
+    for (event, child) in linked.iter().zip(support::flights(repo.path(), &[2, 3])) {
         assert_eq!(event["kind"], serde_json::json!("linked"));
         assert_eq!(event["body"]["from"], serde_json::json!("pi.1"));
         assert_eq!(event["body"]["to"], serde_json::json!(child));
@@ -1699,10 +1730,10 @@ fn decompose_json_carries_the_parent_the_children_and_the_edges() {
     // The parent depends on both children; each child blocks the parent.
     assert_eq!(
         family(&brief_of(repo.path(), "pi.1"), "depends_on"),
-        ["pi.2", "pi.3"]
+        support::flights(repo.path(), &[2, 3])
     );
-    assert_eq!(family(&brief_of(repo.path(), "pi.2"), "blocks"), ["pi.1"]);
-    assert_eq!(family(&brief_of(repo.path(), "pi.3"), "blocks"), ["pi.1"]);
+    assert_eq!(family(&brief_of(repo.path(), "2"), "blocks"), ["pi.1"]);
+    assert_eq!(family(&brief_of(repo.path(), "3"), "blocks"), ["pi.1"]);
 }
 
 #[test]
@@ -1764,13 +1795,16 @@ fn decompose_under_a_procedure_mints_the_definitions_flights() {
     // The children keep the parent's subject in theirs, ride the same
     // edges, and are born by their own `after` — Ready or Waiting.
     let parent = brief_of(repo.path(), "pi.1");
-    assert_eq!(family(&parent, "depends_on"), ["pi.2", "pi.3", "pi.4"]);
-    let pass = brief_of(repo.path(), "pi.2");
+    assert_eq!(
+        family(&parent, "depends_on"),
+        support::flights(repo.path(), &[2, 3, 4])
+    );
+    let pass = brief_of(repo.path(), "2");
     assert_eq!(pass["subject"], serde_json::json!("look this over · pass"));
     assert_eq!(pass["status"], serde_json::json!("ready"));
     assert_eq!(pass["assignee"], serde_json::json!("agent"));
     assert_eq!(
-        brief_of(repo.path(), "pi.4")["status"],
+        brief_of(repo.path(), "4")["status"],
         serde_json::json!("waiting")
     );
     // The parent's own mark is untouched — the mint adds children, never

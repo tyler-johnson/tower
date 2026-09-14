@@ -108,8 +108,8 @@ pub fn run(
     let store = super::store()?;
     let lanes = board::walk(&named, store.identity().client, store.callsign());
     let assignee = verb::stored_lane(assignee, store.callsign());
-    let events = store.read_all()?;
-    let fold = board::fold(&events);
+    store.touch(atc_core::log::sync::Touch::Ordinary)?;
+    let fold = store.current()?;
     let picks = board::pick(&fold, count, &lanes, store.callsign());
     let outcome = picks.outcome();
 

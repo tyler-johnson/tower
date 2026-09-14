@@ -77,7 +77,7 @@ fn list_shows_every_setting_with_defaults_and_the_trailer() {
     assert!(text.contains("leaseSweep  1h"), "{text}");
     assert!(text.contains("updateCheck  1d"), "{text}");
     assert!(!text.contains("autoUpdate"), "{text}");
-    assert_eq!(text.matches("(default)").count(), 7, "{text}");
+    assert_eq!(text.matches("(default)").count(), 11, "{text}");
     assert!(
         text.contains("Set with:     atc config <key> <value>   (--global: every repo)"),
         "{text}"
@@ -102,7 +102,7 @@ fn list_json_pins_the_registry() {
     let settings = envelope["data"]["settings"]
         .as_array()
         .expect("a settings array");
-    assert_eq!(settings.len(), 7, "{envelope}");
+    assert_eq!(settings.len(), 11, "{envelope}");
     let keys: Vec<&str> = settings
         .iter()
         .map(|entry| entry["key"].as_str().expect("a key"))
@@ -110,6 +110,10 @@ fn list_json_pins_the_registry() {
     assert_eq!(
         keys,
         [
+            "remote",
+            "syncInterval",
+            "syncTimeout",
+            "numberTimeout",
             "defaultFileStatus",
             "serveHost",
             "servePort",
@@ -126,10 +130,14 @@ fn list_json_pins_the_registry() {
     assert_eq!(
         kinds,
         [
-            "choice", "host", "port", "duration", "duration", "duration", "cadence"
+            "remote", "duration", "duration", "duration", "choice", "host", "port", "duration",
+            "duration", "duration", "cadence"
         ]
     );
-    let file_status = &settings[0];
+    let file_status = settings
+        .iter()
+        .find(|row| row["key"] == "defaultFileStatus")
+        .unwrap();
     assert_eq!(file_status["value"], serde_json::json!("ready"));
     assert_eq!(
         file_status["git_key"],
@@ -339,7 +347,12 @@ fn global_set_creates_home_gitconfig_and_the_list_reports_global() {
 
     let out = atc(repo.path(), &["config", "--json"]);
     let envelope = envelope(&out);
-    let entry = &envelope["data"]["settings"][6];
+    let entry = envelope["data"]["settings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["key"] == "updateCheck")
+        .unwrap();
     assert_eq!(entry["key"], serde_json::json!("updateCheck"));
     assert_eq!(entry["value"], serde_json::json!("12h"));
     assert_eq!(entry["source"], serde_json::json!("global"));

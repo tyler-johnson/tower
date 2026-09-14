@@ -20,6 +20,7 @@ pub fn run(
     value: Option<String>,
     unset: bool,
     global: bool,
+    renumber: bool,
 ) -> Result<(), CliError> {
     let config = Config::open(super::ff()?.repo())?;
 
@@ -27,6 +28,29 @@ pub fn run(
         return list(json, &config);
     };
     let setting = config::lookup(key)?;
+    if renumber && setting.name != "remote" {
+        return Err(CliError::coded(
+            "usage/bad-value",
+            "--renumber applies only to remote",
+            vec![],
+        ));
+    }
+    if setting.name == "remote"
+        && let Some(value) = &value
+    {
+        config::validate(setting, value)?;
+        let before = atc_core::log::Store::open(&super::repo()?)?;
+        if before.remote().is_none() {
+            before.snapshot()?;
+        }
+        config.set(setting, value, global)?;
+        let store = atc_core::log::Store::open(&super::repo()?)?;
+        store.touch(if renumber {
+            atc_core::log::sync::Touch::Enroll
+        } else {
+            atc_core::log::sync::Touch::Number
+        })?;
+    }
     if unset {
         return unset_run(json, &config, setting, global);
     }

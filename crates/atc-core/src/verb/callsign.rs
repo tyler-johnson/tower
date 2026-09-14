@@ -22,7 +22,7 @@
 
 use serde::Serialize;
 
-use crate::board::{self, Flight, display};
+use crate::board::{Flight, display};
 use crate::lease::{self, State};
 use crate::log::{CLIENT_MARKERS, Kind, Store, usable_callsign};
 
@@ -224,7 +224,7 @@ fn relane(
     old: &str,
     new: &str,
 ) -> Result<(Vec<Moved>, Vec<Left>, Vec<String>, Vec<String>), Error> {
-    let fold = board::fold(&store.read_all()?);
+    let fold = store.snapshot()?;
     let mut moved = Vec::new();
     let mut left = Vec::new();
     let mut moved_display = Vec::new();
@@ -256,7 +256,7 @@ fn relane(
             left_display.push(display(&fold, &flight.id));
         }
     }
-    store.append(batch)?;
+    store.append_synced(batch)?;
     Ok((moved, left, moved_display, left_display))
 }
 

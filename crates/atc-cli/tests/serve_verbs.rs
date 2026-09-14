@@ -298,7 +298,12 @@ fn file_appends_the_whole_batch_and_answers_it() {
     // The batch rides the chain in mint order behind the seeded filing:
     // the parent, `review`'s three flights, then its five edges.
     let chain = chain(repo.path());
-    let batch = &chain[1..];
+    let authored: Vec<_> = chain
+        .iter()
+        .filter(|e| !matches!(e.kind, Kind::Numbered { .. }))
+        .cloned()
+        .collect();
+    let batch = &authored[1..];
     assert_eq!(batch.len(), 9, "the parent, three flights, five edges");
     let (filed, rest) = batch.split_first().expect("the parent");
     let (parts, linked) = rest.split_at(3);
@@ -374,7 +379,12 @@ fn decompose_appends_the_children_and_the_edges_and_answers_them() {
     // The batch rides the chain in mint order behind the seeded filing:
     // the two filings, then one edge each.
     let chain = chain(repo.path());
-    let batch = &chain[1..];
+    let authored: Vec<_> = chain
+        .iter()
+        .filter(|e| !matches!(e.kind, Kind::Numbered { .. }))
+        .cloned()
+        .collect();
+    let batch = &authored[1..];
     assert_eq!(batch.len(), 4, "two children and two edges");
     let (filed, linked) = batch.split_at(2);
     let response: serde_json::Value = serde_json::from_str(&body).expect("decompose response");
@@ -418,7 +428,12 @@ fn decompose_under_a_procedure_mints_the_definitions_flights_over_http() {
         r#"{"flight":"1","parts":["review"]}"#,
     );
     let chain = chain(repo.path());
-    let batch = &chain[1..];
+    let authored: Vec<_> = chain
+        .iter()
+        .filter(|e| !matches!(e.kind, Kind::Numbered { .. }))
+        .cloned()
+        .collect();
+    let batch = &authored[1..];
     assert_eq!(
         batch.len(),
         8,
@@ -739,7 +754,13 @@ fn the_usage_refusals_are_four_hundreds_with_the_clis_envelope() {
     );
     // Every refusal above appended nothing: the seeded filing is still
     // the whole log.
-    assert_eq!(chain(repo.path()).len(), 1);
+    assert_eq!(
+        chain(repo.path())
+            .iter()
+            .filter(|e| !matches!(e.kind, Kind::Numbered { .. }))
+            .count(),
+        1
+    );
 
     // A field on a comment target: the one usage refusal that needs a
     // comment on the record first.
@@ -759,7 +780,13 @@ fn the_usage_refusals_are_four_hundreds_with_the_clis_envelope() {
         &["edit", &comment.to_string(), "-s", "s", "--json"],
         "usage/subject-on-comment",
     );
-    assert_eq!(chain(repo.path()).len(), 2);
+    assert_eq!(
+        chain(repo.path())
+            .iter()
+            .filter(|e| !matches!(e.kind, Kind::Numbered { .. }))
+            .count(),
+        2
+    );
 }
 
 #[test]

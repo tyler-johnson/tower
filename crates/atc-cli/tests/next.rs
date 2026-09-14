@@ -23,6 +23,7 @@
 //! flies in is the agent's own to choose.
 
 use std::path::Path;
+mod support;
 use std::process::{Command, Output};
 
 use atc_testsupport::{Repo, scrub};
@@ -418,7 +419,7 @@ fn a_lane_walks_by_priority_then_filed_order() {
     assert_eq!(envelope["data"]["outcome"], serde_json::json!("work"));
     assert_eq!(
         picked(&envelope),
-        ["pi.2", "pi.1", "pi.3"],
+        support::flights(repo.path(), &[2, 1, 3]),
         "priority first, then filed order: {envelope}"
     );
 }
@@ -441,7 +442,7 @@ fn a_count_picks_in_filed_order_and_the_envelope_has_no_passed_key() {
     assert_eq!(envelope["data"]["outcome"], serde_json::json!("work"));
     assert_eq!(envelope["data"]["lanes"], serde_json::json!(["agent"]));
     assert_eq!(envelope["data"]["pulled"], serde_json::json!(false));
-    assert_eq!(picked(&envelope), ["pi.2", "pi.8"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[2, 5]));
     assert_eq!(
         keys(&envelope["data"]),
         [
@@ -595,11 +596,14 @@ fn the_default_pull_is_me_then_none() {
 
     let envelope = envelope(&atc(repo.path(), &["next", "-n", "3", "--json"]));
     assert_eq!(envelope["data"]["lanes"], serde_json::json!(["me", "none"]));
-    assert_eq!(picked(&envelope), ["pi.2", "pi.1"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[2, 1]));
     assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
 
     let board = self::envelope(&atc(repo.path(), &["--json"]));
-    assert_eq!(board["data"]["ready"][0]["id"], serde_json::json!("pi.3"));
+    assert_eq!(
+        board["data"]["ready"][0]["id"],
+        support::flight(repo.path(), 3)
+    );
 }
 
 #[test]
@@ -628,7 +632,7 @@ fn a_callsign_pulls_its_own_queue_the_literal_me_and_then_none() {
         "qwen-review",
     ));
     assert_eq!(envelope["data"]["lanes"], serde_json::json!(["me", "none"]));
-    assert_eq!(picked(&envelope), ["pi.2", "pi.3", "pi.1"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[2, 3, 1]));
     assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
 }
 
@@ -653,7 +657,7 @@ fn agent_pulls_the_literal_lane_alone() {
         "claude",
     ));
     assert_eq!(envelope["data"]["lanes"], serde_json::json!(["agent"]));
-    assert_eq!(picked(&envelope), ["pi.3"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[3]));
     assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(2));
 }
 
@@ -689,7 +693,7 @@ fn a_client_pulls_its_own_queue_its_client_lane_the_pool_then_none() {
         envelope["data"]["lanes"],
         serde_json::json!(["me", "agent", "none"])
     );
-    assert_eq!(picked(&envelope), ["pi.2", "pi.3", "pi.1"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[2, 3, 1]));
     assert_eq!(
         envelope["data"]["elsewhere"],
         serde_json::json!(1),
@@ -705,7 +709,10 @@ fn a_client_pulls_its_own_queue_its_client_lane_the_pool_then_none() {
         envelope["data"]["lanes"],
         serde_json::json!(["me", "claude", "agent", "none"])
     );
-    assert_eq!(picked(&envelope), ["pi.4", "pi.2", "pi.3", "pi.1"]);
+    assert_eq!(
+        picked(&envelope),
+        support::flights(repo.path(), &[4, 2, 3, 1])
+    );
     assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(0));
 }
 
@@ -721,7 +728,11 @@ fn none_named_outright_walks_the_unassigned() {
 
     let envelope = envelope(&atc(repo.path(), &["next", "none", "-n", "3", "--json"]));
     assert_eq!(envelope["data"]["lanes"], serde_json::json!(["none"]));
-    assert_eq!(picked(&envelope), ["pi.2", "pi.3"], "once, not twice");
+    assert_eq!(
+        picked(&envelope),
+        support::flights(repo.path(), &[2, 3]),
+        "once, not twice"
+    );
     assert_eq!(envelope["data"]["elsewhere"], serde_json::json!(1));
 }
 
@@ -762,7 +773,7 @@ fn a_pick_is_relaned_to_you_by_default_in_the_same_append() {
     assert_eq!(flown["assignee"], serde_json::json!("claude"));
     assert_eq!(flown["status_callsign"], serde_json::json!("claude"));
     let brief = self::envelope(&atc(repo.path(), &["brief", "1", "--json"]));
-    let history = brief["data"]["history"].as_array().expect("a history");
+    let history = support::gestures(&brief["data"]);
     assert_eq!(history.len(), 3, "{history:?}");
     assert_eq!(history[0]["what"], serde_json::json!("filed"));
     assert_eq!(history[1]["what"], serde_json::json!("status"));
@@ -786,7 +797,7 @@ fn a_pick_is_relaned_to_you_by_default_in_the_same_append() {
         .as_array()
         .expect("rows")
         .iter()
-        .find(|row| row["id"] == serde_json::json!("pi.2"))
+        .find(|row| row["id"] == support::flight(repo.path(), 2))
         .expect("pulled")
         .clone();
     assert!(cleared["assignee"].is_null(), "{cleared}");
@@ -801,19 +812,19 @@ fn a_pick_is_relaned_to_you_by_default_in_the_same_append() {
     );
     let envelope = self::envelope(&out);
     assert_eq!(envelope["data"]["assignee"], serde_json::json!("agent"));
-    assert_eq!(picked(&envelope), ["pi.3"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[3]));
     assert_eq!(commits(&repo), before + 1);
     let board = self::envelope(&atc(repo.path(), &["--json"]));
     let kept = board["data"]["in_progress"]
         .as_array()
         .expect("rows")
         .iter()
-        .find(|row| row["id"] == serde_json::json!("pi.3"))
+        .find(|row| row["id"] == support::flight(repo.path(), 3))
         .expect("pulled")
         .clone();
     assert_eq!(kept["assignee"], serde_json::json!("agent"), "{kept}");
     let brief = self::envelope(&atc(repo.path(), &["brief", "3", "--json"]));
-    let history = brief["data"]["history"].as_array().expect("a history");
+    let history = support::gestures(&brief["data"]);
     assert_eq!(history.len(), 2, "filing and status only: {history:?}");
 
     let envelope = self::envelope(&atc(repo.path(), &["next", "--json"]));
@@ -839,7 +850,7 @@ fn a_pick_already_in_the_lane_writes_no_assigned_event() {
     assert_eq!(commits(&repo), before + 1);
 
     let brief = envelope(&atc(repo.path(), &["brief", "1", "--json"]));
-    let history = brief["data"]["history"].as_array().expect("a history");
+    let history = support::gestures(&brief["data"]);
     assert_eq!(history.len(), 2, "{history:?}");
     assert_eq!(history[0]["what"], serde_json::json!("filed"));
     assert_eq!(history[1]["what"], serde_json::json!("status"));
@@ -868,7 +879,7 @@ fn lanes_walk_in_the_order_given_and_nothing_more() {
         envelope["data"]["lanes"],
         serde_json::json!(["agent", "me"])
     );
-    assert_eq!(picked(&envelope), ["pi.2", "pi.3"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[2, 3]));
     assert_eq!(
         envelope["data"]["elsewhere"],
         serde_json::json!(1),
@@ -884,7 +895,7 @@ fn lanes_walk_in_the_order_given_and_nothing_more() {
         serde_json::json!(["none", "agent"]),
         "`none` walks where named"
     );
-    assert_eq!(picked(&envelope), ["pi.1", "pi.2"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[1, 2]));
     assert_eq!(
         envelope["data"]["elsewhere"],
         serde_json::json!(1),
@@ -900,7 +911,7 @@ fn lanes_walk_in_the_order_given_and_nothing_more() {
         serde_json::json!(["me", "agent"]),
         "a lane named twice walks once"
     );
-    assert_eq!(picked(&envelope), ["pi.3", "pi.2"]);
+    assert_eq!(picked(&envelope), support::flights(repo.path(), &[3, 2]));
 }
 
 #[test]
@@ -1019,6 +1030,10 @@ fn a_callsign_pulls_its_own_queue_and_never_the_pool() {
         &["next", "-n", "3", "--json"],
         "claude",
     ));
-    assert_eq!(picked(&json), ["pi.1", "pi.9"], "own queue, filed order");
+    assert_eq!(
+        picked(&json),
+        support::flights(repo.path(), &[1, 5]),
+        "own queue, filed order"
+    );
     assert_eq!(json["data"]["elsewhere"], serde_json::json!(1));
 }

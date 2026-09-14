@@ -38,11 +38,11 @@ The five plugins carry this manual and skills from declared adapters. The trigge
 
 ## Naming a flight
 
-A flight has two names. The board prints `#3`; when two writers share a board and the numbers clash it prints `pi-8c2e#3`; the wire carries `pi-8c2e.140`, the id of the event that filed it. Every verb that takes a flight accepts all three: `<n>`, `<writer>#<n>`, or `<writer>.<seq>`, with one leading `#` stripped so what tower prints pastes back in. A bare number must match exactly one filed flight, or the verb refuses with `flight/ambiguous` and lists the full forms. A flight named inside `-m` prose — `see #3` in a body, a comment, a question, an answer, or a cancel's reason — is stored as its wire id by the same resolution and printed by its current number; a match on nothing stays as typed. Event seqs are shared by every event kind on a writer's chain, so wire ids are sparse: `pi-8c2e.140` and `pi-8c2e.146` can be neighbors.
+A flight's permanent wire ID is `pi-8c2e.140`; `pi-8c2e#3` is its permanent writer-local ordinal alias. The board prints a confirmed global `#n`, or provisional `~n` (`writer~n` when ambiguous). Every verb accepts these forms. Bare numbers mean global claims; tilde inputs resolve only while currently provisional. Prose references resolve against the pre-sync snapshot and are stored as wire IDs, so advancing a guess or renumbering cannot retarget them. Unresolved prose stays as typed. Every event kind consumes a sequence ID; wire IDs are sparse.
 
 ## Reading
 
-Every read folds the log fresh and never blocks on the network.
+The fold is local. With `tower.remote` set, ordinary board touches synchronize synchronously under a three-second default deadline. Filing and decomposition use ten seconds for allocation, independent of cadence.
 
 - `atc`, and `atc board` — what needs a person pinned on top: `questions` (held flights, oldest ask first) and `yours` (Ready in the `me` lane); under it backlog, waiting, ready, in progress, held, and the three newest closed. `atc --closed 7d` widens that last group to a span; a count, `all`, and `none` work too.
 - `atc brief <flight>` (alias `show`) — the whole record: every field, the newest handoff pinned above the comments, the comments with any question and answer among them, the links with each linked flight's subject and status, each parent as a link row, with `-x`/`--expand` printing its body under it, one level up and no further, the flights whose prose names this one under `referenced by`, the history with the byline and the words each verb took, and the standing. Nothing from the repository. A closed flight briefs like any other.
@@ -109,7 +109,7 @@ Board rows, briefs, and picks carry the wire `id`, `writer`, and a ready-to-prin
 | 3 | `hold` succeeded; the flight stopped with a question |
 | 4 | `ref/contended`; another writer had the lock, run it again |
 
-The log is `refs/tower/log/<author>/<writer>`, one orphan chain per writer; `tower.writer` is minted at the first append and is not a setting to copy between machines. Sync is a `git push` or `git fetch` of that refspec; there is no verb, and a chain this repository has not fetched shows in `atc doctor` as events off the board. `atc serve` answers the same envelopes at `/api/…` and streams changes at `/api/feed`; a person starts it, and every other interface works with it down.
+The log is `refs/tower/log/<author>/<writer>`; never copy `tower.writer` between machines. `atc config remote origin` enables shared-board sync on touches and serve's cadence. Joining an established domain can require `--renumber`; wire IDs survive. Unset remote stays local. `syncInterval`, `syncTimeout`, and `numberTimeout` control cadence and deadlines. No detached board sync outlives a command. `atc doctor` reports sync problems. `git log refs/tower/seq` reads the counter. Serve answers the same envelopes at `/api/…` and streams changes at `/api/feed`.
 
 ## Using adapters
 
