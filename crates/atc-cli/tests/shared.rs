@@ -9,7 +9,8 @@ fn run(repo: &Repo, args: &[&str]) -> Value {
     let out = atc(repo.path(), args);
     assert!(
         out.status.success(),
-        "{}",
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     envelope(&out)
@@ -19,7 +20,6 @@ fn configure(repo: &Repo, bare: &std::path::Path, writer: &str) {
     repo.pin_writer(writer);
     repo.git(&["remote", "add", "shared", bare.to_str().unwrap()]);
     repo.git(&["config", "tower.syncInterval", "1s"]);
-    repo.git(&["config", "tower.numberTimeout", "1s"]);
 }
 
 #[test]
