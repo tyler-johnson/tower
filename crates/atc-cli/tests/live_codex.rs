@@ -132,7 +132,7 @@ fn tower_hooks(hooks: &[Value]) -> Vec<Value> {
                 .expect("the key was listed");
             assert_eq!(
                 hook["command"],
-                format!("{} trigger codex", atc_bin()),
+                format!("\"{}\" trigger codex", atc_bin()),
                 "{key}"
             );
             assert_eq!(hook["source"], "plugin", "{key}: {hook}");
