@@ -989,12 +989,15 @@ paths. --settings is Claude Code's escape hatch: entries in
 ~/.claude/settings.json instead of the plugin, and no skills.
 
 Copilot CLI takes an Agent Plugins 1.0 plugin at
-~/.agents/plugins/copilot/tower, with its own marketplace.json beside
-it. This dedicated namespace keeps Copilot's formats separate from
-Codex's. tower owns those files and merges enabledPlugins and
+~/.agents/plugins/copilot/tower, reached through the marketplace.json
+beside it. This dedicated namespace keeps Copilot's formats separate
+from Codex's. tower owns the plugin directory; the marketplace is shared
+with fufu, so tower merges one entry into it, follows the file's name,
+and on unhook drops only its entry. tower merges enabledPlugins and
 extraKnownMarketplaces into ~/.copilot/settings.json, preserving other
 settings and refusing malformed files. Copilot loads tower@tower-atc
-live from that marketplace, with no hook trust step. The plugin carries
+(tower@<name> in a marketplace another tool created) live from that
+marketplace, with no hook trust step. The plugin carries
 the tower skill and com.github.copilot/hooks/hooks.json; each command
 sets ATC_HOOK_EVENT because the payload names no event. Detection uses
 ~/.copilot or copilot on PATH.

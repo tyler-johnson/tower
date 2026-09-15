@@ -642,6 +642,74 @@ fn the_copilot_plugin_round_trips_beside_codex_and_foreign_settings() {
     assert_eq!(envelope(&out)["data"]["changed"], serde_json::json!([]));
 }
 
+/// The Copilot marketplace is shared with fufu: a file fufu wrote keeps its name, owner, and entry through hook and unhook, tower's entry joins and leaves its list, the selector follows the file's name, and fufu's registration survives tower's unhook.
+#[test]
+fn the_copilot_marketplace_is_shared_with_fufu() {
+    let home = home();
+    let home = home.path();
+    let root = home.join(".agents/plugins/copilot");
+    let dir = root.join("tower");
+    let marketplace = root.join("marketplace.json");
+    let settings = home.join(".copilot/settings.json");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let seed = serde_json::json!({
+        "name": "fufu-ff", "owner": {"name": "fufu"},
+        "plugins": [{"name": "fufu", "source": "./fufu"}]
+    });
+    std::fs::write(&marketplace, serde_json::to_string_pretty(&seed).unwrap()).unwrap();
+    let registration = serde_json::json!({"source": {"source": "directory", "path": root}});
+    let foreign = serde_json::json!({
+        "enabledPlugins": {"fufu@fufu-ff": true},
+        "extraKnownMarketplaces": {"fufu-ff": registration}
+    });
+    std::fs::write(&settings, foreign.to_string()).unwrap();
+
+    let out = atc(home, home, &["hook", "copilot", "--json"], None);
+    ok(&out);
+    assert_eq!(
+        envelope(&out)["data"]["changed"],
+        serde_json::json!(["copilot"])
+    );
+    let market = json_at(&marketplace);
+    assert_eq!(market["name"], "fufu-ff");
+    assert_eq!(market["owner"], seed["owner"]);
+    let plugins = market["plugins"].as_array().unwrap();
+    assert_eq!(plugins.len(), 2, "{market}");
+    assert_eq!(
+        plugins[0], seed["plugins"][0],
+        "fufu's entry, value for value"
+    );
+    assert_eq!(
+        plugins[1],
+        serde_json::json!({"name": "tower", "source": "./tower"})
+    );
+    let wired = json_at(&settings);
+    assert_eq!(wired["enabledPlugins"]["tower@fufu-ff"], true);
+    assert_eq!(wired["enabledPlugins"]["fufu@fufu-ff"], true);
+    assert_eq!(
+        wired["extraKnownMarketplaces"]["fufu-ff"],
+        foreign["extraKnownMarketplaces"]["fufu-ff"]
+    );
+    assert!(wired["enabledPlugins"].get("tower@tower-atc").is_none());
+    assert!(wired["extraKnownMarketplaces"].get("tower-atc").is_none());
+    let status = copilot_status(home);
+    assert_eq!(status["wiring"]["state"], "wired", "{status}");
+
+    let out = atc(home, home, &["hook", "copilot", "--json"], None);
+    ok(&out);
+    assert_eq!(envelope(&out)["data"]["changed"], serde_json::json!([]));
+
+    ok(&atc(home, home, &["unhook", "copilot"], None));
+    assert!(!dir.exists());
+    let market = json_at(&marketplace);
+    assert_eq!(market["name"], "fufu-ff");
+    assert_eq!(market["owner"], seed["owner"]);
+    assert_eq!(market["plugins"], seed["plugins"]);
+    assert_eq!(json_at(&settings), foreign);
+    assert_eq!(copilot_status(home)["wiring"]["state"], "not-wired");
+}
+
 #[test]
 fn copilot_refuses_malformed_settings_before_writing_or_removing_files() {
     for bad in [
