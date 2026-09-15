@@ -100,10 +100,12 @@ fn concurrent_single_and_range_claims_do_not_overlap() {
     let hub = Repo::new();
     let bare = hub.path().join("shared.git");
     hub.git(&["init", "--bare", bare.to_str().expect("path")]);
+    // Four writers race one lease while the rest of this binary spawns git beside them, and on the Windows runner that crossed the ten-second default: one writer hit the deadline, filed provisionally, never pushed, and the converged board came up two flights short. This test alone gets thirty seconds.
     let fixtures: Vec<_> = (0..4)
         .map(|n| {
             let fixture = Repo::new();
             remote(&fixture, &bare, &format!("writer{n}"));
+            fixture.git(&["config", "tower.numberTimeout", "30s"]);
             fixture
         })
         .collect();
